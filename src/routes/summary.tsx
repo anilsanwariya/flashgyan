@@ -206,7 +206,7 @@ function Summary() {
               search={{ review: hard + medium > 0 }}
               className="h-12 rounded-2xl bg-primary text-primary-foreground font-semibold grid place-items-center"
             >
-              {hard + medium > 0 ? "Review hard & medium" : "Practice again"}
+              {hard + medium > 0 ? "Review" : "Practice again"}
             </Link>
           ) : (
             <Link

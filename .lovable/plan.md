@@ -1,30 +1,22 @@
-## Goal
-Fix the conflict between horizontal swipe-to-navigate and vertical scrolling on the back of the card by replacing gestures with on-card arrow buttons, and make the back-card scrollbar visible.
+## Changes to `src/routes/practice.$deckId.tsx`
 
-## Changes (all in `src/routes/practice.$deckId.tsx`)
+### 1. Locked view for already-rated cards
+When navigating back (or forward) to a card that already has a rating in `cardRatings[index]`:
+- Force `flipped = true` so the back face (answer + explanations) is shown immediately.
+- Hide the footer rating buttons AND the "Reveal answer" button. Replace footer with a small muted hint like "Already rated — Hard/Medium/Easy" (colored dot matching the rating) so the user knows why controls are gone.
+- Update the `useEffect` that resets `flipped` on index change: if `cardRatings[index] !== null`, set `flipped = true`; otherwise `false` (current behavior).
+- Result: ratings cannot be changed within the session once set.
 
-### 1. Remove swipe gestures
-- Drop `drag`, `dragConstraints`, `dragElastic`, `onDragEnd`, `handleDragEnd`, and the `touch-pan-y` class from the `motion.div` wrapping the card.
-- Card scrolling on the back will now work natively without competing with horizontal drag.
+### 2. Apply the "must rate to advance" guard in review mode
+Currently review mode pre-populates `cardRatings` from `loadReview(deckId)`, which makes `currentRating !== null` for every card on entry, so the right-arrow appears immediately and the user can skip without re-rating.
 
-### 2. Add semi-transparent side navigation buttons
-- Wrap the card in a `relative` container.
-- Add two absolutely-positioned circular icon buttons (`ChevronLeft`, `ChevronRight` from lucide) vertically centered, one on each side, overlapping the card edges slightly.
-- Styling: `bg-background/60 backdrop-blur-sm border border-border rounded-full h-10 w-10`, hover `bg-background/80`. Positioned `left-2` / `right-2` with `top-1/2 -translate-y-1/2`, `z-10`.
-- Clicking does NOT flip the card (stopPropagation).
+Fix: in review mode, initialize `cardRatings` as all `null` (same as fresh practice). The prior ratings still drive card ordering via `applyReviewOrder` (already done before `useState`), but the in-session rating state starts empty. The existing guard in `goNext()` and the right-arrow visibility condition (`currentRating !== null && index < total - 1`) then naturally enforce "must rate before advancing" in review mode too.
 
-### 3. Visibility rules
-- **Left (prev) button**: hidden when `index === 0`.
-- **Right (next) button**: hidden when `currentRating === null` OR when `index === total - 1` (last card has no "next" — user finishes by rating). This matches the existing rule that you must rate before advancing.
-- Keep the existing `goPrev` / `goNext` handlers; remove the toast-on-unrated path since the button is simply hidden instead.
+This also means rule #1 (locked already-rated view) only triggers for cards the user has rated in THIS session — review sessions start fully unlocked, as expected.
 
-### 4. Visible scrollbar on back face
-- Replace the back face's plain `overflow-y-auto` div with shadcn `ScrollArea` (`@/components/ui/scroll-area`, already in project) so a thin always-styled scrollbar shows during scroll.
-- Alternative if ScrollArea conflicts with the 3D flip transform: keep native scroll but add Tailwind utilities to force a visible thin scrollbar (`scrollbar-thin`-style via inline `style` using `scrollbar-width: thin` and `scrollbar-color`, plus webkit pseudo-element CSS in `src/styles.css`). Prefer ScrollArea first; fall back only if the backface-hidden + rotate breaks it.
+### 3. Rename summary CTA
+In `src/routes/summary.tsx` (line 209), change the button label from `"Review hard & medium"` to `"Review"`. Keep the conditional (still only shown when `hard + medium > 0`).
 
-### 5. Cleanup
-- Remove now-unused `PanInfo` import and `toast` import if no other call site uses them (verify before removing `toast`).
-
-## Out of scope
-- Rating buttons, flip animation, progress bar, review mode logic — unchanged.
-- No schema or server changes.
+### Out of scope
+- Right-arrow visibility logic, prev-arrow, flip animation, progress bar, schema, server functions — unchanged.
+- No changes to how `saveReview` persists ratings across sessions.
