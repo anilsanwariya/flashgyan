@@ -344,22 +344,7 @@ function Practice() {
       </main>
 
       <footer className="px-5 pb-6 pt-2 max-w-2xl w-full mx-auto">
-        {currentRating !== null ? (
-          <div className="h-14 rounded-2xl border border-border bg-card grid place-items-center text-sm text-muted-foreground">
-            <span className="inline-flex items-center gap-2">
-              <span
-                className={`inline-block h-2 w-2 rounded-full ${
-                  currentRating === "easy"
-                    ? "bg-success"
-                    : currentRating === "medium"
-                    ? "bg-warning"
-                    : "bg-destructive"
-                }`}
-              />
-              Already rated · {currentRating.charAt(0).toUpperCase() + currentRating.slice(1)}
-            </span>
-          </div>
-        ) : flipped ? (
+        {flipped ? (
           <div className="grid grid-cols-3 gap-2">
             <RatingButton label="Hard" tone="destructive" onClick={() => rate("hard")} />
             <RatingButton label="Medium" tone="warning" onClick={() => rate("medium")} />
@@ -373,6 +358,7 @@ function Practice() {
             Reveal answer
           </button>
         )}
+
 
       </footer>
     </div>
