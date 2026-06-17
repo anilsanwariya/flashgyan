@@ -95,11 +95,10 @@ function Practice() {
   });
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
-  const [cardRatings, setCardRatings] = useState<(Rating | null)[]>(() => {
-    if (!review) return cards.map(() => null);
-    const state = loadReview(deckId);
-    return cards.map((c) => state[c.id] ?? null);
-  });
+  const [cardRatings, setCardRatings] = useState<(Rating | null)[]>(() =>
+    cards.map(() => null),
+  );
+
 
   const ratings = useMemo(() => {
     const r = { hard: 0, medium: 0, easy: 0 };
