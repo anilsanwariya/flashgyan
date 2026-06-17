@@ -2,7 +2,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { listDecks, type DeckSummary } from "@/lib/flashcards.functions";
-import { ArrowLeft, ChevronRight, Layers, ListChecks, Settings } from "lucide-react";
+import { listMcqTests, type McqTestSummary } from "@/lib/mcq.functions";
+import { ArrowLeft, ChevronRight, Layers, ListChecks, Settings, Timer } from "lucide-react";
 import logoAsset from "@/assets/flashgyan-logo.png.asset.json";
 
 import {
@@ -13,19 +14,24 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-const decksQO = queryOptions({
-  queryKey: ["decks"],
-  queryFn: () => listDecks(),
-});
+const decksQO = queryOptions({ queryKey: ["decks"], queryFn: () => listDecks() });
+const mcqQO = queryOptions({ queryKey: ["mcqTests"], queryFn: () => listMcqTests() });
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "Flashgyan web — Pick a feature" },
-      { name: "description", content: "Choose a study feature: flashcards or multiple choice questions." },
+      {
+        name: "description",
+        content: "Choose a study feature: flashcards or multiple choice question tests.",
+      },
     ],
   }),
-  loader: ({ context }) => context.queryClient.ensureQueryData(decksQO),
+  loader: ({ context }) =>
+    Promise.all([
+      context.queryClient.ensureQueryData(decksQO),
+      context.queryClient.ensureQueryData(mcqQO),
+    ]),
   component: Home,
 });
 
@@ -33,10 +39,11 @@ function encodeDeckId(d: { subject: string; topic: string }) {
   return btoa(unescape(encodeURIComponent(`${d.subject}|||${d.topic}`)));
 }
 
-type View = "home" | "flashcards";
+type View = "home" | "flashcards" | "mcqs";
 
 function Home() {
   const { data: decks } = useSuspenseQuery(decksQO);
+  const { data: tests } = useSuspenseQuery(mcqQO);
   const [view, setView] = useState<View>("home");
 
   return (
@@ -49,9 +56,7 @@ function Home() {
 
         {view === "home" ? (
           <>
-            <h1 className="mt-3 text-3xl font-extrabold tracking-tight">
-              Pick a feature.
-            </h1>
+            <h1 className="mt-3 text-3xl font-extrabold tracking-tight">Pick a feature.</h1>
             <p className="mt-2 text-muted-foreground text-[15px] leading-relaxed">
               Choose how you want to study today.
             </p>
@@ -65,21 +70,26 @@ function Home() {
               <ArrowLeft className="h-4 w-4" /> Back
             </button>
             <h1 className="mt-2 text-3xl font-extrabold tracking-tight">
-              Flashcards
+              {view === "flashcards" ? "Flashcards" : "MCQ Tests"}
             </h1>
             <p className="mt-2 text-muted-foreground text-[15px] leading-relaxed">
-              Filter by subject and topic, then flip through cards and rate your recall.
+              {view === "flashcards"
+                ? "Filter by subject and topic, then flip through cards and rate your recall."
+                : "Pick a test, answer the questions before time runs out, and review your score."}
             </p>
           </>
         )}
       </header>
 
       <main className="px-5 max-w-2xl mx-auto pb-32 space-y-6">
-        {view === "home" ? (
-          <FeaturePicker onOpenFlashcards={() => setView("flashcards")} />
-        ) : (
-          <FlashcardsSection decks={decks} />
+        {view === "home" && (
+          <FeaturePicker
+            onOpenFlashcards={() => setView("flashcards")}
+            onOpenMcqs={() => setView("mcqs")}
+          />
         )}
+        {view === "flashcards" && <FlashcardsSection decks={decks} />}
+        {view === "mcqs" && <McqSection tests={tests} />}
       </main>
 
       <footer className="fixed bottom-0 inset-x-0 border-t border-border bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/70">
@@ -96,45 +106,56 @@ function Home() {
   );
 }
 
-function FeaturePicker({ onOpenFlashcards }: { onOpenFlashcards: () => void }) {
+function FeaturePicker({
+  onOpenFlashcards,
+  onOpenMcqs,
+}: {
+  onOpenFlashcards: () => void;
+  onOpenMcqs: () => void;
+}) {
   return (
     <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      <button
+      <FeatureCard
+        title="Flashcards"
+        subtitle="Flip cards and rate recall."
+        icon={<Layers className="h-5 w-5" />}
         onClick={onOpenFlashcards}
-        className="group text-left flex items-center gap-4 rounded-2xl bg-card border border-border p-4 active:scale-[0.99] transition-transform shadow-sm"
-      >
-        <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
-          <Layers className="h-5 w-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-lg font-semibold">Flashcards</div>
-          <div className="mt-0.5 text-sm text-muted-foreground">
-            Flip cards and rate recall.
-          </div>
-        </div>
-        <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0 group-hover:translate-x-0.5 transition-transform" />
-      </button>
-
-      <div
-        aria-disabled="true"
-        className="flex items-center gap-4 rounded-2xl bg-card border border-border p-4 shadow-sm opacity-60 cursor-not-allowed"
-      >
-        <div className="h-10 w-10 rounded-xl bg-muted text-muted-foreground flex items-center justify-center shrink-0">
-          <ListChecks className="h-5 w-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <div className="text-lg font-semibold truncate">MCQs</div>
-            <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
-              Coming soon
-            </span>
-          </div>
-          <div className="mt-0.5 text-sm text-muted-foreground">
-            Multiple choice questions.
-          </div>
-        </div>
-      </div>
+      />
+      <FeatureCard
+        title="MCQ Tests"
+        subtitle="Timed multiple choice tests."
+        icon={<ListChecks className="h-5 w-5" />}
+        onClick={onOpenMcqs}
+      />
     </section>
+  );
+}
+
+function FeatureCard({
+  title,
+  subtitle,
+  icon,
+  onClick,
+}: {
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="group text-left flex items-center gap-4 rounded-2xl bg-card border border-border p-4 active:scale-[0.99] transition-transform shadow-sm"
+    >
+      <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-lg font-semibold">{title}</div>
+        <div className="mt-0.5 text-sm text-muted-foreground">{subtitle}</div>
+      </div>
+      <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0 group-hover:translate-x-0.5 transition-transform" />
+    </button>
   );
 }
 
@@ -206,7 +227,7 @@ function FlashcardsSection({ decks }: { decks: DeckSummary[] }) {
         </div>
 
         {filtered.length === 0 ? (
-          <EmptyState />
+          <EmptyState what="decks" />
         ) : (
           <ul className="space-y-3">
             {filtered.map((d) => (
@@ -216,6 +237,42 @@ function FlashcardsSection({ decks }: { decks: DeckSummary[] }) {
         )}
       </section>
     </>
+  );
+}
+
+function McqSection({ tests }: { tests: McqTestSummary[] }) {
+  if (tests.length === 0) return <EmptyState what="tests" />;
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+        {tests.length} test{tests.length === 1 ? "" : "s"}
+      </h2>
+      <ul className="space-y-3">
+        {tests.map((t) => (
+          <li key={t.id}>
+            <Link
+              to="/mcq/$testId"
+              params={{ testId: t.id }}
+              className="group flex items-center gap-4 rounded-2xl bg-card border border-border p-4 active:scale-[0.99] transition-transform shadow-sm"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground inline-flex items-center gap-2">
+                  <Timer className="h-3 w-3" />
+                  {Math.round(t.duration_seconds / 60)} min · {t.question_count} Q
+                </div>
+                <div className="mt-0.5 text-lg font-semibold truncate">{t.name}</div>
+                {t.description && (
+                  <div className="mt-1 text-sm text-muted-foreground line-clamp-2">
+                    {t.description}
+                  </div>
+                )}
+              </div>
+              <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0 group-hover:translate-x-0.5 transition-transform" />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -286,11 +343,11 @@ function DeckCard({ deck }: { deck: DeckSummary }) {
   );
 }
 
-function EmptyState() {
+function EmptyState({ what }: { what: string }) {
   return (
     <div className="rounded-2xl border border-dashed border-border p-8 text-center">
       <p className="text-sm text-muted-foreground">
-        No decks yet. An admin can upload an Excel file from{" "}
+        No {what} yet. An admin can add them from{" "}
         <Link to="/admin" className="text-primary font-medium">
           Admin
         </Link>
