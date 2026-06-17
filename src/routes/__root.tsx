@@ -80,9 +80,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
-      { title: "Flashly — Focused Flashcard Practice" },
+      { title: "Flashgyan web — Focused Flashcard Practice" },
       { name: "description", content: "Browse decks by subject and topic, flip cards, and rate recall. Mobile-first, distraction-free study." },
-      { property: "og:title", content: "Flashly — Focused Flashcard Practice" },
+      { property: "og:title", content: "Flashgyan web — Focused Flashcard Practice" },
       { property: "og:description", content: "Mobile-first flashcard practice with simple Hard / Medium / Easy recall ratings." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
@@ -90,10 +90,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     ],
     links: [
       { rel: "stylesheet", href: appCss },
+      { rel: "icon", type: "image/png", href: logoAsset.url },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" },
     ],
+
   }),
   shellComponent: RootShell,
   component: RootComponent,
