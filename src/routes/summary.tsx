@@ -79,7 +79,13 @@ function Summary() {
     }
   }
 
-  const hardCards = detail?.results.filter((r) => r.rating === "hard") ?? [];
+  const [selected, setSelected] = useState<Rating | null>(null);
+  const selectedCards =
+    selected && detail ? detail.results.filter((r) => r.rating === selected) : [];
+
+  function toggle(r: Rating) {
+    setSelected((s) => (s === r ? null : r));
+  }
 
   return (
     <div className="min-h-dvh bg-background flex flex-col">
@@ -104,14 +110,40 @@ function Summary() {
 
         <section className="mt-8">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-            By difficulty
+            By difficulty {detail ? "· tap to view cards" : ""}
           </h2>
           <div className="space-y-3">
-            <Row label="Easy" value={easy} pct={pct(easy)} tone="success" />
-            <Row label="Medium" value={medium} pct={pct(medium)} tone="warning" />
-            <Row label="Hard" value={hard} pct={pct(hard)} tone="destructive" />
+            <Row label="Easy" value={easy} pct={pct(easy)} tone="success"
+              active={selected === "easy"} disabled={!detail || easy === 0}
+              onClick={() => toggle("easy")} />
+            <Row label="Medium" value={medium} pct={pct(medium)} tone="warning"
+              active={selected === "medium"} disabled={!detail || medium === 0}
+              onClick={() => toggle("medium")} />
+            <Row label="Hard" value={hard} pct={pct(hard)} tone="destructive"
+              active={selected === "hard"} disabled={!detail || hard === 0}
+              onClick={() => toggle("hard")} />
           </div>
+
+          {selected && (
+            <div className="mt-4">
+              <div className="text-xs text-muted-foreground mb-2">
+                Showing {selectedCards.length} {ratingLabel[selected].toLowerCase()} card{selectedCards.length === 1 ? "" : "s"}
+              </div>
+              <ul className="space-y-2">
+                {selectedCards.map((c) => (
+                  <li key={c.id} className="rounded-2xl border border-border bg-card p-4">
+                    <div className="text-xs text-muted-foreground truncate">
+                      {c.subject} · {c.topic}
+                    </div>
+                    <div className="mt-1 font-medium leading-snug">{c.front_question}</div>
+                    <div className="mt-1 text-sm text-muted-foreground leading-snug">{c.back_answer}</div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </section>
+
 
         {grouped.size > 0 && (
           <section className="mt-8">
@@ -154,37 +186,8 @@ function Summary() {
           </section>
         )}
 
-        {hardCards.length > 0 && (
-          <section className="mt-8">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-              Review queue · {hardCards.length} card{hardCards.length === 1 ? "" : "s"} marked hard
-            </h2>
-            <ul className="space-y-2">
-              {hardCards.map((c) => (
-                <li
-                  key={c.id}
-                  className="rounded-2xl border border-border bg-card p-4"
-                >
-                  <div className="text-xs text-muted-foreground truncate">
-                    {c.subject} · {c.topic}
-                  </div>
-                  <div className="mt-1 font-medium leading-snug">
-                    {c.front_question}
-                  </div>
-                  <div className="mt-1 text-sm text-muted-foreground leading-snug">
-                    {c.back_answer}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
 
-        {detail && hardCards.length === 0 && (
-          <p className="mt-8 text-center text-sm text-muted-foreground">
-            No cards marked hard — nice work.
-          </p>
-        )}
+
 
         <div className="mt-10 grid grid-cols-2 gap-3">
           <Link
@@ -238,11 +241,17 @@ function Row({
   value,
   pct,
   tone,
+  active,
+  disabled,
+  onClick,
 }: {
   label: string;
   value: number;
   pct: number;
   tone: "success" | "warning" | "destructive";
+  active?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
 }) {
   const bar =
     tone === "success"
@@ -250,8 +259,22 @@ function Row({
       : tone === "warning"
       ? "bg-warning"
       : "bg-destructive";
+  const ring =
+    tone === "success"
+      ? "ring-success"
+      : tone === "warning"
+      ? "ring-warning"
+      : "ring-destructive";
   return (
-    <div className="rounded-2xl border border-border bg-card p-4">
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+      className={`w-full text-left rounded-2xl border bg-card p-4 transition ${
+        active ? `ring-2 ${ring} border-transparent` : "border-border"
+      } ${disabled ? "opacity-60 cursor-default" : "cursor-pointer active:scale-[0.99]"}`}
+    >
       <div className="flex items-baseline justify-between">
         <div className="font-semibold">{label}</div>
         <div className="text-sm tabular-nums text-muted-foreground">
@@ -261,6 +284,6 @@ function Row({
       <div className="mt-2 h-2 rounded-full bg-muted overflow-hidden">
         <div className={`h-full ${bar}`} style={{ width: `${pct}%` }} />
       </div>
-    </div>
+    </button>
   );
 }
