@@ -167,7 +167,8 @@ function Practice() {
     }
   }
 
-  const pct = ((index + (flipped ? 0.5 : 0)) / total) * 100;
+
+
 
   return (
     <div className="min-h-dvh flex flex-col bg-background">
