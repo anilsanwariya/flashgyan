@@ -4,6 +4,13 @@ import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { listDecks, type DeckSummary } from "@/lib/flashcards.functions";
 import { Button } from "@/components/ui/button";
 import { ChevronRight, Layers, Settings } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const decksQO = queryOptions({
   queryKey: ["decks"],
