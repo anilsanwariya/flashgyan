@@ -35,9 +35,6 @@ export const Route = createFileRoute("/")({
   component: Home,
 });
 
-function encodeDeckId(d: { subject: string; topic: string }) {
-  return btoa(unescape(encodeURIComponent(`${d.subject}|||${d.topic}`)));
-}
 
 type View = "home" | "flashcards" | "mcqs";
 
