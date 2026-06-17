@@ -34,7 +34,12 @@ const cardsQO = (deckId: string) => {
   });
 };
 
+const practiceSearchSchema = z.object({
+  review: fallback(z.boolean(), false).default(false),
+});
+
 export const Route = createFileRoute("/practice/$deckId")({
+  validateSearch: zodValidator(practiceSearchSchema),
   loader: ({ context, params }) =>
     context.queryClient.ensureQueryData(cardsQO(params.deckId)),
   component: Practice,
