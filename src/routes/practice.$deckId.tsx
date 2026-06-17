@@ -300,18 +300,29 @@ function Practice() {
                   }
                 >
                   {/* Front */}
-                  <div className={`absolute inset-0 backface-hidden rounded-3xl bg-card border-2 shadow-sm p-7 flex flex-col transition-colors ${borderClass}`}>
-                    <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground text-center">
-                      {card.prompt}
-                    </div>
-                    <div className="flex-1 flex items-center justify-center">
-                      <p className="text-2xl font-semibold leading-snug text-center text-balance">
-                        {card.question}
-                      </p>
-                    </div>
-                    <div className="text-center text-xs text-muted-foreground inline-flex items-center justify-center gap-1.5">
-                      <RotateCcw className="h-3.5 w-3.5" /> Tap to reveal
-                    </div>
+                  <div className={`absolute inset-0 backface-hidden rounded-3xl bg-card border-2 shadow-sm overflow-hidden transition-colors ${borderClass}`}>
+                    <ScrollArea className="h-full">
+                      <div className="p-7 min-h-[60vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+                        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground text-center">
+                          {card.prompt}
+                        </div>
+                        <div className="flex-1 flex flex-col items-center justify-center gap-4 py-4">
+                          <p className="text-2xl font-semibold leading-snug text-center text-balance">
+                            {card.question}
+                          </p>
+                          {card.image_url && (
+                            <img
+                              src={card.image_url}
+                              alt=""
+                              className="w-full aspect-[2/1] rounded-xl object-cover border border-border"
+                            />
+                          )}
+                        </div>
+                        <div className="text-center text-xs text-muted-foreground inline-flex items-center justify-center gap-1.5">
+                          <RotateCcw className="h-3.5 w-3.5" /> Tap to reveal
+                        </div>
+                      </div>
+                    </ScrollArea>
                   </div>
                   {/* Back */}
                   <div className={`absolute inset-0 backface-hidden rotate-y-180 rounded-3xl bg-card border-2 shadow-sm transition-colors ${borderClass} overflow-hidden flex flex-col`}>
@@ -323,6 +334,13 @@ function Practice() {
                         <p className="mt-2 text-base font-medium leading-snug">
                           {card.question}
                         </p>
+                        {card.image_url && (
+                          <img
+                            src={card.image_url}
+                            alt=""
+                            className="mt-3 w-full aspect-[2/1] rounded-xl object-cover border border-border"
+                          />
+                        )}
                         <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
                           Answer
                         </div>
