@@ -4,6 +4,11 @@ import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { getDeckCards } from "@/lib/flashcards.functions";
 import { motion, AnimatePresence } from "motion/react";
 import { ArrowLeft, RotateCcw } from "lucide-react";
+import {
+  newSessionId,
+  saveSession,
+  type SessionCardResult,
+} from "@/lib/session-store";
 
 function decodeDeckId(id: string): { subject: string; topic: string } {
   try {
@@ -76,6 +81,7 @@ function Practice() {
     medium: 0,
     easy: 0,
   });
+  const resultsRef = useRef<SessionCardResult[]>([]);
 
   const card = cards[index];
   const total = cards.length;
@@ -100,8 +106,26 @@ function Practice() {
   function rate(r: Rating) {
     const next = { ...ratings, [r]: ratings[r] + 1 };
     setRatings(next);
+    resultsRef.current.push({
+      id: card.id,
+      subject: card.subject,
+      topic: card.topic,
+      front_question: card.front_question,
+      back_answer: card.back_answer,
+      rating: r,
+    });
     if (index + 1 >= total) {
-      const seconds = Math.round((Date.now() - startedAt.current) / 1000);
+      const endedAt = Date.now();
+      const seconds = Math.round((endedAt - startedAt.current) / 1000);
+      const sessionId = newSessionId();
+      saveSession(sessionId, {
+        deckId,
+        subject,
+        topic,
+        startedAt: startedAt.current,
+        endedAt,
+        results: resultsRef.current,
+      });
       navigate({
         to: "/summary",
         search: {
@@ -111,6 +135,7 @@ function Practice() {
           medium: next.medium,
           easy: next.easy,
           seconds,
+          sessionId,
         },
       });
     } else {
