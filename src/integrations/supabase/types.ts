@@ -14,41 +14,91 @@ export type Database = {
   }
   public: {
     Tables: {
+      flashcard_decks: {
+        Row: {
+          created_at: string
+          description: string
+          id: string
+          name: string
+          order_index: number
+          subject: string
+          topic: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string
+          id?: string
+          name: string
+          order_index?: number
+          subject: string
+          topic: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          id?: string
+          name?: string
+          order_index?: number
+          subject?: string
+          topic?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       flashcards: {
         Row: {
           answer: string
           created_at: string
+          deck_id: string
           id: string
+          image_url: string | null
           order_index: number
           prompt: string
           question: string
           sections: Json
           subject: string
           topic: string
+          updated_at: string
         }
         Insert: {
           answer: string
           created_at?: string
+          deck_id: string
           id?: string
+          image_url?: string | null
           order_index?: number
           prompt: string
           question: string
           sections?: Json
           subject: string
           topic: string
+          updated_at?: string
         }
         Update: {
           answer?: string
           created_at?: string
+          deck_id?: string
           id?: string
+          image_url?: string | null
           order_index?: number
           prompt?: string
           question?: string
           sections?: Json
           subject?: string
           topic?: string
+          updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "flashcards_deck_id_fkey"
+            columns: ["deck_id"]
+            isOneToOne: false
+            referencedRelation: "flashcard_decks"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       mcq_questions: {
         Row: {
