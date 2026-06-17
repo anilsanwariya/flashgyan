@@ -191,10 +191,18 @@ function Practice() {
             </span>
           )}
         </div>
-        <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
+        <div className="mt-2 flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
           <div
-            className="h-full bg-primary transition-all duration-300"
-            style={{ width: `${pct}%` }}
+            className="h-full bg-success transition-all duration-300"
+            style={{ width: `${(ratings.easy / total) * 100}%` }}
+          />
+          <div
+            className="h-full bg-warning transition-all duration-300"
+            style={{ width: `${(ratings.medium / total) * 100}%` }}
+          />
+          <div
+            className="h-full bg-destructive transition-all duration-300"
+            style={{ width: `${(ratings.hard / total) * 100}%` }}
           />
         </div>
       </header>
