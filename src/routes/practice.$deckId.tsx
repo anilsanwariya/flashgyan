@@ -160,15 +160,20 @@ function Practice() {
     const endedAt = Date.now();
     const seconds = Math.round((endedAt - startedAt.current) / 1000);
     const sessionId = newSessionId();
-    const results: SessionCardResult[] = cards.map((c, i) => ({
-      id: c.id,
-      subject: c.subject,
-      topic: c.topic,
-      prompt: c.prompt,
-      question: c.question,
-      answer: c.answer,
-      rating: (finalRatings[i] ?? "medium") as Rating,
-    }));
+    const results: SessionCardResult[] = [];
+    cards.forEach((c, i) => {
+      const r = finalRatings[i];
+      if (!r) return;
+      results.push({
+        id: c.id,
+        subject: c.subject,
+        topic: c.topic,
+        prompt: c.prompt,
+        question: c.question,
+        answer: c.answer,
+        rating: r,
+      });
+    });
     const counts = { hard: 0, medium: 0, easy: 0 };
     for (const r of results) counts[r.rating]++;
     saveSession(sessionId, {
@@ -186,7 +191,7 @@ function Practice() {
       to: "/summary",
       search: {
         deckId,
-        total,
+        total: results.length,
         hard: counts.hard,
         medium: counts.medium,
         easy: counts.easy,
