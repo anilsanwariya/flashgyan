@@ -120,8 +120,8 @@ function TakeTest() {
   const answeredCount = Object.values(answers).filter((v) => v !== null).length;
 
   return (
-    <div className="min-h-dvh bg-background flex flex-col">
-      <header className="border-b border-border bg-background sticky top-0 z-10">
+    <div className="h-dvh overflow-hidden bg-background flex flex-col">
+      <header className="shrink-0 border-b border-border bg-background z-10">
         <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-xs text-muted-foreground">{test.name}</div>
@@ -203,7 +203,7 @@ function TakeTest() {
         </div>
       </main>
 
-      <footer className="sticky bottom-0 border-t border-border bg-background">
+      <footer className="shrink-0 border-t border-border bg-background">
         <div className="max-w-2xl mx-auto px-5 py-3 grid grid-cols-3 items-center gap-3">
           <div className="justify-self-start">
             <Button
@@ -284,30 +284,38 @@ function QuestionPalette({
         <div
           ref={scrollRef}
           onScroll={updateEdges}
-          className="flex-1 overflow-x-auto scroll-smooth no-scrollbar"
+          className="flex-1 overflow-x-auto scroll-smooth snap-x snap-mandatory no-scrollbar"
         >
-          <div
-            className="grid grid-rows-2 grid-flow-col gap-1"
-            style={{ gridAutoColumns: "calc((100% - (9 * 0.25rem)) / 10)" }}
-          >
-            {questions.map((q, i) => {
-              const a = answers[q.id];
-              const cur = i === current;
+          <div className="flex">
+            {Array.from({ length: Math.ceil(questions.length / 20) }).map((_, pageIdx) => {
+              const pageQs = questions.slice(pageIdx * 20, pageIdx * 20 + 20);
               return (
-                <button
-                  key={q.id}
-                  onClick={() => onJump(i)}
-                  className={
-                    "h-7 rounded-md text-xs font-medium tabular-nums border " +
-                    (cur
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : a !== null
-                        ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                        : "border-border bg-card text-muted-foreground")
-                  }
+                <div
+                  key={pageIdx}
+                  className="w-full shrink-0 snap-start grid grid-cols-10 grid-rows-2 gap-1"
                 >
-                  {i + 1}
-                </button>
+                  {pageQs.map((q, j) => {
+                    const i = pageIdx * 20 + j;
+                    const a = answers[q.id];
+                    const cur = i === current;
+                    return (
+                      <button
+                        key={q.id}
+                        onClick={() => onJump(i)}
+                        className={
+                          "h-7 rounded-md text-xs font-medium tabular-nums border " +
+                          (cur
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : a !== null
+                              ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              : "border-border bg-card text-muted-foreground")
+                        }
+                      >
+                        {i + 1}
+                      </button>
+                    );
+                  })}
+                </div>
               );
             })}
           </div>
