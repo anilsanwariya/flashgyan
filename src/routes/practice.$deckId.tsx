@@ -183,8 +183,13 @@ function Practice() {
             {index + 1} / {total}
           </div>
         </div>
-        <div className="mt-3 text-xs text-muted-foreground truncate">
-          {subject} · {topic}
+        <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="truncate">{subject} · {topic}</span>
+          {review && (
+            <span className="shrink-0 rounded-full bg-primary/10 text-primary px-2 py-0.5 font-medium">
+              Review mode
+            </span>
+          )}
         </div>
         <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
           <div
