@@ -312,7 +312,28 @@ function Practice() {
               </button>
             </motion.div>
           </AnimatePresence>
+          {index > 0 && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); goPrev(); }}
+              aria-label="Previous card"
+              className="absolute left-2 top-1/2 -translate-y-1/2 z-10 h-10 w-10 rounded-full bg-background/60 backdrop-blur-sm border border-border shadow-sm flex items-center justify-center hover:bg-background/80 transition-colors"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+          )}
+          {currentRating !== null && index < total - 1 && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); goNext(); }}
+              aria-label="Next card"
+              className="absolute right-2 top-1/2 -translate-y-1/2 z-10 h-10 w-10 rounded-full bg-background/60 backdrop-blur-sm border border-border shadow-sm flex items-center justify-center hover:bg-background/80 transition-colors"
+            >
+              <ChevronRight className="h-5 w-5" />
+            </button>
+          )}
         </div>
+
       </main>
 
       <footer className="px-5 pb-6 pt-2 max-w-2xl w-full mx-auto">
