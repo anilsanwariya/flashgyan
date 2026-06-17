@@ -95,9 +95,11 @@ function Practice() {
   });
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
-  const [cardRatings, setCardRatings] = useState<(Rating | null)[]>(() =>
-    cards.map(() => null),
-  );
+  const [cardRatings, setCardRatings] = useState<(Rating | null)[]>(() => {
+    if (!review) return cards.map(() => null);
+    const state = loadReview(deckId);
+    return cards.map((c) => state[c.id] ?? null);
+  });
 
   const ratings = useMemo(() => {
     const r = { hard: 0, medium: 0, easy: 0 };
@@ -108,6 +110,15 @@ function Practice() {
   const card = cards[index];
   const total = cards.length;
   const currentRating = cardRatings[index];
+  const borderClass =
+    currentRating === "hard"
+      ? "border-destructive"
+      : currentRating === "medium"
+      ? "border-warning"
+      : currentRating === "easy"
+      ? "border-success"
+      : "border-border";
+
 
   useEffect(() => {
     setFlipped(false);
@@ -169,13 +180,11 @@ function Practice() {
     const next = cardRatings.slice();
     next[index] = r;
     setCardRatings(next);
-    if (next.every((x) => x !== null)) {
+    if (index < total - 1) {
+      setIndex(index + 1);
+    } else if (next.every((x) => x !== null)) {
       submit(next);
-      return;
     }
-    // advance to next unrated card, or simply next card
-    const nextUnrated = next.findIndex((x, i) => i > index && x === null);
-    setIndex(nextUnrated !== -1 ? nextUnrated : Math.min(index + 1, total - 1));
   }
 
   function goPrev() {
@@ -270,7 +279,7 @@ function Practice() {
                   }
                 >
                   {/* Front */}
-                  <div className="absolute inset-0 backface-hidden rounded-3xl bg-card border border-border shadow-sm p-7 flex flex-col">
+                  <div className={`absolute inset-0 backface-hidden rounded-3xl bg-card border-2 shadow-sm p-7 flex flex-col transition-colors ${borderClass}`}>
                     {card.front_prompt && (
                       <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                         {card.front_prompt}
@@ -286,7 +295,7 @@ function Practice() {
                     </div>
                   </div>
                   {/* Back */}
-                  <div className="absolute inset-0 backface-hidden rotate-y-180 rounded-3xl bg-card border border-border shadow-sm p-7 flex flex-col">
+                  <div className={`absolute inset-0 backface-hidden rotate-y-180 rounded-3xl bg-card border-2 shadow-sm p-7 flex flex-col transition-colors ${borderClass}`}>
                     <div className="text-xs font-semibold uppercase tracking-wider text-primary">
                       Answer
                     </div>
