@@ -388,10 +388,14 @@ function RatingButton({
   label,
   tone,
   onClick,
+  disabled = false,
+  active = false,
 }: {
   label: string;
   tone: "destructive" | "warning" | "success";
   onClick: () => void;
+  disabled?: boolean;
+  active?: boolean;
 }) {
   const cls =
     tone === "destructive"
@@ -399,10 +403,16 @@ function RatingButton({
       : tone === "warning"
       ? "bg-warning text-warning-foreground"
       : "bg-success text-success-foreground";
+  const stateCls = disabled
+    ? active
+      ? "cursor-not-allowed"
+      : "opacity-40 cursor-not-allowed"
+    : "active:scale-[0.98]";
   return (
     <button
       onClick={onClick}
-      className={`h-14 rounded-2xl font-semibold text-base shadow-sm active:scale-[0.98] transition-transform ${cls}`}
+      disabled={disabled}
+      className={`h-14 rounded-2xl font-semibold text-base shadow-sm transition-transform ${cls} ${stateCls}`}
     >
       {label}
     </button>
