@@ -137,9 +137,9 @@ function TakeTest() {
         </div>
       </header>
 
-      <main className="flex-1 max-w-2xl w-full mx-auto px-5 py-4 space-y-4">
-        <div className="rounded-2xl bg-card border border-border p-5">
-          <div className="max-h-[calc(100dvh-22rem)] overflow-y-auto pr-1 space-y-4">
+      <main className="flex-1 min-h-0 max-w-2xl w-full mx-auto px-5 py-4 flex flex-col">
+        <div className="flex-1 min-h-0 flex flex-col rounded-2xl bg-card border border-border p-5">
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-4">
             <p className="text-base font-medium leading-relaxed whitespace-pre-wrap">
               {q.question}
             </p>
@@ -192,13 +192,15 @@ function TakeTest() {
           </div>
         </div>
 
-        <QuestionPalette
-          questions={questions}
-          answers={answers}
-          current={idx}
-          onJump={setIdx}
-          answeredCount={answeredCount}
-        />
+        <div className="shrink-0 mt-3">
+          <QuestionPalette
+            questions={questions}
+            answers={answers}
+            current={idx}
+            onJump={setIdx}
+            answeredCount={answeredCount}
+          />
+        </div>
       </main>
 
       <footer className="sticky bottom-0 border-t border-border bg-background">
