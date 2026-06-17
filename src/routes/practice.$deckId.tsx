@@ -1,12 +1,17 @@
 import { createFileRoute, Link, useNavigate, notFound } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
+import { z } from "zod";
+import { zodValidator, fallback } from "@tanstack/zod-adapter";
 import { getDeckCards } from "@/lib/flashcards.functions";
 import { motion, AnimatePresence } from "motion/react";
 import { ArrowLeft, RotateCcw } from "lucide-react";
 import {
   newSessionId,
   saveSession,
+  loadReview,
+  saveReview,
+  applyReviewOrder,
   type SessionCardResult,
 } from "@/lib/session-store";
 
@@ -29,7 +34,12 @@ const cardsQO = (deckId: string) => {
   });
 };
 
+const practiceSearchSchema = z.object({
+  review: fallback(z.boolean(), false).default(false),
+});
+
 export const Route = createFileRoute("/practice/$deckId")({
+  validateSearch: zodValidator(practiceSearchSchema),
   loader: ({ context, params }) =>
     context.queryClient.ensureQueryData(cardsQO(params.deckId)),
   component: Practice,
@@ -68,12 +78,20 @@ function shuffle<T>(arr: T[]): T[] {
 
 function Practice() {
   const { deckId } = Route.useParams();
+  const { review } = Route.useSearch();
   const { subject, topic } = useMemo(() => decodeDeckId(deckId), [deckId]);
   const { data: cardsRaw } = useSuspenseQuery(cardsQO(deckId));
   const navigate = useNavigate();
   const startedAt = useRef(Date.now());
 
-  const [cards] = useState(() => shuffle(cardsRaw));
+  const [cards] = useState(() => {
+    if (review) {
+      const state = loadReview(deckId);
+      const ordered = applyReviewOrder(cardsRaw, state);
+      return ordered.length > 0 ? ordered : shuffle(cardsRaw);
+    }
+    return shuffle(cardsRaw);
+  });
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [ratings, setRatings] = useState<Record<Rating, number>>({
@@ -126,6 +144,12 @@ function Practice() {
         endedAt,
         results: resultsRef.current,
       });
+      // Persist spaced-repetition state: most recent rating per card.
+      const state = loadReview(deckId);
+      for (const result of resultsRef.current) {
+        state[result.id] = result.rating;
+      }
+      saveReview(deckId, state);
       navigate({
         to: "/summary",
         search: {
@@ -159,8 +183,13 @@ function Practice() {
             {index + 1} / {total}
           </div>
         </div>
-        <div className="mt-3 text-xs text-muted-foreground truncate">
-          {subject} · {topic}
+        <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="truncate">{subject} · {topic}</span>
+          {review && (
+            <span className="shrink-0 rounded-full bg-primary/10 text-primary px-2 py-0.5 font-medium">
+              Review mode
+            </span>
+          )}
         </div>
         <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
           <div

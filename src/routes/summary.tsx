@@ -200,9 +200,10 @@ function Summary() {
             <Link
               to="/practice/$deckId"
               params={{ deckId }}
+              search={{ review: hard + medium > 0 }}
               className="h-12 rounded-2xl bg-primary text-primary-foreground font-semibold grid place-items-center"
             >
-              Practice again
+              {hard + medium > 0 ? "Review hard & medium" : "Practice again"}
             </Link>
           ) : (
             <Link
