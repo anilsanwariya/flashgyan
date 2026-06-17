@@ -15,6 +15,17 @@ import {
   applyReviewOrder,
   type SessionCardResult,
 } from "@/lib/session-store";
+import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 
 function decodeDeckId(id: string): { subject: string; topic: string } {
   try {
@@ -149,15 +160,20 @@ function Practice() {
     const endedAt = Date.now();
     const seconds = Math.round((endedAt - startedAt.current) / 1000);
     const sessionId = newSessionId();
-    const results: SessionCardResult[] = cards.map((c, i) => ({
-      id: c.id,
-      subject: c.subject,
-      topic: c.topic,
-      prompt: c.prompt,
-      question: c.question,
-      answer: c.answer,
-      rating: (finalRatings[i] ?? "medium") as Rating,
-    }));
+    const results: SessionCardResult[] = [];
+    cards.forEach((c, i) => {
+      const r = finalRatings[i];
+      if (!r) return;
+      results.push({
+        id: c.id,
+        subject: c.subject,
+        topic: c.topic,
+        prompt: c.prompt,
+        question: c.question,
+        answer: c.answer,
+        rating: r,
+      });
+    });
     const counts = { hard: 0, medium: 0, easy: 0 };
     for (const r of results) counts[r.rating]++;
     saveSession(sessionId, {
@@ -175,7 +191,7 @@ function Practice() {
       to: "/summary",
       search: {
         deckId,
-        total,
+        total: results.length,
         hard: counts.hard,
         medium: counts.medium,
         easy: counts.easy,
@@ -214,12 +230,35 @@ function Practice() {
     <div className="min-h-dvh flex flex-col bg-background">
       <header className="px-5 pt-4 pb-3 max-w-2xl w-full mx-auto">
         <div className="flex items-center justify-between">
-          <Link
-            to="/"
-            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="h-4 w-4" /> Exit
-          </Link>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft className="h-4 w-4" /> End Session
+              </button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>End this session?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  You can keep going, or end now and see your summary. Unrated cards stay unrated.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="bg-success text-success-foreground hover:bg-success/90 border-0">
+                  Continue
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => submit(cardRatings)}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  End session
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           <div className="text-sm tabular-nums text-muted-foreground">
             {index + 1} / {total}
           </div>

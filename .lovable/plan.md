@@ -1,43 +1,33 @@
 ## Goal
 
-In `src/routes/practice.$deckId.tsx`, make the rating flow behave identically in fresh practice and review mode, with one visual difference: review mode shows prior-session border colors on unrated cards.
+In `src/routes/practice.$deckId.tsx`, replace the top-left "Exit" link with an "End Session" button that opens a confirmation dialog. Ending early preserves unrated cards as unrated so the next Review run shows them after hard and medium.
 
 ## Behavior
 
-1. **Rating flow (both modes)**: User must rate a card to advance. The next-arrow guard already enforces this — keep as-is.
+- Top-left control: text changes from "Exit" to "End Session" (icon kept).
+- Clicking it opens an AlertDialog:
+  - **Continue** (green) — closes dialog, session continues untouched.
+  - **End session** (red) — ends now, goes to Summary.
+- Ending early:
+  - Cards rated in this session are saved with their rating (hard/medium/easy).
+  - Cards NOT rated this session stay unrated: they are not added to the deck's review state, and existing entries (e.g. prior-session ratings) are left untouched.
+  - Summary counts (`hard`/`medium`/`easy`/`total`) reflect only cards rated this session, so percentages are meaningful.
+- Next Review run from Summary already does the right thing via the existing `applyReviewOrder`: easy → filtered out, hard (priority 0) → medium (1) → unrated (1.5). No changes needed in `summary.tsx` or `session-store.ts`.
 
-2. **Lock already-rated cards in this session**: When navigating back to a card the user rated earlier in the current session, the rating buttons become non-interactive (locked). User can still flip the card and use the next arrow. This applies in both fresh and review modes.
-   - A card is "locked" when `cardRatings[index] !== null` AND the user navigated to it (i.e. it's not the freshly-revealed current card needing input).
-   - Simplest rule: lock whenever `cardRatings[index] !== null`. Since rating auto-advances, you only see a non-null rating when you went back.
+## Changes (single file: `src/routes/practice.$deckId.tsx`)
 
-3. **Review mode borders**: Keep `priorRatings` border tint on cards not yet rated this session. Once rated this session, `currentRating` takes over (already the case via `displayRating = currentRating ?? priorRatings[index]`).
-
-4. **Auto-flip on revisit**: Keep current behavior — `setFlipped(cardRatings[index] !== null)` flips to the answer side when revisiting a session-rated card (so the locked buttons make sense in context). Review-mode prior-only cards still open on the front.
-
-## Changes
-
-Replace the footer block (lines ~298-312):
-
-```tsx
-{flipped ? (
-  <div className="grid grid-cols-3 gap-2">
-    {currentRating !== null ? (
-      <>
-        <RatingButton label="Hard" tone="destructive" disabled active={currentRating === "hard"} />
-        <RatingButton label="Medium" tone="warning" disabled active={currentRating === "medium"} />
-        <RatingButton label="Easy" tone="success" disabled active={currentRating === "easy"} />
-      </>
-    ) : (
-      <>
-        <RatingButton label="Hard" tone="destructive" onClick={() => rate("hard")} />
-        <RatingButton label="Medium" tone="warning" onClick={() => rate("medium")} />
-        <RatingButton label="Easy" tone="success" onClick={() => rate("easy")} />
-      </>
-    )}
-  </div>
-) : ( /* Reveal answer button unchanged */ )}
-```
-
-Update `RatingButton` to accept optional `disabled` and `active` props: when `disabled`, render as a non-clickable button with `opacity-50 cursor-not-allowed`, and when `active` keep full opacity so the user sees which rating they previously gave.
-
-No other files change. No logic changes to `rate()`, `priorRatings`, `displayRating`, or the next-arrow guard.
+1. Add imports from `@/components/ui/alert-dialog`: `AlertDialog`, `AlertDialogTrigger`, `AlertDialogContent`, `AlertDialogHeader`, `AlertDialogTitle`, `AlertDialogDescription`, `AlertDialogFooter`, `AlertDialogCancel`, `AlertDialogAction`.
+2. Generalize `submit()` to handle partial completion:
+   - Accept the current `cardRatings` as-is (some entries may be `null`).
+   - Build `results` from cards whose entry is non-null only.
+   - Compute `counts` and `total` from those rated cards.
+   - When writing the review state, only `state[id] = rating` for rated cards — never overwrite or insert nulls.
+   - Navigate to `/summary` with `total = rated.length`, plus the per-rating counts.
+   - The existing natural completion path (last card rated) still goes through this same function and behaves identically because all entries are non-null at that point.
+3. Replace the header `<Link to="/">… Exit</Link>` with an `AlertDialog`:
+   - `AlertDialogTrigger asChild` wrapping a `<button>` with `ArrowLeft` icon + "End Session", same classes as the previous link.
+   - Title: "End this session?"
+   - Description: "You can keep going, or end now and see your summary. Unrated cards stay unrated."
+   - `AlertDialogCancel` labeled "Continue" with `className="bg-success text-success-foreground hover:bg-success/90 border-0"`.
+   - `AlertDialogAction` labeled "End session" with `className="bg-destructive text-destructive-foreground hover:bg-destructive/90"` and `onClick={() => submit(cardRatings)}`.
+4. No other files change.
