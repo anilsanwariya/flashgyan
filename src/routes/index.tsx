@@ -326,9 +326,14 @@ function DeckCard({ deck }: { deck: DeckSummary }) {
       >
         <div className="min-w-0 flex-1">
           <div className="text-xs uppercase tracking-wide text-muted-foreground">
-            {deck.subject}
+            {deck.subject} · {deck.topic}
           </div>
-          <div className="mt-0.5 text-lg font-semibold truncate">{deck.topic}</div>
+          <div className="mt-0.5 text-lg font-semibold truncate">{deck.name}</div>
+          {deck.description && (
+            <div className="mt-1 text-sm text-muted-foreground line-clamp-2">
+              {deck.description}
+            </div>
+          )}
           <div className="mt-1 text-sm text-muted-foreground">
             {deck.count} card{deck.count === 1 ? "" : "s"}
           </div>
