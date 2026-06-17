@@ -120,8 +120,8 @@ function TakeTest() {
   const answeredCount = Object.values(answers).filter((v) => v !== null).length;
 
   return (
-    <div className="min-h-dvh bg-background flex flex-col">
-      <header className="border-b border-border bg-background sticky top-0 z-10">
+    <div className="h-dvh overflow-hidden bg-background flex flex-col">
+      <header className="shrink-0 border-b border-border bg-background z-10">
         <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-xs text-muted-foreground">{test.name}</div>
