@@ -1,9 +1,9 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { getMcqTest, type McqQuestion } from "@/lib/mcq.functions";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Timer } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Timer } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -137,54 +137,58 @@ function TakeTest() {
         </div>
       </header>
 
-      <main className="flex-1 max-w-2xl w-full mx-auto px-5 py-6 space-y-5">
-        <div className="rounded-2xl bg-card border border-border p-5 space-y-4">
-          <p className="text-base font-medium leading-relaxed">{q.question}</p>
-          {q.image_url && (
-            <img
-              src={q.image_url}
-              alt=""
-              className="max-h-72 w-full object-contain rounded-lg border border-border"
-            />
-          )}
-          {q.hint && (
+      <main className="flex-1 max-w-2xl w-full mx-auto px-5 py-4 space-y-4">
+        <div className="rounded-2xl bg-card border border-border p-5">
+          <div className="max-h-[calc(100dvh-22rem)] overflow-y-auto pr-1 space-y-4">
             <p className="text-base font-medium leading-relaxed whitespace-pre-wrap">
-              {q.hint}
+              {q.question}
             </p>
-          )}
+            {q.image_url && (
+              <img
+                src={q.image_url}
+                alt=""
+                className="max-h-72 w-full object-contain rounded-lg border border-border"
+              />
+            )}
+            {q.hint && (
+              <p className="text-base font-medium leading-relaxed whitespace-pre-wrap">
+                {q.hint}
+              </p>
+            )}
 
-          <div className="space-y-2">
-            {opts.map((o, i) => {
-              const n = i + 1;
-              const selected = choice === n;
-              return (
-                <button
-                  key={i}
-                  onClick={() => setChoice(n)}
-                  className={
-                    "w-full text-left rounded-xl border p-3 text-sm transition-colors " +
-                    (selected
-                      ? "border-primary bg-primary/5"
-                      : "border-border bg-background hover:bg-accent/50")
-                  }
-                >
-                  <span className="font-semibold mr-2">{n}.</span>
-                  {o}
-                </button>
-              );
-            })}
-            <button
-              onClick={() => setChoice(null)}
-              className={
-                "w-full text-left rounded-xl border p-3 text-sm transition-colors " +
-                (choice === null
-                  ? "border-muted-foreground/50 bg-muted/40"
-                  : "border-dashed border-border bg-background hover:bg-accent/50")
-              }
-            >
-              <span className="font-semibold mr-2">—</span>
-              Not answered
-            </button>
+            <div className="space-y-2">
+              {opts.map((o, i) => {
+                const n = i + 1;
+                const selected = choice === n;
+                return (
+                  <button
+                    key={i}
+                    onClick={() => setChoice(n)}
+                    className={
+                      "w-full text-left rounded-xl border p-3 text-sm transition-colors " +
+                      (selected
+                        ? "border-primary bg-primary/5"
+                        : "border-border bg-background hover:bg-accent/50")
+                    }
+                  >
+                    <span className="font-semibold mr-2">{n}.</span>
+                    {o}
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => setChoice(null)}
+                className={
+                  "w-full text-left rounded-xl border p-3 text-sm transition-colors " +
+                  (choice === null
+                    ? "border-muted-foreground/50 bg-muted/40"
+                    : "border-dashed border-border bg-background hover:bg-accent/50")
+                }
+              >
+                <span className="font-semibold mr-2">—</span>
+                Not answered
+              </button>
+            </div>
           </div>
         </div>
 
@@ -193,28 +197,32 @@ function TakeTest() {
           answers={answers}
           current={idx}
           onJump={setIdx}
+          answeredCount={answeredCount}
         />
       </main>
 
       <footer className="sticky bottom-0 border-t border-border bg-background">
-        <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between gap-3">
-          <Button
-            variant="outline"
-            disabled={idx === 0}
-            onClick={() => setIdx((i) => Math.max(0, i - 1))}
-          >
-            Prev
-          </Button>
-          <div className="text-xs text-muted-foreground tabular-nums">
-            {answeredCount}/{questions.length} answered
+        <div className="max-w-2xl mx-auto px-5 py-3 grid grid-cols-3 items-center gap-3">
+          <div className="justify-self-start">
+            <Button
+              variant="outline"
+              disabled={idx === 0}
+              onClick={() => setIdx((i) => Math.max(0, i - 1))}
+            >
+              Prev
+            </Button>
           </div>
-          {idx < questions.length - 1 ? (
-            <Button onClick={() => setIdx((i) => Math.min(questions.length - 1, i + 1))}>
+          <div className="justify-self-center">
+            <SubmitDialog onConfirm={submit} answered={answeredCount} total={questions.length} />
+          </div>
+          <div className="justify-self-end">
+            <Button
+              disabled={idx === questions.length - 1}
+              onClick={() => setIdx((i) => Math.min(questions.length - 1, i + 1))}
+            >
               Next
             </Button>
-          ) : (
-            <SubmitDialog onConfirm={submit} answered={answeredCount} total={questions.length} />
-          )}
+          </div>
         </div>
       </footer>
     </div>
@@ -226,38 +234,92 @@ function QuestionPalette({
   answers,
   current,
   onJump,
+  answeredCount,
 }: {
   questions: McqQuestion[];
   answers: Answers;
   current: number;
   onJump: (i: number) => void;
+  answeredCount: number;
 }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [atStart, setAtStart] = useState(true);
+  const [atEnd, setAtEnd] = useState(false);
+
+  function updateEdges() {
+    const el = scrollRef.current;
+    if (!el) return;
+    setAtStart(el.scrollLeft <= 1);
+    setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 1);
+  }
+
+  useEffect(() => {
+    updateEdges();
+  }, [questions.length]);
+
+  function page(dir: -1 | 1) {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * el.clientWidth, behavior: "smooth" });
+  }
+
   return (
     <div>
       <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-        Questions
+        Questions ({answeredCount}/{questions.length})
       </div>
-      <div className="grid grid-cols-8 gap-1.5">
-        {questions.map((q, i) => {
-          const a = answers[q.id];
-          const cur = i === current;
-          return (
-            <button
-              key={q.id}
-              onClick={() => onJump(i)}
-              className={
-                "h-8 rounded-md text-xs font-medium tabular-nums border " +
-                (cur
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : a !== null
-                    ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                    : "border-border bg-card text-muted-foreground")
-              }
-            >
-              {i + 1}
-            </button>
-          );
-        })}
+      <div className="flex items-center gap-1.5">
+        <Button
+          variant="outline"
+          size="icon"
+          className="h-8 w-8 shrink-0"
+          onClick={() => page(-1)}
+          disabled={atStart}
+          aria-label="Scroll left"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <div
+          ref={scrollRef}
+          onScroll={updateEdges}
+          className="flex-1 overflow-x-auto scroll-smooth no-scrollbar"
+        >
+          <div
+            className="grid grid-rows-2 grid-flow-col gap-1.5"
+            style={{ gridAutoColumns: "calc((100% - (9 * 0.375rem)) / 10)" }}
+          >
+            {questions.map((q, i) => {
+              const a = answers[q.id];
+              const cur = i === current;
+              return (
+                <button
+                  key={q.id}
+                  onClick={() => onJump(i)}
+                  className={
+                    "h-8 rounded-md text-xs font-medium tabular-nums border " +
+                    (cur
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : a !== null
+                        ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                        : "border-border bg-card text-muted-foreground")
+                  }
+                >
+                  {i + 1}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <Button
+          variant="outline"
+          size="icon"
+          className="h-8 w-8 shrink-0"
+          onClick={() => page(1)}
+          disabled={atEnd}
+          aria-label="Scroll right"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
       </div>
     </div>
   );
