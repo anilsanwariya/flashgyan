@@ -14,6 +14,8 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PracticeDeckIdRouteImport } from './routes/practice.$deckId'
+import { Route as McqTestIdRouteImport } from './routes/mcq.$testId'
+import { Route as McqResultTestIdRouteImport } from './routes/mcq-result.$testId'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 
 const SummaryRoute = SummaryRouteImport.update({
@@ -40,6 +42,16 @@ const PracticeDeckIdRoute = PracticeDeckIdRouteImport.update({
   path: '/practice/$deckId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const McqTestIdRoute = McqTestIdRouteImport.update({
+  id: '/mcq/$testId',
+  path: '/mcq/$testId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McqResultTestIdRoute = McqResultTestIdRouteImport.update({
+  id: '/mcq-result/$testId',
+  path: '/mcq-result/$testId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -51,6 +63,8 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/summary': typeof SummaryRoute
   '/admin': typeof AuthenticatedAdminRoute
+  '/mcq-result/$testId': typeof McqResultTestIdRoute
+  '/mcq/$testId': typeof McqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
 }
 export interface FileRoutesByTo {
@@ -58,6 +72,8 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/summary': typeof SummaryRoute
   '/admin': typeof AuthenticatedAdminRoute
+  '/mcq-result/$testId': typeof McqResultTestIdRoute
+  '/mcq/$testId': typeof McqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
 }
 export interface FileRoutesById {
@@ -67,13 +83,29 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/summary': typeof SummaryRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
+  '/mcq-result/$testId': typeof McqResultTestIdRoute
+  '/mcq/$testId': typeof McqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/summary' | '/admin' | '/practice/$deckId'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/summary'
+    | '/admin'
+    | '/mcq-result/$testId'
+    | '/mcq/$testId'
+    | '/practice/$deckId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/summary' | '/admin' | '/practice/$deckId'
+  to:
+    | '/'
+    | '/auth'
+    | '/summary'
+    | '/admin'
+    | '/mcq-result/$testId'
+    | '/mcq/$testId'
+    | '/practice/$deckId'
   id:
     | '__root__'
     | '/'
@@ -81,6 +113,8 @@ export interface FileRouteTypes {
     | '/auth'
     | '/summary'
     | '/_authenticated/admin'
+    | '/mcq-result/$testId'
+    | '/mcq/$testId'
     | '/practice/$deckId'
   fileRoutesById: FileRoutesById
 }
@@ -89,6 +123,8 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   SummaryRoute: typeof SummaryRoute
+  McqResultTestIdRoute: typeof McqResultTestIdRoute
+  McqTestIdRoute: typeof McqTestIdRoute
   PracticeDeckIdRoute: typeof PracticeDeckIdRoute
 }
 
@@ -129,6 +165,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PracticeDeckIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mcq/$testId': {
+      id: '/mcq/$testId'
+      path: '/mcq/$testId'
+      fullPath: '/mcq/$testId'
+      preLoaderRoute: typeof McqTestIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcq-result/$testId': {
+      id: '/mcq-result/$testId'
+      path: '/mcq-result/$testId'
+      fullPath: '/mcq-result/$testId'
+      preLoaderRoute: typeof McqResultTestIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/admin': {
       id: '/_authenticated/admin'
       path: '/admin'
@@ -155,6 +205,8 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   SummaryRoute: SummaryRoute,
+  McqResultTestIdRoute: McqResultTestIdRoute,
+  McqTestIdRoute: McqTestIdRoute,
   PracticeDeckIdRoute: PracticeDeckIdRoute,
 }
 export const routeTree = rootRouteImport

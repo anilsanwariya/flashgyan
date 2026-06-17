@@ -50,6 +50,95 @@ export type Database = {
         }
         Relationships: []
       }
+      mcq_questions: {
+        Row: {
+          answer: number
+          created_at: string
+          explanation_sections: Json
+          hint: string
+          id: string
+          image_url: string | null
+          option_1: string
+          option_2: string
+          option_3: string
+          option_4: string
+          order_index: number
+          question: string
+          test_id: string
+          updated_at: string
+        }
+        Insert: {
+          answer: number
+          created_at?: string
+          explanation_sections?: Json
+          hint?: string
+          id?: string
+          image_url?: string | null
+          option_1: string
+          option_2: string
+          option_3: string
+          option_4: string
+          order_index?: number
+          question: string
+          test_id: string
+          updated_at?: string
+        }
+        Update: {
+          answer?: number
+          created_at?: string
+          explanation_sections?: Json
+          hint?: string
+          id?: string
+          image_url?: string | null
+          option_1?: string
+          option_2?: string
+          option_3?: string
+          option_4?: string
+          order_index?: number
+          question?: string
+          test_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mcq_questions_test_id_fkey"
+            columns: ["test_id"]
+            isOneToOne: false
+            referencedRelation: "mcq_tests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mcq_tests: {
+        Row: {
+          created_at: string
+          description: string
+          duration_seconds: number
+          id: string
+          name: string
+          order_index: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string
+          duration_seconds?: number
+          id?: string
+          name: string
+          order_index?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          duration_seconds?: number
+          id?: string
+          name?: string
+          order_index?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
