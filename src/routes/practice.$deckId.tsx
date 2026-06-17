@@ -193,22 +193,10 @@ function Practice() {
   }
 
   function goNext() {
-    if (currentRating === null) {
-      toast("Rate this card first", {
-        description: "Tap Hard, Medium, or Easy to continue.",
-      });
-      return;
-    }
+    if (currentRating === null) return;
     if (index < total - 1) setIndex(index + 1);
   }
 
-  function handleDragEnd(_: unknown, info: PanInfo) {
-    const { offset, velocity } = info;
-    const swipe = Math.abs(offset.x) > 80 || Math.abs(velocity.x) > 400;
-    if (!swipe) return;
-    if (offset.x < 0) goNext();
-    else goPrev();
-  }
 
 
 
