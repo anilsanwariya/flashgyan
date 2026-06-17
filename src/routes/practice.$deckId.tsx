@@ -296,10 +296,18 @@ function Practice() {
                   </div>
                   {/* Back */}
                   <div className={`absolute inset-0 backface-hidden rotate-y-180 rounded-3xl bg-card border-2 shadow-sm p-7 flex flex-col transition-colors ${borderClass}`}>
-                    <div className="text-xs font-semibold uppercase tracking-wider text-primary">
+                    {card.front_prompt && (
+                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        {card.front_prompt}
+                      </div>
+                    )}
+                    <p className="mt-2 text-base font-medium leading-snug text-muted-foreground">
+                      {card.front_question}
+                    </p>
+                    <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
                       Answer
                     </div>
-                    <div className="mt-4">
+                    <div className="mt-3">
                       <p className="text-2xl font-semibold leading-snug text-balance">
                         {card.back_answer}
                       </p>
@@ -312,6 +320,7 @@ function Practice() {
                       </div>
                     )}
                   </div>
+
                 </div>
               </button>
             </motion.div>
