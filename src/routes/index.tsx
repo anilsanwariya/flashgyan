@@ -4,6 +4,13 @@ import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { listDecks, type DeckSummary } from "@/lib/flashcards.functions";
 import { Button } from "@/components/ui/button";
 import { ChevronRight, Layers, Settings } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const decksQO = queryOptions({
   queryKey: ["decks"],
@@ -68,9 +75,10 @@ function Home() {
       </header>
 
       <main className="px-5 max-w-2xl mx-auto pb-32 space-y-6">
-        <section className="space-y-3">
-          <FilterRow
+        <section className="grid grid-cols-2 gap-3">
+          <FilterSelect
             label="Subject"
+            placeholder="All subjects"
             options={subjects}
             value={subject}
             onChange={(v) => {
@@ -78,14 +86,14 @@ function Home() {
               setTopic(null);
             }}
           />
-          {subject && (
-            <FilterRow
-              label="Topic"
-              options={topics}
-              value={topic}
-              onChange={setTopic}
-            />
-          )}
+          <FilterSelect
+            label="Topic"
+            placeholder={subject ? "All topics" : "Pick subject first"}
+            options={topics}
+            value={topic}
+            onChange={setTopic}
+            disabled={!subject}
+          />
         </section>
 
         <section className="space-y-3">
@@ -132,41 +140,44 @@ function Home() {
   );
 }
 
-function FilterRow({
+function FilterSelect({
   label,
+  placeholder,
   options,
   value,
   onChange,
+  disabled,
 }: {
   label: string;
+  placeholder: string;
   options: string[];
   value: string | null;
   onChange: (v: string | null) => void;
+  disabled?: boolean;
 }) {
+  const ALL = "__all__";
   return (
     <div>
       <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
         {label}
       </div>
-      <div className="flex gap-2 overflow-x-auto -mx-5 px-5 pb-1 scrollbar-none">
-        {options.map((opt) => {
-          const active = value === opt;
-          return (
-            <button
-              key={opt}
-              onClick={() => onChange(active ? null : opt)}
-              className={
-                "shrink-0 rounded-full border px-4 py-2 text-sm font-medium transition-colors " +
-                (active
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "bg-card border-border text-foreground hover:bg-accent")
-              }
-            >
+      <Select
+        value={value ?? ALL}
+        onValueChange={(v) => onChange(v === ALL ? null : v)}
+        disabled={disabled}
+      >
+        <SelectTrigger>
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>{placeholder}</SelectItem>
+          {options.map((opt) => (
+            <SelectItem key={opt} value={opt}>
               {opt}
-            </button>
-          );
-        })}
-      </div>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }
