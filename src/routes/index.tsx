@@ -75,9 +75,10 @@ function Home() {
       </header>
 
       <main className="px-5 max-w-2xl mx-auto pb-32 space-y-6">
-        <section className="space-y-3">
-          <FilterRow
+        <section className="grid grid-cols-2 gap-3">
+          <FilterSelect
             label="Subject"
+            placeholder="All subjects"
             options={subjects}
             value={subject}
             onChange={(v) => {
@@ -85,14 +86,14 @@ function Home() {
               setTopic(null);
             }}
           />
-          {subject && (
-            <FilterRow
-              label="Topic"
-              options={topics}
-              value={topic}
-              onChange={setTopic}
-            />
-          )}
+          <FilterSelect
+            label="Topic"
+            placeholder={subject ? "All topics" : "Pick subject first"}
+            options={topics}
+            value={topic}
+            onChange={setTopic}
+            disabled={!subject}
+          />
         </section>
 
         <section className="space-y-3">
