@@ -41,7 +41,7 @@ const practiceSearchSchema = z.object({
 export const Route = createFileRoute("/practice/$deckId")({
   validateSearch: zodValidator(practiceSearchSchema),
   loader: ({ context, params }) =>
-    context.queryClient.ensureQueryData(cardsQO(params.deckId)),
+    context.queryClient.ensureQueryData(deckQO(params.deckId)),
   component: Practice,
   notFoundComponent: () => (
     <div className="min-h-dvh grid place-items-center p-6 text-center">
