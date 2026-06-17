@@ -1,12 +1,22 @@
 import { createFileRoute, useRouter, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
   bulkImportCards,
   checkIsAdmin,
+  createCard,
+  createDeck,
+  deleteCard,
   deleteDeck,
+  getDeck,
   listDecks,
+  setCardImage,
+  signFlashcardImage,
+  updateCard,
+  updateDeck,
+  type DeckSummary,
+  type Flashcard,
 } from "@/lib/flashcards.functions";
 import {
   bulkImportMcq,
@@ -28,6 +38,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -56,11 +73,11 @@ export const Route = createFileRoute("/_authenticated/admin")({
 
 type Tab = "flashcards" | "mcq";
 
-const REQUIRED_FC = ["subject", "topic", "order", "prompt", "question", "answer"] as const;
+// ---------- Flashcard Excel parsing ----------
+
+const REQUIRED_FC = ["order", "prompt", "question", "answer"] as const;
 type Section = { title: string; body: string };
 type ParsedFcRow = {
-  subject: string;
-  topic: string;
   order_index: number;
   prompt: string;
   question: string;
@@ -104,15 +121,13 @@ function parseFcWorkbook(file: ArrayBuffer) {
   const rows: ParsedFcRow[] = [];
   let invalid = 0;
   for (const row of json) {
-    const subject = pick(row, "subject");
-    const topic = pick(row, "topic");
     const orderRaw = pick(row, "order");
     const prompt = pick(row, "prompt");
     const question = pick(row, "question");
     const answer = pick(row, "answer");
     const orderNum = Number(orderRaw);
     if (
-      !subject || !topic || !prompt || !question || !answer || !orderRaw ||
+      !prompt || !question || !answer || !orderRaw ||
       !Number.isFinite(orderNum) || !Number.isInteger(orderNum)
     ) {
       invalid++;
@@ -123,10 +138,12 @@ function parseFcWorkbook(file: ArrayBuffer) {
       const body = String(row[col.key] ?? "").trim();
       if (body) sections.push({ title: col.title, body });
     }
-    rows.push({ subject, topic, order_index: orderNum, prompt, question, answer, sections });
+    rows.push({ order_index: orderNum, prompt, question, answer, sections });
   }
   return { rows, invalid, missingCols: [] };
 }
+
+// ---------- Top-level Admin ----------
 
 function Admin() {
   const router = useRouter();
@@ -206,20 +223,330 @@ function TabButton({
   );
 }
 
-// ====================== Flashcards Panel (existing) ======================
+// ====================== Flashcards Panel ======================
 
 function FlashcardsPanel() {
   const qc = useQueryClient();
-  const listDecksFn = useServerFn(listDecks);
-  const bulkImportFn = useServerFn(bulkImportCards);
-  const deleteDeckFn = useServerFn(deleteDeck);
-  const decksQ = useQuery({ queryKey: ["decks"], queryFn: () => listDecksFn() });
+  const listFn = useServerFn(listDecks);
+  const deleteFn = useServerFn(deleteDeck);
+  const decksQ = useQuery<DeckSummary[]>({
+    queryKey: ["decksAdmin"],
+    queryFn: () => listFn(),
+  });
+
+  const [editing, setEditing] = useState<DeckSummary | "new" | null>(null);
+  const [viewingDeckId, setViewingDeckId] = useState<string | null>(null);
+  const [filterSubject, setFilterSubject] = useState<string | null>(null);
+  const [filterTopic, setFilterTopic] = useState<string | null>(null);
+
+  const decks = decksQ.data ?? [];
+
+  const subjects = useMemo(
+    () => Array.from(new Set(decks.map((d) => d.subject))).sort(),
+    [decks],
+  );
+  const topics = useMemo(
+    () =>
+      filterSubject
+        ? Array.from(
+            new Set(decks.filter((d) => d.subject === filterSubject).map((d) => d.topic)),
+          ).sort()
+        : [],
+    [decks, filterSubject],
+  );
+  const filtered = useMemo(
+    () =>
+      decks.filter(
+        (d) =>
+          (!filterSubject || d.subject === filterSubject) &&
+          (!filterTopic || d.topic === filterTopic),
+      ),
+    [decks, filterSubject, filterTopic],
+  );
+
+  if (viewingDeckId) {
+    return (
+      <DeckCardsView
+        deckId={viewingDeckId}
+        onBack={() => {
+          setViewingDeckId(null);
+          qc.invalidateQueries({ queryKey: ["decksAdmin"] });
+        }}
+      />
+    );
+  }
+
+  async function onDelete(d: DeckSummary) {
+    if (!confirm(`Delete deck "${d.name}"? This removes all its cards.`)) return;
+    try {
+      await deleteFn({ data: { id: d.id } });
+      toast.success("Deck deleted");
+      qc.invalidateQueries({ queryKey: ["decksAdmin"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Delete failed");
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="font-semibold">Decks</h2>
+        <Button size="sm" onClick={() => setEditing("new")}>
+          <Plus className="h-4 w-4" /> Add Deck
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <FilterSelect
+          label="Subject"
+          placeholder="All subjects"
+          options={subjects}
+          value={filterSubject}
+          onChange={(v) => {
+            setFilterSubject(v);
+            setFilterTopic(null);
+          }}
+        />
+        <FilterSelect
+          label="Topic"
+          placeholder={filterSubject ? "All topics" : "Pick subject"}
+          options={topics}
+          value={filterTopic}
+          onChange={setFilterTopic}
+          disabled={!filterSubject}
+        />
+      </div>
+
+      {decksQ.isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : filtered.length > 0 ? (
+        <ul className="space-y-2">
+          {filtered.map((d) => (
+            <li key={d.id} className="rounded-xl bg-card border border-border p-3">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setViewingDeckId(d.id)}
+                  className="min-w-0 flex-1 text-left"
+                >
+                  <div className="text-xs text-muted-foreground">
+                    Order {d.order_index} · {d.subject} · {d.topic}
+                  </div>
+                  <div className="font-medium truncate">{d.name}</div>
+                  <div className="text-xs text-muted-foreground truncate">
+                    {d.count} card{d.count === 1 ? "" : "s"}
+                    {d.description ? ` · ${d.description}` : ""}
+                  </div>
+                </button>
+                <button
+                  onClick={() => setEditing(d)}
+                  className="shrink-0 h-9 w-9 grid place-items-center rounded-lg hover:bg-accent"
+                  aria-label="Edit deck"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => onDelete(d)}
+                  className="shrink-0 h-9 w-9 grid place-items-center rounded-lg text-destructive hover:bg-destructive/10"
+                  aria-label="Delete deck"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setViewingDeckId(d.id)}
+                  className="shrink-0 h-9 w-9 grid place-items-center rounded-lg hover:bg-accent"
+                  aria-label="Open deck"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {decks.length === 0 ? "No decks yet. Add your first deck." : "No decks match the filters."}
+        </p>
+      )}
+
+      {editing !== null && (
+        <DeckFormDialog
+          deck={editing === "new" ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            qc.invalidateQueries({ queryKey: ["decksAdmin"] });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function FilterSelect({
+  label,
+  placeholder,
+  options,
+  value,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  placeholder: string;
+  options: string[];
+  value: string | null;
+  onChange: (v: string | null) => void;
+  disabled?: boolean;
+}) {
+  const ALL = "__all__";
+  return (
+    <div>
+      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+        {label}
+      </div>
+      <Select
+        value={value ?? ALL}
+        onValueChange={(v) => onChange(v === ALL ? null : v)}
+        disabled={disabled}
+      >
+        <SelectTrigger>
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>{placeholder}</SelectItem>
+          {options.map((opt) => (
+            <SelectItem key={opt} value={opt}>
+              {opt}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function DeckFormDialog({
+  deck,
+  onClose,
+  onSaved,
+}: {
+  deck: DeckSummary | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const createFn = useServerFn(createDeck);
+  const updateFn = useServerFn(updateDeck);
+  const [name, setName] = useState(deck?.name ?? "");
+  const [description, setDescription] = useState(deck?.description ?? "");
+  const [subject, setSubject] = useState(deck?.subject ?? "");
+  const [topic, setTopic] = useState(deck?.topic ?? "");
+  const [order, setOrder] = useState(String(deck?.order_index ?? 0));
+  const [saving, setSaving] = useState(false);
+
+  async function onSave() {
+    const ord = Number(order);
+    if (!name.trim()) return toast.error("Name is required");
+    if (!subject.trim()) return toast.error("Subject is required");
+    if (!topic.trim()) return toast.error("Topic is required");
+    if (!Number.isFinite(ord) || !Number.isInteger(ord))
+      return toast.error("Order must be an integer");
+    setSaving(true);
+    try {
+      const payload = {
+        name: name.trim(),
+        description: description.trim(),
+        subject: subject.trim(),
+        topic: topic.trim(),
+        order_index: ord,
+      };
+      if (deck) {
+        await updateFn({ data: { id: deck.id, ...payload } });
+        toast.success("Deck updated");
+      } else {
+        await createFn({ data: payload });
+        toast.success("Deck created");
+      }
+      onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{deck ? "Edit deck" : "Add deck"}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <Label htmlFor="d-name">Name</Label>
+            <Input id="d-name" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="d-desc">Short description</Label>
+            <Textarea
+              id="d-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="d-subj">Subject</Label>
+              <Input id="d-subj" value={subject} onChange={(e) => setSubject(e.target.value)} />
+            </div>
+            <div>
+              <Label htmlFor="d-topic">Topic</Label>
+              <Input id="d-topic" value={topic} onChange={(e) => setTopic(e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <Label htmlFor="d-order">Order</Label>
+            <Input
+              id="d-order"
+              type="number"
+              value={order}
+              onChange={(e) => setOrder(e.target.value)}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={onSave} disabled={saving}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DeckCardsView({
+  deckId,
+  onBack,
+}: {
+  deckId: string;
+  onBack: () => void;
+}) {
+  const qc = useQueryClient();
+  const getFn = useServerFn(getDeck);
+  const importFn = useServerFn(bulkImportCards);
+  const delFn = useServerFn(deleteCard);
+
+  const deckQ = useQuery({
+    queryKey: ["deckAdmin", deckId],
+    queryFn: () => getFn({ data: { id: deckId } }),
+  });
 
   const [parsed, setParsed] = useState<ParsedFcRow[] | null>(null);
   const [invalid, setInvalid] = useState(0);
   const [mode, setMode] = useState<"append" | "replace">("append");
-  const [fileName, setFileName] = useState<string>("");
+  const [fileName, setFileName] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [editing, setEditing] = useState<Flashcard | "new" | null>(null);
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -246,11 +573,11 @@ function FlashcardsPanel() {
     if (!parsed) return;
     setSubmitting(true);
     try {
-      const res = await bulkImportFn({ data: { rows: parsed, mode } });
+      const res = await importFn({ data: { deck_id: deckId, rows: parsed, mode } });
       toast.success(`Imported ${res.inserted} cards`);
       setParsed(null);
       setFileName("");
-      qc.invalidateQueries({ queryKey: ["decks"] });
+      qc.invalidateQueries({ queryKey: ["deckAdmin", deckId] });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Import failed");
     } finally {
@@ -258,91 +585,428 @@ function FlashcardsPanel() {
     }
   }
 
-  async function onDeleteDeck(subject: string, topic: string) {
-    if (!confirm(`Delete deck "${subject} · ${topic}"? This removes all its cards.`)) return;
+  async function onDeleteCard(c: Flashcard) {
+    if (!confirm("Delete this card?")) return;
     try {
-      await deleteDeckFn({ data: { subject, topic } });
-      toast.success("Deck deleted");
-      qc.invalidateQueries({ queryKey: ["decks"] });
+      await delFn({ data: { id: c.id } });
+      toast.success("Card deleted");
+      qc.invalidateQueries({ queryKey: ["deckAdmin", deckId] });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Delete failed");
     }
   }
 
   return (
-    <div className="space-y-8">
-      <section className="rounded-2xl border border-border bg-card p-5">
-        <h2 className="font-semibold flex items-center gap-2">
-          <Upload className="h-4 w-4" /> Upload Excel
-        </h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Columns: subject, topic, order, prompt, question, answer, then any number of
-          explanation_&lt;title&gt; columns.
-        </p>
-        <label className="mt-4 flex items-center justify-center h-24 rounded-xl border-2 border-dashed border-border cursor-pointer hover:bg-accent/40">
-          <div className="text-center">
-            <div className="text-sm font-medium">{fileName || "Tap to choose .xlsx file"}</div>
-            {parsed && (
-              <div className="text-xs text-muted-foreground mt-1">
-                {parsed.length} valid rows{invalid ? ` · ${invalid} skipped` : ""}
-              </div>
+    <div className="space-y-6">
+      <button
+        onClick={onBack}
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="h-4 w-4" /> All decks
+      </button>
+
+      {deckQ.isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : deckQ.data ? (
+        <>
+          <div>
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">
+              {deckQ.data.deck.subject} · {deckQ.data.deck.topic}
+            </div>
+            <h2 className="text-xl font-semibold mt-1">{deckQ.data.deck.name}</h2>
+            {deckQ.data.deck.description && (
+              <p className="text-sm text-muted-foreground mt-1">
+                {deckQ.data.deck.description}
+              </p>
             )}
           </div>
-          <input type="file" accept=".xlsx,.xls" className="hidden" onChange={onFile} />
-        </label>
-        {parsed && (
-          <>
-            <div className="mt-4">
-              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-                Import mode
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <ModeButton active={mode === "append"} onClick={() => setMode("append")}>
-                  Append
-                </ModeButton>
-                <ModeButton active={mode === "replace"} onClick={() => setMode("replace")}>
-                  Replace all
-                </ModeButton>
-              </div>
-            </div>
-            <Button onClick={onImport} disabled={submitting} className="mt-4 w-full h-11">
-              {submitting ? "Importing…" : `Import ${parsed.length} cards`}
-            </Button>
-          </>
-        )}
-      </section>
 
-      <section>
-        <h2 className="font-semibold mb-3">Existing decks</h2>
-        {decksQ.isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : decksQ.data && decksQ.data.length > 0 ? (
-          <ul className="space-y-2">
-            {decksQ.data.map((d) => (
-              <li
-                key={`${d.subject}|${d.topic}`}
-                className="flex items-center gap-3 rounded-xl bg-card border border-border p-3"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs text-muted-foreground">{d.subject}</div>
-                  <div className="font-medium truncate">{d.topic}</div>
-                  <div className="text-xs text-muted-foreground">{d.count} cards</div>
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <h3 className="font-semibold flex items-center gap-2">
+              <Upload className="h-4 w-4" /> Upload cards Excel
+            </h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Columns: order, prompt, question, answer, optional
+              explanation_&lt;title&gt; columns.
+            </p>
+            <label className="mt-4 flex items-center justify-center h-24 rounded-xl border-2 border-dashed border-border cursor-pointer hover:bg-accent/40">
+              <div className="text-center">
+                <div className="text-sm font-medium">
+                  {fileName || "Tap to choose .xlsx file"}
                 </div>
-                <button
-                  onClick={() => onDeleteDeck(d.subject, d.topic)}
-                  className="shrink-0 h-9 w-9 grid place-items-center rounded-lg text-destructive hover:bg-destructive/10"
-                  aria-label="Delete deck"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-sm text-muted-foreground">No decks yet.</p>
-        )}
-      </section>
+                {parsed && (
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {parsed.length} valid rows{invalid ? ` · ${invalid} skipped` : ""}
+                  </div>
+                )}
+              </div>
+              <input type="file" accept=".xlsx,.xls" className="hidden" onChange={onFile} />
+            </label>
+            {parsed && (
+              <>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <ModeButton active={mode === "append"} onClick={() => setMode("append")}>
+                    Append
+                  </ModeButton>
+                  <ModeButton active={mode === "replace"} onClick={() => setMode("replace")}>
+                    Replace all
+                  </ModeButton>
+                </div>
+                <Button onClick={onImport} disabled={submitting} className="mt-4 w-full h-11">
+                  {submitting ? "Importing…" : `Import ${parsed.length} cards`}
+                </Button>
+              </>
+            )}
+          </section>
+
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold">
+                Cards ({deckQ.data.cards.length})
+              </h3>
+              <Button size="sm" onClick={() => setEditing("new")}>
+                <Plus className="h-4 w-4" /> Add Card
+              </Button>
+            </div>
+            {deckQ.data.cards.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No cards yet. Add one or upload an Excel file above.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {deckQ.data.cards.map((c) => (
+                  <CardRow
+                    key={c.id}
+                    c={c}
+                    onEdit={() => setEditing(c)}
+                    onDelete={() => onDeleteCard(c)}
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
+        </>
+      ) : null}
+
+      {editing !== null && (
+        <CardEditDialog
+          deckId={deckId}
+          card={editing === "new" ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            qc.invalidateQueries({ queryKey: ["deckAdmin", deckId] });
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function CardRow({
+  c,
+  onEdit,
+  onDelete,
+}: {
+  c: Flashcard;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <li className="rounded-xl bg-card border border-border p-3 space-y-2">
+      <div className="flex items-start gap-3">
+        <div className="text-xs text-muted-foreground tabular-nums shrink-0 mt-0.5">
+          #{c.order_index}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">
+            {c.prompt}
+          </div>
+          <div className="text-sm font-medium mt-0.5">{c.question}</div>
+          {c.image_url && (
+            <img
+              src={c.image_url}
+              alt=""
+              className="mt-2 w-full max-w-xs aspect-[2/1] rounded-md border border-border object-cover"
+            />
+          )}
+          <div className="mt-2 text-xs text-emerald-600 dark:text-emerald-400 line-clamp-2">
+            {c.answer}
+          </div>
+        </div>
+        <div className="flex flex-col gap-1 shrink-0">
+          <button
+            onClick={onEdit}
+            className="h-8 w-8 grid place-items-center rounded-lg hover:bg-accent"
+            aria-label="Edit"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={onDelete}
+            className="h-8 w-8 grid place-items-center rounded-lg text-destructive hover:bg-destructive/10"
+            aria-label="Delete"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function CardEditDialog({
+  deckId,
+  card,
+  onClose,
+  onSaved,
+}: {
+  deckId: string;
+  card: Flashcard | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const createFn = useServerFn(createCard);
+  const updateFn = useServerFn(updateCard);
+  const setImgFn = useServerFn(setCardImage);
+  const signFn = useServerFn(signFlashcardImage);
+
+  const [form, setForm] = useState(
+    card
+      ? { ...card }
+      : ({
+          id: "",
+          deck_id: deckId,
+          subject: "",
+          topic: "",
+          order_index: 0,
+          prompt: "",
+          question: "",
+          answer: "",
+          image_url: null as string | null,
+          sections: [] as Section[],
+        } as Flashcard),
+  );
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  // Track storage path separately so we can re-sign without losing it.
+  const [imagePath, setImagePath] = useState<string | null>(null);
+
+  async function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!card) {
+      toast.error("Save the card first, then upload an image.");
+      return;
+    }
+    setUploading(true);
+    try {
+      const ext = file.name.split(".").pop() || "png";
+      const path = `${card.id}/${Date.now()}.${ext}`;
+      const { error } = await supabase.storage
+        .from("flashcard-images")
+        .upload(path, file, { upsert: true, contentType: file.type });
+      if (error) throw error;
+      // Store the storage path in DB (not the signed URL) so we can re-sign later.
+      await setImgFn({ data: { id: card.id, image_url: path } });
+      const { url } = await signFn({ data: { path } });
+      setImagePath(path);
+      setForm((f) => ({ ...f, image_url: url }));
+      toast.success("Image uploaded");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function onRemoveImage() {
+    if (!card) return;
+    setUploading(true);
+    try {
+      await setImgFn({ data: { id: card.id, image_url: null } });
+      setImagePath(null);
+      setForm((f) => ({ ...f, image_url: null }));
+      toast.success("Image removed");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Remove failed");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function onSave() {
+    if (!form.prompt.trim() || !form.question.trim() || !form.answer.trim()) {
+      toast.error("Prompt, question, and answer are required");
+      return;
+    }
+    setSaving(true);
+    try {
+      if (card) {
+        await updateFn({
+          data: {
+            id: card.id,
+            order_index: Number(form.order_index),
+            prompt: form.prompt.trim(),
+            question: form.question.trim(),
+            answer: form.answer.trim(),
+            // Preserve storage path if we have one, otherwise keep existing value.
+            image_url: imagePath ?? form.image_url,
+            sections: form.sections,
+          },
+        });
+        toast.success("Card updated");
+      } else {
+        await createFn({
+          data: {
+            deck_id: deckId,
+            order_index: Number(form.order_index),
+            prompt: form.prompt.trim(),
+            question: form.question.trim(),
+            answer: form.answer.trim(),
+            sections: form.sections,
+          },
+        });
+        toast.success("Card created");
+      }
+      onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function updateSection(i: number, field: "title" | "body", val: string) {
+    setForm((f) => {
+      const arr = [...f.sections];
+      arr[i] = { ...arr[i], [field]: val };
+      return { ...f, sections: arr };
+    });
+  }
+  function addSection() {
+    setForm((f) => ({ ...f, sections: [...f.sections, { title: "", body: "" }] }));
+  }
+  function removeSection(i: number) {
+    setForm((f) => ({ ...f, sections: f.sections.filter((_, idx) => idx !== i) }));
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{card ? "Edit card" : "Add card"}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <Label>Order</Label>
+            <Input
+              type="number"
+              value={form.order_index}
+              onChange={(e) => setForm({ ...form, order_index: Number(e.target.value) })}
+            />
+          </div>
+          <div>
+            <Label>Prompt (small label above question)</Label>
+            <Input
+              value={form.prompt}
+              onChange={(e) => setForm({ ...form, prompt: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>Question</Label>
+            <Textarea
+              rows={2}
+              value={form.question}
+              onChange={(e) => setForm({ ...form, question: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>Image (shown under question, 2:1)</Label>
+            {form.image_url && (
+              <img
+                src={form.image_url}
+                alt=""
+                className="my-2 w-full aspect-[2/1] rounded-md border border-border object-cover"
+              />
+            )}
+            <div className="flex gap-2">
+              <label
+                className={
+                  "inline-flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm hover:bg-accent " +
+                  (card ? "cursor-pointer" : "opacity-50 cursor-not-allowed")
+                }
+              >
+                <ImagePlus className="h-4 w-4" />
+                {uploading ? "Uploading…" : form.image_url ? "Replace" : "Upload"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={onUpload}
+                  disabled={!card}
+                />
+              </label>
+              {form.image_url && card && (
+                <Button variant="outline" size="sm" onClick={onRemoveImage} disabled={uploading}>
+                  Remove
+                </Button>
+              )}
+            </div>
+            {!card && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Save the card first, then upload an image.
+              </p>
+            )}
+          </div>
+          <div>
+            <Label>Answer</Label>
+            <Textarea
+              rows={3}
+              value={form.answer}
+              onChange={(e) => setForm({ ...form, answer: e.target.value })}
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between">
+              <Label>Explanation sections</Label>
+              <Button size="sm" variant="outline" onClick={addSection}>
+                <Plus className="h-3 w-3" /> Add
+              </Button>
+            </div>
+            <div className="space-y-2 mt-2">
+              {form.sections.map((s, i) => (
+                <div key={i} className="rounded-lg border border-border p-2 space-y-2">
+                  <Input
+                    placeholder="Section title"
+                    value={s.title}
+                    onChange={(e) => updateSection(i, "title", e.target.value)}
+                  />
+                  <Textarea
+                    placeholder="Body"
+                    rows={2}
+                    value={s.body}
+                    onChange={(e) => updateSection(i, "body", e.target.value)}
+                  />
+                  <button
+                    onClick={() => removeSection(i)}
+                    className="text-xs text-destructive"
+                  >
+                    Remove section
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={onSave} disabled={saving}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1022,12 +1686,12 @@ function QuestionEditDialog({
 
 function Header({ onSignOut }: { onSignOut: () => void }) {
   return (
-    <header className="border-b border-border bg-background">
-      <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between">
-        <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground">
+    <header className="px-5 py-4 border-b border-border bg-background">
+      <div className="max-w-2xl w-full mx-auto flex items-center justify-between">
+        <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Home
         </Link>
-        <div className="font-semibold text-sm">Admin</div>
+        <h1 className="text-base font-semibold">Admin</h1>
         <button
           onClick={onSignOut}
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
@@ -1052,10 +1716,10 @@ function ModeButton({
     <button
       onClick={onClick}
       className={
-        "h-10 rounded-lg border font-medium text-sm " +
+        "h-10 rounded-lg text-sm font-medium border transition-colors " +
         (active
           ? "bg-primary text-primary-foreground border-primary"
-          : "bg-card border-border")
+          : "border-border bg-card text-foreground hover:bg-accent")
       }
     >
       {children}

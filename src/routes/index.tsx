@@ -35,9 +35,6 @@ export const Route = createFileRoute("/")({
   component: Home,
 });
 
-function encodeDeckId(d: { subject: string; topic: string }) {
-  return btoa(unescape(encodeURIComponent(`${d.subject}|||${d.topic}`)));
-}
 
 type View = "home" | "flashcards" | "mcqs";
 
@@ -231,7 +228,7 @@ function FlashcardsSection({ decks }: { decks: DeckSummary[] }) {
         ) : (
           <ul className="space-y-3">
             {filtered.map((d) => (
-              <DeckCard key={`${d.subject}|${d.topic}`} deck={d} />
+              <DeckCard key={d.id} deck={d} />
             ))}
           </ul>
         )}
@@ -319,20 +316,24 @@ function FilterSelect({
 }
 
 function DeckCard({ deck }: { deck: DeckSummary }) {
-  const id = encodeDeckId(deck);
   return (
     <li>
       <Link
         to="/practice/$deckId"
-        params={{ deckId: id }}
+        params={{ deckId: deck.id }}
         search={{ review: false }}
         className="group flex items-center gap-4 rounded-2xl bg-card border border-border p-4 active:scale-[0.99] transition-transform shadow-sm"
       >
         <div className="min-w-0 flex-1">
           <div className="text-xs uppercase tracking-wide text-muted-foreground">
-            {deck.subject}
+            {deck.subject} · {deck.topic}
           </div>
-          <div className="mt-0.5 text-lg font-semibold truncate">{deck.topic}</div>
+          <div className="mt-0.5 text-lg font-semibold truncate">{deck.name}</div>
+          {deck.description && (
+            <div className="mt-1 text-sm text-muted-foreground line-clamp-2">
+              {deck.description}
+            </div>
+          )}
           <div className="mt-1 text-sm text-muted-foreground">
             {deck.count} card{deck.count === 1 ? "" : "s"}
           </div>

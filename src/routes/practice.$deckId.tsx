@@ -1,9 +1,9 @@
-import { createFileRoute, Link, useNavigate, notFound } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { z } from "zod";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
-import { getDeckCards } from "@/lib/flashcards.functions";
+import { getDeck } from "@/lib/flashcards.functions";
 import { motion, AnimatePresence } from "motion/react";
 import { ArrowLeft, RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -27,24 +27,12 @@ import {
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
 
-function decodeDeckId(id: string): { subject: string; topic: string } {
-  try {
-    const raw = decodeURIComponent(escape(atob(id)));
-    const [subject, topic] = raw.split("|||");
-    if (!subject || !topic) throw new Error("bad id");
-    return { subject, topic };
-  } catch {
-    throw notFound();
-  }
-}
-
-const cardsQO = (deckId: string) => {
-  const { subject, topic } = decodeDeckId(deckId);
-  return queryOptions({
-    queryKey: ["deck", subject, topic],
-    queryFn: () => getDeckCards({ data: { subject, topic } }),
+const deckQO = (deckId: string) =>
+  queryOptions({
+    queryKey: ["deck", deckId],
+    queryFn: () => getDeck({ data: { id: deckId } }),
   });
-};
+
 
 const practiceSearchSchema = z.object({
   review: fallback(z.boolean(), false).default(false),
@@ -53,7 +41,7 @@ const practiceSearchSchema = z.object({
 export const Route = createFileRoute("/practice/$deckId")({
   validateSearch: zodValidator(practiceSearchSchema),
   loader: ({ context, params }) =>
-    context.queryClient.ensureQueryData(cardsQO(params.deckId)),
+    context.queryClient.ensureQueryData(deckQO(params.deckId)),
   component: Practice,
   notFoundComponent: () => (
     <div className="min-h-dvh grid place-items-center p-6 text-center">
@@ -91,8 +79,9 @@ function shuffle<T>(arr: T[]): T[] {
 function Practice() {
   const { deckId } = Route.useParams();
   const { review } = Route.useSearch();
-  const { subject, topic } = useMemo(() => decodeDeckId(deckId), [deckId]);
-  const { data: cardsRaw } = useSuspenseQuery(cardsQO(deckId));
+  const { data: deckData } = useSuspenseQuery(deckQO(deckId));
+  const { subject, topic } = deckData.deck;
+  const cardsRaw = deckData.cards;
   const navigate = useNavigate();
   const startedAt = useRef(Date.now());
 
@@ -311,18 +300,29 @@ function Practice() {
                   }
                 >
                   {/* Front */}
-                  <div className={`absolute inset-0 backface-hidden rounded-3xl bg-card border-2 shadow-sm p-7 flex flex-col transition-colors ${borderClass}`}>
-                    <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground text-center">
-                      {card.prompt}
-                    </div>
-                    <div className="flex-1 flex items-center justify-center">
-                      <p className="text-2xl font-semibold leading-snug text-center text-balance">
-                        {card.question}
-                      </p>
-                    </div>
-                    <div className="text-center text-xs text-muted-foreground inline-flex items-center justify-center gap-1.5">
-                      <RotateCcw className="h-3.5 w-3.5" /> Tap to reveal
-                    </div>
+                  <div className={`absolute inset-0 backface-hidden rounded-3xl bg-card border-2 shadow-sm overflow-hidden transition-colors ${borderClass}`}>
+                    <ScrollArea className="h-full">
+                      <div className="p-7 min-h-[60vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+                        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground text-center">
+                          {card.prompt}
+                        </div>
+                        <div className="flex-1 flex flex-col items-center justify-center gap-4 py-4">
+                          <p className="text-2xl font-semibold leading-snug text-center text-balance">
+                            {card.question}
+                          </p>
+                          {card.image_url && (
+                            <img
+                              src={card.image_url}
+                              alt=""
+                              className="w-full aspect-[2/1] rounded-xl object-cover border border-border"
+                            />
+                          )}
+                        </div>
+                        <div className="text-center text-xs text-muted-foreground inline-flex items-center justify-center gap-1.5">
+                          <RotateCcw className="h-3.5 w-3.5" /> Tap to reveal
+                        </div>
+                      </div>
+                    </ScrollArea>
                   </div>
                   {/* Back */}
                   <div className={`absolute inset-0 backface-hidden rotate-y-180 rounded-3xl bg-card border-2 shadow-sm transition-colors ${borderClass} overflow-hidden flex flex-col`}>
@@ -334,6 +334,13 @@ function Practice() {
                         <p className="mt-2 text-base font-medium leading-snug">
                           {card.question}
                         </p>
+                        {card.image_url && (
+                          <img
+                            src={card.image_url}
+                            alt=""
+                            className="mt-3 w-full aspect-[2/1] rounded-xl object-cover border border-border"
+                          />
+                        )}
                         <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
                           Answer
                         </div>
