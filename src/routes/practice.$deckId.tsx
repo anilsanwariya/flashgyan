@@ -241,19 +241,15 @@ function Practice() {
       </header>
 
       <main className="flex-1 flex flex-col items-center justify-center px-5 max-w-2xl w-full mx-auto pb-6">
-        <div className="w-full perspective-1000">
+        <div className="w-full relative">
           <AnimatePresence mode="wait">
             <motion.div
               key={card.id}
               initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0, x: 0 }}
+              animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -12 }}
               transition={{ duration: 0.18 }}
-              drag="x"
-              dragConstraints={{ left: 0, right: 0 }}
-              dragElastic={0.35}
-              onDragEnd={handleDragEnd}
-              className="w-full touch-pan-y"
+              className="w-full perspective-1000"
             >
               <button
                 type="button"
@@ -283,31 +279,34 @@ function Practice() {
                   </div>
                   {/* Back */}
                   <div className={`absolute inset-0 backface-hidden rotate-y-180 rounded-3xl bg-card border-2 shadow-sm transition-colors ${borderClass} overflow-hidden flex flex-col`}>
-                    <div className="flex-1 overflow-y-auto overscroll-contain p-7" style={{ WebkitOverflowScrolling: "touch" }}>
-                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        {card.prompt}
-                      </div>
-                      <p className="mt-2 text-base font-medium leading-snug">
-                        {card.question}
-                      </p>
-                      <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
-                        Answer
-                      </div>
-                      <p className="mt-3 text-2xl font-semibold leading-snug text-balance">
-                        {card.answer}
-                      </p>
-                      {card.sections.map((s, i) => (
-                        <div key={i} className="mt-5 pt-5 border-t border-border">
-                          <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
-                            {s.title}
-                          </div>
-                          <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
-                            {s.body}
-                          </p>
+                    <ScrollArea className="flex-1 h-full">
+                      <div className="p-7" onClick={(e) => e.stopPropagation()}>
+                        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          {card.prompt}
                         </div>
-                      ))}
-                    </div>
+                        <p className="mt-2 text-base font-medium leading-snug">
+                          {card.question}
+                        </p>
+                        <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
+                          Answer
+                        </div>
+                        <p className="mt-3 text-2xl font-semibold leading-snug text-balance">
+                          {card.answer}
+                        </p>
+                        {card.sections.map((s, i) => (
+                          <div key={i} className="mt-5 pt-5 border-t border-border">
+                            <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
+                              {s.title}
+                            </div>
+                            <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                              {s.body}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
                   </div>
+
 
                 </div>
               </button>
