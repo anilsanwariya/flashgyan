@@ -352,7 +352,7 @@ function McqPanel() {
   const qc = useQueryClient();
   const listFn = useServerFn(listMcqTests);
   const deleteFn = useServerFn(deleteMcqTest);
-  const testsQ = useQuery({ queryKey: ["mcqTestsAdmin"], queryFn: () => listFn() });
+  const testsQ = useQuery<McqTestSummary[]>({ queryKey: ["mcqTestsAdmin"], queryFn: () => listFn() });
 
   const [editing, setEditing] = useState<McqTestSummary | "new" | null>(null);
   const [viewingTestId, setViewingTestId] = useState<string | null>(null);
