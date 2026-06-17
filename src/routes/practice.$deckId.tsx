@@ -120,8 +120,9 @@ function Practice() {
 
 
   useEffect(() => {
-    setFlipped(false);
-  }, [index]);
+    setFlipped(cardRatings[index] !== null);
+  }, [index, cardRatings]);
+
 
   if (total === 0) {
     return (
