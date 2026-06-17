@@ -1,12 +1,17 @@
 import { createFileRoute, Link, useNavigate, notFound } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
+import { z } from "zod";
+import { zodValidator, fallback } from "@tanstack/zod-adapter";
 import { getDeckCards } from "@/lib/flashcards.functions";
 import { motion, AnimatePresence } from "motion/react";
 import { ArrowLeft, RotateCcw } from "lucide-react";
 import {
   newSessionId,
   saveSession,
+  loadReview,
+  saveReview,
+  applyReviewOrder,
   type SessionCardResult,
 } from "@/lib/session-store";
 
