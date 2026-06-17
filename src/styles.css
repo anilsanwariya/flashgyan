@@ -120,3 +120,7 @@
 @utility rotate-y-180 {
   transform: rotateY(180deg);
 }
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
+}
