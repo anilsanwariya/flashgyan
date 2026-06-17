@@ -16,7 +16,7 @@ import { LogOut, Trash2, Upload, ArrowLeft } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/admin")({
   ssr: false,
-  head: () => ({ meta: [{ title: "Admin — Flashly" }] }),
+  head: () => ({ meta: [{ title: "Admin — Flashgyan web" }] }),
   component: Admin,
 });
 

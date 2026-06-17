@@ -3,7 +3,9 @@ import { useMemo, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { listDecks, type DeckSummary } from "@/lib/flashcards.functions";
 import { Button } from "@/components/ui/button";
-import { ChevronRight, Layers, Settings } from "lucide-react";
+import { ChevronRight, Settings } from "lucide-react";
+import logoAsset from "@/assets/flashgyan-logo.png.asset.json";
+
 import {
   Select,
   SelectContent,
@@ -20,7 +22,7 @@ const decksQO = queryOptions({
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Flashly — Pick a deck" },
+      { title: "Flashgyan web — Pick a deck" },
       { name: "description", content: "Browse flashcard decks by subject and topic and start a focused practice session." },
     ],
   }),
@@ -63,9 +65,10 @@ function Home() {
     <div className="min-h-dvh bg-background">
       <header className="px-5 pt-10 pb-6 max-w-2xl mx-auto">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Layers className="h-4 w-4" />
-          Flashly
+          <img src={logoAsset.url} alt="Flashgyan web logo" className="h-5 w-5 rounded-sm" />
+          Flashgyan web
         </div>
+
         <h1 className="mt-3 text-3xl font-extrabold tracking-tight">
           Pick a deck. Practice.
         </h1>

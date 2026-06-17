@@ -21,7 +21,7 @@ export const Route = createFileRoute("/summary")({
     if (!search.total) throw redirect({ to: "/" });
   },
   head: () => ({
-    meta: [{ title: "Session summary — Flashly" }],
+    meta: [{ title: "Session summary — Flashgyan web" }],
   }),
   component: Summary,
 });
