@@ -78,12 +78,20 @@ function shuffle<T>(arr: T[]): T[] {
 
 function Practice() {
   const { deckId } = Route.useParams();
+  const { review } = Route.useSearch();
   const { subject, topic } = useMemo(() => decodeDeckId(deckId), [deckId]);
   const { data: cardsRaw } = useSuspenseQuery(cardsQO(deckId));
   const navigate = useNavigate();
   const startedAt = useRef(Date.now());
 
-  const [cards] = useState(() => shuffle(cardsRaw));
+  const [cards] = useState(() => {
+    if (review) {
+      const state = loadReview(deckId);
+      const ordered = applyReviewOrder(cardsRaw, state);
+      return ordered.length > 0 ? ordered : shuffle(cardsRaw);
+    }
+    return shuffle(cardsRaw);
+  });
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [ratings, setRatings] = useState<Record<Rating, number>>({
