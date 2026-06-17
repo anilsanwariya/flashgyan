@@ -5,7 +5,8 @@ export type SessionCardResult = {
   subject: string;
   topic: string;
   prompt: string;
-  back: string;
+  question: string;
+  answer: string;
   rating: Rating;
 };
 
