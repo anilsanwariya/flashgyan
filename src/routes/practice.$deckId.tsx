@@ -230,12 +230,35 @@ function Practice() {
     <div className="min-h-dvh flex flex-col bg-background">
       <header className="px-5 pt-4 pb-3 max-w-2xl w-full mx-auto">
         <div className="flex items-center justify-between">
-          <Link
-            to="/"
-            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="h-4 w-4" /> Exit
-          </Link>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft className="h-4 w-4" /> End Session
+              </button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>End this session?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  You can keep going, or end now and see your summary. Unrated cards stay unrated.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="bg-success text-success-foreground hover:bg-success/90 border-0">
+                  Continue
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => submit(cardRatings)}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  End session
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           <div className="text-sm tabular-nums text-muted-foreground">
             {index + 1} / {total}
           </div>
