@@ -15,6 +15,17 @@ import {
   applyReviewOrder,
   type SessionCardResult,
 } from "@/lib/session-store";
+import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 
 function decodeDeckId(id: string): { subject: string; topic: string } {
   try {
