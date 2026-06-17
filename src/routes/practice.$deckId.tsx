@@ -146,7 +146,8 @@ function Practice() {
       subject: c.subject,
       topic: c.topic,
       prompt: c.prompt,
-      back: c.back,
+      question: c.question,
+      answer: c.answer,
       rating: (finalRatings[i] ?? "medium") as Rating,
     }));
     const counts = { hard: 0, medium: 0, easy: 0 };
@@ -280,9 +281,12 @@ function Practice() {
                 >
                   {/* Front */}
                   <div className={`absolute inset-0 backface-hidden rounded-3xl bg-card border-2 shadow-sm p-7 flex flex-col transition-colors ${borderClass}`}>
+                    <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground text-center">
+                      {card.prompt}
+                    </div>
                     <div className="flex-1 flex items-center justify-center">
                       <p className="text-2xl font-semibold leading-snug text-center text-balance">
-                        {card.prompt}
+                        {card.question}
                       </p>
                     </div>
                     <div className="text-center text-xs text-muted-foreground inline-flex items-center justify-center gap-1.5">
@@ -292,14 +296,17 @@ function Practice() {
                   {/* Back */}
                   <div className={`absolute inset-0 backface-hidden rotate-y-180 rounded-3xl bg-card border-2 shadow-sm transition-colors ${borderClass} overflow-hidden flex flex-col`}>
                     <div className="flex-1 overflow-y-auto overscroll-contain p-7" style={{ WebkitOverflowScrolling: "touch" }}>
-                      <p className="text-base font-medium leading-snug text-muted-foreground">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                         {card.prompt}
+                      </div>
+                      <p className="mt-2 text-base font-medium leading-snug">
+                        {card.question}
                       </p>
                       <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
                         Answer
                       </div>
                       <p className="mt-3 text-2xl font-semibold leading-snug text-balance">
-                        {card.back}
+                        {card.answer}
                       </p>
                       {card.sections.map((s, i) => (
                         <div key={i} className="mt-5 pt-5 border-t border-border">

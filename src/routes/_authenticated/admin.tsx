@@ -20,7 +20,7 @@ export const Route = createFileRoute("/_authenticated/admin")({
   component: Admin,
 });
 
-const REQUIRED = ["subject", "topic", "order", "prompt", "back"] as const;
+const REQUIRED = ["subject", "topic", "order", "prompt", "question", "answer"] as const;
 
 type Section = { title: string; body: string };
 type ParsedRow = {
@@ -28,7 +28,8 @@ type ParsedRow = {
   topic: string;
   order_index: number;
   prompt: string;
-  back: string;
+  question: string;
+  answer: string;
   sections: Section[];
 };
 
@@ -85,13 +86,15 @@ function parseWorkbook(file: ArrayBuffer): {
     const topic = pick(row, "topic");
     const orderRaw = pick(row, "order");
     const prompt = pick(row, "prompt");
-    const back = pick(row, "back");
+    const question = pick(row, "question");
+    const answer = pick(row, "answer");
     const orderNum = Number(orderRaw);
     if (
       !subject ||
       !topic ||
       !prompt ||
-      !back ||
+      !question ||
+      !answer ||
       !orderRaw ||
       !Number.isFinite(orderNum) ||
       !Number.isInteger(orderNum)
@@ -109,7 +112,8 @@ function parseWorkbook(file: ArrayBuffer): {
       topic,
       order_index: orderNum,
       prompt,
-      back,
+      question,
+      answer,
       sections,
     });
   }
@@ -235,9 +239,10 @@ function Admin() {
             <Upload className="h-4 w-4" /> Upload Excel
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Columns: subject, topic, order, prompt, back, then any number of
-            explanation_&lt;title&gt; columns (e.g. explanation_definition). Text
-            after the underscore becomes the section heading.
+            Columns: subject, topic, order, prompt, question, answer, then any
+            number of explanation_&lt;title&gt; columns (e.g.
+            explanation_definition). Text after the underscore becomes the
+            section heading.
           </p>
 
           <label className="mt-4 flex items-center justify-center h-24 rounded-xl border-2 border-dashed border-border cursor-pointer hover:bg-accent/40">
@@ -283,6 +288,7 @@ function Admin() {
                       <th className="text-left p-2">Topic</th>
                       <th className="text-left p-2">Order</th>
                       <th className="text-left p-2">Prompt</th>
+                      <th className="text-left p-2">Question</th>
                       <th className="text-left p-2">Sections</th>
                     </tr>
                   </thead>
@@ -292,7 +298,8 @@ function Admin() {
                         <td className="p-2">{r.subject}</td>
                         <td className="p-2">{r.topic}</td>
                         <td className="p-2 tabular-nums">{r.order_index}</td>
-                        <td className="p-2 truncate max-w-[160px]">{r.prompt}</td>
+                        <td className="p-2 truncate max-w-[120px]">{r.prompt}</td>
+                        <td className="p-2 truncate max-w-[160px]">{r.question}</td>
                         <td className="p-2 tabular-nums">{r.sections.length}</td>
                       </tr>
                     ))}

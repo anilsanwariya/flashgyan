@@ -135,8 +135,11 @@ function Summary() {
                     <div className="text-xs text-muted-foreground truncate">
                       {c.subject} · {c.topic}
                     </div>
-                    <div className="mt-1 font-medium leading-snug">{c.prompt}</div>
-                    <div className="mt-1 text-sm text-muted-foreground leading-snug">{c.back}</div>
+                    <div className="mt-1 font-medium leading-snug">
+                      <span className="text-xs text-muted-foreground uppercase tracking-wider mr-2">{c.prompt}</span>
+                      {c.question}
+                    </div>
+                    <div className="mt-1 text-sm text-muted-foreground leading-snug">{c.answer}</div>
                   </li>
                 ))}
               </ul>

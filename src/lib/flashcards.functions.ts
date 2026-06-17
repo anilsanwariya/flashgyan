@@ -26,7 +26,8 @@ export type Flashcard = {
   topic: string;
   order_index: number;
   prompt: string;
-  back: string;
+  question: string;
+  answer: string;
   sections: CardSection[];
 };
 
@@ -57,7 +58,7 @@ export const getDeckCards = createServerFn({ method: "GET" })
     const supabase = publicClient();
     const { data: rows, error } = await supabase
       .from("flashcards")
-      .select("id, subject, topic, order_index, prompt, back, sections")
+      .select("id, subject, topic, order_index, prompt, question, answer, sections")
       .eq("subject", data.subject)
       .eq("topic", data.topic)
       .order("order_index", { ascending: true })
@@ -69,7 +70,8 @@ export const getDeckCards = createServerFn({ method: "GET" })
       topic: r.topic,
       order_index: r.order_index,
       prompt: r.prompt,
-      back: r.back,
+      question: r.question,
+      answer: r.answer,
       sections: Array.isArray(r.sections) ? (r.sections as unknown as CardSection[]) : [],
     }));
   });
@@ -84,7 +86,8 @@ const importRowSchema = z.object({
   topic: z.string().min(1),
   order_index: z.number().int(),
   prompt: z.string().min(1),
-  back: z.string().min(1),
+  question: z.string().min(1),
+  answer: z.string().min(1),
   sections: z.array(sectionSchema),
 });
 
@@ -120,7 +123,8 @@ export const bulkImportCards = createServerFn({ method: "POST" })
       topic: r.topic.trim(),
       order_index: r.order_index,
       prompt: r.prompt.trim(),
-      back: r.back.trim(),
+      question: r.question.trim(),
+      answer: r.answer.trim(),
       sections: r.sections,
     }));
 
