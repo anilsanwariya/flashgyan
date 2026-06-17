@@ -126,8 +126,9 @@ function Practice() {
 
 
   useEffect(() => {
-    setFlipped(cardRatings[index] !== null || priorRatings[index] !== null);
-  }, [index, cardRatings, priorRatings]);
+    setFlipped(cardRatings[index] !== null);
+  }, [index, cardRatings]);
+
 
 
 
