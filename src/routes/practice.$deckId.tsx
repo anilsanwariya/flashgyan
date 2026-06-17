@@ -144,6 +144,12 @@ function Practice() {
         endedAt,
         results: resultsRef.current,
       });
+      // Persist spaced-repetition state: most recent rating per card.
+      const state = loadReview(deckId);
+      for (const result of resultsRef.current) {
+        state[result.id] = result.rating;
+      }
+      saveReview(deckId, state);
       navigate({
         to: "/summary",
         search: {
