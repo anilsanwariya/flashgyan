@@ -79,8 +79,9 @@ function shuffle<T>(arr: T[]): T[] {
 function Practice() {
   const { deckId } = Route.useParams();
   const { review } = Route.useSearch();
-  const { subject, topic } = useMemo(() => decodeDeckId(deckId), [deckId]);
-  const { data: cardsRaw } = useSuspenseQuery(cardsQO(deckId));
+  const { data: deckData } = useSuspenseQuery(deckQO(deckId));
+  const { subject, topic } = deckData.deck;
+  const cardsRaw = deckData.cards;
   const navigate = useNavigate();
   const startedAt = useRef(Date.now());
 
