@@ -110,6 +110,15 @@ function Practice() {
   const card = cards[index];
   const total = cards.length;
   const currentRating = cardRatings[index];
+  const borderClass =
+    currentRating === "hard"
+      ? "border-destructive"
+      : currentRating === "medium"
+      ? "border-warning"
+      : currentRating === "easy"
+      ? "border-success"
+      : "border-border";
+
 
   useEffect(() => {
     setFlipped(false);
