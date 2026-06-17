@@ -65,9 +65,10 @@ function Home() {
     <div className="min-h-dvh bg-background">
       <header className="px-5 pt-10 pb-6 max-w-2xl mx-auto">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Layers className="h-4 w-4" />
-          Flashly
+          <img src={logoAsset.url} alt="Flashgyan web logo" className="h-5 w-5 rounded-sm" />
+          Flashgyan web
         </div>
+
         <h1 className="mt-3 text-3xl font-extrabold tracking-tight">
           Pick a deck. Practice.
         </h1>
