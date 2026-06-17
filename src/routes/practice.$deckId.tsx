@@ -4,9 +4,9 @@ import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { z } from "zod";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
 import { getDeckCards } from "@/lib/flashcards.functions";
-import { motion, AnimatePresence, type PanInfo } from "motion/react";
-import { ArrowLeft, RotateCcw } from "lucide-react";
-import { toast } from "sonner";
+import { motion, AnimatePresence } from "motion/react";
+import { ArrowLeft, RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   newSessionId,
   saveSession,
@@ -193,22 +193,10 @@ function Practice() {
   }
 
   function goNext() {
-    if (currentRating === null) {
-      toast("Rate this card first", {
-        description: "Tap Hard, Medium, or Easy to continue.",
-      });
-      return;
-    }
+    if (currentRating === null) return;
     if (index < total - 1) setIndex(index + 1);
   }
 
-  function handleDragEnd(_: unknown, info: PanInfo) {
-    const { offset, velocity } = info;
-    const swipe = Math.abs(offset.x) > 80 || Math.abs(velocity.x) > 400;
-    if (!swipe) return;
-    if (offset.x < 0) goNext();
-    else goPrev();
-  }
 
 
 
@@ -253,19 +241,15 @@ function Practice() {
       </header>
 
       <main className="flex-1 flex flex-col items-center justify-center px-5 max-w-2xl w-full mx-auto pb-6">
-        <div className="w-full perspective-1000">
+        <div className="w-full relative">
           <AnimatePresence mode="wait">
             <motion.div
               key={card.id}
               initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0, x: 0 }}
+              animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -12 }}
               transition={{ duration: 0.18 }}
-              drag="x"
-              dragConstraints={{ left: 0, right: 0 }}
-              dragElastic={0.35}
-              onDragEnd={handleDragEnd}
-              className="w-full touch-pan-y"
+              className="w-full perspective-1000"
             >
               <button
                 type="button"
@@ -295,37 +279,61 @@ function Practice() {
                   </div>
                   {/* Back */}
                   <div className={`absolute inset-0 backface-hidden rotate-y-180 rounded-3xl bg-card border-2 shadow-sm transition-colors ${borderClass} overflow-hidden flex flex-col`}>
-                    <div className="flex-1 overflow-y-auto overscroll-contain p-7" style={{ WebkitOverflowScrolling: "touch" }}>
-                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        {card.prompt}
-                      </div>
-                      <p className="mt-2 text-base font-medium leading-snug">
-                        {card.question}
-                      </p>
-                      <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
-                        Answer
-                      </div>
-                      <p className="mt-3 text-2xl font-semibold leading-snug text-balance">
-                        {card.answer}
-                      </p>
-                      {card.sections.map((s, i) => (
-                        <div key={i} className="mt-5 pt-5 border-t border-border">
-                          <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
-                            {s.title}
-                          </div>
-                          <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
-                            {s.body}
-                          </p>
+                    <ScrollArea className="flex-1 h-full">
+                      <div className="p-7" onClick={(e) => e.stopPropagation()}>
+                        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          {card.prompt}
                         </div>
-                      ))}
-                    </div>
+                        <p className="mt-2 text-base font-medium leading-snug">
+                          {card.question}
+                        </p>
+                        <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
+                          Answer
+                        </div>
+                        <p className="mt-3 text-2xl font-semibold leading-snug text-balance">
+                          {card.answer}
+                        </p>
+                        {card.sections.map((s, i) => (
+                          <div key={i} className="mt-5 pt-5 border-t border-border">
+                            <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
+                              {s.title}
+                            </div>
+                            <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                              {s.body}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
                   </div>
+
 
                 </div>
               </button>
             </motion.div>
           </AnimatePresence>
+          {index > 0 && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); goPrev(); }}
+              aria-label="Previous card"
+              className="absolute left-2 top-1/2 -translate-y-1/2 z-10 h-10 w-10 rounded-full bg-background/60 backdrop-blur-sm border border-border shadow-sm flex items-center justify-center hover:bg-background/80 transition-colors"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+          )}
+          {currentRating !== null && index < total - 1 && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); goNext(); }}
+              aria-label="Next card"
+              className="absolute right-2 top-1/2 -translate-y-1/2 z-10 h-10 w-10 rounded-full bg-background/60 backdrop-blur-sm border border-border shadow-sm flex items-center justify-center hover:bg-background/80 transition-colors"
+            >
+              <ChevronRight className="h-5 w-5" />
+            </button>
+          )}
         </div>
+
       </main>
 
       <footer className="px-5 pb-6 pt-2 max-w-2xl w-full mx-auto">
