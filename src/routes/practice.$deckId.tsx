@@ -248,10 +248,14 @@ function Practice() {
             <motion.div
               key={card.id}
               initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
+              animate={{ opacity: 1, y: 0, x: 0 }}
               exit={{ opacity: 0, y: -12 }}
               transition={{ duration: 0.18 }}
-              className="w-full"
+              drag="x"
+              dragConstraints={{ left: 0, right: 0 }}
+              dragElastic={0.35}
+              onDragEnd={handleDragEnd}
+              className="w-full touch-pan-y"
             >
               <button
                 type="button"
