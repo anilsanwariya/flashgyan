@@ -14,7 +14,7 @@ import {
   deleteMcqQuestion,
   deleteMcqTest,
   getMcqTest,
-  listMcqTestsAdmin,
+  listMcqTests,
   setMcqQuestionImage,
   signMcqImage,
   updateMcqQuestion,
