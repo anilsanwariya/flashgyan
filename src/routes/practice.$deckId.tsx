@@ -95,15 +95,19 @@ function Practice() {
   });
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
-  const [ratings, setRatings] = useState<Record<Rating, number>>({
-    hard: 0,
-    medium: 0,
-    easy: 0,
-  });
-  const resultsRef = useRef<SessionCardResult[]>([]);
+  const [cardRatings, setCardRatings] = useState<(Rating | null)[]>(() =>
+    cards.map(() => null),
+  );
+
+  const ratings = useMemo(() => {
+    const r = { hard: 0, medium: 0, easy: 0 };
+    for (const c of cardRatings) if (c) r[c]++;
+    return r;
+  }, [cardRatings]);
 
   const card = cards[index];
   const total = cards.length;
+  const currentRating = cardRatings[index];
 
   useEffect(() => {
     setFlipped(false);
@@ -122,51 +126,80 @@ function Practice() {
     );
   }
 
-  function rate(r: Rating) {
-    const next = { ...ratings, [r]: ratings[r] + 1 };
-    setRatings(next);
-    resultsRef.current.push({
-      id: card.id,
-      subject: card.subject,
-      topic: card.topic,
-      front_question: card.front_question,
-      back_answer: card.back_answer,
-      rating: r,
+  function submit(finalRatings: (Rating | null)[]) {
+    const endedAt = Date.now();
+    const seconds = Math.round((endedAt - startedAt.current) / 1000);
+    const sessionId = newSessionId();
+    const results: SessionCardResult[] = cards.map((c, i) => ({
+      id: c.id,
+      subject: c.subject,
+      topic: c.topic,
+      front_question: c.front_question,
+      back_answer: c.back_answer,
+      rating: (finalRatings[i] ?? "medium") as Rating,
+    }));
+    const counts = { hard: 0, medium: 0, easy: 0 };
+    for (const r of results) counts[r.rating]++;
+    saveSession(sessionId, {
+      deckId,
+      subject,
+      topic,
+      startedAt: startedAt.current,
+      endedAt,
+      results,
     });
-    if (index + 1 >= total) {
-      const endedAt = Date.now();
-      const seconds = Math.round((endedAt - startedAt.current) / 1000);
-      const sessionId = newSessionId();
-      saveSession(sessionId, {
+    const state = loadReview(deckId);
+    for (const r of results) state[r.id] = r.rating;
+    saveReview(deckId, state);
+    navigate({
+      to: "/summary",
+      search: {
         deckId,
-        subject,
-        topic,
-        startedAt: startedAt.current,
-        endedAt,
-        results: resultsRef.current,
-      });
-      // Persist spaced-repetition state: most recent rating per card.
-      const state = loadReview(deckId);
-      for (const result of resultsRef.current) {
-        state[result.id] = result.rating;
-      }
-      saveReview(deckId, state);
-      navigate({
-        to: "/summary",
-        search: {
-          deckId,
-          total,
-          hard: next.hard,
-          medium: next.medium,
-          easy: next.easy,
-          seconds,
-          sessionId,
-        },
-      });
-    } else {
-      setIndex(index + 1);
-    }
+        total,
+        hard: counts.hard,
+        medium: counts.medium,
+        easy: counts.easy,
+        seconds,
+        sessionId,
+      },
+    });
   }
+
+  function rate(r: Rating) {
+    const next = cardRatings.slice();
+    next[index] = r;
+    setCardRatings(next);
+    if (next.every((x) => x !== null)) {
+      submit(next);
+      return;
+    }
+    // advance to next unrated card, or simply next card
+    const nextUnrated = next.findIndex((x, i) => i > index && x === null);
+    setIndex(nextUnrated !== -1 ? nextUnrated : Math.min(index + 1, total - 1));
+  }
+
+  function goPrev() {
+    if (index > 0) setIndex(index - 1);
+  }
+
+  function goNext() {
+    if (currentRating === null) {
+      toast("Rate this card first", {
+        description: "Tap Hard, Medium, or Easy to continue.",
+      });
+      return;
+    }
+    if (index < total - 1) setIndex(index + 1);
+  }
+
+  function handleDragEnd(_: unknown, info: PanInfo) {
+    const { offset, velocity } = info;
+    const swipe = Math.abs(offset.x) > 80 || Math.abs(velocity.x) > 400;
+    if (!swipe) return;
+    if (offset.x < 0) goNext();
+    else goPrev();
+  }
+
 
 
 
