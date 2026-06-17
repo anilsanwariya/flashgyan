@@ -347,9 +347,27 @@ function Practice() {
       <footer className="px-5 pb-6 pt-2 max-w-2xl w-full mx-auto">
         {flipped ? (
           <div className="grid grid-cols-3 gap-2">
-            <RatingButton label="Hard" tone="destructive" onClick={() => rate("hard")} />
-            <RatingButton label="Medium" tone="warning" onClick={() => rate("medium")} />
-            <RatingButton label="Easy" tone="success" onClick={() => rate("easy")} />
+            <RatingButton
+              label="Hard"
+              tone="destructive"
+              onClick={() => rate("hard")}
+              disabled={currentRating !== null}
+              active={currentRating === "hard"}
+            />
+            <RatingButton
+              label="Medium"
+              tone="warning"
+              onClick={() => rate("medium")}
+              disabled={currentRating !== null}
+              active={currentRating === "medium"}
+            />
+            <RatingButton
+              label="Easy"
+              tone="success"
+              onClick={() => rate("easy")}
+              disabled={currentRating !== null}
+              active={currentRating === "easy"}
+            />
           </div>
         ) : (
           <button
