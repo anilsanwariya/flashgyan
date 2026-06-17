@@ -203,7 +203,7 @@ function TakeTest() {
         </div>
       </main>
 
-      <footer className="sticky bottom-0 border-t border-border bg-background">
+      <footer className="shrink-0 border-t border-border bg-background">
         <div className="max-w-2xl mx-auto px-5 py-3 grid grid-cols-3 items-center gap-3">
           <div className="justify-self-start">
             <Button
