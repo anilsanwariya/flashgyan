@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate, notFound } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { z } from "zod";
