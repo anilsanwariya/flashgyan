@@ -280,7 +280,9 @@ function Admin() {
                     <tr>
                       <th className="text-left p-2">Subject</th>
                       <th className="text-left p-2">Topic</th>
-                      <th className="text-left p-2">Question</th>
+                      <th className="text-left p-2">Order</th>
+                      <th className="text-left p-2">Prompt</th>
+                      <th className="text-left p-2">Sections</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -288,7 +290,9 @@ function Admin() {
                       <tr key={i} className="border-t border-border">
                         <td className="p-2">{r.subject}</td>
                         <td className="p-2">{r.topic}</td>
-                        <td className="p-2 truncate max-w-[200px]">{r.front_question}</td>
+                        <td className="p-2 tabular-nums">{r.order_index}</td>
+                        <td className="p-2 truncate max-w-[160px]">{r.prompt}</td>
+                        <td className="p-2 tabular-nums">{r.sections.length}</td>
                       </tr>
                     ))}
                   </tbody>
