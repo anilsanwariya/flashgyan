@@ -284,30 +284,38 @@ function QuestionPalette({
         <div
           ref={scrollRef}
           onScroll={updateEdges}
-          className="flex-1 overflow-x-auto scroll-smooth no-scrollbar"
+          className="flex-1 overflow-x-auto scroll-smooth snap-x snap-mandatory no-scrollbar"
         >
-          <div
-            className="grid grid-rows-2 grid-flow-col gap-1"
-            style={{ gridAutoColumns: "calc((100% - (9 * 0.25rem)) / 10)" }}
-          >
-            {questions.map((q, i) => {
-              const a = answers[q.id];
-              const cur = i === current;
+          <div className="flex">
+            {Array.from({ length: Math.ceil(questions.length / 20) }).map((_, pageIdx) => {
+              const pageQs = questions.slice(pageIdx * 20, pageIdx * 20 + 20);
               return (
-                <button
-                  key={q.id}
-                  onClick={() => onJump(i)}
-                  className={
-                    "h-7 rounded-md text-xs font-medium tabular-nums border " +
-                    (cur
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : a !== null
-                        ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                        : "border-border bg-card text-muted-foreground")
-                  }
+                <div
+                  key={pageIdx}
+                  className="w-full shrink-0 snap-start grid grid-cols-10 grid-rows-2 gap-1"
                 >
-                  {i + 1}
-                </button>
+                  {pageQs.map((q, j) => {
+                    const i = pageIdx * 20 + j;
+                    const a = answers[q.id];
+                    const cur = i === current;
+                    return (
+                      <button
+                        key={q.id}
+                        onClick={() => onJump(i)}
+                        className={
+                          "h-7 rounded-md text-xs font-medium tabular-nums border " +
+                          (cur
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : a !== null
+                              ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              : "border-border bg-card text-muted-foreground")
+                        }
+                      >
+                        {i + 1}
+                      </button>
+                    );
+                  })}
+                </div>
               );
             })}
           </div>
