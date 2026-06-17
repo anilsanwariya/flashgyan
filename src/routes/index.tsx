@@ -316,12 +316,11 @@ function FilterSelect({
 }
 
 function DeckCard({ deck }: { deck: DeckSummary }) {
-  const id = encodeDeckId(deck);
   return (
     <li>
       <Link
         to="/practice/$deckId"
-        params={{ deckId: id }}
+        params={{ deckId: deck.id }}
         search={{ review: false }}
         className="group flex items-center gap-4 rounded-2xl bg-card border border-border p-4 active:scale-[0.99] transition-transform shadow-sm"
       >
