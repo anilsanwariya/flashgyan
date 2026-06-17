@@ -241,11 +241,17 @@ function Row({
   value,
   pct,
   tone,
+  active,
+  disabled,
+  onClick,
 }: {
   label: string;
   value: number;
   pct: number;
   tone: "success" | "warning" | "destructive";
+  active?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
 }) {
   const bar =
     tone === "success"
@@ -253,8 +259,22 @@ function Row({
       : tone === "warning"
       ? "bg-warning"
       : "bg-destructive";
+  const ring =
+    tone === "success"
+      ? "ring-success"
+      : tone === "warning"
+      ? "ring-warning"
+      : "ring-destructive";
   return (
-    <div className="rounded-2xl border border-border bg-card p-4">
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+      className={`w-full text-left rounded-2xl border bg-card p-4 transition ${
+        active ? `ring-2 ${ring} border-transparent` : "border-border"
+      } ${disabled ? "opacity-60 cursor-default" : "cursor-pointer active:scale-[0.99]"}`}
+    >
       <div className="flex items-baseline justify-between">
         <div className="font-semibold">{label}</div>
         <div className="text-sm tabular-nums text-muted-foreground">
@@ -264,6 +284,6 @@ function Row({
       <div className="mt-2 h-2 rounded-full bg-muted overflow-hidden">
         <div className={`h-full ${bar}`} style={{ width: `${pct}%` }} />
       </div>
-    </div>
+    </button>
   );
 }
