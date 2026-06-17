@@ -96,6 +96,7 @@ function Practice() {
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [cardRatings, setCardRatings] = useState<(Rating | null)[]>(() => {
+    if (!review) return cards.map(() => null);
     const state = loadReview(deckId);
     return cards.map((c) => state[c.id] ?? null);
   });
