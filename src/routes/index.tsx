@@ -140,41 +140,44 @@ function Home() {
   );
 }
 
-function FilterRow({
+function FilterSelect({
   label,
+  placeholder,
   options,
   value,
   onChange,
+  disabled,
 }: {
   label: string;
+  placeholder: string;
   options: string[];
   value: string | null;
   onChange: (v: string | null) => void;
+  disabled?: boolean;
 }) {
+  const ALL = "__all__";
   return (
     <div>
       <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
         {label}
       </div>
-      <div className="flex gap-2 overflow-x-auto -mx-5 px-5 pb-1 scrollbar-none">
-        {options.map((opt) => {
-          const active = value === opt;
-          return (
-            <button
-              key={opt}
-              onClick={() => onChange(active ? null : opt)}
-              className={
-                "shrink-0 rounded-full border px-4 py-2 text-sm font-medium transition-colors " +
-                (active
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "bg-card border-border text-foreground hover:bg-accent")
-              }
-            >
+      <Select
+        value={value ?? ALL}
+        onValueChange={(v) => onChange(v === ALL ? null : v)}
+        disabled={disabled}
+      >
+        <SelectTrigger>
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>{placeholder}</SelectItem>
+          {options.map((opt) => (
+            <SelectItem key={opt} value={opt}>
               {opt}
-            </button>
-          );
-        })}
-      </div>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }
