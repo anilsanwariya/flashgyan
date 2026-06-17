@@ -20,26 +20,28 @@ export const Route = createFileRoute("/_authenticated/admin")({
   component: Admin,
 });
 
-const REQUIRED = [
-  "subject",
-  "topic",
-  "card front - prompt",
-  "card front - question",
-  "card back - answer",
-  "card back - explanation",
-] as const;
+const REQUIRED = ["subject", "topic", "order", "prompt", "back"] as const;
 
+type Section = { title: string; body: string };
 type ParsedRow = {
   subject: string;
   topic: string;
-  front_prompt: string | null;
-  front_question: string;
-  back_answer: string;
-  back_explanation: string | null;
+  order_index: number;
+  prompt: string;
+  back: string;
+  sections: Section[];
 };
 
 function normalizeKey(k: string) {
   return k.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function titleCase(s: string) {
+  return s
+    .split("_")
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 }
 
 function parseWorkbook(file: ArrayBuffer): {
@@ -53,16 +55,23 @@ function parseWorkbook(file: ArrayBuffer): {
     defval: "",
   });
   if (json.length === 0) return { rows: [], invalid: 0, missingCols: [] };
+
+  // Preserve original column order for explanation_* headers.
+  const originalKeys = Object.keys(json[0]);
   const headerMap: Record<string, string> = {};
-  for (const k of Object.keys(json[0])) headerMap[normalizeKey(k)] = k;
-  const missingCols = REQUIRED.filter(
-    (c) => !(c in headerMap) && !(c.replace(/-/g, "–") in headerMap),
-  );
-  // Allow missing optional cols (prompt/explanation) — flag only required
-  const trulyMissing = missingCols.filter(
-    (c) => c !== "card front - prompt" && c !== "card back - explanation",
-  );
-  if (trulyMissing.length) return { rows: [], invalid: 0, missingCols: trulyMissing };
+  for (const k of originalKeys) headerMap[normalizeKey(k)] = k;
+
+  const missingCols = REQUIRED.filter((c) => !(c in headerMap));
+  if (missingCols.length) return { rows: [], invalid: 0, missingCols };
+
+  const explanationCols: { key: string; title: string }[] = [];
+  for (const k of originalKeys) {
+    const nk = normalizeKey(k);
+    if (nk.startsWith("explanation_")) {
+      const suffix = nk.slice("explanation_".length);
+      if (suffix) explanationCols.push({ key: k, title: titleCase(suffix) });
+    }
+  }
 
   const pick = (row: Record<string, unknown>, name: string) => {
     const k = headerMap[name];
@@ -74,23 +83,39 @@ function parseWorkbook(file: ArrayBuffer): {
   for (const row of json) {
     const subject = pick(row, "subject");
     const topic = pick(row, "topic");
-    const front_question = pick(row, "card front - question");
-    const back_answer = pick(row, "card back - answer");
-    if (!subject || !topic || !front_question || !back_answer) {
+    const orderRaw = pick(row, "order");
+    const prompt = pick(row, "prompt");
+    const back = pick(row, "back");
+    const orderNum = Number(orderRaw);
+    if (
+      !subject ||
+      !topic ||
+      !prompt ||
+      !back ||
+      !orderRaw ||
+      !Number.isFinite(orderNum) ||
+      !Number.isInteger(orderNum)
+    ) {
       invalid++;
       continue;
+    }
+    const sections: Section[] = [];
+    for (const col of explanationCols) {
+      const body = String(row[col.key] ?? "").trim();
+      if (body) sections.push({ title: col.title, body });
     }
     rows.push({
       subject,
       topic,
-      front_prompt: pick(row, "card front - prompt") || null,
-      front_question,
-      back_answer,
-      back_explanation: pick(row, "card back - explanation") || null,
+      order_index: orderNum,
+      prompt,
+      back,
+      sections,
     });
   }
   return { rows, invalid, missingCols: [] };
 }
+
 
 function Admin() {
   const router = useRouter();
@@ -210,8 +235,9 @@ function Admin() {
             <Upload className="h-4 w-4" /> Upload Excel
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Columns: Subject, Topic, Card front - prompt, Card front - question, Card back -
-            answer, Card back - explanation.
+            Columns: subject, topic, order, prompt, back, then any number of
+            explanation_&lt;title&gt; columns (e.g. explanation_definition). Text
+            after the underscore becomes the section heading.
           </p>
 
           <label className="mt-4 flex items-center justify-center h-24 rounded-xl border-2 border-dashed border-border cursor-pointer hover:bg-accent/40">
@@ -255,7 +281,9 @@ function Admin() {
                     <tr>
                       <th className="text-left p-2">Subject</th>
                       <th className="text-left p-2">Topic</th>
-                      <th className="text-left p-2">Question</th>
+                      <th className="text-left p-2">Order</th>
+                      <th className="text-left p-2">Prompt</th>
+                      <th className="text-left p-2">Sections</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -263,7 +291,9 @@ function Admin() {
                       <tr key={i} className="border-t border-border">
                         <td className="p-2">{r.subject}</td>
                         <td className="p-2">{r.topic}</td>
-                        <td className="p-2 truncate max-w-[200px]">{r.front_question}</td>
+                        <td className="p-2 tabular-nums">{r.order_index}</td>
+                        <td className="p-2 truncate max-w-[160px]">{r.prompt}</td>
+                        <td className="p-2 tabular-nums">{r.sections.length}</td>
                       </tr>
                     ))}
                   </tbody>

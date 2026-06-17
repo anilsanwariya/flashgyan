@@ -1,131 +1,79 @@
-## Overview
+## Goal
 
-A mobile-first flashcard study web app with four pages: Home, Practice, Summary, Admin. No user sign-up for studying. Admin panel is gated by Lovable Cloud email/password auth and lets an admin upload decks via Excel.
+Switch flashcards to support multiple explanation sections (with custom titles), reorder the back of the card as a scrollable stack, and update the Excel import to a new, extensible column layout.
 
-## Pages & flows
+## New Excel format
 
-**Home (`/`)**
-- Page title + short tagline.
-- Two cascading filters: Subject → Topic (Topic options depend on selected Subject).
-- Below filters: list of decks matching the filter, each showing deck name, subject/topic, and card count.
-- Tap a deck → navigate to `/practice/$deckId`.
-- Small "Admin" link in footer.
+First-row headers (order matters only for the fixed columns; explanation pairs can repeat):
 
-**Practice (`/practice/$deckId`)**
-- Loads all cards in the deck, shuffled, served in one session (all cards, once each).
-- Card UI:
-  - Front side shows **Prompt** (smaller, muted, top) + **Question** (large, centered).
-  - Tap card → 3D flip animation → Back shows **Answer** (large) + **Explanation** (smaller, below).
-  - Below the card after flip: three rating buttons **Hard / Medium / Easy**.
-- Tapping a rating records the result and advances to the next card.
-- Progress indicator (e.g. "7 / 20") + thin progress bar at top.
-- When all cards are done → navigate to `/summary` with session results in router state/search.
+```
+subject | topic | order | prompt | back | explanation_<title1> | explanation_<title2> | ...
+```
 
-**Summary (`/summary`)**
-- Shows: total cards, counts and % for Hard / Medium / Easy, time spent, deck name.
-- Buttons: "Practice again" (same deck), "Back to decks" (home).
-- If visited without a completed session → redirect to home.
+- `subject`, `topic` — unchanged, still required.
+- `order` — integer; controls card display order within a (subject, topic) deck.
+- `prompt` — single front text (replaces both old `front_prompt` and `front_question`).
+- `back` — main answer shown first on the back of the card.
+- `explanation_<X>` — any number of columns. The text after `_` becomes the section title (snake_case → Title Case, e.g. `explanation_definition` → "Definition", `explanation_example_usage` → "Example Usage"). Empty cells are skipped. Sections appear in the column order they were in the sheet.
 
-**Admin (`/admin`, under `_authenticated`)**
-- Email/password sign-in via Lovable Cloud (managed `/auth` page).
-- Once signed in:
-  - Upload Excel file (`.xlsx`).
-  - Parse client-side with SheetJS, validate columns, show preview (first 10 rows + count + any row errors).
-  - "Replace all" vs "Append" toggle.
-  - Confirm → server function inserts cards.
-  - Below: table of existing decks (subject/topic/card count) with a delete button per deck.
+Importer behavior:
+- Detect every header starting with `explanation_`; preserve their left-to-right order.
+- Validate required cells: subject, topic, order, prompt, back.
+- Build a `sections` JSON array `[{ title, body }]` per card from the non-empty explanation columns.
+- "Replace all" remains supported; "append" still appends.
 
-## Excel format
+## Database changes (single migration)
 
-Required columns (header row, case-insensitive, trimmed):
-- `Subject`
-- `Topic`
-- `Card front - prompt`
-- `Card front - question`
-- `Card back - answer`
-- `Card back - explanation`
+Wipe and recreate the `flashcards` table with the new schema:
 
-A "deck" is the unique pair (Subject, Topic). Rows with missing Subject/Topic/Question/Answer are flagged as invalid and skipped; Prompt and Explanation are optional.
-
-## Data model (Lovable Cloud / Supabase)
-
-Single table `flashcards`:
-- `id uuid pk default gen_random_uuid()`
+- `id uuid pk`
 - `subject text not null`
 - `topic text not null`
-- `front_prompt text`
-- `front_question text not null`
-- `back_answer text not null`
-- `back_explanation text`
+- `order_index int not null default 0`
+- `prompt text not null`
+- `back text not null`
+- `sections jsonb not null default '[]'::jsonb` — array of `{ title: string, body: string }`
 - `created_at timestamptz default now()`
-- index on `(subject, topic)`
 
-RLS:
-- `SELECT` policy `TO anon, authenticated` (public read — no PII).
-- No public insert/update/delete. Writes happen via authenticated server functions; admin role checked via `user_roles` table + `has_role()`.
+Keep current RLS: public SELECT to anon/authenticated; writes only via service role (admin import). Re-apply existing GRANTs.
 
-`user_roles` table + `app_role` enum (`admin`) per the standard pattern. First admin is seeded manually (instructed to user after signup).
+Index: `(subject, topic, order_index)` for ordered deck fetch.
 
-Session results live only in client memory / router search state — no DB persistence (matches "no sign-up" + simple).
+## Card UI (back face)
 
-## Server functions (`createServerFn`)
+`src/routes/practice.$deckId.tsx`:
 
-Client-safe `.functions.ts` files under `src/lib/`:
-- `listSubjects()` — public, distinct subjects.
-- `listTopics({ subject })` — public, distinct topics for a subject.
-- `listDecks({ subject?, topic? })` — public, grouped (subject, topic, count).
-- `getDeckCards({ subject, topic })` — public, all cards for practice.
-- `bulkImportCards({ rows, mode: 'append' | 'replace' })` — `requireSupabaseAuth` + admin role check.
-- `deleteDeck({ subject, topic })` — `requireSupabaseAuth` + admin role check.
+- Front face shows `prompt` (replaces the prompt-label + question split).
+- Back face becomes a vertical scrollable column inside the fixed-height card:
+  1. Small `prompt` recap at top (unchanged behavior from last turn).
+  2. "Answer" label + `back` text.
+  3. For each section in `sections`: a heading with the section title and the body below it.
+- The card container keeps its fixed size and rounded border; only the inner content area scrolls (`overflow-y-auto`, momentum scroll on touch). Border-color rating behavior is unchanged.
+- Swipe gestures: scrolling inside the back must not trigger horizontal swipe-to-next. Constrain drag to the card frame (not the inner scroll area) so vertical scrolling stays smooth.
 
-Public reads use the server publishable client (anon, RLS). Admin writes verify role via `has_role` RPC before mutating.
+Deck fetch and practice order:
+- `getDeckCards` orders by `order_index asc, created_at asc`.
+- Practice walks cards in that order on first run; spaced-repetition re-runs from Summary still group by rating (hard → medium) and within each rating preserve `order_index`.
 
-## Routes
+## Admin importer
 
-```
-src/routes/
-  __root.tsx                       (shared shell, QueryClient, auth listener)
-  index.tsx                        Home
-  practice.$deckId.tsx             Practice (deckId = base64 of `subject|topic`)
-  summary.tsx                      Summary (reads from search params)
-  auth.tsx                         Lovable Cloud sign-in
-  _authenticated/route.tsx         (integration-managed gate)
-  _authenticated/admin.tsx         Admin panel
-```
+`src/routes/_authenticated/admin.tsx` + `src/lib/flashcards.functions.ts`:
 
-`deckId` encodes subject+topic so practice URLs are shareable.
+- Update REQUIRED columns list to: subject, topic, order, prompt, back. Plus at least one `explanation_*` column is allowed but not required.
+- Parsing:
+  - Collect all keys starting with `explanation_` (case-insensitive, in column order).
+  - For each row, build `sections` from non-empty explanation cells, deriving titles from the suffix.
+  - Coerce `order` to int; reject rows where it isn't a positive integer.
+- Preview table shows: Subject, Topic, Order, Prompt, #Sections.
+- Zod validator updated for new shape; `sections` validated as array of `{ title, body }`.
 
-## Design direction
+## Types & call sites
 
-Clean, distraction-free, mobile-first:
-- Off-white background, soft neutral surfaces, single accent color for primary actions and progress.
-- Generous type scale, plenty of whitespace, no decorative chrome during practice.
-- Large tap targets (min 48px) for flip + rating buttons; bottom-anchored rating row for thumb reach.
-- Smooth 3D flip animation (CSS `transform-style: preserve-3d` + `rotateY`).
-- Subtle haptic-feel transitions between cards (fade + slight slide).
-- Tailwind v4 tokens in `src/styles.css`; shadcn components for inputs/buttons/select/dialog/sonner.
+- Update `Flashcard` type in `flashcards.functions.ts` to the new shape.
+- Update `session-store.ts` and `summary.tsx` only where they reference `front_question` / `back_answer` / `back_explanation` — switch to `prompt` / `back` / `sections`.
+- Regenerate Supabase types after migration approval.
 
-## Dependencies to add
+## Out of scope
 
-- `xlsx` (SheetJS) — parse Excel client-side in admin.
-- `motion` (Motion for React) — card transitions.
-
-## Build order
-
-1. Enable Lovable Cloud.
-2. Migration: `flashcards`, `app_role` enum, `user_roles`, `has_role` function, RLS + grants.
-3. Add `xlsx` and `motion`.
-4. Server functions in `src/lib/flashcards.functions.ts`.
-5. Design tokens + base layout shell.
-6. Home page (filters + deck list).
-7. Practice page (flip card, ratings, progress).
-8. Summary page.
-9. Auth page + admin route under `_authenticated/`.
-10. Admin: Excel upload, parse, preview, import, deck management.
-11. Verify with preview on a mobile viewport.
-
-## Open items handled with sensible defaults
-
-- **First admin**: after the user signs up via `/auth`, I'll show them the SQL snippet (or run it on request) to grant the `admin` role to their `user_id`. No public self-serve admin promotion.
-- **Session state across pages**: passed via TanStack Router search params (counts + deck id), not persisted.
-- **No spaced repetition / scheduling** — ratings are recorded only for the session summary.
+- No change to rating UI, progress bar coloring, swipe-to-rate behavior, or summary grouping logic beyond field renames.
+- No data migration of existing cards — table is wiped per your choice; admin re-uploads with the new sheet.

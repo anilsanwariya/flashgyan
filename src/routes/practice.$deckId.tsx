@@ -145,8 +145,8 @@ function Practice() {
       id: c.id,
       subject: c.subject,
       topic: c.topic,
-      front_question: c.front_question,
-      back_answer: c.back_answer,
+      prompt: c.prompt,
+      back: c.back,
       rating: (finalRatings[i] ?? "medium") as Rating,
     }));
     const counts = { hard: 0, medium: 0, easy: 0 };
@@ -280,14 +280,9 @@ function Practice() {
                 >
                   {/* Front */}
                   <div className={`absolute inset-0 backface-hidden rounded-3xl bg-card border-2 shadow-sm p-7 flex flex-col transition-colors ${borderClass}`}>
-                    {card.front_prompt && (
-                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        {card.front_prompt}
-                      </div>
-                    )}
                     <div className="flex-1 flex items-center justify-center">
                       <p className="text-2xl font-semibold leading-snug text-center text-balance">
-                        {card.front_question}
+                        {card.prompt}
                       </p>
                     </div>
                     <div className="text-center text-xs text-muted-foreground inline-flex items-center justify-center gap-1.5">
@@ -295,30 +290,28 @@ function Practice() {
                     </div>
                   </div>
                   {/* Back */}
-                  <div className={`absolute inset-0 backface-hidden rotate-y-180 rounded-3xl bg-card border-2 shadow-sm p-7 flex flex-col transition-colors ${borderClass}`}>
-                    {card.front_prompt && (
-                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        {card.front_prompt}
-                      </div>
-                    )}
-                    <p className="mt-2 text-base font-medium leading-snug text-muted-foreground">
-                      {card.front_question}
-                    </p>
-                    <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
-                      Answer
-                    </div>
-                    <div className="mt-3">
-                      <p className="text-2xl font-semibold leading-snug text-balance">
-                        {card.back_answer}
+                  <div className={`absolute inset-0 backface-hidden rotate-y-180 rounded-3xl bg-card border-2 shadow-sm transition-colors ${borderClass} overflow-hidden flex flex-col`}>
+                    <div className="flex-1 overflow-y-auto overscroll-contain p-7" style={{ WebkitOverflowScrolling: "touch" }}>
+                      <p className="text-base font-medium leading-snug text-muted-foreground">
+                        {card.prompt}
                       </p>
-                    </div>
-                    {card.back_explanation && (
-                      <div className="mt-5 pt-5 border-t border-border">
-                        <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
-                          {card.back_explanation}
-                        </p>
+                      <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
+                        Answer
                       </div>
-                    )}
+                      <p className="mt-3 text-2xl font-semibold leading-snug text-balance">
+                        {card.back}
+                      </p>
+                      {card.sections.map((s, i) => (
+                        <div key={i} className="mt-5 pt-5 border-t border-border">
+                          <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
+                            {s.title}
+                          </div>
+                          <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                            {s.body}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
 
                 </div>

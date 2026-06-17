@@ -18,14 +18,16 @@ export type DeckSummary = {
   count: number;
 };
 
+export type CardSection = { title: string; body: string };
+
 export type Flashcard = {
   id: string;
   subject: string;
   topic: string;
-  front_prompt: string | null;
-  front_question: string;
-  back_answer: string;
-  back_explanation: string | null;
+  order_index: number;
+  prompt: string;
+  back: string;
+  sections: CardSection[];
 };
 
 export const listDecks = createServerFn({ method: "GET" }).handler(async () => {
@@ -55,22 +57,35 @@ export const getDeckCards = createServerFn({ method: "GET" })
     const supabase = publicClient();
     const { data: rows, error } = await supabase
       .from("flashcards")
-      .select(
-        "id, subject, topic, front_prompt, front_question, back_answer, back_explanation",
-      )
+      .select("id, subject, topic, order_index, prompt, back, sections")
       .eq("subject", data.subject)
-      .eq("topic", data.topic);
+      .eq("topic", data.topic)
+      .order("order_index", { ascending: true })
+      .order("created_at", { ascending: true });
     if (error) throw new Error(error.message);
-    return rows ?? [];
+    return (rows ?? []).map((r) => ({
+      id: r.id,
+      subject: r.subject,
+      topic: r.topic,
+      order_index: r.order_index,
+      prompt: r.prompt,
+      back: r.back,
+      sections: Array.isArray(r.sections) ? (r.sections as unknown as CardSection[]) : [],
+    }));
   });
+
+const sectionSchema = z.object({
+  title: z.string().min(1),
+  body: z.string().min(1),
+});
 
 const importRowSchema = z.object({
   subject: z.string().min(1),
   topic: z.string().min(1),
-  front_prompt: z.string().nullable().optional(),
-  front_question: z.string().min(1),
-  back_answer: z.string().min(1),
-  back_explanation: z.string().nullable().optional(),
+  order_index: z.number().int(),
+  prompt: z.string().min(1),
+  back: z.string().min(1),
+  sections: z.array(sectionSchema),
 });
 
 const bulkImportSchema = z.object({
@@ -103,13 +118,12 @@ export const bulkImportCards = createServerFn({ method: "POST" })
     const payload = data.rows.map((r) => ({
       subject: r.subject.trim(),
       topic: r.topic.trim(),
-      front_prompt: r.front_prompt?.trim() || null,
-      front_question: r.front_question.trim(),
-      back_answer: r.back_answer.trim(),
-      back_explanation: r.back_explanation?.trim() || null,
+      order_index: r.order_index,
+      prompt: r.prompt.trim(),
+      back: r.back.trim(),
+      sections: r.sections,
     }));
 
-    // chunk inserts
     const CHUNK = 500;
     let inserted = 0;
     for (let i = 0; i < payload.length; i += CHUNK) {
