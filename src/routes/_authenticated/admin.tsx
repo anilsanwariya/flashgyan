@@ -350,7 +350,7 @@ function FlashcardsPanel() {
 
 function McqPanel() {
   const qc = useQueryClient();
-  const listFn = useServerFn(listMcqTestsAdmin);
+  const listFn = useServerFn(listMcqTests);
   const deleteFn = useServerFn(deleteMcqTest);
   const testsQ = useQuery({ queryKey: ["mcqTestsAdmin"], queryFn: () => listFn() });
 
