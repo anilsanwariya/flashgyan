@@ -1,7 +1,9 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { z } from "zod";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
-import { Trophy } from "lucide-react";
+import { Trophy, Clock, Layers } from "lucide-react";
+import { useEffect, useState } from "react";
+import { loadSession, type SessionDetail, type Rating } from "@/lib/session-store";
 
 const summarySchema = z.object({
   deckId: fallback(z.string(), "").default(""),
@@ -10,6 +12,7 @@ const summarySchema = z.object({
   medium: fallback(z.number().int().min(0), 0).default(0),
   easy: fallback(z.number().int().min(0), 0).default(0),
   seconds: fallback(z.number().int().min(0), 0).default(0),
+  sessionId: fallback(z.string(), "").default(""),
 });
 
 export const Route = createFileRoute("/summary")({
@@ -29,9 +32,54 @@ function fmtTime(s: number) {
   return m > 0 ? `${m}m ${r}s` : `${r}s`;
 }
 
+const ratingTone: Record<Rating, "success" | "warning" | "destructive"> = {
+  easy: "success",
+  medium: "warning",
+  hard: "destructive",
+};
+
+const ratingLabel: Record<Rating, string> = {
+  hard: "Hard",
+  medium: "Medium",
+  easy: "Easy",
+};
+
 function Summary() {
-  const { deckId, total, hard, medium, easy, seconds } = Route.useSearch();
+  const { deckId, total, hard, medium, easy, seconds, sessionId } =
+    Route.useSearch();
+  const [detail, setDetail] = useState<SessionDetail | null>(null);
+
+  useEffect(() => {
+    if (sessionId) setDetail(loadSession(sessionId));
+  }, [sessionId]);
+
   const pct = (n: number) => (total ? Math.round((n / total) * 100) : 0);
+  const avgSec = total ? Math.round(seconds / total) : 0;
+
+  // Group results by subject/topic
+  const grouped = new Map<
+    string,
+    { subject: string; topic: string; counts: Record<Rating, number>; cards: typeof detail extends null ? never : NonNullable<SessionDetail>["results"] }
+  >();
+  if (detail) {
+    for (const r of detail.results) {
+      const key = `${r.subject}|||${r.topic}`;
+      let g = grouped.get(key);
+      if (!g) {
+        g = {
+          subject: r.subject,
+          topic: r.topic,
+          counts: { hard: 0, medium: 0, easy: 0 },
+          cards: [],
+        };
+        grouped.set(key, g);
+      }
+      g.counts[r.rating]++;
+      g.cards.push(r);
+    }
+  }
+
+  const hardCards = detail?.results.filter((r) => r.rating === "hard") ?? [];
 
   return (
     <div className="min-h-dvh bg-background flex flex-col">
@@ -48,11 +96,95 @@ function Summary() {
           </p>
         </div>
 
-        <div className="mt-10 space-y-3">
-          <Row label="Easy" value={easy} pct={pct(easy)} tone="success" />
-          <Row label="Medium" value={medium} pct={pct(medium)} tone="warning" />
-          <Row label="Hard" value={hard} pct={pct(hard)} tone="destructive" />
+        <div className="mt-8 grid grid-cols-3 gap-3">
+          <Stat icon={<Layers className="h-4 w-4" />} label="Cards" value={String(total)} />
+          <Stat icon={<Clock className="h-4 w-4" />} label="Total" value={fmtTime(seconds)} />
+          <Stat icon={<Clock className="h-4 w-4" />} label="Per card" value={`${avgSec}s`} />
         </div>
+
+        <section className="mt-8">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+            By difficulty
+          </h2>
+          <div className="space-y-3">
+            <Row label="Easy" value={easy} pct={pct(easy)} tone="success" />
+            <Row label="Medium" value={medium} pct={pct(medium)} tone="warning" />
+            <Row label="Hard" value={hard} pct={pct(hard)} tone="destructive" />
+          </div>
+        </section>
+
+        {grouped.size > 0 && (
+          <section className="mt-8">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+              By subject · topic
+            </h2>
+            <div className="space-y-3">
+              {Array.from(grouped.values()).map((g) => {
+                const gTotal = g.cards.length;
+                return (
+                  <div
+                    key={`${g.subject}-${g.topic}`}
+                    className="rounded-2xl border border-border bg-card p-4"
+                  >
+                    <div className="flex items-baseline justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold truncate">{g.topic}</div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          {g.subject}
+                        </div>
+                      </div>
+                      <div className="text-sm tabular-nums text-muted-foreground shrink-0">
+                        {gTotal} card{gTotal === 1 ? "" : "s"}
+                      </div>
+                    </div>
+                    <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-muted">
+                      <Seg n={g.counts.easy} total={gTotal} className="bg-success" />
+                      <Seg n={g.counts.medium} total={gTotal} className="bg-warning" />
+                      <Seg n={g.counts.hard} total={gTotal} className="bg-destructive" />
+                    </div>
+                    <div className="mt-2 flex gap-3 text-xs text-muted-foreground tabular-nums">
+                      <span><span className="inline-block h-2 w-2 rounded-full bg-success mr-1 align-middle" />{g.counts.easy} easy</span>
+                      <span><span className="inline-block h-2 w-2 rounded-full bg-warning mr-1 align-middle" />{g.counts.medium} med</span>
+                      <span><span className="inline-block h-2 w-2 rounded-full bg-destructive mr-1 align-middle" />{g.counts.hard} hard</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {hardCards.length > 0 && (
+          <section className="mt-8">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+              Review queue · {hardCards.length} card{hardCards.length === 1 ? "" : "s"} marked hard
+            </h2>
+            <ul className="space-y-2">
+              {hardCards.map((c) => (
+                <li
+                  key={c.id}
+                  className="rounded-2xl border border-border bg-card p-4"
+                >
+                  <div className="text-xs text-muted-foreground truncate">
+                    {c.subject} · {c.topic}
+                  </div>
+                  <div className="mt-1 font-medium leading-snug">
+                    {c.front_question}
+                  </div>
+                  <div className="mt-1 text-sm text-muted-foreground leading-snug">
+                    {c.back_answer}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {detail && hardCards.length === 0 && (
+          <p className="mt-8 text-center text-sm text-muted-foreground">
+            No cards marked hard — nice work.
+          </p>
+        )}
 
         <div className="mt-10 grid grid-cols-2 gap-3">
           <Link
@@ -81,6 +213,24 @@ function Summary() {
       </main>
     </div>
   );
+}
+
+function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-border bg-card p-3 text-center">
+      <div className="flex items-center justify-center gap-1 text-muted-foreground text-xs">
+        {icon}
+        {label}
+      </div>
+      <div className="mt-1 text-lg font-bold tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+function Seg({ n, total, className }: { n: number; total: number; className: string }) {
+  if (!n) return null;
+  const w = total ? (n / total) * 100 : 0;
+  return <div className={className} style={{ width: `${w}%` }} />;
 }
 
 function Row({
