@@ -148,10 +148,9 @@ function TakeTest() {
             />
           )}
           {q.hint && (
-            <details className="text-sm text-muted-foreground">
-              <summary className="cursor-pointer font-medium">Hint</summary>
-              <p className="mt-2">{q.hint}</p>
-            </details>
+            <p className="text-base font-medium leading-relaxed whitespace-pre-wrap">
+              {q.hint}
+            </p>
           )}
 
           <div className="space-y-2">

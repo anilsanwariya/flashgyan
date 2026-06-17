@@ -136,9 +136,9 @@ function Result() {
                     />
                   )}
                   {q.hint && (
-                    <div className="text-xs text-muted-foreground">
-                      <span className="font-semibold">Hint:</span> {q.hint}
-                    </div>
+                    <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap">
+                      {q.hint}
+                    </p>
                   )}
                   <ul className="space-y-1">
                     {opts.map((o, oi) => {
