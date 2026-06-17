@@ -98,6 +98,11 @@ function Practice() {
   const [cardRatings, setCardRatings] = useState<(Rating | null)[]>(() =>
     cards.map(() => null),
   );
+  const [priorRatings] = useState<(Rating | null)[]>(() => {
+    if (!review) return cards.map(() => null);
+    const state = loadReview(deckId);
+    return cards.map((c) => state[c.id] ?? null);
+  });
 
 
   const ratings = useMemo(() => {
@@ -109,19 +114,21 @@ function Practice() {
   const card = cards[index];
   const total = cards.length;
   const currentRating = cardRatings[index];
+  const displayRating = currentRating ?? priorRatings[index];
   const borderClass =
-    currentRating === "hard"
+    displayRating === "hard"
       ? "border-destructive"
-      : currentRating === "medium"
+      : displayRating === "medium"
       ? "border-warning"
-      : currentRating === "easy"
+      : displayRating === "easy"
       ? "border-success"
       : "border-border";
 
 
   useEffect(() => {
-    setFlipped(cardRatings[index] !== null);
-  }, [index, cardRatings]);
+    setFlipped(cardRatings[index] !== null || priorRatings[index] !== null);
+  }, [index, cardRatings, priorRatings]);
+
 
 
   if (total === 0) {
