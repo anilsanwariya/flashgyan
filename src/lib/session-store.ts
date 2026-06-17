@@ -4,8 +4,8 @@ export type SessionCardResult = {
   id: string;
   subject: string;
   topic: string;
-  front_question: string;
-  back_answer: string;
+  prompt: string;
+  back: string;
   rating: Rating;
 };
 
