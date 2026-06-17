@@ -4,9 +4,9 @@ import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { z } from "zod";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
 import { getDeckCards } from "@/lib/flashcards.functions";
-import { motion, AnimatePresence, type PanInfo } from "motion/react";
-import { ArrowLeft, RotateCcw } from "lucide-react";
-import { toast } from "sonner";
+import { motion, AnimatePresence } from "motion/react";
+import { ArrowLeft, RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   newSessionId,
   saveSession,

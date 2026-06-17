@@ -1,58 +1,30 @@
 ## Goal
+Fix the conflict between horizontal swipe-to-navigate and vertical scrolling on the back of the card by replacing gestures with on-card arrow buttons, and make the back-card scrollbar visible.
 
-Split the front into separate `prompt` (small) and `question` (large) fields, rename `back` → `answer`, and update Excel import + card UI accordingly.
+## Changes (all in `src/routes/practice.$deckId.tsx`)
 
-## New Excel format
+### 1. Remove swipe gestures
+- Drop `drag`, `dragConstraints`, `dragElastic`, `onDragEnd`, `handleDragEnd`, and the `touch-pan-y` class from the `motion.div` wrapping the card.
+- Card scrolling on the back will now work natively without competing with horizontal drag.
 
-Headers (first row):
-```
-subject | topic | order | prompt | question | answer | explanation_<title1> | explanation_<title2> | ...
-```
+### 2. Add semi-transparent side navigation buttons
+- Wrap the card in a `relative` container.
+- Add two absolutely-positioned circular icon buttons (`ChevronLeft`, `ChevronRight` from lucide) vertically centered, one on each side, overlapping the card edges slightly.
+- Styling: `bg-background/60 backdrop-blur-sm border border-border rounded-full h-10 w-10`, hover `bg-background/80`. Positioned `left-2` / `right-2` with `top-1/2 -translate-y-1/2`, `z-10`.
+- Clicking does NOT flip the card (stopPropagation).
 
-- All six fixed columns required.
-- `explanation_*` columns: any number, order preserved, title from suffix (snake_case → Title Case), empty cells skipped.
+### 3. Visibility rules
+- **Left (prev) button**: hidden when `index === 0`.
+- **Right (next) button**: hidden when `currentRating === null` OR when `index === total - 1` (last card has no "next" — user finishes by rating). This matches the existing rule that you must rate before advancing.
+- Keep the existing `goPrev` / `goNext` handlers; remove the toast-on-unrated path since the button is simply hidden instead.
 
-## Database (single migration)
+### 4. Visible scrollbar on back face
+- Replace the back face's plain `overflow-y-auto` div with shadcn `ScrollArea` (`@/components/ui/scroll-area`, already in project) so a thin always-styled scrollbar shows during scroll.
+- Alternative if ScrollArea conflicts with the 3D flip transform: keep native scroll but add Tailwind utilities to force a visible thin scrollbar (`scrollbar-thin`-style via inline `style` using `scrollbar-width: thin` and `scrollbar-color`, plus webkit pseudo-element CSS in `src/styles.css`). Prefer ScrollArea first; fall back only if the backface-hidden + rotate breaks it.
 
-Wipe and recreate `flashcards`:
-- `id uuid pk`
-- `subject text not null`
-- `topic text not null`
-- `order_index int not null default 0`
-- `prompt text not null`
-- `question text not null`
-- `answer text not null`
-- `sections jsonb not null default '[]'::jsonb`
-- `created_at timestamptz default now()`
-
-Re-apply existing RLS (public SELECT to anon/authenticated; writes via service role only) and GRANTs. Index `(subject, topic, order_index)`.
-
-## Card UI (`src/routes/practice.$deckId.tsx`)
-
-- **Front**: small `prompt` label on top, large `question` below (restores the old split layout).
-- **Back** (scrollable inside fixed card frame):
-  1. Small recap: `prompt` label + `question`
-  2. "Answer" label + `answer` text
-  3. Each `sections[i]`: title heading + body
-- Border-color rating behavior, swipe gestures, and rate-before-next popup unchanged. Inner scroll area does not trigger horizontal swipe.
-
-## Admin importer (`src/routes/_authenticated/admin.tsx`)
-
-- REQUIRED = `subject, topic, order, prompt, question, answer`.
-- Detect `explanation_*` columns in column order; build `sections: [{title, body}]` from non-empty cells.
-- Coerce `order` to positive int; reject otherwise.
-- Preview columns: Subject, Topic, Order, Prompt, Question, #Sections.
-- Help text updated.
-
-## Types & call sites
-
-- `Flashcard` type in `flashcards.functions.ts`: add `question`, rename `back` → `answer`.
-- `importRowSchema`: add `question`, rename `back` → `answer`.
-- `getDeckCards` select: include `question`, `answer`.
-- `SessionCardResult` in `session-store.ts`: add `question`, rename `back` → `answer`.
-- `summary.tsx`: show `question` and `answer` where it currently shows `prompt`/`back`.
-- `practice.$deckId.tsx`: results mapping uses `card.question` + `card.answer`.
+### 5. Cleanup
+- Remove now-unused `PanInfo` import and `toast` import if no other call site uses them (verify before removing `toast`).
 
 ## Out of scope
-
-Rating UI, progress bar, swipe-to-rate, summary grouping logic — unchanged beyond field renames.
+- Rating buttons, flip animation, progress bar, review mode logic — unchanged.
+- No schema or server changes.
