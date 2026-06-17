@@ -22,7 +22,7 @@ const decksQO = queryOptions({
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Flashly — Pick a deck" },
+      { title: "Flashgyan web — Pick a deck" },
       { name: "description", content: "Browse flashcard decks by subject and topic and start a focused practice session." },
     ],
   }),
