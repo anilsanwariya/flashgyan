@@ -16,32 +16,32 @@ export type Database = {
     Tables: {
       flashcards: {
         Row: {
-          back_answer: string
-          back_explanation: string | null
+          back: string
           created_at: string
-          front_prompt: string | null
-          front_question: string
           id: string
+          order_index: number
+          prompt: string
+          sections: Json
           subject: string
           topic: string
         }
         Insert: {
-          back_answer: string
-          back_explanation?: string | null
+          back: string
           created_at?: string
-          front_prompt?: string | null
-          front_question: string
           id?: string
+          order_index?: number
+          prompt: string
+          sections?: Json
           subject: string
           topic: string
         }
         Update: {
-          back_answer?: string
-          back_explanation?: string | null
+          back?: string
           created_at?: string
-          front_prompt?: string | null
-          front_question?: string
           id?: string
+          order_index?: number
+          prompt?: string
+          sections?: Json
           subject?: string
           topic?: string
         }
