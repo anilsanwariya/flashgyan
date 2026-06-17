@@ -270,7 +270,7 @@ function Practice() {
                   }
                 >
                   {/* Front */}
-                  <div className="absolute inset-0 backface-hidden rounded-3xl bg-card border border-border shadow-sm p-7 flex flex-col">
+                  <div className={`absolute inset-0 backface-hidden rounded-3xl bg-card border-2 shadow-sm p-7 flex flex-col transition-colors ${borderClass}`}>
                     {card.front_prompt && (
                       <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                         {card.front_prompt}
@@ -286,7 +286,7 @@ function Practice() {
                     </div>
                   </div>
                   {/* Back */}
-                  <div className="absolute inset-0 backface-hidden rotate-y-180 rounded-3xl bg-card border border-border shadow-sm p-7 flex flex-col">
+                  <div className={`absolute inset-0 backface-hidden rotate-y-180 rounded-3xl bg-card border-2 shadow-sm p-7 flex flex-col transition-colors ${borderClass}`}>
                     <div className="text-xs font-semibold uppercase tracking-wider text-primary">
                       Answer
                     </div>
