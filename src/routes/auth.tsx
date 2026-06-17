@@ -9,7 +9,7 @@ import { ArrowLeft } from "lucide-react";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
-  head: () => ({ meta: [{ title: "Admin sign in — Flashly" }] }),
+  head: () => ({ meta: [{ title: "Admin sign in — Flashgyan web" }] }),
   component: Auth,
 });
 
