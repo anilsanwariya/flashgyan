@@ -235,8 +235,9 @@ function Admin() {
             <Upload className="h-4 w-4" /> Upload Excel
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Columns: Subject, Topic, Card front - prompt, Card front - question, Card back -
-            answer, Card back - explanation.
+            Columns: subject, topic, order, prompt, back, then any number of
+            explanation_&lt;title&gt; columns (e.g. explanation_definition). Text
+            after the underscore becomes the section heading.
           </p>
 
           <label className="mt-4 flex items-center justify-center h-24 rounded-xl border-2 border-dashed border-border cursor-pointer hover:bg-accent/40">
