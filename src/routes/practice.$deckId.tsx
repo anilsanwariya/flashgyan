@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { z } from "zod";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
-import { getDeckCards } from "@/lib/flashcards.functions";
+import { getDeck } from "@/lib/flashcards.functions";
 import { motion, AnimatePresence } from "motion/react";
 import { ArrowLeft, RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -27,24 +27,12 @@ import {
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
 
-function decodeDeckId(id: string): { subject: string; topic: string } {
-  try {
-    const raw = decodeURIComponent(escape(atob(id)));
-    const [subject, topic] = raw.split("|||");
-    if (!subject || !topic) throw new Error("bad id");
-    return { subject, topic };
-  } catch {
-    throw notFound();
-  }
-}
-
-const cardsQO = (deckId: string) => {
-  const { subject, topic } = decodeDeckId(deckId);
-  return queryOptions({
-    queryKey: ["deck", subject, topic],
-    queryFn: () => getDeckCards({ data: { subject, topic } }),
+const deckQO = (deckId: string) =>
+  queryOptions({
+    queryKey: ["deck", deckId],
+    queryFn: () => getDeck({ data: { id: deckId } }),
   });
-};
+
 
 const practiceSearchSchema = z.object({
   review: fallback(z.boolean(), false).default(false),
