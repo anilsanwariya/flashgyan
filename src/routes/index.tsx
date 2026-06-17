@@ -3,7 +3,9 @@ import { useMemo, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { listDecks, type DeckSummary } from "@/lib/flashcards.functions";
 import { Button } from "@/components/ui/button";
-import { ChevronRight, Layers, Settings } from "lucide-react";
+import { ChevronRight, Settings } from "lucide-react";
+import logoAsset from "@/assets/flashgyan-logo.png.asset.json";
+
 import {
   Select,
   SelectContent,
