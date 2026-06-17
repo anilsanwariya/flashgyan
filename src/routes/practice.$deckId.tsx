@@ -98,6 +98,11 @@ function Practice() {
   const [cardRatings, setCardRatings] = useState<(Rating | null)[]>(() =>
     cards.map(() => null),
   );
+  const [priorRatings] = useState<(Rating | null)[]>(() => {
+    if (!review) return cards.map(() => null);
+    const state = loadReview(deckId);
+    return cards.map((c) => state[c.id] ?? null);
+  });
 
 
   const ratings = useMemo(() => {
@@ -109,19 +114,21 @@ function Practice() {
   const card = cards[index];
   const total = cards.length;
   const currentRating = cardRatings[index];
+  const displayRating = currentRating ?? priorRatings[index];
   const borderClass =
-    currentRating === "hard"
+    displayRating === "hard"
       ? "border-destructive"
-      : currentRating === "medium"
+      : displayRating === "medium"
       ? "border-warning"
-      : currentRating === "easy"
+      : displayRating === "easy"
       ? "border-success"
       : "border-border";
 
 
   useEffect(() => {
-    setFlipped(cardRatings[index] !== null);
-  }, [index, cardRatings]);
+    setFlipped(cardRatings[index] !== null || priorRatings[index] !== null);
+  }, [index, cardRatings, priorRatings]);
+
 
 
   if (total === 0) {
@@ -337,22 +344,7 @@ function Practice() {
       </main>
 
       <footer className="px-5 pb-6 pt-2 max-w-2xl w-full mx-auto">
-        {currentRating !== null ? (
-          <div className="h-14 rounded-2xl border border-border bg-card grid place-items-center text-sm text-muted-foreground">
-            <span className="inline-flex items-center gap-2">
-              <span
-                className={`inline-block h-2 w-2 rounded-full ${
-                  currentRating === "easy"
-                    ? "bg-success"
-                    : currentRating === "medium"
-                    ? "bg-warning"
-                    : "bg-destructive"
-                }`}
-              />
-              Already rated · {currentRating.charAt(0).toUpperCase() + currentRating.slice(1)}
-            </span>
-          </div>
-        ) : flipped ? (
+        {flipped ? (
           <div className="grid grid-cols-3 gap-2">
             <RatingButton label="Hard" tone="destructive" onClick={() => rate("hard")} />
             <RatingButton label="Medium" tone="warning" onClick={() => rate("medium")} />
@@ -366,6 +358,7 @@ function Practice() {
             Reveal answer
           </button>
         )}
+
 
       </footer>
     </div>

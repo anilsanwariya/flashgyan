@@ -1,22 +1,26 @@
-## Rebrand to "Flashgyan web" with uploaded logo
+## Show prior ratings in review mode without breaking the "must rate to advance" guard
 
-### 1. Upload the icon as a Lovable Asset
-- Run `lovable-assets create --file /mnt/user-uploads/icon.png --filename flashgyan-logo.png > src/assets/flashgyan-logo.png.asset.json`.
-- Use the resulting `.asset.json` pointer everywhere a logo or favicon is needed.
+In review mode (opened from the summary "Review" button) the user wants to see the colored border from their previous session's rating on each card AND still be able to change the rating. The previously-added rule that the right arrow only appears once the user has rated the current card in THIS session must still hold.
 
-### 2. Replace text "Flashly" → "Flashgyan web" everywhere
-Files and exact replacements:
-- `src/routes/__root.tsx` line 81/83: titles & og:title → `"Flashgyan web — Focused Flashcard Practice"`.
-- `src/routes/index.tsx` line 23: `"Flashgyan web — Pick a deck"`.
-- `src/routes/index.tsx` line 67: header text → `"Flashgyan web"`.
-- `src/routes/summary.tsx` line 24: `"Session summary — Flashgyan web"`.
-- `src/routes/auth.tsx` line 12: `"Admin sign in — Flashgyan web"`.
-- `src/routes/_authenticated/admin.tsx` line 19: `"Admin — Flashgyan web"`.
-- `src/lib/session-store.ts` — leave the `flashly:` sessionStorage key prefixes unchanged (internal keys; renaming would silently lose in-flight session data).
+### Changes — `src/routes/practice.$deckId.tsx`
 
-### 3. Use the logo
-- `src/routes/__root.tsx`: import the asset pointer and add a favicon link entry `{ rel: "icon", type: "image/png", href: logo.url }` in the root `links` array.
-- `src/routes/index.tsx` header: replace the `<Layers />` icon next to the brand text with an `<img src={logo.url} alt="Flashgyan web logo" className="h-5 w-5 rounded-sm" />`. Keep the same flex layout; drop the now-unused `Layers` import if no other usage remains in the file.
+1. **Add a parallel `priorRatings` array** (review mode only):
+   - `const [priorRatings] = useState<(Rating | null)[]>(() => review ? cards.map(c => loadReview(deckId)[c.id] ?? null) : cards.map(() => null));`
+   - This holds the saved rating from the previous session, purely for display.
+
+2. **Keep `cardRatings` initialized to all nulls** (current behavior). This continues to drive the advance guard, so in review mode the right arrow stays hidden until the user picks a rating again.
+
+3. **Update `borderClass`** to fall back to the prior rating:
+   - `const displayRating = currentRating ?? priorRatings[index];`
+   - Compute `borderClass` from `displayRating` instead of `currentRating`. Result: cards show their previous color from the moment review starts; once the user picks a new rating in this session it overrides the color.
+
+4. **Auto-flip on revisit**: change the existing `useEffect` to flip when `cardRatings[index]` is set in this session OR when `priorRatings[index]` exists (review mode). So review cards open on the answer face, matching the colored-border experience.
+
+5. **Footer / rating buttons**: unchanged. Buttons still appear on the back face whenever `currentRating` is null OR set — wait, current code shows them only when `flipped && currentRating === null`. Change to show them whenever `flipped` (drop the `currentRating !== null` "Already rated" branch entirely). This lets the user change a rating they just set in this session too, which is consistent with the review goal.
+
+6. **Progress bar at top**: it reads from `cardRatings` only. Leave as-is — it should reflect this session's progress, not the prior one.
 
 ### Out of scope
-- No DB, route, or auth changes. No other UI restyling. Storage key prefix stays as `flashly:` to preserve existing session/review state.
+- No change to `saveReview`/`loadReview` storage shape.
+- No change to summary page, schema, or non-review fresh-practice flow (fresh practice has no `priorRatings`, so nothing visible changes there).
+- Right-arrow visibility logic still keys off `currentRating !== null` — guard preserved.
