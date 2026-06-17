@@ -171,13 +171,11 @@ function Practice() {
     const next = cardRatings.slice();
     next[index] = r;
     setCardRatings(next);
-    if (next.every((x) => x !== null)) {
+    if (index < total - 1) {
+      setIndex(index + 1);
+    } else if (next.every((x) => x !== null)) {
       submit(next);
-      return;
     }
-    // advance to next unrated card, or simply next card
-    const nextUnrated = next.findIndex((x, i) => i > index && x === null);
-    setIndex(nextUnrated !== -1 ? nextUnrated : Math.min(index + 1, total - 1));
   }
 
   function goPrev() {
