@@ -228,7 +228,7 @@ function FlashcardsSection({ decks }: { decks: DeckSummary[] }) {
         ) : (
           <ul className="space-y-3">
             {filtered.map((d) => (
-              <DeckCard key={`${d.subject}|${d.topic}`} deck={d} />
+              <DeckCard key={d.id} deck={d} />
             ))}
           </ul>
         )}
