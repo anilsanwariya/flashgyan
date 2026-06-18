@@ -297,3 +297,36 @@ export const signMcqImage = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { url: signed.signedUrl };
   });
+
+export const uploadMcqImage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        filename: z.string().min(1),
+        contentType: z.string().min(1),
+        dataBase64: z.string().min(1),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const supabaseAdmin = await assertAdmin(context.userId);
+    const ext = data.filename.split(".").pop() || "png";
+    const path = `${data.id}/${Date.now()}.${ext}`;
+    const bytes = Buffer.from(data.dataBase64, "base64");
+    const { error: upErr } = await supabaseAdmin.storage
+      .from("mcq-images")
+      .upload(path, bytes, { upsert: true, contentType: data.contentType });
+    if (upErr) throw new Error(upErr.message);
+    const { data: signed, error: sErr } = await supabaseAdmin.storage
+      .from("mcq-images")
+      .createSignedUrl(path, 60 * 60 * 24 * 365 * 10);
+    if (sErr) throw new Error(sErr.message);
+    const { error: dbErr } = await supabaseAdmin
+      .from("mcq_questions")
+      .update({ image_url: signed.signedUrl })
+      .eq("id", data.id);
+    if (dbErr) throw new Error(dbErr.message);
+    return { path, url: signed.signedUrl };
+  });
