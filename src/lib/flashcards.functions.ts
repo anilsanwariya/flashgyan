@@ -313,6 +313,39 @@ export const signFlashcardImage = createServerFn({ method: "POST" })
     return { url: signed.signedUrl, path: data.path };
   });
 
+export const uploadFlashcardImage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        filename: z.string().min(1),
+        contentType: z.string().min(1),
+        dataBase64: z.string().min(1),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const admin = await assertAdmin(context.userId);
+    const ext = data.filename.split(".").pop() || "png";
+    const path = `${data.id}/${Date.now()}.${ext}`;
+    const bytes = Buffer.from(data.dataBase64, "base64");
+    const { error: upErr } = await admin.storage
+      .from("flashcard-images")
+      .upload(path, bytes, { upsert: true, contentType: data.contentType });
+    if (upErr) throw new Error(upErr.message);
+    const { error: dbErr } = await admin
+      .from("flashcards")
+      .update({ image_url: path })
+      .eq("id", data.id);
+    if (dbErr) throw new Error(dbErr.message);
+    const { data: signed, error: sErr } = await admin.storage
+      .from("flashcard-images")
+      .createSignedUrl(path, 60 * 60 * 24 * 365 * 10);
+    if (sErr) throw new Error(sErr.message);
+    return { path, url: signed.signedUrl };
+  });
+
 const importRowSchema = z.object({
   order_index: z.number().int(),
   prompt: z.string().min(1),
