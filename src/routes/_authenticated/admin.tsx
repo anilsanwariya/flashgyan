@@ -1474,7 +1474,7 @@ function QuestionEditDialog({
 }) {
   const updateFn = useServerFn(updateMcqQuestion);
   const setImgFn = useServerFn(setMcqQuestionImage);
-  const signFn = useServerFn(signMcqImage);
+  const uploadFn = useServerFn(uploadMcqImage);
   const [form, setForm] = useState({ ...q });
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -1484,14 +1484,18 @@ function QuestionEditDialog({
     if (!file) return;
     setUploading(true);
     try {
-      const ext = file.name.split(".").pop() || "png";
-      const path = `${q.id}/${Date.now()}.${ext}`;
-      const { error } = await supabase.storage
-        .from("mcq-images")
-        .upload(path, file, { upsert: true, contentType: file.type });
-      if (error) throw error;
-      const { url } = await signFn({ data: { path } });
-      await setImgFn({ data: { id: q.id, image_url: url } });
+      const buf = await file.arrayBuffer();
+      const dataBase64 = btoa(
+        new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), ""),
+      );
+      const { url } = await uploadFn({
+        data: {
+          id: q.id,
+          filename: file.name,
+          contentType: file.type || "application/octet-stream",
+          dataBase64,
+        },
+      });
       setForm((f) => ({ ...f, image_url: url }));
       toast.success("Image uploaded");
     } catch (err) {
