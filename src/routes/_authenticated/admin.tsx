@@ -771,7 +771,6 @@ function CardEditDialog({
   const createFn = useServerFn(createCard);
   const updateFn = useServerFn(updateCard);
   const setImgFn = useServerFn(setCardImage);
-  const signFn = useServerFn(signFlashcardImage);
   const uploadFn = useServerFn(uploadFlashcardImage);
 
   const [form, setForm] = useState(
