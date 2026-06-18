@@ -15,6 +15,7 @@ import {
   signFlashcardImage,
   updateCard,
   updateDeck,
+  uploadFlashcardImage,
   type DeckSummary,
   type Flashcard,
 } from "@/lib/flashcards.functions";
