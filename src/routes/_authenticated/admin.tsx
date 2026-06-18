@@ -804,15 +804,18 @@ function CardEditDialog({
     }
     setUploading(true);
     try {
-      const ext = file.name.split(".").pop() || "png";
-      const path = `${card.id}/${Date.now()}.${ext}`;
-      const { error } = await supabase.storage
-        .from("flashcard-images")
-        .upload(path, file, { upsert: true, contentType: file.type });
-      if (error) throw error;
-      // Store the storage path in DB (not the signed URL) so we can re-sign later.
-      await setImgFn({ data: { id: card.id, image_url: path } });
-      const { url } = await signFn({ data: { path } });
+      const buf = await file.arrayBuffer();
+      const dataBase64 = btoa(
+        new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), ""),
+      );
+      const { path, url } = await uploadFn({
+        data: {
+          id: card.id,
+          filename: file.name,
+          contentType: file.type || "application/octet-stream",
+          dataBase64,
+        },
+      });
       setImagePath(path);
       setForm((f) => ({ ...f, image_url: url }));
       toast.success("Image uploaded");
