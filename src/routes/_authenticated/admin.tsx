@@ -30,6 +30,7 @@ import {
   signMcqImage,
   updateMcqQuestion,
   updateMcqTest,
+  uploadMcqImage,
   type McqQuestion,
   type McqTestSummary,
 } from "@/lib/mcq.functions";
