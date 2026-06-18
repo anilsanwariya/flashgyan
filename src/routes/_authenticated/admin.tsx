@@ -26,7 +26,6 @@ import {
   getMcqTest,
   listMcqTests,
   setMcqQuestionImage,
-  signMcqImage,
   updateMcqQuestion,
   updateMcqTest,
   uploadMcqImage,
