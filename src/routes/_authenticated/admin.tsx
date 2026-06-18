@@ -12,7 +12,6 @@ import {
   getDeck,
   listDecks,
   setCardImage,
-  signFlashcardImage,
   updateCard,
   updateDeck,
   uploadFlashcardImage,
