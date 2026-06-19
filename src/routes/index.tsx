@@ -233,8 +233,8 @@ function FlashcardsSection({ decks }: { decks: DeckSummary[] }) {
           <EmptyState what="decks" />
         ) : (
           <ul className="space-y-3">
-            {filtered.map((d) => (
-              <DeckCard key={d.id} deck={d} />
+            {filtered.map((d, i) => (
+              <DeckCard key={d.id} deck={d} gradient={GRADIENTS[i % GRADIENTS.length]} />
             ))}
           </ul>
         )}
