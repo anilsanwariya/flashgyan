@@ -111,47 +111,53 @@ function FeaturePicker({
   onOpenMcqs: () => void;
 }) {
   return (
-    <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    <section className="space-y-3">
       <FeatureCard
         title="Flashcards"
         subtitle="Flip cards and rate recall."
         icon={<Layers className="h-5 w-5" />}
+        gradient="grad-pink"
         onClick={onOpenFlashcards}
       />
       <FeatureCard
         title="MCQ Tests"
         subtitle="Timed multiple choice tests."
         icon={<ListChecks className="h-5 w-5" />}
+        gradient="grad-lavender"
         onClick={onOpenMcqs}
       />
     </section>
   );
 }
 
+const GRADIENTS = ["grad-pink", "grad-lavender", "grad-peach", "grad-mint"] as const;
+
 function FeatureCard({
   title,
   subtitle,
   icon,
+  gradient,
   onClick,
 }: {
   title: string;
   subtitle: string;
   icon: React.ReactNode;
+  gradient: string;
   onClick: () => void;
 }) {
   return (
     <button
       onClick={onClick}
-      className="group text-left flex items-center gap-4 rounded-2xl bg-card border border-border p-4 active:scale-[0.99] transition-transform shadow-sm"
+      className={`group w-full text-left flex items-center gap-4 rounded-3xl ${gradient} p-5 shadow-soft active:scale-[0.99] transition-transform`}
     >
-      <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+      <div className="h-12 w-12 rounded-full bg-white/70 text-foreground flex items-center justify-center shrink-0">
         {icon}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-lg font-semibold">{title}</div>
-        <div className="mt-0.5 text-sm text-muted-foreground">{subtitle}</div>
+        <div className="text-lg font-bold text-foreground">{title}</div>
+        <div className="mt-0.5 text-sm text-foreground/70">{subtitle}</div>
       </div>
-      <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0 group-hover:translate-x-0.5 transition-transform" />
+      <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
     </button>
   );
 }
@@ -227,8 +233,8 @@ function FlashcardsSection({ decks }: { decks: DeckSummary[] }) {
           <EmptyState what="decks" />
         ) : (
           <ul className="space-y-3">
-            {filtered.map((d) => (
-              <DeckCard key={d.id} deck={d} />
+            {filtered.map((d, i) => (
+              <DeckCard key={d.id} deck={d} gradient={GRADIENTS[i % GRADIENTS.length]} />
             ))}
           </ul>
         )}
@@ -245,26 +251,28 @@ function McqSection({ tests }: { tests: McqTestSummary[] }) {
         {tests.length} test{tests.length === 1 ? "" : "s"}
       </h2>
       <ul className="space-y-3">
-        {tests.map((t) => (
+        {tests.map((t, i) => (
           <li key={t.id}>
             <Link
               to="/mcq/$testId"
               params={{ testId: t.id }}
-              className="group flex items-center gap-4 rounded-2xl bg-card border border-border p-4 active:scale-[0.99] transition-transform shadow-sm"
+              className={`group flex items-center gap-4 rounded-3xl ${GRADIENTS[i % GRADIENTS.length]} p-5 shadow-soft active:scale-[0.99] transition-transform`}
             >
+              <div className="h-12 w-12 rounded-full bg-white/70 text-foreground flex items-center justify-center shrink-0">
+                <Timer className="h-5 w-5" />
+              </div>
               <div className="min-w-0 flex-1">
-                <div className="text-xs uppercase tracking-wide text-muted-foreground inline-flex items-center gap-2">
-                  <Timer className="h-3 w-3" />
+                <div className="text-lg font-bold text-foreground truncate">{t.name}</div>
+                <div className="mt-0.5 text-sm text-foreground/70">
                   {Math.round(t.duration_seconds / 60)} min · {t.question_count} Q
                 </div>
-                <div className="mt-0.5 text-lg font-semibold truncate">{t.name}</div>
                 {t.description && (
-                  <div className="mt-1 text-sm text-muted-foreground line-clamp-2">
+                  <div className="mt-1 text-sm text-foreground/60 line-clamp-2">
                     {t.description}
                   </div>
                 )}
               </div>
-              <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0 group-hover:translate-x-0.5 transition-transform" />
+              <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
             </Link>
           </li>
         ))}
@@ -315,30 +323,33 @@ function FilterSelect({
   );
 }
 
-function DeckCard({ deck }: { deck: DeckSummary }) {
+function DeckCard({ deck, gradient }: { deck: DeckSummary; gradient: string }) {
   return (
     <li>
       <Link
         to="/practice/$deckId"
         params={{ deckId: deck.id }}
         search={{ review: false }}
-        className="group flex items-center gap-4 rounded-2xl bg-card border border-border p-4 active:scale-[0.99] transition-transform shadow-sm"
+        className={`group flex items-center gap-4 rounded-3xl ${gradient} p-5 shadow-soft active:scale-[0.99] transition-transform`}
       >
+        <div className="h-12 w-12 rounded-full bg-white/70 text-foreground flex items-center justify-center shrink-0">
+          <Layers className="h-5 w-5" />
+        </div>
         <div className="min-w-0 flex-1">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground">
+          <div className="text-xs uppercase tracking-wide text-foreground/60">
             {deck.subject} · {deck.topic}
           </div>
-          <div className="mt-0.5 text-lg font-semibold truncate">{deck.name}</div>
+          <div className="mt-0.5 text-lg font-bold text-foreground truncate">{deck.name}</div>
           {deck.description && (
-            <div className="mt-1 text-sm text-muted-foreground line-clamp-2">
+            <div className="mt-1 text-sm text-foreground/70 line-clamp-2">
               {deck.description}
             </div>
           )}
-          <div className="mt-1 text-sm text-muted-foreground">
+          <div className="mt-1 text-sm text-foreground/60">
             {deck.count} card{deck.count === 1 ? "" : "s"}
           </div>
         </div>
-        <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0 group-hover:translate-x-0.5 transition-transform" />
+        <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
       </Link>
     </li>
   );

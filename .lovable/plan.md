@@ -1,20 +1,43 @@
-## Root cause
+## Goal
 
-The browser uploads directly to Storage with the user's session token. The Storage RLS policy then calls `public.has_role(auth.uid(), 'admin')`, which depends on (a) the JWT actually reaching Storage with the right `auth.uid()` and (b) the role lookup succeeding in that request context. In this project both buckets currently have **zero** objects — so MCQ image uploads have never actually succeeded either, the issue just hadn't been hit until now. Continuing to debug client-side storage RLS is fragile.
+Restyle Flashgyan to match the reference: soft lavender/cream background, large serif display headlines, and pastel gradient feature cards with circular icon badges and a right arrow.
 
-## Fix: route image uploads through an admin server function
+## Theme tokens (`src/styles.css`)
 
-Send the file to a `createServerFn` that:
-1. Runs `requireSupabaseAuth` and verifies the caller has the `admin` role (already done by `assertAdmin`).
-2. Uses `supabaseAdmin` (service role) to `storage.from('flashcard-images').upload(path, bytes)`. Service role bypasses RLS, so the upload always works once the user is confirmed admin.
-3. Updates the flashcard's `image_url` to the stored path and returns a signed URL.
+- Background: soft lavender-tinted off-white (`oklch(0.97 0.012 290)`).
+- Foreground: deep navy near-black for high-contrast headings.
+- Card: pure white with very soft shadow + larger radius (`--radius: 1.25rem`).
+- Add serif display font for headings via `<link>` in `__root.tsx` (Fraunces or Instrument Serif) and keep Inter for body. Add `--font-serif` token; apply to `h1`/`.display`.
+- Add 4 pastel gradient tokens:
+  - `--grad-pink`: pink → rose
+  - `--grad-lavender`: lilac → periwinkle
+  - `--grad-peach`: peach → blush
+  - `--grad-mint`: mint → sky
+- Add `--shadow-soft` (low, diffuse) for cards.
 
-Apply the same pattern to the MCQ image upload so it actually works going forward.
+## Home page (`src/routes/index.tsx`)
 
-### Changes
+- Header: big serif H1 ("Pick a feature.") with a short body subtitle, matching reference scale (text-5xl serif, tight tracking).
+- Feature cards (Flashcards / MCQ Tests) and deck/test list items restyled to:
+  - rounded-3xl, full-width pastel gradient background (rotating through the 4 gradients), soft shadow, no border.
+  - Left: white circular icon badge (h-12 w-12) with the existing lucide icon in dark navy.
+  - Middle: bold title + small muted subtitle.
+  - Right: simple arrow-right icon.
+- Cycle gradients deterministically by index so lists look like the reference.
 
-- `src/lib/flashcards.functions.ts`: add `uploadFlashcardImage` server fn (input: `{ id, filename, contentType, dataBase64 }`). Validates admin, uploads via `supabaseAdmin`, updates `flashcards.image_url` to the path, returns `{ path, url }`.
-- `src/lib/mcq.functions.ts`: add the equivalent `uploadMcqImage` for parity.
-- `src/routes/_authenticated/admin.tsx`: in both `onUpload` handlers, read the file as base64 and call the new server fn instead of `supabase.storage.from(...).upload(...)`. Keep the existing path/state wiring; just swap the transport.
+## Other surfaces
 
-No DB migration or policy change needed. Existing RLS policies stay as defense-in-depth.
+- Practice and MCQ routes: pick up new tokens automatically (background, serif H1, rounded cards). Replace any hard `border` look on the flashcard container with the new soft-shadow white card + larger radius. No logic changes.
+- Admin page: inherits tokens; no structural change.
+
+## Out of scope
+
+- No changes to data, auth, server functions, or the tap-to-reveal fix (still pending separately).
+- No new routes or copy changes beyond what's needed for the visual match.
+
+## Files touched
+
+- `src/styles.css` — tokens, gradients, serif font, radius, shadow.
+- `src/routes/__root.tsx` — `<link>` for serif font.
+- `src/routes/index.tsx` — header typography + card styling + gradient cycling.
+- `src/routes/practice.$deckId.tsx` and `src/routes/mcq.$testId.tsx` — small className tweaks so headings use serif and cards use new radius/shadow.
