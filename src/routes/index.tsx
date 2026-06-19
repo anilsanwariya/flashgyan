@@ -111,22 +111,26 @@ function FeaturePicker({
   onOpenMcqs: () => void;
 }) {
   return (
-    <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    <section className="space-y-3">
       <FeatureCard
         title="Flashcards"
         subtitle="Flip cards and rate recall."
         icon={<Layers className="h-5 w-5" />}
+        gradient="grad-pink"
         onClick={onOpenFlashcards}
       />
       <FeatureCard
         title="MCQ Tests"
         subtitle="Timed multiple choice tests."
         icon={<ListChecks className="h-5 w-5" />}
+        gradient="grad-lavender"
         onClick={onOpenMcqs}
       />
     </section>
   );
 }
+
+const GRADIENTS = ["grad-pink", "grad-lavender", "grad-peach", "grad-mint"] as const;
 
 function FeatureCard({
   title,
