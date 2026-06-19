@@ -136,26 +136,28 @@ function FeatureCard({
   title,
   subtitle,
   icon,
+  gradient,
   onClick,
 }: {
   title: string;
   subtitle: string;
   icon: React.ReactNode;
+  gradient: string;
   onClick: () => void;
 }) {
   return (
     <button
       onClick={onClick}
-      className="group text-left flex items-center gap-4 rounded-2xl bg-card border border-border p-4 active:scale-[0.99] transition-transform shadow-sm"
+      className={`group w-full text-left flex items-center gap-4 rounded-3xl ${gradient} p-5 shadow-soft active:scale-[0.99] transition-transform`}
     >
-      <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+      <div className="h-12 w-12 rounded-full bg-white/70 text-foreground flex items-center justify-center shrink-0">
         {icon}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-lg font-semibold">{title}</div>
-        <div className="mt-0.5 text-sm text-muted-foreground">{subtitle}</div>
+        <div className="text-lg font-bold text-foreground">{title}</div>
+        <div className="mt-0.5 text-sm text-foreground/70">{subtitle}</div>
       </div>
-      <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0 group-hover:translate-x-0.5 transition-transform" />
+      <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
     </button>
   );
 }
