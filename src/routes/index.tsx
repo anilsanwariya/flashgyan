@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { listDecks, type DeckSummary } from "@/lib/flashcards.functions";
 import { listMcqTests, type McqTestSummary } from "@/lib/mcq.functions";
-import { ArrowLeft, ChevronRight, Layers, ListChecks, Settings, Timer } from "lucide-react";
+import { ArrowLeft, ChevronRight, Layers, ListChecks, Settings, Sparkles, Timer } from "lucide-react";
 import logoAsset from "@/assets/flashgyan-logo.png.asset.json";
 
 import {
@@ -126,7 +126,28 @@ function FeaturePicker({
         gradient="grad-lavender"
         onClick={onOpenMcqs}
       />
+      <SaathiFeatureLink />
     </section>
+  );
+}
+
+function SaathiFeatureLink() {
+  return (
+    <Link
+      to="/saathi"
+      className="group w-full text-left flex items-center gap-4 rounded-3xl grad-peach p-5 shadow-soft active:scale-[0.99] transition-transform"
+    >
+      <div className="h-12 w-12 rounded-full bg-white/70 text-foreground flex items-center justify-center shrink-0">
+        <Sparkles className="h-5 w-5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-lg font-bold text-foreground">SAATHI</div>
+        <div className="mt-0.5 text-sm text-foreground/70">
+          Ask the AI study assistant.
+        </div>
+      </div>
+      <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+    </Link>
   );
 }
 
