@@ -16,6 +16,8 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as PracticeDeckIdRouteImport } from './routes/practice.$deckId'
 import { Route as McqTestIdRouteImport } from './routes/mcq.$testId'
 import { Route as McqResultTestIdRouteImport } from './routes/mcq-result.$testId'
+import { Route as AuthenticatedSaathiAdminRouteImport } from './routes/_authenticated/saathi-admin'
+import { Route as AuthenticatedSaathiRouteImport } from './routes/_authenticated/saathi'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 
 const SummaryRoute = SummaryRouteImport.update({
@@ -52,6 +54,17 @@ const McqResultTestIdRoute = McqResultTestIdRouteImport.update({
   path: '/mcq-result/$testId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedSaathiAdminRoute =
+  AuthenticatedSaathiAdminRouteImport.update({
+    id: '/saathi-admin',
+    path: '/saathi-admin',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedSaathiRoute = AuthenticatedSaathiRouteImport.update({
+  id: '/saathi',
+  path: '/saathi',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -63,6 +76,8 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/summary': typeof SummaryRoute
   '/admin': typeof AuthenticatedAdminRoute
+  '/saathi': typeof AuthenticatedSaathiRoute
+  '/saathi-admin': typeof AuthenticatedSaathiAdminRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
@@ -72,6 +87,8 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/summary': typeof SummaryRoute
   '/admin': typeof AuthenticatedAdminRoute
+  '/saathi': typeof AuthenticatedSaathiRoute
+  '/saathi-admin': typeof AuthenticatedSaathiAdminRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
@@ -83,6 +100,8 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/summary': typeof SummaryRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
+  '/_authenticated/saathi': typeof AuthenticatedSaathiRoute
+  '/_authenticated/saathi-admin': typeof AuthenticatedSaathiAdminRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
@@ -94,6 +113,8 @@ export interface FileRouteTypes {
     | '/auth'
     | '/summary'
     | '/admin'
+    | '/saathi'
+    | '/saathi-admin'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice/$deckId'
@@ -103,6 +124,8 @@ export interface FileRouteTypes {
     | '/auth'
     | '/summary'
     | '/admin'
+    | '/saathi'
+    | '/saathi-admin'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice/$deckId'
@@ -113,6 +136,8 @@ export interface FileRouteTypes {
     | '/auth'
     | '/summary'
     | '/_authenticated/admin'
+    | '/_authenticated/saathi'
+    | '/_authenticated/saathi-admin'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice/$deckId'
@@ -179,6 +204,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof McqResultTestIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/saathi-admin': {
+      id: '/_authenticated/saathi-admin'
+      path: '/saathi-admin'
+      fullPath: '/saathi-admin'
+      preLoaderRoute: typeof AuthenticatedSaathiAdminRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/saathi': {
+      id: '/_authenticated/saathi'
+      path: '/saathi'
+      fullPath: '/saathi'
+      preLoaderRoute: typeof AuthenticatedSaathiRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/admin': {
       id: '/_authenticated/admin'
       path: '/admin'
@@ -191,10 +230,14 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAdminRoute: typeof AuthenticatedAdminRoute
+  AuthenticatedSaathiRoute: typeof AuthenticatedSaathiRoute
+  AuthenticatedSaathiAdminRoute: typeof AuthenticatedSaathiAdminRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAdminRoute: AuthenticatedAdminRoute,
+  AuthenticatedSaathiRoute: AuthenticatedSaathiRoute,
+  AuthenticatedSaathiAdminRoute: AuthenticatedSaathiAdminRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =

@@ -150,7 +150,7 @@ export const askSaathi = createServerFn({ method: "POST" })
       {
         query_embedding: queryEmbedding as unknown as string,
         match_count: 6,
-        subject_filter: data.subject ?? null,
+        subject_filter: data.subject ?? undefined,
       },
     );
     if (matchErr) throw new Error(matchErr.message);
