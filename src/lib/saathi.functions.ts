@@ -1,0 +1,218 @@
+import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+
+export type SaathiDoc = {
+  id: string;
+  title: string;
+  subject: string;
+  content: string;
+  created_at: string;
+};
+
+export type SaathiChatSource = {
+  id: string;
+  title: string;
+  subject: string;
+  similarity: number;
+};
+
+const EMBED_MODEL = "google/gemini-embedding-001";
+const EMBED_DIMS = 1536;
+const CHAT_MODEL = "google/gemini-3-flash-preview";
+
+async function embed(text: string): Promise<number[]> {
+  const key = process.env.LOVABLE_API_KEY;
+  if (!key) throw new Error("LOVABLE_API_KEY is not configured");
+  const res = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Lovable-API-Key": key,
+    },
+    body: JSON.stringify({
+      model: EMBED_MODEL,
+      input: text,
+      dimensions: EMBED_DIMS,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Embedding failed (${res.status}): ${body}`);
+  }
+  const json = (await res.json()) as { data: { embedding: number[] }[] };
+  return json.data[0].embedding;
+}
+
+async function getAdmin() {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  return supabaseAdmin;
+}
+
+async function assertAdmin(userId: string) {
+  const admin = await getAdmin();
+  const { data, error } = await admin.rpc("has_role", {
+    _user_id: userId,
+    _role: "admin",
+  });
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Admin access required");
+  return admin;
+}
+
+// ---------------- Server functions ----------------
+
+export const listSaathiDocs = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async () => {
+    const admin = await getAdmin();
+    const { data, error } = await admin
+      .from("saathi_knowledge")
+      .select("id,title,subject,content,created_at")
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []) as SaathiDoc[];
+  });
+
+export const listSaathiSubjects = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async () => {
+    const admin = await getAdmin();
+    const { data, error } = await admin.from("saathi_knowledge").select("subject");
+    if (error) throw new Error(error.message);
+    const set = new Set<string>();
+    for (const row of data ?? []) if (row.subject) set.add(row.subject);
+    return Array.from(set).sort();
+  });
+
+export const createSaathiDoc = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        title: z.string().trim().min(1).max(300),
+        subject: z.string().trim().min(1).max(120),
+        content: z.string().trim().min(1).max(50_000),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const admin = await assertAdmin(context.userId);
+    const embedding = await embed(`${data.title}\n\n${data.content}`);
+    const { data: row, error } = await admin
+      .from("saathi_knowledge")
+      .insert({
+        title: data.title,
+        subject: data.subject,
+        content: data.content,
+        embedding: embedding as unknown as string,
+      })
+      .select("id,title,subject,content,created_at")
+      .single();
+    if (error) throw new Error(error.message);
+    return row as SaathiDoc;
+  });
+
+export const deleteSaathiDoc = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z.object({ id: z.string().uuid() }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const admin = await assertAdmin(context.userId);
+    const { error } = await admin.from("saathi_knowledge").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+const FALLBACK = "I don't have information on that subject.";
+const SYSTEM_PROMPT = `Your name is SAATHI, an expert study assistant for competitive exams. You must ONLY answer questions using the provided context from the database. Do not use outside knowledge. If the answer is not contained in the context, reply exactly with: '${FALLBACK}' Keep answers clear, accurate, and structured with bullet points if necessary.`;
+
+export const askSaathi = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        question: z.string().trim().min(1).max(2000),
+        subject: z.string().trim().min(1).max(120).nullable().optional(),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    const key = process.env.LOVABLE_API_KEY;
+    if (!key) throw new Error("LOVABLE_API_KEY is not configured");
+    const admin = await getAdmin();
+
+    const queryEmbedding = await embed(data.question);
+
+    const { data: matches, error: matchErr } = await admin.rpc(
+      "match_saathi_knowledge",
+      {
+        query_embedding: queryEmbedding as unknown as string,
+        match_count: 6,
+        subject_filter: data.subject ?? undefined,
+      },
+    );
+    if (matchErr) throw new Error(matchErr.message);
+
+    const sources = (matches ?? []) as Array<{
+      id: string;
+      title: string;
+      subject: string;
+      content: string;
+      similarity: number;
+    }>;
+
+    if (sources.length === 0) {
+      return {
+        answer: FALLBACK,
+        sources: [] as SaathiChatSource[],
+      };
+    }
+
+    const contextBlock = sources
+      .map(
+        (s, i) =>
+          `[Source ${i + 1}] Title: ${s.title}\nSubject: ${s.subject}\nContent:\n${s.content}`,
+      )
+      .join("\n\n---\n\n");
+
+    const userPrompt = `Context from knowledge base:\n\n${contextBlock}\n\n---\n\nQuestion: ${data.question}`;
+
+    const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Lovable-API-Key": key,
+      },
+      body: JSON.stringify({
+        model: CHAT_MODEL,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: userPrompt },
+        ],
+      }),
+    });
+
+    if (aiRes.status === 429) throw new Error("Rate limit reached. Please try again shortly.");
+    if (aiRes.status === 402) throw new Error("AI credits exhausted. Please add credits.");
+    if (!aiRes.ok) {
+      const body = await aiRes.text();
+      throw new Error(`AI request failed (${aiRes.status}): ${body}`);
+    }
+
+    const aiJson = (await aiRes.json()) as {
+      choices: { message: { content: string } }[];
+    };
+    const answer = aiJson.choices?.[0]?.message?.content?.trim() || FALLBACK;
+
+    return {
+      answer,
+      sources: sources.map((s) => ({
+        id: s.id,
+        title: s.title,
+        subject: s.subject,
+        similarity: s.similarity,
+      })) satisfies SaathiChatSource[],
+    };
+  });

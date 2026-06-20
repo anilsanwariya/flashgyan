@@ -189,6 +189,36 @@ export type Database = {
         }
         Relationships: []
       }
+      saathi_knowledge: {
+        Row: {
+          content: string
+          created_at: string
+          embedding: string | null
+          id: string
+          subject: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          subject: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          subject?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
@@ -218,6 +248,20 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      match_saathi_knowledge: {
+        Args: {
+          match_count?: number
+          query_embedding: string
+          subject_filter?: string
+        }
+        Returns: {
+          content: string
+          id: string
+          similarity: number
+          subject: string
+          title: string
+        }[]
       }
     }
     Enums: {
