@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-export const Route = createFileRoute("/_authenticated/saathi")({
+export const Route = createFileRoute("/saathi")({
   ssr: false,
   head: () => ({ meta: [{ title: "SAATHI — Ask the knowledge base" }] }),
   component: SaathiChat,

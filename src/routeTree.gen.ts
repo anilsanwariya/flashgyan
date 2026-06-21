@@ -10,19 +10,23 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SummaryRouteImport } from './routes/summary'
+import { Route as SaathiRouteImport } from './routes/saathi'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PracticeDeckIdRouteImport } from './routes/practice.$deckId'
 import { Route as McqTestIdRouteImport } from './routes/mcq.$testId'
 import { Route as McqResultTestIdRouteImport } from './routes/mcq-result.$testId'
-import { Route as AuthenticatedSaathiAdminRouteImport } from './routes/_authenticated/saathi-admin'
-import { Route as AuthenticatedSaathiRouteImport } from './routes/_authenticated/saathi'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 
 const SummaryRoute = SummaryRouteImport.update({
   id: '/summary',
   path: '/summary',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SaathiRoute = SaathiRouteImport.update({
+  id: '/saathi',
+  path: '/saathi',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -54,17 +58,6 @@ const McqResultTestIdRoute = McqResultTestIdRouteImport.update({
   path: '/mcq-result/$testId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthenticatedSaathiAdminRoute =
-  AuthenticatedSaathiAdminRouteImport.update({
-    id: '/saathi-admin',
-    path: '/saathi-admin',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedSaathiRoute = AuthenticatedSaathiRouteImport.update({
-  id: '/saathi',
-  path: '/saathi',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
 const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -74,10 +67,9 @@ const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/saathi': typeof SaathiRoute
   '/summary': typeof SummaryRoute
   '/admin': typeof AuthenticatedAdminRoute
-  '/saathi': typeof AuthenticatedSaathiRoute
-  '/saathi-admin': typeof AuthenticatedSaathiAdminRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
@@ -85,10 +77,9 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/saathi': typeof SaathiRoute
   '/summary': typeof SummaryRoute
   '/admin': typeof AuthenticatedAdminRoute
-  '/saathi': typeof AuthenticatedSaathiRoute
-  '/saathi-admin': typeof AuthenticatedSaathiAdminRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
@@ -98,10 +89,9 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/saathi': typeof SaathiRoute
   '/summary': typeof SummaryRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
-  '/_authenticated/saathi': typeof AuthenticatedSaathiRoute
-  '/_authenticated/saathi-admin': typeof AuthenticatedSaathiAdminRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
@@ -111,10 +101,9 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/saathi'
     | '/summary'
     | '/admin'
-    | '/saathi'
-    | '/saathi-admin'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice/$deckId'
@@ -122,10 +111,9 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/auth'
+    | '/saathi'
     | '/summary'
     | '/admin'
-    | '/saathi'
-    | '/saathi-admin'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice/$deckId'
@@ -134,10 +122,9 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/saathi'
     | '/summary'
     | '/_authenticated/admin'
-    | '/_authenticated/saathi'
-    | '/_authenticated/saathi-admin'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice/$deckId'
@@ -147,6 +134,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  SaathiRoute: typeof SaathiRoute
   SummaryRoute: typeof SummaryRoute
   McqResultTestIdRoute: typeof McqResultTestIdRoute
   McqTestIdRoute: typeof McqTestIdRoute
@@ -160,6 +148,13 @@ declare module '@tanstack/react-router' {
       path: '/summary'
       fullPath: '/summary'
       preLoaderRoute: typeof SummaryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/saathi': {
+      id: '/saathi'
+      path: '/saathi'
+      fullPath: '/saathi'
+      preLoaderRoute: typeof SaathiRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth': {
@@ -204,20 +199,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof McqResultTestIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authenticated/saathi-admin': {
-      id: '/_authenticated/saathi-admin'
-      path: '/saathi-admin'
-      fullPath: '/saathi-admin'
-      preLoaderRoute: typeof AuthenticatedSaathiAdminRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/saathi': {
-      id: '/_authenticated/saathi'
-      path: '/saathi'
-      fullPath: '/saathi'
-      preLoaderRoute: typeof AuthenticatedSaathiRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
     '/_authenticated/admin': {
       id: '/_authenticated/admin'
       path: '/admin'
@@ -230,14 +211,10 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAdminRoute: typeof AuthenticatedAdminRoute
-  AuthenticatedSaathiRoute: typeof AuthenticatedSaathiRoute
-  AuthenticatedSaathiAdminRoute: typeof AuthenticatedSaathiAdminRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAdminRoute: AuthenticatedAdminRoute,
-  AuthenticatedSaathiRoute: AuthenticatedSaathiRoute,
-  AuthenticatedSaathiAdminRoute: AuthenticatedSaathiAdminRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
@@ -247,6 +224,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  SaathiRoute: SaathiRoute,
   SummaryRoute: SummaryRoute,
   McqResultTestIdRoute: McqResultTestIdRoute,
   McqTestIdRoute: McqTestIdRoute,

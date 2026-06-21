@@ -2,10 +2,13 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
+export type SaathiMedium = "Hindi" | "English" | "Bilingual";
+
 export type SaathiDoc = {
   id: string;
   title: string;
   subject: string;
+  medium: SaathiMedium;
   content: string;
   created_at: string;
 };
@@ -60,29 +63,18 @@ async function assertAdmin(userId: string) {
   return admin;
 }
 
-// ---------------- Server functions ----------------
+// ---------------- Admin server functions ----------------
 
 export const listSaathiDocs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
-    const admin = await getAdmin();
+  .handler(async ({ context }) => {
+    const admin = await assertAdmin(context.userId);
     const { data, error } = await admin
       .from("saathi_knowledge")
-      .select("id,title,subject,content,created_at")
+      .select("id,title,subject,medium,content,created_at")
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
     return (data ?? []) as SaathiDoc[];
-  });
-
-export const listSaathiSubjects = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async () => {
-    const admin = await getAdmin();
-    const { data, error } = await admin.from("saathi_knowledge").select("subject");
-    if (error) throw new Error(error.message);
-    const set = new Set<string>();
-    for (const row of data ?? []) if (row.subject) set.add(row.subject);
-    return Array.from(set).sort();
   });
 
 export const createSaathiDoc = createServerFn({ method: "POST" })
@@ -92,22 +84,25 @@ export const createSaathiDoc = createServerFn({ method: "POST" })
       .object({
         title: z.string().trim().min(1).max(300),
         subject: z.string().trim().min(1).max(120),
-        content: z.string().trim().min(1).max(50_000),
+        medium: z.enum(["Hindi", "English", "Bilingual"]),
+        content: z.string().trim().min(1).max(200_000),
       })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
     const admin = await assertAdmin(context.userId);
-    const embedding = await embed(`${data.title}\n\n${data.content}`);
+    const embedInput = `${data.title}\n\n${data.content}`.slice(0, 30_000);
+    const embedding = await embed(embedInput);
     const { data: row, error } = await admin
       .from("saathi_knowledge")
       .insert({
         title: data.title,
         subject: data.subject,
+        medium: data.medium,
         content: data.content,
         embedding: embedding as unknown as string,
       })
-      .select("id,title,subject,content,created_at")
+      .select("id,title,subject,medium,content,created_at")
       .single();
     if (error) throw new Error(error.message);
     return row as SaathiDoc;
@@ -125,11 +120,27 @@ export const deleteSaathiDoc = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+// ---------------- Public chat server functions ----------------
+
+export const listSaathiSubjects = createServerFn({ method: "GET" }).handler(async () => {
+  const admin = await getAdmin();
+  const { data, error } = await admin.from("saathi_knowledge").select("subject");
+  if (error) throw new Error(error.message);
+  const set = new Set<string>();
+  for (const row of data ?? []) if (row.subject) set.add(row.subject);
+  return Array.from(set).sort();
+});
+
 const FALLBACK = "I don't have information on that subject.";
-const SYSTEM_PROMPT = `Your name is SAATHI, an expert study assistant for competitive exams. You must ONLY answer questions using the provided context from the database. Do not use outside knowledge. If the answer is not contained in the context, reply exactly with: '${FALLBACK}' Keep answers clear, accurate, and structured with bullet points if necessary.`;
+const SYSTEM_PROMPT = `You are SAATHI, an expert study assistant. Answer questions ONLY based on the provided database context. If the answer is not contained in the context, reply exactly with: '${FALLBACK}'
+
+LANGUAGE MATCHING: You must detect the language of the user's question and reply in that EXACT same language (e.g., if asked in Hindi, reply in Hindi; if in English, reply in English).
+
+RICH FORMATTING: Always format your answers using Markdown. Use **bold** for headings, and *italicize* or **bold** important keywords for emphasis. Use bullet points and numbered lists where appropriate.
+
+VISUAL AIDS: When explaining processes, timelines, or comparisons, you MUST use Markdown tables, or generate Mermaid.js code blocks (\`\`\`mermaid) to draw flowcharts/diagrams to make the concepts easier for students to understand.`;
 
 export const askSaathi = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
     z
       .object({
