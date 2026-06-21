@@ -195,6 +195,7 @@ export type Database = {
           created_at: string
           embedding: string | null
           id: string
+          medium: string
           subject: string
           title: string
           updated_at: string
@@ -204,6 +205,7 @@ export type Database = {
           created_at?: string
           embedding?: string | null
           id?: string
+          medium?: string
           subject: string
           title: string
           updated_at?: string
@@ -213,6 +215,7 @@ export type Database = {
           created_at?: string
           embedding?: string | null
           id?: string
+          medium?: string
           subject?: string
           title?: string
           updated_at?: string

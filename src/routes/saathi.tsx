@@ -1,9 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, Send, Settings, Sparkles } from "lucide-react";
+import { ArrowLeft, Send, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import mermaid from "mermaid";
 import { askSaathi, listSaathiSubjects, type SaathiChatSource } from "@/lib/saathi.functions";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -14,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-export const Route = createFileRoute("/_authenticated/saathi")({
+export const Route = createFileRoute("/saathi")({
   ssr: false,
   head: () => ({ meta: [{ title: "SAATHI — Ask the knowledge base" }] }),
   component: SaathiChat,
@@ -28,6 +31,8 @@ type Msg = {
 };
 
 const ALL = "__all__";
+
+mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose" });
 
 function SaathiChat() {
   const askFn = useServerFn(askSaathi);
@@ -58,19 +63,11 @@ function SaathiChat() {
     setSending(true);
     try {
       const res = await askFn({
-        data: {
-          question: text,
-          subject: subject === ALL ? null : subject,
-        },
+        data: { question: text, subject: subject === ALL ? null : subject },
       });
       setMessages((m) => [
         ...m,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: res.answer,
-          sources: res.sources,
-        },
+        { id: crypto.randomUUID(), role: "assistant", content: res.answer, sources: res.sources },
       ]);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Something went wrong";
@@ -128,13 +125,6 @@ function SaathiChat() {
               </SelectContent>
             </Select>
           </div>
-          <Link
-            to="/saathi-admin"
-            className="text-muted-foreground hover:text-foreground"
-            aria-label="Admin"
-          >
-            <Settings className="h-4 w-4" />
-          </Link>
         </div>
       </header>
 
@@ -207,8 +197,43 @@ function MessageBubble({ msg }: { msg: Msg }) {
         <Sparkles className="h-4 w-4 text-foreground" />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-[15px] leading-relaxed whitespace-pre-wrap text-foreground">
-          {msg.content}
+        <div className="prose prose-sm max-w-none text-foreground prose-headings:font-bold prose-table:text-sm prose-td:border prose-th:border prose-td:px-2 prose-th:px-2 prose-td:py-1 prose-th:py-1">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              code(props) {
+                const { className, children } = props as {
+                  className?: string;
+                  children?: React.ReactNode;
+                };
+                const match = /language-(\w+)/.exec(className ?? "");
+                const lang = match?.[1];
+                const text = String(children ?? "").replace(/\n$/, "");
+                if (lang === "mermaid") {
+                  return <MermaidBlock chart={text} />;
+                }
+                if (lang) {
+                  return (
+                    <pre className="bg-muted rounded-lg p-3 overflow-x-auto text-xs">
+                      <code>{text}</code>
+                    </pre>
+                  );
+                }
+                return (
+                  <code className="bg-muted rounded px-1 py-0.5 text-xs">{children}</code>
+                );
+              },
+              table(props) {
+                return (
+                  <div className="overflow-x-auto my-2">
+                    <table className="border-collapse border border-border">{props.children}</table>
+                  </div>
+                );
+              },
+            }}
+          >
+            {msg.content}
+          </ReactMarkdown>
         </div>
         {msg.sources && msg.sources.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -226,4 +251,37 @@ function MessageBubble({ msg }: { msg: Msg }) {
       </div>
     </div>
   );
+}
+
+function MermaidBlock({ chart }: { chart: string }) {
+  const id = useId().replace(/:/g, "");
+  const ref = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { svg } = await mermaid.render(`m-${id}`, chart);
+        if (!cancelled && ref.current) {
+          ref.current.innerHTML = svg;
+          setError(null);
+        }
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Diagram error");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chart, id]);
+
+  if (error) {
+    return (
+      <pre className="bg-muted rounded-lg p-3 overflow-x-auto text-xs text-destructive">
+        {chart}
+      </pre>
+    );
+  }
+  return <div ref={ref} className="my-3 rounded-lg bg-white p-3 overflow-x-auto" />;
 }

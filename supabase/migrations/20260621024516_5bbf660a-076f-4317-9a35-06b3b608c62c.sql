@@ -1,0 +1,1 @@
+ALTER TABLE public.saathi_knowledge ADD COLUMN IF NOT EXISTS medium text NOT NULL DEFAULT 'English';
