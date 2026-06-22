@@ -178,7 +178,7 @@ export const askSaathi = createServerFn({ method: "POST" })
     z
       .object({
         question: z.string().trim().min(1).max(2000),
-        subject: z.string().trim().min(1).max(120).nullable().optional(),
+        subjects: z.array(z.string().trim().min(1).max(120)).min(1).max(20),
       })
       .parse(input),
   )
@@ -189,15 +189,31 @@ export const askSaathi = createServerFn({ method: "POST" })
 
     const queryEmbedding = await embed(data.question);
 
-    const { data: matches, error: matchErr } = await admin.rpc(
-      "match_saathi_knowledge",
-      {
-        query_embedding: queryEmbedding as unknown as string,
-        match_count: 6,
-        subject_filter: data.subject ?? undefined,
-      },
+    // Run one match per subject and merge top results.
+    const perSubject = await Promise.all(
+      data.subjects.map((subject) =>
+        admin.rpc("match_saathi_knowledge", {
+          query_embedding: queryEmbedding as unknown as string,
+          match_count: 6,
+          subject_filter: subject,
+        }),
+      ),
     );
-    if (matchErr) throw new Error(matchErr.message);
+    const errored = perSubject.find((r) => r.error);
+    if (errored?.error) throw new Error(errored.error.message);
+    const merged = perSubject.flatMap((r) => (r.data ?? []) as Array<{
+      id: string;
+      title: string;
+      subject: string;
+      content: string;
+      similarity: number;
+    }>);
+    const seen = new Set<string>();
+    const matches = merged
+      .filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true)))
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, 8);
+
 
     const sources = (matches ?? []) as Array<{
       id: string;
