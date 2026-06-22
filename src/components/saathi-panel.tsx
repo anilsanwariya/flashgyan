@@ -534,7 +534,9 @@ function QnABulkUpload({
   onDone,
 }: {
   subjects: string[];
-  createFn: ReturnType<typeof useServerFn<typeof createSaathiDoc>>;
+  createFn: (args: {
+    data: { title: string; subject: string; medium: SaathiMedium; content: string };
+  }) => Promise<unknown>;
   onDone: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
