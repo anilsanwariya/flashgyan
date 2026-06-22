@@ -215,7 +215,7 @@ export const askSaathi = createServerFn({ method: "POST" })
       .slice(0, 8);
 
 
-    const sources = (matches ?? []) as Array<{
+    const sources = matches as Array<{
       id: string;
       title: string;
       subject: string;
