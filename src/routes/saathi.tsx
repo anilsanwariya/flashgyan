@@ -1,8 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, Send, Sparkles } from "lucide-react";
+import { ArrowLeft, ChevronDown, Send, Sparkles, Check } from "lucide-react";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -10,12 +10,10 @@ import mermaid from "mermaid";
 import { askSaathi, listSaathiSubjects, type SaathiChatSource } from "@/lib/saathi.functions";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 export const Route = createFileRoute("/saathi")({
   ssr: false,
@@ -30,8 +28,6 @@ type Msg = {
   sources?: SaathiChatSource[];
 };
 
-const ALL = "__all__";
-
 mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose" });
 
 function SaathiChat() {
@@ -41,7 +37,7 @@ function SaathiChat() {
 
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
-  const [subject, setSubject] = useState<string>(ALL);
+  const [selected, setSelected] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -54,17 +50,22 @@ function SaathiChat() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, sending]);
 
+  const canSend = input.trim().length > 0 && selected.length > 0 && !sending;
+
   async function send() {
     const text = input.trim();
-    if (!text || sending) return;
+    if (!text) return;
+    if (selected.length === 0) {
+      toast.error("Pick at least one subject first");
+      return;
+    }
+    if (sending) return;
     const userMsg: Msg = { id: crypto.randomUUID(), role: "user", content: text };
     setMessages((m) => [...m, userMsg]);
     setInput("");
     setSending(true);
     try {
-      const res = await askFn({
-        data: { question: text, subject: subject === ALL ? null : subject },
-      });
+      const res = await askFn({ data: { question: text, subjects: selected } });
       setMessages((m) => [
         ...m,
         { id: crypto.randomUUID(), role: "assistant", content: res.answer, sources: res.sources },
@@ -90,7 +91,10 @@ function SaathiChat() {
   }
 
   return (
-    <div className="min-h-dvh flex flex-col bg-background">
+    <div
+      className="flex flex-col bg-background"
+      style={{ height: "100dvh" }}
+    >
       <header className="border-b border-border bg-background/80 backdrop-blur sticky top-0 z-10">
         <div className="max-w-3xl mx-auto px-5 py-3 flex items-center gap-3">
           <Link
@@ -110,21 +114,6 @@ function SaathiChat() {
               </div>
             </div>
           </div>
-          <div className="w-44">
-            <Select value={subject} onValueChange={setSubject}>
-              <SelectTrigger>
-                <SelectValue placeholder="Subject" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All Subjects</SelectItem>
-                {(subjectsQ.data ?? []).map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {s}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
         </div>
       </header>
 
@@ -137,8 +126,8 @@ function SaathiChat() {
               </div>
               <h1 className="text-2xl font-extrabold tracking-tight">Ask SAATHI anything</h1>
               <p className="mt-2 text-sm text-muted-foreground max-w-md mx-auto">
-                Answers come only from the knowledge base. Pick a subject to narrow the search,
-                or leave it on All Subjects.
+                Pick one or more subjects below, then ask your question. SAATHI only
+                answers from saved study material.
               </p>
             </div>
           )}
@@ -156,28 +145,120 @@ function SaathiChat() {
         </div>
       </div>
 
-      <div className="border-t border-border bg-background">
-        <div className="max-w-3xl mx-auto px-5 py-3 flex items-end gap-2">
-          <Textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={onKey}
-            placeholder="Ask SAATHI about your study material…"
-            rows={1}
-            className="resize-none min-h-[44px] max-h-40"
+      <div
+        className="border-t border-border bg-background sticky bottom-0"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
+        <div className="max-w-3xl mx-auto px-5 pt-3 pb-3 space-y-2">
+          <SubjectMultiSelect
+            options={subjectsQ.data ?? []}
+            selected={selected}
+            onChange={setSelected}
           />
-          <button
-            onClick={send}
-            disabled={sending || !input.trim()}
-            className="h-11 w-11 shrink-0 rounded-full bg-foreground text-background grid place-items-center disabled:opacity-40"
-            aria-label="Send"
-          >
-            <Send className="h-4 w-4" />
-          </button>
+          <div className="flex items-end gap-2">
+            <Textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={onKey}
+              placeholder={
+                selected.length === 0
+                  ? "Select at least one subject above to start…"
+                  : "Ask SAATHI about your study material…"
+              }
+              rows={1}
+              className="resize-none min-h-[44px] max-h-40"
+            />
+            <button
+              onClick={send}
+              disabled={!canSend}
+              className="h-11 w-11 shrink-0 rounded-full bg-foreground text-background grid place-items-center disabled:opacity-40"
+              aria-label="Send"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function SubjectMultiSelect({
+  options,
+  selected,
+  onChange,
+}: {
+  options: string[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  function toggle(s: string) {
+    onChange(selected.includes(s) ? selected.filter((x) => x !== s) : [...selected, s]);
+  }
+
+  const label = useMemo(() => {
+    if (selected.length === 0) return "Select subject(s)…";
+    if (selected.length === 1) return selected[0];
+    if (selected.length === options.length && options.length > 0) return "All subjects";
+    return `${selected.length} subjects`;
+  }, [selected, options]);
+
+  const allSelected = options.length > 0 && selected.length === options.length;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={`w-full h-10 rounded-lg border px-3 text-sm flex items-center justify-between gap-2 bg-background ${
+            selected.length === 0
+              ? "border-destructive/60 text-muted-foreground"
+              : "border-border"
+          }`}
+        >
+          <span className="truncate text-left">{label}</span>
+          <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[--radix-popover-trigger-width] p-1 max-h-72 overflow-y-auto">
+        {options.length === 0 ? (
+          <div className="px-2 py-3 text-sm text-muted-foreground">No subjects yet.</div>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => onChange(allSelected ? [] : options)}
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted"
+            >
+              <span className="h-4 w-4 grid place-items-center rounded border border-border">
+                {allSelected && <Check className="h-3 w-3" />}
+              </span>
+              <span className="font-medium">Select all</span>
+            </button>
+            <div className="h-px bg-border my-1" />
+            {options.map((s) => {
+              const on = selected.includes(s);
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => toggle(s)}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted"
+                >
+                  <span className="h-4 w-4 grid place-items-center rounded border border-border">
+                    {on && <Check className="h-3 w-3" />}
+                  </span>
+                  <span className="truncate">{s}</span>
+                </button>
+              );
+            })}
+          </>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 

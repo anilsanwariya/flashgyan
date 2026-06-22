@@ -108,6 +108,39 @@ export const createSaathiDoc = createServerFn({ method: "POST" })
     return row as SaathiDoc;
   });
 
+export const updateSaathiDoc = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        title: z.string().trim().min(1).max(300),
+        subject: z.string().trim().min(1).max(120),
+        medium: z.enum(["Hindi", "English", "Bilingual"]),
+        content: z.string().trim().min(1).max(200_000),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const admin = await assertAdmin(context.userId);
+    const embedInput = `${data.title}\n\n${data.content}`.slice(0, 30_000);
+    const embedding = await embed(embedInput);
+    const { data: row, error } = await admin
+      .from("saathi_knowledge")
+      .update({
+        title: data.title,
+        subject: data.subject,
+        medium: data.medium,
+        content: data.content,
+        embedding: embedding as unknown as string,
+      })
+      .eq("id", data.id)
+      .select("id,title,subject,medium,content,created_at")
+      .single();
+    if (error) throw new Error(error.message);
+    return row as SaathiDoc;
+  });
+
 export const deleteSaathiDoc = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
@@ -145,7 +178,7 @@ export const askSaathi = createServerFn({ method: "POST" })
     z
       .object({
         question: z.string().trim().min(1).max(2000),
-        subject: z.string().trim().min(1).max(120).nullable().optional(),
+        subjects: z.array(z.string().trim().min(1).max(120)).min(1).max(20),
       })
       .parse(input),
   )
@@ -156,17 +189,33 @@ export const askSaathi = createServerFn({ method: "POST" })
 
     const queryEmbedding = await embed(data.question);
 
-    const { data: matches, error: matchErr } = await admin.rpc(
-      "match_saathi_knowledge",
-      {
-        query_embedding: queryEmbedding as unknown as string,
-        match_count: 6,
-        subject_filter: data.subject ?? undefined,
-      },
+    // Run one match per subject and merge top results.
+    const perSubject = await Promise.all(
+      data.subjects.map((subject) =>
+        admin.rpc("match_saathi_knowledge", {
+          query_embedding: queryEmbedding as unknown as string,
+          match_count: 6,
+          subject_filter: subject,
+        }),
+      ),
     );
-    if (matchErr) throw new Error(matchErr.message);
+    const errored = perSubject.find((r) => r.error);
+    if (errored?.error) throw new Error(errored.error.message);
+    const merged = perSubject.flatMap((r) => (r.data ?? []) as Array<{
+      id: string;
+      title: string;
+      subject: string;
+      content: string;
+      similarity: number;
+    }>);
+    const seen = new Set<string>();
+    const matches = merged
+      .filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true)))
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, 8);
 
-    const sources = (matches ?? []) as Array<{
+
+    const sources = matches as Array<{
       id: string;
       title: string;
       subject: string;
