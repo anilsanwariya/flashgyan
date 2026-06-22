@@ -108,6 +108,39 @@ export const createSaathiDoc = createServerFn({ method: "POST" })
     return row as SaathiDoc;
   });
 
+export const updateSaathiDoc = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        title: z.string().trim().min(1).max(300),
+        subject: z.string().trim().min(1).max(120),
+        medium: z.enum(["Hindi", "English", "Bilingual"]),
+        content: z.string().trim().min(1).max(200_000),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const admin = await assertAdmin(context.userId);
+    const embedInput = `${data.title}\n\n${data.content}`.slice(0, 30_000);
+    const embedding = await embed(embedInput);
+    const { data: row, error } = await admin
+      .from("saathi_knowledge")
+      .update({
+        title: data.title,
+        subject: data.subject,
+        medium: data.medium,
+        content: data.content,
+        embedding: embedding as unknown as string,
+      })
+      .eq("id", data.id)
+      .select("id,title,subject,medium,content,created_at")
+      .single();
+    if (error) throw new Error(error.message);
+    return row as SaathiDoc;
+  });
+
 export const deleteSaathiDoc = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
