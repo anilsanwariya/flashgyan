@@ -41,14 +41,41 @@ function SaathiChat() {
   const [sending, setSending] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
+  // Pin layout to the visual viewport so the input/subject dropdown stay
+  // visible above the on-screen keyboard on mobile devices.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const el = containerRef.current;
+    if (!vv || !el) return;
+    const apply = () => {
+      el.style.height = `${vv.height}px`;
+      el.style.transform = `translateY(${vv.offsetTop}px)`;
+    };
+    apply();
+    vv.addEventListener("resize", apply);
+    vv.addEventListener("scroll", apply);
+    // Prevent body from scrolling behind a fixed-height chat surface.
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      vv.removeEventListener("resize", apply);
+      vv.removeEventListener("scroll", apply);
+      document.body.style.overflow = prevOverflow;
+      el.style.height = "";
+      el.style.transform = "";
+    };
+  }, []);
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, sending]);
+
 
   const canSend = input.trim().length > 0 && selected.length > 0 && !sending;
 
