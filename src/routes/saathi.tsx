@@ -119,9 +119,11 @@ function SaathiChat() {
 
   return (
     <div
-      className="flex flex-col bg-background"
+      ref={containerRef}
+      className="fixed inset-0 flex flex-col bg-background"
       style={{ height: "100dvh" }}
     >
+
       <header className="border-b border-border bg-background/80 backdrop-blur sticky top-0 z-10">
         <div className="max-w-3xl mx-auto px-5 py-3 flex items-center gap-3">
           <Link
