@@ -191,7 +191,10 @@ function Admin() {
     <div className="min-h-dvh bg-background flex flex-col">
       <Header onSignOut={onSignOut} />
       <main className="flex-1 max-w-2xl w-full mx-auto px-5 py-6 space-y-6 pb-24">
-        <div className="grid grid-cols-3 gap-2 rounded-xl bg-muted p-1">
+        <div className="grid grid-cols-4 gap-2 rounded-xl bg-muted p-1">
+          <TabButton active={tab === "home"} onClick={() => setTab("home")}>
+            Home
+          </TabButton>
           <TabButton active={tab === "flashcards"} onClick={() => setTab("flashcards")}>
             Flashcards
           </TabButton>
@@ -202,7 +205,9 @@ function Admin() {
             SAATHI KB
           </TabButton>
         </div>
-        {tab === "flashcards" ? (
+        {tab === "home" ? (
+          <HomePanel />
+        ) : tab === "flashcards" ? (
           <FlashcardsPanel />
         ) : tab === "mcq" ? (
           <McqPanel />
