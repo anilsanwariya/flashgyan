@@ -1,9 +1,21 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { listDecks, type DeckSummary } from "@/lib/flashcards.functions";
 import { listMcqTests, type McqTestSummary } from "@/lib/mcq.functions";
-import { ArrowLeft, ChevronRight, Layers, ListChecks, Settings, Sparkles, Timer } from "lucide-react";
+import { getHomeData, type HomeData } from "@/lib/home.functions";
+import {
+  ArrowLeft,
+  ChevronRight,
+  ExternalLink,
+  Layers,
+  ListChecks,
+  Lock,
+  Settings,
+  Sparkles,
+  Timer,
+} from "lucide-react";
+import { toast } from "sonner";
 import logoAsset from "@/assets/flashgyan-logo.png.asset.json";
 
 import {
@@ -16,6 +28,7 @@ import {
 
 const decksQO = queryOptions({ queryKey: ["decks"], queryFn: () => listDecks() });
 const mcqQO = queryOptions({ queryKey: ["mcqTests"], queryFn: () => listMcqTests() });
+const homeQO = queryOptions({ queryKey: ["homeData"], queryFn: () => getHomeData() });
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -31,17 +44,32 @@ export const Route = createFileRoute("/")({
     Promise.all([
       context.queryClient.ensureQueryData(decksQO),
       context.queryClient.ensureQueryData(mcqQO),
+      context.queryClient.ensureQueryData(homeQO),
     ]),
   component: Home,
 });
 
-
 type View = "home" | "flashcards" | "mcqs";
+
+function greetingFor(date: Date) {
+  const h = date.getHours();
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  if (h < 21) return "Good evening";
+  return "Good night";
+}
 
 function Home() {
   const { data: decks } = useSuspenseQuery(decksQO);
   const { data: tests } = useSuspenseQuery(mcqQO);
+  const { data: home } = useSuspenseQuery(homeQO);
   const [view, setView] = useState<View>("home");
+  const [greeting, setGreeting] = useState(() => greetingFor(new Date()));
+
+  useEffect(() => {
+    const t = setInterval(() => setGreeting(greetingFor(new Date())), 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   return (
     <div className="min-h-dvh bg-background">
@@ -53,7 +81,7 @@ function Home() {
 
         {view === "home" ? (
           <>
-            <h1 className="mt-3 text-3xl font-extrabold tracking-tight">Pick a feature.</h1>
+            <h1 className="mt-3 text-3xl font-extrabold tracking-tight">{greeting}.</h1>
             <p className="mt-2 text-muted-foreground text-[15px] leading-relaxed">
               Choose how you want to study today.
             </p>
@@ -80,10 +108,14 @@ function Home() {
 
       <main className="px-5 max-w-2xl mx-auto pb-32 space-y-6">
         {view === "home" && (
-          <FeaturePicker
-            onOpenFlashcards={() => setView("flashcards")}
-            onOpenMcqs={() => setView("mcqs")}
-          />
+          <>
+            <BannerCarousel banners={home.banners} />
+            <FeaturePicker
+              settings={home.settings}
+              onOpenFlashcards={() => setView("flashcards")}
+              onOpenMcqs={() => setView("mcqs")}
+            />
+          </>
         )}
         {view === "flashcards" && <FlashcardsSection decks={decks} />}
         {view === "mcqs" && <McqSection tests={tests} />}
@@ -103,10 +135,63 @@ function Home() {
   );
 }
 
+function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
+  const [idx, setIdx] = useState(0);
+  const len = banners.length;
+
+  useEffect(() => {
+    if (len <= 1) return;
+    const t = setInterval(() => setIdx((i) => (i + 1) % len), 4500);
+    return () => clearInterval(t);
+  }, [len]);
+
+  if (len === 0) return null;
+
+  return (
+    <section
+      className="relative w-full overflow-hidden rounded-3xl shadow-soft bg-muted"
+      style={{ aspectRatio: "2 / 1" }}
+      aria-label="Featured banners"
+    >
+      <div
+        className="flex h-full transition-transform duration-500 ease-out"
+        style={{ transform: `translateX(-${idx * 100}%)` }}
+      >
+        {banners.map((b) => (
+          <img
+            key={b.id}
+            src={b.url}
+            alt=""
+            className="w-full h-full object-cover shrink-0"
+            draggable={false}
+          />
+        ))}
+      </div>
+      {len > 1 && (
+        <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5">
+          {banners.map((b, i) => (
+            <button
+              key={b.id}
+              aria-label={`Show banner ${i + 1}`}
+              onClick={() => setIdx(i)}
+              className={
+                "h-1.5 rounded-full transition-all " +
+                (i === idx ? "w-5 bg-white" : "w-1.5 bg-white/60")
+              }
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function FeaturePicker({
+  settings,
   onOpenFlashcards,
   onOpenMcqs,
 }: {
+  settings: HomeData["settings"];
   onOpenFlashcards: () => void;
   onOpenMcqs: () => void;
 }) {
@@ -117,6 +202,7 @@ function FeaturePicker({
         subtitle="Flip cards and rate recall."
         icon={<Layers className="h-5 w-5" />}
         gradient="grad-pink"
+        locked={settings.lock_flashcards}
         onClick={onOpenFlashcards}
       />
       <FeatureCard
@@ -124,30 +210,59 @@ function FeaturePicker({
         subtitle="Timed multiple choice tests."
         icon={<ListChecks className="h-5 w-5" />}
         gradient="grad-lavender"
+        locked={settings.lock_mcq}
         onClick={onOpenMcqs}
       />
-      <SaathiFeatureLink />
+      <SaathiFeatureLink locked={settings.lock_saathi} />
+      {settings.cta_url.trim() && settings.cta_label.trim() && (
+        <ExternalCtaCard
+          label={settings.cta_label}
+          url={settings.cta_url}
+          locked={settings.lock_cta}
+        />
+      )}
     </section>
   );
 }
 
-function SaathiFeatureLink() {
+function ExternalCtaCard({
+  label,
+  url,
+  locked,
+}: {
+  label: string;
+  url: string;
+  locked: boolean;
+}) {
   return (
-    <Link
-      to="/saathi"
-      className="group w-full text-left flex items-center gap-4 rounded-3xl grad-peach p-5 shadow-soft active:scale-[0.99] transition-transform"
-    >
-      <div className="h-12 w-12 rounded-full bg-white/70 text-foreground flex items-center justify-center shrink-0">
-        <Sparkles className="h-5 w-5" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="text-lg font-bold text-foreground">SAATHI</div>
-        <div className="mt-0.5 text-sm text-foreground/70">
-          Ask the AI study assistant.
-        </div>
-      </div>
-      <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
-    </Link>
+    <FeatureCard
+      title={label}
+      subtitle="Open external link"
+      icon={<ExternalLink className="h-5 w-5" />}
+      gradient="grad-mint"
+      locked={locked}
+      onClick={() => {
+        if (locked) return;
+        window.open(url, "_blank", "noopener,noreferrer");
+      }}
+    />
+  );
+}
+
+function SaathiFeatureLink({ locked }: { locked: boolean }) {
+  const navigate = useNavigate();
+  return (
+    <FeatureCard
+      title="SAATHI"
+      subtitle="Ask the AI study assistant."
+      icon={<Sparkles className="h-5 w-5" />}
+      gradient="grad-peach"
+      locked={locked}
+      onClick={() => {
+        if (locked) return;
+        navigate({ to: "/saathi" });
+      }}
+    />
   );
 }
 
@@ -158,18 +273,30 @@ function FeatureCard({
   subtitle,
   icon,
   gradient,
+  locked = false,
   onClick,
 }: {
   title: string;
   subtitle: string;
   icon: React.ReactNode;
   gradient: string;
+  locked?: boolean;
   onClick: () => void;
 }) {
+  const handle = () => {
+    if (locked) {
+      toast.info(`${title} is locked.`);
+      return;
+    }
+    onClick();
+  };
   return (
     <button
-      onClick={onClick}
-      className={`group w-full text-left flex items-center gap-4 rounded-3xl ${gradient} p-5 shadow-soft active:scale-[0.99] transition-transform`}
+      onClick={handle}
+      aria-disabled={locked}
+      className={`group w-full text-left flex items-center gap-4 rounded-3xl ${gradient} p-5 shadow-soft transition-transform ${
+        locked ? "opacity-80 cursor-not-allowed" : "active:scale-[0.99]"
+      }`}
     >
       <div className="h-12 w-12 rounded-full bg-white/70 text-foreground flex items-center justify-center shrink-0">
         {icon}
@@ -178,7 +305,11 @@ function FeatureCard({
         <div className="text-lg font-bold text-foreground">{title}</div>
         <div className="mt-0.5 text-sm text-foreground/70">{subtitle}</div>
       </div>
-      <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+      {locked ? (
+        <Lock className="h-5 w-5 text-foreground/70 shrink-0" aria-label="Locked" />
+      ) : (
+        <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+      )}
     </button>
   );
 }
@@ -389,3 +520,6 @@ function EmptyState({ what }: { what: string }) {
     </div>
   );
 }
+
+// Re-export for unused-import safety (BannerCarousel internal use only)
+export { BannerCarousel };
