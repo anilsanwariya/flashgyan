@@ -607,7 +607,8 @@ function QnABulkUpload({
         <code className="font-mono">question</code>,{" "}
         <code className="font-mono">answer</code>, then one column per
         explanation section (the header text becomes the section title). One
-        row = one Q&amp;A entry in SAATHI.
+        Excel file = one SAATHI entry; the file name becomes the entry title.
+        You can pick multiple files at once.
       </p>
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -648,6 +649,7 @@ function QnABulkUpload({
         ref={fileRef}
         type="file"
         accept=".xlsx,.xls,.csv"
+        multiple
         className="hidden"
         onChange={onPick}
       />
@@ -657,7 +659,7 @@ function QnABulkUpload({
             ? `Saving ${progress.done} / ${progress.total}…`
             : busy
               ? "Parsing…"
-              : "Pick an Excel file to import."}
+              : "Pick one or more Excel files to import."}
         </div>
         <Button
           type="button"
@@ -665,7 +667,7 @@ function QnABulkUpload({
           disabled={busy || !subject.trim()}
         >
           <FileSpreadsheet className="h-4 w-4" />
-          {busy ? "Working…" : "Choose Excel file"}
+          {busy ? "Working…" : "Choose Excel files"}
         </Button>
       </div>
     </div>
