@@ -154,7 +154,7 @@ function Admin() {
   const qc = useQueryClient();
   const checkIsAdminFn = useServerFn(checkIsAdmin);
   const adminQ = useQuery({ queryKey: ["isAdmin"], queryFn: () => checkIsAdminFn() });
-  const [tab, setTab] = useState<Tab>("flashcards");
+  const [tab, setTab] = useState<Tab>("home");
 
   async function onSignOut() {
     await qc.cancelQueries();
