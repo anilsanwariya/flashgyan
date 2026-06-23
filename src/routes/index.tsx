@@ -521,5 +521,3 @@ function EmptyState({ what }: { what: string }) {
   );
 }
 
-// Re-export for unused-import safety (BannerCarousel internal use only)
-export { BannerCarousel };
