@@ -100,6 +100,60 @@ export type Database = {
           },
         ]
       }
+      home_banners: {
+        Row: {
+          created_at: string
+          id: string
+          order_index: number
+          storage_path: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          order_index?: number
+          storage_path: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          order_index?: number
+          storage_path?: string
+        }
+        Relationships: []
+      }
+      home_settings: {
+        Row: {
+          cta_label: string
+          cta_url: string
+          id: number
+          lock_cta: boolean
+          lock_flashcards: boolean
+          lock_mcq: boolean
+          lock_saathi: boolean
+          updated_at: string
+        }
+        Insert: {
+          cta_label?: string
+          cta_url?: string
+          id?: number
+          lock_cta?: boolean
+          lock_flashcards?: boolean
+          lock_mcq?: boolean
+          lock_saathi?: boolean
+          updated_at?: string
+        }
+        Update: {
+          cta_label?: string
+          cta_url?: string
+          id?: number
+          lock_cta?: boolean
+          lock_flashcards?: boolean
+          lock_mcq?: boolean
+          lock_saathi?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
       mcq_questions: {
         Row: {
           answer: number
