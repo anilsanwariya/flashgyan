@@ -546,51 +546,53 @@ function QnABulkUpload({
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!file) return;
+    if (files.length === 0) return;
     if (!subject.trim()) {
       toast.error("Enter a subject first");
       return;
     }
     setBusy(true);
-    setProgress(null);
+    setProgress({ done: 0, total: files.length });
+    let saved = 0;
+    let failed = 0;
     try {
-      const rows = await parseQnAExcel(file);
-      if (rows.length === 0) {
-        toast.error("No Q&A rows found. Need columns: question, answer (+ optional explanation_* columns)");
-        return;
-      }
-      rows.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-      setProgress({ done: 0, total: rows.length });
-      let saved = 0;
-      let failed = 0;
-      for (const r of rows) {
-        const title = (r.order ? `Q${r.order}. ` : "") + r.question.slice(0, 240);
+      for (const file of files) {
+        const title = file.name.replace(/\.(xlsx|xls|csv)$/i, "").trim() || file.name;
         try {
-          await createFn({
-            data: {
-              title,
-              subject: subject.trim(),
-              medium,
-              content: r.markdown,
-            },
-          });
-          saved += 1;
+          const rows = await parseQnAExcel(file);
+          if (rows.length === 0) {
+            failed += 1;
+            toast.error(`${file.name}: no Q&A rows found`);
+          } else {
+            rows.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+            const content = rows.map((r) => r.markdown).join("\n\n---\n\n");
+            await createFn({
+              data: {
+                title: title.slice(0, 300),
+                subject: subject.trim(),
+                medium,
+                content,
+              },
+            });
+            saved += 1;
+          }
         } catch (err) {
           failed += 1;
-          console.error("Q&A row failed", err);
+          console.error("Q&A file failed", file.name, err);
+          toast.error(`${file.name}: ${err instanceof Error ? err.message : "failed"}`);
         }
-        setProgress({ done: saved + failed, total: rows.length });
+        setProgress({ done: saved + failed, total: files.length });
       }
-      toast.success(
-        failed > 0
-          ? `Saved ${saved} of ${rows.length} (${failed} failed)`
-          : `Saved ${saved} Q&A entries`,
-      );
-      onDone();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not parse file");
+      if (saved > 0) {
+        toast.success(
+          failed > 0
+            ? `Saved ${saved} of ${files.length} entries (${failed} failed)`
+            : `Saved ${saved} Q&A ${saved === 1 ? "entry" : "entries"}`,
+        );
+        onDone();
+      }
     } finally {
       setBusy(false);
       setProgress(null);
@@ -605,7 +607,8 @@ function QnABulkUpload({
         <code className="font-mono">question</code>,{" "}
         <code className="font-mono">answer</code>, then one column per
         explanation section (the header text becomes the section title). One
-        row = one Q&amp;A entry in SAATHI.
+        Excel file = one SAATHI entry; the file name becomes the entry title.
+        You can pick multiple files at once.
       </p>
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -646,6 +649,7 @@ function QnABulkUpload({
         ref={fileRef}
         type="file"
         accept=".xlsx,.xls,.csv"
+        multiple
         className="hidden"
         onChange={onPick}
       />
@@ -655,7 +659,7 @@ function QnABulkUpload({
             ? `Saving ${progress.done} / ${progress.total}…`
             : busy
               ? "Parsing…"
-              : "Pick an Excel file to import."}
+              : "Pick one or more Excel files to import."}
         </div>
         <Button
           type="button"
@@ -663,7 +667,7 @@ function QnABulkUpload({
           disabled={busy || !subject.trim()}
         >
           <FileSpreadsheet className="h-4 w-4" />
-          {busy ? "Working…" : "Choose Excel file"}
+          {busy ? "Working…" : "Choose Excel files"}
         </Button>
       </div>
     </div>
