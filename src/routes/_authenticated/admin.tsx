@@ -72,8 +72,10 @@ export const Route = createFileRoute("/_authenticated/admin")({
 });
 
 import { SaathiPanel } from "@/components/saathi-panel";
+import { HomePanel } from "@/components/home-panel";
 
-type Tab = "flashcards" | "mcq" | "saathi";
+type Tab = "home" | "flashcards" | "mcq" | "saathi";
+
 
 // ---------- Flashcard Excel parsing ----------
 
@@ -152,7 +154,7 @@ function Admin() {
   const qc = useQueryClient();
   const checkIsAdminFn = useServerFn(checkIsAdmin);
   const adminQ = useQuery({ queryKey: ["isAdmin"], queryFn: () => checkIsAdminFn() });
-  const [tab, setTab] = useState<Tab>("flashcards");
+  const [tab, setTab] = useState<Tab>("home");
 
   async function onSignOut() {
     await qc.cancelQueries();
@@ -189,7 +191,10 @@ function Admin() {
     <div className="min-h-dvh bg-background flex flex-col">
       <Header onSignOut={onSignOut} />
       <main className="flex-1 max-w-2xl w-full mx-auto px-5 py-6 space-y-6 pb-24">
-        <div className="grid grid-cols-3 gap-2 rounded-xl bg-muted p-1">
+        <div className="grid grid-cols-4 gap-2 rounded-xl bg-muted p-1">
+          <TabButton active={tab === "home"} onClick={() => setTab("home")}>
+            Home
+          </TabButton>
           <TabButton active={tab === "flashcards"} onClick={() => setTab("flashcards")}>
             Flashcards
           </TabButton>
@@ -200,7 +205,9 @@ function Admin() {
             SAATHI KB
           </TabButton>
         </div>
-        {tab === "flashcards" ? (
+        {tab === "home" ? (
+          <HomePanel />
+        ) : tab === "flashcards" ? (
           <FlashcardsPanel />
         ) : tab === "mcq" ? (
           <McqPanel />
