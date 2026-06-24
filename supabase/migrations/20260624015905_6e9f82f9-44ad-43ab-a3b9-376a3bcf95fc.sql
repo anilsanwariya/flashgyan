@@ -1,0 +1,1 @@
+ALTER TABLE public.home_settings ADD COLUMN IF NOT EXISTS cta_subtitle text NOT NULL DEFAULT '';
