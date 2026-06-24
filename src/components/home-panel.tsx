@@ -219,6 +219,15 @@ export function HomePanel() {
                 placeholder="https://…"
               />
             </div>
+            <div>
+              <Label htmlFor="cta-caption">Caption (shown below button)</Label>
+              <Input
+                id="cta-caption"
+                value={settings.cta_caption}
+                onChange={(e) => setSettings({ ...settings, cta_caption: e.target.value })}
+                placeholder="e.g. Tap above to explore more."
+              />
+            </div>
           </div>
         </section>
       )}
