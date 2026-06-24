@@ -123,6 +123,7 @@ export type Database = {
       }
       home_settings: {
         Row: {
+          cta_caption: string
           cta_label: string
           cta_subtitle: string
           cta_url: string
@@ -134,6 +135,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          cta_caption?: string
           cta_label?: string
           cta_subtitle?: string
           cta_url?: string
@@ -145,6 +147,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          cta_caption?: string
           cta_label?: string
           cta_subtitle?: string
           cta_url?: string
