@@ -15,6 +15,7 @@ export type HomeBanner = {
 
 export type HomeSettings = {
   cta_label: string;
+  cta_subtitle: string;
   cta_url: string;
   lock_flashcards: boolean;
   lock_mcq: boolean;
