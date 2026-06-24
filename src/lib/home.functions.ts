@@ -17,6 +17,7 @@ export type HomeSettings = {
   cta_label: string;
   cta_subtitle: string;
   cta_url: string;
+  cta_caption: string;
   lock_flashcards: boolean;
   lock_mcq: boolean;
   lock_saathi: boolean;
