@@ -110,6 +110,14 @@ function Home() {
         {view === "home" && (
           <>
             <BannerCarousel banners={home.banners} />
+            {home.settings.cta_url.trim() && home.settings.cta_label.trim() && (
+              <ExternalCtaButton
+                label={home.settings.cta_label}
+                subtitle={home.settings.cta_subtitle}
+                url={home.settings.cta_url}
+                locked={home.settings.lock_cta}
+              />
+            )}
             <FeaturePicker
               settings={home.settings}
               onOpenFlashcards={() => setView("flashcards")}
