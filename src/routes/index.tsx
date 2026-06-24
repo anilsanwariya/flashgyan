@@ -111,12 +111,19 @@ function Home() {
           <>
             <BannerCarousel banners={home.banners} />
             {home.settings.cta_url.trim() && home.settings.cta_label.trim() && (
-              <ExternalCtaButton
-                label={home.settings.cta_label}
-                subtitle={home.settings.cta_subtitle}
-                url={home.settings.cta_url}
-                locked={home.settings.lock_cta}
-              />
+              <>
+                <ExternalCtaButton
+                  label={home.settings.cta_label}
+                  subtitle={home.settings.cta_subtitle}
+                  url={home.settings.cta_url}
+                  locked={home.settings.lock_cta}
+                />
+                {home.settings.cta_caption.trim() && (
+                  <p className="-mt-2 text-muted-foreground text-[15px] leading-relaxed">
+                    {home.settings.cta_caption}
+                  </p>
+                )}
+              </>
             )}
             <FeaturePicker
               settings={home.settings}
