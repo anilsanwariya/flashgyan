@@ -172,6 +172,7 @@ export const updateHomeSettings = createServerFn({ method: "POST" })
     z
       .object({
         cta_label: z.string().max(80).default(""),
+        cta_subtitle: z.string().max(120).default(""),
         cta_url: z.string().max(2000).default(""),
         lock_flashcards: z.boolean(),
         lock_mcq: z.boolean(),
