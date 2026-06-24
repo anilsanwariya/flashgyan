@@ -222,38 +222,62 @@ function FeaturePicker({
         onClick={onOpenMcqs}
       />
       <SaathiFeatureLink locked={settings.lock_saathi} />
-      {settings.cta_url.trim() && settings.cta_label.trim() && (
-        <ExternalCtaCard
-          label={settings.cta_label}
-          url={settings.cta_url}
-          locked={settings.lock_cta}
-        />
-      )}
     </section>
   );
 }
 
-function ExternalCtaCard({
+function ExternalCtaButton({
   label,
+  subtitle,
   url,
   locked,
 }: {
   label: string;
+  subtitle: string;
   url: string;
   locked: boolean;
 }) {
+  const handle = () => {
+    if (locked) {
+      toast.info(`${label} is locked.`);
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
   return (
-    <FeatureCard
-      title={label}
-      subtitle="Open external link"
-      icon={<ExternalLink className="h-5 w-5" />}
-      gradient="grad-mint"
-      locked={locked}
-      onClick={() => {
-        if (locked) return;
-        window.open(url, "_blank", "noopener,noreferrer");
-      }}
-    />
+    <button
+      onClick={handle}
+      aria-disabled={locked}
+      className={`relative w-full overflow-hidden rounded-2xl border border-white/40 bg-gradient-to-br from-primary/85 via-primary to-primary/70 px-5 py-4 text-left text-primary-foreground shadow-[0_18px_40px_-20px_oklch(0.45_0.2_295/0.65),inset_0_1px_0_oklch(1_0_0/0.45)] backdrop-blur-xl transition-all hover:shadow-[0_22px_48px_-20px_oklch(0.45_0.2_295/0.75),inset_0_1px_0_oklch(1_0_0/0.55)] active:translate-y-px active:scale-[0.995] ${
+        locked ? "opacity-80 cursor-not-allowed" : ""
+      }`}
+    >
+      {/* Glass highlight */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-2xl bg-gradient-to-b from-white/40 to-transparent"
+      />
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -top-6 -left-10 h-24 w-40 rotate-12 bg-white/25 blur-2xl"
+      />
+      <div className="relative flex items-center gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/40 bg-white/20 backdrop-blur-md">
+          {locked ? <Lock className="h-5 w-5" /> : <ExternalLink className="h-5 w-5" />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-base font-bold tracking-tight">{label}</div>
+          {subtitle && (
+            <div className="mt-0.5 truncate text-xs text-primary-foreground/80">
+              {subtitle}
+            </div>
+          )}
+        </div>
+        {!locked && (
+          <ChevronRight className="h-5 w-5 shrink-0 text-primary-foreground/90" />
+        )}
+      </div>
+    </button>
   );
 }
 
