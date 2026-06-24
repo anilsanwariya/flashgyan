@@ -62,6 +62,7 @@ const DEFAULT_SETTINGS: HomeSettings = {
   cta_label: "",
   cta_subtitle: "",
   cta_url: "",
+  cta_caption: "",
   lock_flashcards: false,
   lock_mcq: false,
   lock_saathi: false,
