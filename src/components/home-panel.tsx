@@ -193,12 +193,21 @@ export function HomePanel() {
           </div>
           <div className="grid gap-3">
             <div>
-              <Label htmlFor="cta-label">Button text</Label>
+              <Label htmlFor="cta-label">Button title</Label>
               <Input
                 id="cta-label"
                 value={settings.cta_label}
                 onChange={(e) => setSettings({ ...settings, cta_label: e.target.value })}
                 placeholder="e.g. Visit our website"
+              />
+            </div>
+            <div>
+              <Label htmlFor="cta-subtitle">Button subtitle</Label>
+              <Input
+                id="cta-subtitle"
+                value={settings.cta_subtitle}
+                onChange={(e) => setSettings({ ...settings, cta_subtitle: e.target.value })}
+                placeholder="e.g. Explore more resources"
               />
             </div>
             <div>
