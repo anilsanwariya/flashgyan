@@ -15,6 +15,7 @@ export type HomeBanner = {
 
 export type HomeSettings = {
   cta_label: string;
+  cta_subtitle: string;
   cta_url: string;
   lock_flashcards: boolean;
   lock_mcq: boolean;
@@ -58,6 +59,7 @@ async function assertAdmin(userId: string) {
 
 const DEFAULT_SETTINGS: HomeSettings = {
   cta_label: "",
+  cta_subtitle: "",
   cta_url: "",
   lock_flashcards: false,
   lock_mcq: false,
@@ -76,7 +78,7 @@ export const getHomeData = createServerFn({ method: "GET" }).handler(
         .order("created_at", { ascending: true }),
       supabase
         .from("home_settings")
-        .select("cta_label, cta_url, lock_flashcards, lock_mcq, lock_saathi, lock_cta")
+        .select("cta_label, cta_subtitle, cta_url, lock_flashcards, lock_mcq, lock_saathi, lock_cta")
         .eq("id", 1)
         .maybeSingle(),
     ]);
@@ -170,6 +172,7 @@ export const updateHomeSettings = createServerFn({ method: "POST" })
     z
       .object({
         cta_label: z.string().max(80).default(""),
+        cta_subtitle: z.string().max(120).default(""),
         cta_url: z.string().max(2000).default(""),
         lock_flashcards: z.boolean(),
         lock_mcq: z.boolean(),
@@ -184,6 +187,7 @@ export const updateHomeSettings = createServerFn({ method: "POST" })
       .from("home_settings")
       .update({
         cta_label: data.cta_label.trim(),
+        cta_subtitle: data.cta_subtitle.trim(),
         cta_url: data.cta_url.trim(),
         lock_flashcards: data.lock_flashcards,
         lock_mcq: data.lock_mcq,

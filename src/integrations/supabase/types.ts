@@ -124,6 +124,7 @@ export type Database = {
       home_settings: {
         Row: {
           cta_label: string
+          cta_subtitle: string
           cta_url: string
           id: number
           lock_cta: boolean
@@ -134,6 +135,7 @@ export type Database = {
         }
         Insert: {
           cta_label?: string
+          cta_subtitle?: string
           cta_url?: string
           id?: number
           lock_cta?: boolean
@@ -144,6 +146,7 @@ export type Database = {
         }
         Update: {
           cta_label?: string
+          cta_subtitle?: string
           cta_url?: string
           id?: number
           lock_cta?: boolean
