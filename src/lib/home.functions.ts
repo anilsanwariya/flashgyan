@@ -59,6 +59,7 @@ async function assertAdmin(userId: string) {
 
 const DEFAULT_SETTINGS: HomeSettings = {
   cta_label: "",
+  cta_subtitle: "",
   cta_url: "",
   lock_flashcards: false,
   lock_mcq: false,
