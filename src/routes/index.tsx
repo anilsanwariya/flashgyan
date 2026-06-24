@@ -6,6 +6,7 @@ import { listMcqTests, type McqTestSummary } from "@/lib/mcq.functions";
 import { getHomeData, type HomeData } from "@/lib/home.functions";
 import {
   ArrowLeft,
+  ChevronLeft,
   ChevronRight,
   ExternalLink,
   Layers,
@@ -55,8 +56,7 @@ function greetingFor(date: Date) {
   const h = date.getHours();
   if (h < 12) return "Good morning";
   if (h < 17) return "Good afternoon";
-  if (h < 21) return "Good evening";
-  return "Good night";
+  return "Good evening";
 }
 
 function Home() {
@@ -111,12 +111,19 @@ function Home() {
           <>
             <BannerCarousel banners={home.banners} />
             {home.settings.cta_url.trim() && home.settings.cta_label.trim() && (
-              <ExternalCtaButton
-                label={home.settings.cta_label}
-                subtitle={home.settings.cta_subtitle}
-                url={home.settings.cta_url}
-                locked={home.settings.lock_cta}
-              />
+              <>
+                <ExternalCtaButton
+                  label={home.settings.cta_label}
+                  subtitle={home.settings.cta_subtitle}
+                  url={home.settings.cta_url}
+                  locked={home.settings.lock_cta}
+                />
+                {home.settings.cta_caption.trim() && (
+                  <p className="-mt-2 text-muted-foreground text-[15px] leading-relaxed">
+                    {home.settings.cta_caption}
+                  </p>
+                )}
+              </>
             )}
             <FeaturePicker
               settings={home.settings}
@@ -176,19 +183,37 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
         ))}
       </div>
       {len > 1 && (
-        <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5">
-          {banners.map((b, i) => (
-            <button
-              key={b.id}
-              aria-label={`Show banner ${i + 1}`}
-              onClick={() => setIdx(i)}
-              className={
-                "h-1.5 rounded-full transition-all " +
-                (i === idx ? "w-5 bg-white" : "w-1.5 bg-white/60")
-              }
-            />
-          ))}
-        </div>
+        <>
+          <button
+            type="button"
+            aria-label="Previous banner"
+            onClick={() => setIdx((i) => (i - 1 + len) % len)}
+            className="absolute left-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-black/40 text-white backdrop-blur-sm flex items-center justify-center hover:bg-black/55 active:scale-95 transition"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            aria-label="Next banner"
+            onClick={() => setIdx((i) => (i + 1) % len)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-black/40 text-white backdrop-blur-sm flex items-center justify-center hover:bg-black/55 active:scale-95 transition"
+          >
+            <ChevronRight className="h-5 w-5" />
+          </button>
+          <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5">
+            {banners.map((b, i) => (
+              <button
+                key={b.id}
+                aria-label={`Show banner ${i + 1}`}
+                onClick={() => setIdx(i)}
+                className={
+                  "h-1.5 rounded-full transition-all " +
+                  (i === idx ? "w-5 bg-white" : "w-1.5 bg-white/60")
+                }
+              />
+            ))}
+          </div>
+        </>
       )}
     </section>
   );

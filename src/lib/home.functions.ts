@@ -17,6 +17,7 @@ export type HomeSettings = {
   cta_label: string;
   cta_subtitle: string;
   cta_url: string;
+  cta_caption: string;
   lock_flashcards: boolean;
   lock_mcq: boolean;
   lock_saathi: boolean;
@@ -61,6 +62,7 @@ const DEFAULT_SETTINGS: HomeSettings = {
   cta_label: "",
   cta_subtitle: "",
   cta_url: "",
+  cta_caption: "",
   lock_flashcards: false,
   lock_mcq: false,
   lock_saathi: false,
@@ -78,7 +80,7 @@ export const getHomeData = createServerFn({ method: "GET" }).handler(
         .order("created_at", { ascending: true }),
       supabase
         .from("home_settings")
-        .select("cta_label, cta_subtitle, cta_url, lock_flashcards, lock_mcq, lock_saathi, lock_cta")
+        .select("cta_label, cta_subtitle, cta_url, cta_caption, lock_flashcards, lock_mcq, lock_saathi, lock_cta")
         .eq("id", 1)
         .maybeSingle(),
     ]);
@@ -174,6 +176,7 @@ export const updateHomeSettings = createServerFn({ method: "POST" })
         cta_label: z.string().max(80).default(""),
         cta_subtitle: z.string().max(120).default(""),
         cta_url: z.string().max(2000).default(""),
+        cta_caption: z.string().max(200).default(""),
         lock_flashcards: z.boolean(),
         lock_mcq: z.boolean(),
         lock_saathi: z.boolean(),
@@ -189,6 +192,7 @@ export const updateHomeSettings = createServerFn({ method: "POST" })
         cta_label: data.cta_label.trim(),
         cta_subtitle: data.cta_subtitle.trim(),
         cta_url: data.cta_url.trim(),
+        cta_caption: data.cta_caption.trim(),
         lock_flashcards: data.lock_flashcards,
         lock_mcq: data.lock_mcq,
         lock_saathi: data.lock_saathi,
