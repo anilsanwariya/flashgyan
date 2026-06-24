@@ -187,6 +187,7 @@ export const updateHomeSettings = createServerFn({ method: "POST" })
       .from("home_settings")
       .update({
         cta_label: data.cta_label.trim(),
+        cta_subtitle: data.cta_subtitle.trim(),
         cta_url: data.cta_url.trim(),
         lock_flashcards: data.lock_flashcards,
         lock_mcq: data.lock_mcq,
