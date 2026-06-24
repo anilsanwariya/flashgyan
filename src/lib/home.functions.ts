@@ -80,7 +80,7 @@ export const getHomeData = createServerFn({ method: "GET" }).handler(
         .order("created_at", { ascending: true }),
       supabase
         .from("home_settings")
-        .select("cta_label, cta_subtitle, cta_url, lock_flashcards, lock_mcq, lock_saathi, lock_cta")
+        .select("cta_label, cta_subtitle, cta_url, cta_caption, lock_flashcards, lock_mcq, lock_saathi, lock_cta")
         .eq("id", 1)
         .maybeSingle(),
     ]);
