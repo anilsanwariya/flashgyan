@@ -63,6 +63,7 @@ function shuffle<T>(arr: T[]): T[] {
 function PracticeMcq() {
   const { testId } = Route.useParams();
   const { review } = Route.useSearch();
+  const navigate = useNavigate();
   const { data } = useSuspenseQuery(testQO(testId));
   const { test, questions: qRaw } = data;
 
