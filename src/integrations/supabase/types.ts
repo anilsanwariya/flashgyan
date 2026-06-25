@@ -131,6 +131,7 @@ export type Database = {
           lock_cta: boolean
           lock_flashcards: boolean
           lock_mcq: boolean
+          lock_mcq_practice: boolean
           lock_saathi: boolean
           updated_at: string
         }
@@ -143,6 +144,7 @@ export type Database = {
           lock_cta?: boolean
           lock_flashcards?: boolean
           lock_mcq?: boolean
+          lock_mcq_practice?: boolean
           lock_saathi?: boolean
           updated_at?: string
         }
@@ -155,7 +157,94 @@ export type Database = {
           lock_cta?: boolean
           lock_flashcards?: boolean
           lock_mcq?: boolean
+          lock_mcq_practice?: boolean
           lock_saathi?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      mcq_practice_questions: {
+        Row: {
+          answer: number
+          created_at: string
+          explanation_sections: Json
+          hint: string
+          id: string
+          image_url: string | null
+          option_1: string
+          option_2: string
+          option_3: string
+          option_4: string
+          order_index: number
+          question: string
+          test_id: string
+          updated_at: string
+        }
+        Insert: {
+          answer: number
+          created_at?: string
+          explanation_sections?: Json
+          hint?: string
+          id?: string
+          image_url?: string | null
+          option_1: string
+          option_2: string
+          option_3: string
+          option_4: string
+          order_index?: number
+          question: string
+          test_id: string
+          updated_at?: string
+        }
+        Update: {
+          answer?: number
+          created_at?: string
+          explanation_sections?: Json
+          hint?: string
+          id?: string
+          image_url?: string | null
+          option_1?: string
+          option_2?: string
+          option_3?: string
+          option_4?: string
+          order_index?: number
+          question?: string
+          test_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mcq_practice_questions_test_id_fkey"
+            columns: ["test_id"]
+            isOneToOne: false
+            referencedRelation: "mcq_practice_tests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mcq_practice_tests: {
+        Row: {
+          created_at: string
+          description: string
+          id: string
+          name: string
+          order_index: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string
+          id?: string
+          name: string
+          order_index?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          id?: string
+          name?: string
+          order_index?: number
           updated_at?: string
         }
         Relationships: []
