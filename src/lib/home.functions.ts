@@ -66,6 +66,7 @@ const DEFAULT_SETTINGS: HomeSettings = {
   cta_caption: "",
   lock_flashcards: false,
   lock_mcq: false,
+  lock_mcq_practice: false,
   lock_saathi: false,
   lock_cta: false,
 };
