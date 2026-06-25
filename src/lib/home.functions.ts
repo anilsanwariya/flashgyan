@@ -20,6 +20,7 @@ export type HomeSettings = {
   cta_caption: string;
   lock_flashcards: boolean;
   lock_mcq: boolean;
+  lock_mcq_practice: boolean;
   lock_saathi: boolean;
   lock_cta: boolean;
 };
