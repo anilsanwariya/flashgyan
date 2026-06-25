@@ -3,6 +3,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { listDecks, type DeckSummary } from "@/lib/flashcards.functions";
 import { listMcqTests, type McqTestSummary } from "@/lib/mcq.functions";
+import {
+  listMcqPracticeTests,
+  type McqPracticeTestSummary,
+} from "@/lib/mcq-practice.functions";
 import { getHomeData, type HomeData } from "@/lib/home.functions";
 import {
   ArrowLeft,
@@ -14,6 +18,7 @@ import {
   Lock,
   Settings,
   Sparkles,
+  Target,
   Timer,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -29,6 +34,10 @@ import {
 
 const decksQO = queryOptions({ queryKey: ["decks"], queryFn: () => listDecks() });
 const mcqQO = queryOptions({ queryKey: ["mcqTests"], queryFn: () => listMcqTests() });
+const mcqPracticeQO = queryOptions({
+  queryKey: ["mcqPracticeTests"],
+  queryFn: () => listMcqPracticeTests(),
+});
 const homeQO = queryOptions({ queryKey: ["homeData"], queryFn: () => getHomeData() });
 
 export const Route = createFileRoute("/")({
@@ -37,7 +46,7 @@ export const Route = createFileRoute("/")({
       { title: "Flashgyan web — Pick a feature" },
       {
         name: "description",
-        content: "Choose a study feature: flashcards or multiple choice question tests.",
+        content: "Choose a study feature: flashcards, MCQ practice or timed MCQ tests.",
       },
     ],
   }),
@@ -45,12 +54,13 @@ export const Route = createFileRoute("/")({
     Promise.all([
       context.queryClient.ensureQueryData(decksQO),
       context.queryClient.ensureQueryData(mcqQO),
+      context.queryClient.ensureQueryData(mcqPracticeQO),
       context.queryClient.ensureQueryData(homeQO),
     ]),
   component: Home,
 });
 
-type View = "home" | "flashcards" | "mcqs";
+type View = "home" | "flashcards" | "mcqs" | "mcqPractice";
 
 function greetingFor(date: Date) {
   const h = date.getHours();
@@ -62,6 +72,7 @@ function greetingFor(date: Date) {
 function Home() {
   const { data: decks } = useSuspenseQuery(decksQO);
   const { data: tests } = useSuspenseQuery(mcqQO);
+  const { data: practiceTests } = useSuspenseQuery(mcqPracticeQO);
   const { data: home } = useSuspenseQuery(homeQO);
   const [view, setView] = useState<View>("home");
   const [greeting, setGreeting] = useState(() => greetingFor(new Date()));
@@ -70,6 +81,21 @@ function Home() {
     const t = setInterval(() => setGreeting(greetingFor(new Date())), 60_000);
     return () => clearInterval(t);
   }, []);
+
+  const headings: Record<Exclude<View, "home">, { title: string; sub: string }> = {
+    flashcards: {
+      title: "Flashcards",
+      sub: "Filter by subject and topic, then flip through cards and rate your recall.",
+    },
+    mcqs: {
+      title: "MCQ Tests",
+      sub: "Pick a test, answer the questions before time runs out, and review your score.",
+    },
+    mcqPractice: {
+      title: "MCQ Practice",
+      sub: "Untimed practice. Tap an option, see what's right, and read the explanation.",
+    },
+  };
 
   return (
     <div className="min-h-dvh bg-background">
@@ -95,12 +121,10 @@ function Home() {
               <ArrowLeft className="h-4 w-4" /> Back
             </button>
             <h1 className="mt-2 text-3xl font-extrabold tracking-tight">
-              {view === "flashcards" ? "Flashcards" : "MCQ Tests"}
+              {headings[view].title}
             </h1>
             <p className="mt-2 text-muted-foreground text-[15px] leading-relaxed">
-              {view === "flashcards"
-                ? "Filter by subject and topic, then flip through cards and rate your recall."
-                : "Pick a test, answer the questions before time runs out, and review your score."}
+              {headings[view].sub}
             </p>
           </>
         )}
@@ -129,12 +153,15 @@ function Home() {
               settings={home.settings}
               onOpenFlashcards={() => setView("flashcards")}
               onOpenMcqs={() => setView("mcqs")}
+              onOpenMcqPractice={() => setView("mcqPractice")}
             />
           </>
         )}
         {view === "flashcards" && <FlashcardsSection decks={decks} />}
         {view === "mcqs" && <McqSection tests={tests} />}
+        {view === "mcqPractice" && <McqPracticeSection tests={practiceTests} />}
       </main>
+
 
       <footer className="fixed bottom-0 inset-x-0 border-t border-border bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/70">
         <div className="max-w-2xl mx-auto px-5 py-3 flex justify-end">
@@ -223,10 +250,12 @@ function FeaturePicker({
   settings,
   onOpenFlashcards,
   onOpenMcqs,
+  onOpenMcqPractice,
 }: {
   settings: HomeData["settings"];
   onOpenFlashcards: () => void;
   onOpenMcqs: () => void;
+  onOpenMcqPractice: () => void;
 }) {
   return (
     <section className="space-y-3">
@@ -237,6 +266,14 @@ function FeaturePicker({
         gradient="grad-pink"
         locked={settings.lock_flashcards}
         onClick={onOpenFlashcards}
+      />
+      <FeatureCard
+        title="MCQ Practice"
+        subtitle="Untimed Q&A with instant feedback."
+        icon={<Target className="h-5 w-5" />}
+        gradient="grad-mint"
+        locked={settings.lock_mcq_practice}
+        onClick={onOpenMcqPractice}
       />
       <FeatureCard
         title="MCQ Tests"
@@ -480,6 +517,47 @@ function McqSection({ tests }: { tests: McqTestSummary[] }) {
     </section>
   );
 }
+
+function McqPracticeSection({ tests }: { tests: McqPracticeTestSummary[] }) {
+  if (tests.length === 0) return <EmptyState what="practice sets" />;
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+        {tests.length} practice set{tests.length === 1 ? "" : "s"}
+      </h2>
+      <ul className="space-y-3">
+        {tests.map((t, i) => (
+          <li key={t.id}>
+            <Link
+              to="/practice-mcq/$testId"
+              params={{ testId: t.id }}
+              search={{ review: false }}
+              className={`group flex items-center gap-4 rounded-3xl ${GRADIENTS[i % GRADIENTS.length]} p-5 shadow-soft active:scale-[0.99] transition-transform`}
+            >
+              <div className="h-12 w-12 rounded-full bg-white/70 text-foreground flex items-center justify-center shrink-0">
+                <Target className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-lg font-bold text-foreground truncate">{t.name}</div>
+                <div className="mt-0.5 text-sm text-foreground/70">
+                  {t.question_count} question{t.question_count === 1 ? "" : "s"}
+                </div>
+                {t.description && (
+                  <div className="mt-1 text-sm text-foreground/60 line-clamp-2">
+                    {t.description}
+                  </div>
+                )}
+              </div>
+              <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+
 
 function FilterSelect({
   label,

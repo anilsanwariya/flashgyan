@@ -32,6 +32,20 @@ import {
   type McqQuestion,
   type McqTestSummary,
 } from "@/lib/mcq.functions";
+import {
+  bulkImportMcqPractice,
+  createMcqPracticeTest,
+  deleteMcqPracticeQuestion,
+  deleteMcqPracticeTest,
+  getMcqPracticeTest,
+  listMcqPracticeTests,
+  setMcqPracticeQuestionImage,
+  updateMcqPracticeQuestion,
+  updateMcqPracticeTest,
+  uploadMcqPracticeImage,
+  type McqPracticeQuestion,
+  type McqPracticeTestSummary,
+} from "@/lib/mcq-practice.functions";
 import { parseMcqWorkbook, type ParsedMcqRow } from "@/lib/mcq-parse";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -74,7 +88,7 @@ export const Route = createFileRoute("/_authenticated/admin")({
 import { SaathiPanel } from "@/components/saathi-panel";
 import { HomePanel } from "@/components/home-panel";
 
-type Tab = "home" | "flashcards" | "mcq" | "saathi";
+type Tab = "home" | "flashcards" | "mcq" | "mcqPractice" | "saathi";
 
 
 // ---------- Flashcard Excel parsing ----------
@@ -191,7 +205,7 @@ function Admin() {
     <div className="min-h-dvh bg-background flex flex-col">
       <Header onSignOut={onSignOut} />
       <main className="flex-1 max-w-2xl w-full mx-auto px-5 py-6 space-y-6 pb-24">
-        <div className="grid grid-cols-4 gap-2 rounded-xl bg-muted p-1">
+        <div className="grid grid-cols-5 gap-2 rounded-xl bg-muted p-1">
           <TabButton active={tab === "home"} onClick={() => setTab("home")}>
             Home
           </TabButton>
@@ -200,6 +214,9 @@ function Admin() {
           </TabButton>
           <TabButton active={tab === "mcq"} onClick={() => setTab("mcq")}>
             MCQ Tests
+          </TabButton>
+          <TabButton active={tab === "mcqPractice"} onClick={() => setTab("mcqPractice")}>
+            MCQ Practice
           </TabButton>
           <TabButton active={tab === "saathi"} onClick={() => setTab("saathi")}>
             SAATHI KB
@@ -211,6 +228,8 @@ function Admin() {
           <FlashcardsPanel />
         ) : tab === "mcq" ? (
           <McqPanel />
+        ) : tab === "mcqPractice" ? (
+          <McqPracticePanel />
         ) : (
           <SaathiPanel />
         )}
@@ -1749,5 +1768,655 @@ function ModeButton({
     >
       {children}
     </button>
+  );
+}
+
+// ====================== MCQ Practice Panel ======================
+
+function McqPracticePanel() {
+  const qc = useQueryClient();
+  const listFn = useServerFn(listMcqPracticeTests);
+  const deleteFn = useServerFn(deleteMcqPracticeTest);
+  const testsQ = useQuery<McqPracticeTestSummary[]>({
+    queryKey: ["mcqPracticeTestsAdmin"],
+    queryFn: () => listFn(),
+  });
+
+  const [editing, setEditing] = useState<McqPracticeTestSummary | "new" | null>(null);
+  const [viewingTestId, setViewingTestId] = useState<string | null>(null);
+
+  if (viewingTestId) {
+    return (
+      <McqPracticeQuestionsView
+        testId={viewingTestId}
+        onBack={() => {
+          setViewingTestId(null);
+          qc.invalidateQueries({ queryKey: ["mcqPracticeTestsAdmin"] });
+        }}
+      />
+    );
+  }
+
+  async function onDelete(t: McqPracticeTestSummary) {
+    if (!confirm(`Delete practice set "${t.name}"? This removes all its questions.`)) return;
+    try {
+      await deleteFn({ data: { id: t.id } });
+      toast.success("Practice set deleted");
+      qc.invalidateQueries({ queryKey: ["mcqPracticeTestsAdmin"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Delete failed");
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="font-semibold">MCQ Practice Sets</h2>
+        <Button size="sm" onClick={() => setEditing("new")}>
+          <Plus className="h-4 w-4" /> Add Set
+        </Button>
+      </div>
+
+      {testsQ.isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : testsQ.data && testsQ.data.length > 0 ? (
+        <ul className="space-y-2">
+          {testsQ.data.map((t) => (
+            <li key={t.id} className="rounded-xl bg-card border border-border p-3">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setViewingTestId(t.id)}
+                  className="min-w-0 flex-1 text-left"
+                >
+                  <div className="text-xs text-muted-foreground">Order {t.order_index}</div>
+                  <div className="font-medium truncate">{t.name}</div>
+                  <div className="text-xs text-muted-foreground truncate">
+                    {t.question_count} question{t.question_count === 1 ? "" : "s"}
+                    {t.description ? ` · ${t.description}` : ""}
+                  </div>
+                </button>
+                <button
+                  onClick={() => setEditing(t)}
+                  className="shrink-0 h-9 w-9 grid place-items-center rounded-lg hover:bg-accent"
+                  aria-label="Edit set"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => onDelete(t)}
+                  className="shrink-0 h-9 w-9 grid place-items-center rounded-lg text-destructive hover:bg-destructive/10"
+                  aria-label="Delete set"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setViewingTestId(t.id)}
+                  className="shrink-0 h-9 w-9 grid place-items-center rounded-lg hover:bg-accent"
+                  aria-label="Open set"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted-foreground">No practice sets yet. Add your first one.</p>
+      )}
+
+      {editing !== null && (
+        <PracticeTestFormDialog
+          test={editing === "new" ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            qc.invalidateQueries({ queryKey: ["mcqPracticeTestsAdmin"] });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function PracticeTestFormDialog({
+  test,
+  onClose,
+  onSaved,
+}: {
+  test: McqPracticeTestSummary | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const createFn = useServerFn(createMcqPracticeTest);
+  const updateFn = useServerFn(updateMcqPracticeTest);
+  const [name, setName] = useState(test?.name ?? "");
+  const [description, setDescription] = useState(test?.description ?? "");
+  const [order, setOrder] = useState(String(test?.order_index ?? 0));
+  const [saving, setSaving] = useState(false);
+
+  async function onSave() {
+    const ord = Number(order);
+    if (!name.trim()) return toast.error("Name is required");
+    if (!Number.isFinite(ord) || !Number.isInteger(ord))
+      return toast.error("Order must be an integer");
+    setSaving(true);
+    try {
+      const payload = {
+        name: name.trim(),
+        description: description.trim(),
+        order_index: ord,
+      };
+      if (test) {
+        await updateFn({ data: { id: test.id, ...payload } });
+        toast.success("Practice set updated");
+      } else {
+        await createFn({ data: payload });
+        toast.success("Practice set created");
+      }
+      onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{test ? "Edit practice set" : "Add practice set"}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <Label htmlFor="p-name">Name</Label>
+            <Input id="p-name" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="p-desc">Short description</Label>
+            <Textarea
+              id="p-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+            />
+          </div>
+          <div>
+            <Label htmlFor="p-order">Order</Label>
+            <Input
+              id="p-order"
+              type="number"
+              value={order}
+              onChange={(e) => setOrder(e.target.value)}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={onSave} disabled={saving}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function McqPracticeQuestionsView({
+  testId,
+  onBack,
+}: {
+  testId: string;
+  onBack: () => void;
+}) {
+  const qc = useQueryClient();
+  const getFn = useServerFn(getMcqPracticeTest);
+  const importFn = useServerFn(bulkImportMcqPractice);
+  const delQFn = useServerFn(deleteMcqPracticeQuestion);
+
+  const testQ = useQuery({
+    queryKey: ["mcqPracticeTest", testId],
+    queryFn: () => getFn({ data: { id: testId } }),
+  });
+
+  const [parsed, setParsed] = useState<ParsedMcqRow[] | null>(null);
+  const [invalid, setInvalid] = useState(0);
+  const [mode, setMode] = useState<"append" | "replace">("append");
+  const [fileName, setFileName] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [editing, setEditing] = useState<McqPracticeQuestion | null>(null);
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setFileName(f.name);
+    const buf = await f.arrayBuffer();
+    const { rows, invalid, missingCols } = parseMcqWorkbook(buf);
+    if (missingCols.length) {
+      toast.error("Missing required columns: " + missingCols.join(", "));
+      setParsed(null);
+      return;
+    }
+    if (rows.length === 0) {
+      toast.error("No valid rows found.");
+      setParsed(null);
+      return;
+    }
+    setParsed(rows);
+    setInvalid(invalid);
+    toast.success(`Parsed ${rows.length} rows${invalid ? ` (${invalid} skipped)` : ""}`);
+  }
+
+  async function onImport() {
+    if (!parsed) return;
+    setSubmitting(true);
+    try {
+      const res = await importFn({ data: { test_id: testId, rows: parsed, mode } });
+      toast.success(`Imported ${res.inserted} questions`);
+      setParsed(null);
+      setFileName("");
+      qc.invalidateQueries({ queryKey: ["mcqPracticeTest", testId] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function onDeleteQ(q: McqPracticeQuestion) {
+    if (!confirm("Delete this question?")) return;
+    try {
+      await delQFn({ data: { id: q.id } });
+      toast.success("Question deleted");
+      qc.invalidateQueries({ queryKey: ["mcqPracticeTest", testId] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Delete failed");
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <button
+        onClick={onBack}
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="h-4 w-4" /> All practice sets
+      </button>
+
+      {testQ.isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : testQ.data ? (
+        <>
+          <div>
+            <h2 className="text-xl font-semibold">{testQ.data.test.name}</h2>
+            {testQ.data.test.description && (
+              <p className="text-sm text-muted-foreground mt-1">
+                {testQ.data.test.description}
+              </p>
+            )}
+          </div>
+
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <h3 className="font-semibold flex items-center gap-2">
+              <Upload className="h-4 w-4" /> Upload questions Excel
+            </h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Same schema as MCQ Tests: order, question, option_1..option_4, answer,
+              optional hint, optional explanation_&lt;title&gt; columns.
+            </p>
+            <label className="mt-4 flex items-center justify-center h-24 rounded-xl border-2 border-dashed border-border cursor-pointer hover:bg-accent/40">
+              <div className="text-center">
+                <div className="text-sm font-medium">
+                  {fileName || "Tap to choose .xlsx file"}
+                </div>
+                {parsed && (
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {parsed.length} valid rows{invalid ? ` · ${invalid} skipped` : ""}
+                  </div>
+                )}
+              </div>
+              <input type="file" accept=".xlsx,.xls" className="hidden" onChange={onFile} />
+            </label>
+            {parsed && (
+              <>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <ModeButton active={mode === "append"} onClick={() => setMode("append")}>
+                    Append
+                  </ModeButton>
+                  <ModeButton active={mode === "replace"} onClick={() => setMode("replace")}>
+                    Replace all
+                  </ModeButton>
+                </div>
+                <Button onClick={onImport} disabled={submitting} className="mt-4 w-full h-11">
+                  {submitting ? "Importing…" : `Import ${parsed.length} questions`}
+                </Button>
+              </>
+            )}
+          </section>
+
+          <section>
+            <h3 className="font-semibold mb-3">
+              Questions ({testQ.data.questions.length})
+            </h3>
+            {testQ.data.questions.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No questions yet. Upload an Excel file above.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {testQ.data.questions.map((q) => (
+                  <PracticeQuestionRow
+                    key={q.id}
+                    q={q}
+                    onEdit={() => setEditing(q)}
+                    onDelete={() => onDeleteQ(q)}
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
+        </>
+      ) : null}
+
+      {editing && (
+        <PracticeQuestionEditDialog
+          q={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            qc.invalidateQueries({ queryKey: ["mcqPracticeTest", testId] });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function PracticeQuestionRow({
+  q,
+  onEdit,
+  onDelete,
+}: {
+  q: McqPracticeQuestion;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const opts = [q.option_1, q.option_2, q.option_3, q.option_4];
+  return (
+    <li className="rounded-xl bg-card border border-border p-3 space-y-2">
+      <div className="flex items-start gap-3">
+        <div className="text-xs text-muted-foreground tabular-nums shrink-0 mt-0.5">
+          #{q.order_index}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium">{q.question}</div>
+          {q.image_url && (
+            <img
+              src={q.image_url}
+              alt=""
+              className="mt-2 max-h-32 rounded-md border border-border"
+            />
+          )}
+          <ol className="mt-2 space-y-0.5 text-xs">
+            {opts.map((o, i) => (
+              <li
+                key={i}
+                className={
+                  q.answer === i + 1
+                    ? "text-emerald-600 dark:text-emerald-400 font-medium"
+                    : "text-muted-foreground"
+                }
+              >
+                {i + 1}. {o}
+                {q.answer === i + 1 ? "  ✓" : ""}
+              </li>
+            ))}
+          </ol>
+        </div>
+        <div className="flex flex-col gap-1 shrink-0">
+          <button
+            onClick={onEdit}
+            className="h-8 w-8 grid place-items-center rounded-lg hover:bg-accent"
+            aria-label="Edit"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={onDelete}
+            className="h-8 w-8 grid place-items-center rounded-lg text-destructive hover:bg-destructive/10"
+            aria-label="Delete"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function PracticeQuestionEditDialog({
+  q,
+  onClose,
+  onSaved,
+}: {
+  q: McqPracticeQuestion;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const updateFn = useServerFn(updateMcqPracticeQuestion);
+  const setImgFn = useServerFn(setMcqPracticeQuestionImage);
+  const uploadFn = useServerFn(uploadMcqPracticeImage);
+  const [form, setForm] = useState({ ...q });
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  async function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const dataBase64 = btoa(
+        new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), ""),
+      );
+      const { url } = await uploadFn({
+        data: {
+          id: q.id,
+          filename: file.name,
+          contentType: file.type || "application/octet-stream",
+          dataBase64,
+        },
+      });
+      setForm((f) => ({ ...f, image_url: url }));
+      toast.success("Image uploaded");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function onRemoveImage() {
+    setUploading(true);
+    try {
+      await setImgFn({ data: { id: q.id, image_url: null } });
+      setForm((f) => ({ ...f, image_url: null }));
+      toast.success("Image removed");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Remove failed");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function onSave() {
+    setSaving(true);
+    try {
+      await updateFn({
+        data: {
+          id: q.id,
+          order_index: Number(form.order_index),
+          question: form.question.trim(),
+          hint: form.hint.trim(),
+          image_url: form.image_url,
+          option_1: form.option_1.trim(),
+          option_2: form.option_2.trim(),
+          option_3: form.option_3.trim(),
+          option_4: form.option_4.trim(),
+          answer: Number(form.answer),
+          explanation_sections: form.explanation_sections,
+        },
+      });
+      toast.success("Question updated");
+      onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function updateSection(i: number, field: "title" | "body", val: string) {
+    setForm((f) => {
+      const arr = [...f.explanation_sections];
+      arr[i] = { ...arr[i], [field]: val };
+      return { ...f, explanation_sections: arr };
+    });
+  }
+  function addSection() {
+    setForm((f) => ({
+      ...f,
+      explanation_sections: [...f.explanation_sections, { title: "", body: "" }],
+    }));
+  }
+  function removeSection(i: number) {
+    setForm((f) => ({
+      ...f,
+      explanation_sections: f.explanation_sections.filter((_, idx) => idx !== i),
+    }));
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Edit question</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <Label>Order</Label>
+            <Input
+              type="number"
+              value={form.order_index}
+              onChange={(e) => setForm({ ...form, order_index: Number(e.target.value) })}
+            />
+          </div>
+          <div>
+            <Label>Question</Label>
+            <Textarea
+              rows={2}
+              value={form.question}
+              onChange={(e) => setForm({ ...form, question: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>Image</Label>
+            {form.image_url && (
+              <img
+                src={form.image_url}
+                alt=""
+                className="my-2 max-h-32 rounded-md border border-border"
+              />
+            )}
+            <div className="flex gap-2">
+              <label className="inline-flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm cursor-pointer hover:bg-accent">
+                <ImagePlus className="h-4 w-4" />
+                {uploading ? "Uploading…" : form.image_url ? "Replace" : "Upload"}
+                <input type="file" accept="image/*" className="hidden" onChange={onUpload} />
+              </label>
+              {form.image_url && (
+                <Button variant="outline" size="sm" onClick={onRemoveImage} disabled={uploading}>
+                  Remove
+                </Button>
+              )}
+            </div>
+          </div>
+          <div>
+            <Label>Hint</Label>
+            <Textarea
+              rows={2}
+              value={form.hint}
+              onChange={(e) => setForm({ ...form, hint: e.target.value })}
+            />
+          </div>
+          {[1, 2, 3, 4].map((n) => {
+            const key = `option_${n}` as "option_1" | "option_2" | "option_3" | "option_4";
+            return (
+              <div key={n}>
+                <Label>
+                  Option {n}
+                  {form.answer === n && (
+                    <span className="ml-2 text-xs text-emerald-600 dark:text-emerald-400">
+                      ✓ correct
+                    </span>
+                  )}
+                </Label>
+                <Input
+                  value={form[key]}
+                  onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                />
+              </div>
+            );
+          })}
+          <div>
+            <Label>Correct answer (1–4)</Label>
+            <Input
+              type="number"
+              min={1}
+              max={4}
+              value={form.answer}
+              onChange={(e) => setForm({ ...form, answer: Number(e.target.value) })}
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between">
+              <Label>Explanation sections</Label>
+              <Button size="sm" variant="outline" onClick={addSection}>
+                <Plus className="h-3 w-3" /> Add
+              </Button>
+            </div>
+            <div className="space-y-2 mt-2">
+              {form.explanation_sections.map((s, i) => (
+                <div key={i} className="rounded-lg border border-border p-2 space-y-2">
+                  <Input
+                    placeholder="Section title"
+                    value={s.title}
+                    onChange={(e) => updateSection(i, "title", e.target.value)}
+                  />
+                  <Textarea
+                    placeholder="Body"
+                    rows={2}
+                    value={s.body}
+                    onChange={(e) => updateSection(i, "body", e.target.value)}
+                  />
+                  <button
+                    onClick={() => removeSection(i)}
+                    className="text-xs text-destructive"
+                  >
+                    Remove section
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={onSave} disabled={saving}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
