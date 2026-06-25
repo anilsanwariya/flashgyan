@@ -60,7 +60,7 @@ export const Route = createFileRoute("/")({
   component: Home,
 });
 
-type View = "home" | "flashcards" | "mcqs";
+type View = "home" | "flashcards" | "mcqs" | "mcqPractice";
 
 function greetingFor(date: Date) {
   const h = date.getHours();
@@ -72,6 +72,7 @@ function greetingFor(date: Date) {
 function Home() {
   const { data: decks } = useSuspenseQuery(decksQO);
   const { data: tests } = useSuspenseQuery(mcqQO);
+  const { data: practiceTests } = useSuspenseQuery(mcqPracticeQO);
   const { data: home } = useSuspenseQuery(homeQO);
   const [view, setView] = useState<View>("home");
   const [greeting, setGreeting] = useState(() => greetingFor(new Date()));
@@ -80,6 +81,21 @@ function Home() {
     const t = setInterval(() => setGreeting(greetingFor(new Date())), 60_000);
     return () => clearInterval(t);
   }, []);
+
+  const headings: Record<Exclude<View, "home">, { title: string; sub: string }> = {
+    flashcards: {
+      title: "Flashcards",
+      sub: "Filter by subject and topic, then flip through cards and rate your recall.",
+    },
+    mcqs: {
+      title: "MCQ Tests",
+      sub: "Pick a test, answer the questions before time runs out, and review your score.",
+    },
+    mcqPractice: {
+      title: "MCQ Practice",
+      sub: "Untimed practice. Tap an option, see what's right, and read the explanation.",
+    },
+  };
 
   return (
     <div className="min-h-dvh bg-background">
@@ -105,12 +121,10 @@ function Home() {
               <ArrowLeft className="h-4 w-4" /> Back
             </button>
             <h1 className="mt-2 text-3xl font-extrabold tracking-tight">
-              {view === "flashcards" ? "Flashcards" : "MCQ Tests"}
+              {headings[view].title}
             </h1>
             <p className="mt-2 text-muted-foreground text-[15px] leading-relaxed">
-              {view === "flashcards"
-                ? "Filter by subject and topic, then flip through cards and rate your recall."
-                : "Pick a test, answer the questions before time runs out, and review your score."}
+              {headings[view].sub}
             </p>
           </>
         )}
@@ -139,12 +153,15 @@ function Home() {
               settings={home.settings}
               onOpenFlashcards={() => setView("flashcards")}
               onOpenMcqs={() => setView("mcqs")}
+              onOpenMcqPractice={() => setView("mcqPractice")}
             />
           </>
         )}
         {view === "flashcards" && <FlashcardsSection decks={decks} />}
         {view === "mcqs" && <McqSection tests={tests} />}
+        {view === "mcqPractice" && <McqPracticeSection tests={practiceTests} />}
       </main>
+
 
       <footer className="fixed bottom-0 inset-x-0 border-t border-border bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/70">
         <div className="max-w-2xl mx-auto px-5 py-3 flex justify-end">
