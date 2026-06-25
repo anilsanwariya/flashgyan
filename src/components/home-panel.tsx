@@ -252,6 +252,11 @@ export function HomePanel() {
             onChange={(v) => setSettings({ ...settings, lock_mcq: v })}
           />
           <LockRow
+            label="MCQ Practice"
+            checked={settings.lock_mcq_practice}
+            onChange={(v) => setSettings({ ...settings, lock_mcq_practice: v })}
+          />
+          <LockRow
             label="SAATHI"
             checked={settings.lock_saathi}
             onChange={(v) => setSettings({ ...settings, lock_saathi: v })}
