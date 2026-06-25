@@ -518,6 +518,47 @@ function McqSection({ tests }: { tests: McqTestSummary[] }) {
   );
 }
 
+function McqPracticeSection({ tests }: { tests: McqPracticeTestSummary[] }) {
+  if (tests.length === 0) return <EmptyState what="practice sets" />;
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+        {tests.length} practice set{tests.length === 1 ? "" : "s"}
+      </h2>
+      <ul className="space-y-3">
+        {tests.map((t, i) => (
+          <li key={t.id}>
+            <Link
+              to="/practice-mcq/$testId"
+              params={{ testId: t.id }}
+              search={{ review: false }}
+              className={`group flex items-center gap-4 rounded-3xl ${GRADIENTS[i % GRADIENTS.length]} p-5 shadow-soft active:scale-[0.99] transition-transform`}
+            >
+              <div className="h-12 w-12 rounded-full bg-white/70 text-foreground flex items-center justify-center shrink-0">
+                <Target className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-lg font-bold text-foreground truncate">{t.name}</div>
+                <div className="mt-0.5 text-sm text-foreground/70">
+                  {t.question_count} question{t.question_count === 1 ? "" : "s"}
+                </div>
+                {t.description && (
+                  <div className="mt-1 text-sm text-foreground/60 line-clamp-2">
+                    {t.description}
+                  </div>
+                )}
+              </div>
+              <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+
+
 function FilterSelect({
   label,
   placeholder,
