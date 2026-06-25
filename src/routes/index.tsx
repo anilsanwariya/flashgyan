@@ -3,6 +3,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { listDecks, type DeckSummary } from "@/lib/flashcards.functions";
 import { listMcqTests, type McqTestSummary } from "@/lib/mcq.functions";
+import {
+  listMcqPracticeTests,
+  type McqPracticeTestSummary,
+} from "@/lib/mcq-practice.functions";
 import { getHomeData, type HomeData } from "@/lib/home.functions";
 import {
   ArrowLeft,
@@ -14,6 +18,7 @@ import {
   Lock,
   Settings,
   Sparkles,
+  Target,
   Timer,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -29,6 +34,10 @@ import {
 
 const decksQO = queryOptions({ queryKey: ["decks"], queryFn: () => listDecks() });
 const mcqQO = queryOptions({ queryKey: ["mcqTests"], queryFn: () => listMcqTests() });
+const mcqPracticeQO = queryOptions({
+  queryKey: ["mcqPracticeTests"],
+  queryFn: () => listMcqPracticeTests(),
+});
 const homeQO = queryOptions({ queryKey: ["homeData"], queryFn: () => getHomeData() });
 
 export const Route = createFileRoute("/")({
@@ -37,7 +46,7 @@ export const Route = createFileRoute("/")({
       { title: "Flashgyan web — Pick a feature" },
       {
         name: "description",
-        content: "Choose a study feature: flashcards or multiple choice question tests.",
+        content: "Choose a study feature: flashcards, MCQ practice or timed MCQ tests.",
       },
     ],
   }),
@@ -45,6 +54,7 @@ export const Route = createFileRoute("/")({
     Promise.all([
       context.queryClient.ensureQueryData(decksQO),
       context.queryClient.ensureQueryData(mcqQO),
+      context.queryClient.ensureQueryData(mcqPracticeQO),
       context.queryClient.ensureQueryData(homeQO),
     ]),
   component: Home,
