@@ -32,6 +32,20 @@ import {
   type McqQuestion,
   type McqTestSummary,
 } from "@/lib/mcq.functions";
+import {
+  bulkImportMcqPractice,
+  createMcqPracticeTest,
+  deleteMcqPracticeQuestion,
+  deleteMcqPracticeTest,
+  getMcqPracticeTest,
+  listMcqPracticeTests,
+  setMcqPracticeQuestionImage,
+  updateMcqPracticeQuestion,
+  updateMcqPracticeTest,
+  uploadMcqPracticeImage,
+  type McqPracticeQuestion,
+  type McqPracticeTestSummary,
+} from "@/lib/mcq-practice.functions";
 import { parseMcqWorkbook, type ParsedMcqRow } from "@/lib/mcq-parse";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
