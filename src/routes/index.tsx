@@ -250,10 +250,12 @@ function FeaturePicker({
   settings,
   onOpenFlashcards,
   onOpenMcqs,
+  onOpenMcqPractice,
 }: {
   settings: HomeData["settings"];
   onOpenFlashcards: () => void;
   onOpenMcqs: () => void;
+  onOpenMcqPractice: () => void;
 }) {
   return (
     <section className="space-y-3">
@@ -264,6 +266,14 @@ function FeaturePicker({
         gradient="grad-pink"
         locked={settings.lock_flashcards}
         onClick={onOpenFlashcards}
+      />
+      <FeatureCard
+        title="MCQ Practice"
+        subtitle="Untimed Q&A with instant feedback."
+        icon={<Target className="h-5 w-5" />}
+        gradient="grad-mint"
+        locked={settings.lock_mcq_practice}
+        onClick={onOpenMcqPractice}
       />
       <FeatureCard
         title="MCQ Tests"
