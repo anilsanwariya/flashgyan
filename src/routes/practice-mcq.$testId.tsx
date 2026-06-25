@@ -135,6 +135,7 @@ function PracticeMcq() {
   function goNext() {
     if (!answered) return;
     if (index < total - 1) setIndex(index + 1);
+    else navigate({ to: "/" });
   }
 
   return (
