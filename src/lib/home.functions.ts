@@ -181,6 +181,7 @@ export const updateHomeSettings = createServerFn({ method: "POST" })
         cta_caption: z.string().max(200).default(""),
         lock_flashcards: z.boolean(),
         lock_mcq: z.boolean(),
+        lock_mcq_practice: z.boolean(),
         lock_saathi: z.boolean(),
         lock_cta: z.boolean(),
       })
@@ -197,6 +198,7 @@ export const updateHomeSettings = createServerFn({ method: "POST" })
         cta_caption: data.cta_caption.trim(),
         lock_flashcards: data.lock_flashcards,
         lock_mcq: data.lock_mcq,
+        lock_mcq_practice: data.lock_mcq_practice,
         lock_saathi: data.lock_saathi,
         lock_cta: data.lock_cta,
         updated_at: new Date().toISOString(),
