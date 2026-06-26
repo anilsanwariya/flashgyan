@@ -519,41 +519,113 @@ function McqSection({ tests }: { tests: McqTestSummary[] }) {
 }
 
 function McqPracticeSection({ tests }: { tests: McqPracticeTestSummary[] }) {
-  if (tests.length === 0) return <EmptyState what="practice sets" />;
+  const [subject, setSubject] = useState<string | null>(null);
+  const [topic, setTopic] = useState<string | null>(null);
+
+  const subjects = useMemo(
+    () => Array.from(new Set(tests.map((t) => t.subject).filter(Boolean))).sort(),
+    [tests],
+  );
+  const topics = useMemo(
+    () =>
+      subject
+        ? Array.from(
+            new Set(
+              tests.filter((t) => t.subject === subject).map((t) => t.topic).filter(Boolean),
+            ),
+          ).sort()
+        : [],
+    [tests, subject],
+  );
+  const filtered = useMemo(
+    () =>
+      tests.filter(
+        (t) =>
+          (!subject || t.subject === subject) && (!topic || t.topic === topic),
+      ),
+    [tests, subject, topic],
+  );
+
   return (
-    <section className="space-y-3">
-      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-        {tests.length} practice set{tests.length === 1 ? "" : "s"}
-      </h2>
-      <ul className="space-y-3">
-        {tests.map((t, i) => (
-          <li key={t.id}>
-            <Link
-              to="/practice-mcq/$testId"
-              params={{ testId: t.id }}
-              search={{ review: false }}
-              className={`group flex items-center gap-4 rounded-3xl ${GRADIENTS[i % GRADIENTS.length]} p-5 shadow-soft active:scale-[0.99] transition-transform`}
+    <>
+      <section className="grid grid-cols-2 gap-3">
+        <FilterSelect
+          label="Subject"
+          placeholder="All subjects"
+          options={subjects}
+          value={subject}
+          onChange={(v) => {
+            setSubject(v);
+            setTopic(null);
+          }}
+        />
+        <FilterSelect
+          label="Topic"
+          placeholder={subject ? "All topics" : "Pick subject first"}
+          options={topics}
+          value={topic}
+          onChange={setTopic}
+          disabled={!subject}
+        />
+      </section>
+
+      <section className="space-y-3">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+            {filtered.length} practice set{filtered.length === 1 ? "" : "s"}
+          </h2>
+          {(subject || topic) && (
+            <button
+              onClick={() => {
+                setSubject(null);
+                setTopic(null);
+              }}
+              className="text-xs text-primary font-medium"
             >
-              <div className="h-12 w-12 rounded-full bg-white/70 text-foreground flex items-center justify-center shrink-0">
-                <Target className="h-5 w-5" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-lg font-bold text-foreground truncate">{t.name}</div>
-                <div className="mt-0.5 text-sm text-foreground/70">
-                  {t.question_count} question{t.question_count === 1 ? "" : "s"}
-                </div>
-                {t.description && (
-                  <div className="mt-1 text-sm text-foreground/60 line-clamp-2">
-                    {t.description}
+              Clear filters
+            </button>
+          )}
+        </div>
+
+        {filtered.length === 0 ? (
+          <EmptyState what="practice sets" />
+        ) : (
+          <ul className="space-y-3">
+            {filtered.map((t, i) => (
+              <li key={t.id}>
+                <Link
+                  to="/practice-mcq/$testId"
+                  params={{ testId: t.id }}
+                  search={{ review: false }}
+                  className={`group flex items-center gap-4 rounded-3xl ${GRADIENTS[i % GRADIENTS.length]} p-5 shadow-soft active:scale-[0.99] transition-transform`}
+                >
+                  <div className="h-12 w-12 rounded-full bg-white/70 text-foreground flex items-center justify-center shrink-0">
+                    <Target className="h-5 w-5" />
                   </div>
-                )}
-              </div>
-              <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
+                  <div className="min-w-0 flex-1">
+                    {(t.subject || t.topic) && (
+                      <div className="text-xs uppercase tracking-wide text-foreground/60">
+                        {[t.subject, t.topic].filter(Boolean).join(" · ")}
+                      </div>
+                    )}
+                    <div className="mt-0.5 text-lg font-bold text-foreground truncate">{t.name}</div>
+                    <div className="mt-0.5 text-sm text-foreground/70">
+                      {t.question_count} question{t.question_count === 1 ? "" : "s"}
+                    </div>
+                    {t.description && (
+                      <div className="mt-1 text-sm text-foreground/60 line-clamp-2">
+                        {t.description}
+                      </div>
+                    )}
+                  </div>
+                  <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </>
   );
 }
 
