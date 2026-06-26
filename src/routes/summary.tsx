@@ -46,7 +46,7 @@ const ratingLabel: Record<Rating, string> = {
 };
 
 function Summary() {
-  const { deckId, total, hard, medium, easy, seconds, sessionId } =
+  const { deckId, practiceId, total, hard, medium, easy, seconds, sessionId } =
     Route.useSearch();
   const [detail, setDetail] = useState<SessionDetail | null>(null);
 
