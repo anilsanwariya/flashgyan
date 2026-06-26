@@ -7,6 +7,7 @@ import { loadSession, type SessionDetail, type Rating } from "@/lib/session-stor
 
 const summarySchema = z.object({
   deckId: fallback(z.string(), "").default(""),
+  practiceId: fallback(z.string(), "").default(""),
   total: fallback(z.number().int().min(0), 0).default(0),
   hard: fallback(z.number().int().min(0), 0).default(0),
   medium: fallback(z.number().int().min(0), 0).default(0),
