@@ -1891,6 +1891,8 @@ function PracticeTestFormDialog({
   const updateFn = useServerFn(updateMcqPracticeTest);
   const [name, setName] = useState(test?.name ?? "");
   const [description, setDescription] = useState(test?.description ?? "");
+  const [subject, setSubject] = useState((test as any)?.subject ?? "");
+  const [topic, setTopic] = useState((test as any)?.topic ?? "");
   const [order, setOrder] = useState(String(test?.order_index ?? 0));
   const [saving, setSaving] = useState(false);
 
@@ -1904,6 +1906,8 @@ function PracticeTestFormDialog({
       const payload = {
         name: name.trim(),
         description: description.trim(),
+        subject: subject.trim(),
+        topic: topic.trim(),
         order_index: ord,
       };
       if (test) {
