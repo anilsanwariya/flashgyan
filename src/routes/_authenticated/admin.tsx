@@ -1891,8 +1891,8 @@ function PracticeTestFormDialog({
   const updateFn = useServerFn(updateMcqPracticeTest);
   const [name, setName] = useState(test?.name ?? "");
   const [description, setDescription] = useState(test?.description ?? "");
-  const [subject, setSubject] = useState((test as any)?.subject ?? "");
-  const [topic, setTopic] = useState((test as any)?.topic ?? "");
+  const [subject, setSubject] = useState(test?.subject ?? "");
+  const [topic, setTopic] = useState(test?.topic ?? "");
   const [order, setOrder] = useState(String(test?.order_index ?? 0));
   const [saving, setSaving] = useState(false);
 
