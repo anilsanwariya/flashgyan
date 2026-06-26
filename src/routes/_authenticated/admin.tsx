@@ -1945,6 +1945,23 @@ function PracticeTestFormDialog({
               rows={2}
             />
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="p-subject">Subject</Label>
+              <Input
+                id="p-subject"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="p-topic">Topic</Label>
+              <Input
+                id="p-topic"
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+              />
+            </div>
           <div>
             <Label htmlFor="p-order">Order</Label>
             <Input
