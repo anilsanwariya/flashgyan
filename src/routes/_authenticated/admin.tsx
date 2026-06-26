@@ -1962,6 +1962,7 @@ function PracticeTestFormDialog({
                 onChange={(e) => setTopic(e.target.value)}
               />
             </div>
+          </div>
           <div>
             <Label htmlFor="p-order">Order</Label>
             <Input
