@@ -18,6 +18,8 @@ export type McqPracticeTest = {
   id: string;
   name: string;
   description: string;
+  subject: string;
+  topic: string;
   order_index: number;
 };
 
