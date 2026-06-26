@@ -198,9 +198,18 @@ function Summary() {
             to="/"
             className="h-12 rounded-2xl border border-border bg-card font-semibold grid place-items-center"
           >
-            All decks
+            Home
           </Link>
-          {deckId ? (
+          {practiceId ? (
+            <Link
+              to="/practice-mcq/$testId"
+              params={{ testId: practiceId }}
+              search={{ review: hard + medium > 0 }}
+              className="h-12 rounded-2xl bg-primary text-primary-foreground font-semibold grid place-items-center"
+            >
+              {hard + medium > 0 ? "Review" : "Practice again"}
+            </Link>
+          ) : deckId ? (
             <Link
               to="/practice/$deckId"
               params={{ deckId }}
