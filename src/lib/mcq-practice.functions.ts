@@ -161,6 +161,8 @@ export const updateMcqPracticeTest = createServerFn({ method: "POST" })
       .update({
         name: data.name.trim(),
         description: data.description.trim(),
+        subject: data.subject.trim(),
+        topic: data.topic.trim(),
         order_index: data.order_index,
       })
       .eq("id", data.id);
