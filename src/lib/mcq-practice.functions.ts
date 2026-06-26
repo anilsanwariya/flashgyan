@@ -46,7 +46,7 @@ export const listMcqPracticeTests = createServerFn({ method: "GET" }).handler(as
   const supabase = publicClient();
   const { data: tests, error } = await supabase
     .from("mcq_practice_tests")
-    .select("id, name, description, order_index")
+    .select("id, name, description, subject, topic, order_index")
     .order("order_index", { ascending: true })
     .order("created_at", { ascending: true });
   if (error) throw new Error(error.message);
@@ -68,7 +68,7 @@ export const getMcqPracticeTest = createServerFn({ method: "GET" })
     const supabase = publicClient();
     const { data: test, error: tErr } = await supabase
       .from("mcq_practice_tests")
-      .select("id, name, description, order_index")
+      .select("id, name, description, subject, topic, order_index")
       .eq("id", data.id)
       .maybeSingle();
     if (tErr) throw new Error(tErr.message);
