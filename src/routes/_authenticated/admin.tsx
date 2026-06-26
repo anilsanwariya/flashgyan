@@ -1891,6 +1891,8 @@ function PracticeTestFormDialog({
   const updateFn = useServerFn(updateMcqPracticeTest);
   const [name, setName] = useState(test?.name ?? "");
   const [description, setDescription] = useState(test?.description ?? "");
+  const [subject, setSubject] = useState(test?.subject ?? "");
+  const [topic, setTopic] = useState(test?.topic ?? "");
   const [order, setOrder] = useState(String(test?.order_index ?? 0));
   const [saving, setSaving] = useState(false);
 
@@ -1904,6 +1906,8 @@ function PracticeTestFormDialog({
       const payload = {
         name: name.trim(),
         description: description.trim(),
+        subject: subject.trim(),
+        topic: topic.trim(),
         order_index: ord,
       };
       if (test) {
@@ -1940,6 +1944,24 @@ function PracticeTestFormDialog({
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
             />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="p-subject">Subject</Label>
+              <Input
+                id="p-subject"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="p-topic">Topic</Label>
+              <Input
+                id="p-topic"
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+              />
+            </div>
           </div>
           <div>
             <Label htmlFor="p-order">Order</Label>

@@ -7,6 +7,7 @@ import { loadSession, type SessionDetail, type Rating } from "@/lib/session-stor
 
 const summarySchema = z.object({
   deckId: fallback(z.string(), "").default(""),
+  practiceId: fallback(z.string(), "").default(""),
   total: fallback(z.number().int().min(0), 0).default(0),
   hard: fallback(z.number().int().min(0), 0).default(0),
   medium: fallback(z.number().int().min(0), 0).default(0),
@@ -45,7 +46,7 @@ const ratingLabel: Record<Rating, string> = {
 };
 
 function Summary() {
-  const { deckId, total, hard, medium, easy, seconds, sessionId } =
+  const { deckId, practiceId, total, hard, medium, easy, seconds, sessionId } =
     Route.useSearch();
   const [detail, setDetail] = useState<SessionDetail | null>(null);
 
@@ -197,9 +198,18 @@ function Summary() {
             to="/"
             className="h-12 rounded-2xl border border-border bg-card font-semibold grid place-items-center"
           >
-            All decks
+            Home
           </Link>
-          {deckId ? (
+          {practiceId ? (
+            <Link
+              to="/practice-mcq/$testId"
+              params={{ testId: practiceId }}
+              search={{ review: hard + medium > 0 }}
+              className="h-12 rounded-2xl bg-primary text-primary-foreground font-semibold grid place-items-center"
+            >
+              {hard + medium > 0 ? "Review" : "Practice again"}
+            </Link>
+          ) : deckId ? (
             <Link
               to="/practice/$deckId"
               params={{ deckId }}

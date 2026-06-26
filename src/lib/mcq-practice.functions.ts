@@ -18,6 +18,8 @@ export type McqPracticeTest = {
   id: string;
   name: string;
   description: string;
+  subject: string;
+  topic: string;
   order_index: number;
 };
 
@@ -44,7 +46,7 @@ export const listMcqPracticeTests = createServerFn({ method: "GET" }).handler(as
   const supabase = publicClient();
   const { data: tests, error } = await supabase
     .from("mcq_practice_tests")
-    .select("id, name, description, order_index")
+    .select("id, name, description, subject, topic, order_index")
     .order("order_index", { ascending: true })
     .order("created_at", { ascending: true });
   if (error) throw new Error(error.message);
@@ -66,7 +68,7 @@ export const getMcqPracticeTest = createServerFn({ method: "GET" })
     const supabase = publicClient();
     const { data: test, error: tErr } = await supabase
       .from("mcq_practice_tests")
-      .select("id, name, description, order_index")
+      .select("id, name, description, subject, topic, order_index")
       .eq("id", data.id)
       .maybeSingle();
     if (tErr) throw new Error(tErr.message);
@@ -99,6 +101,8 @@ const explanationSchema = z.object({
 const testMetaSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(2000).default(""),
+  subject: z.string().max(200).default(""),
+  topic: z.string().max(200).default(""),
   order_index: z.number().int(),
 });
 
@@ -135,6 +139,8 @@ export const createMcqPracticeTest = createServerFn({ method: "POST" })
       .insert({
         name: data.name.trim(),
         description: data.description.trim(),
+        subject: data.subject.trim(),
+        topic: data.topic.trim(),
         order_index: data.order_index,
       })
       .select("id")
@@ -155,6 +161,8 @@ export const updateMcqPracticeTest = createServerFn({ method: "POST" })
       .update({
         name: data.name.trim(),
         description: data.description.trim(),
+        subject: data.subject.trim(),
+        topic: data.topic.trim(),
         order_index: data.order_index,
       })
       .eq("id", data.id);
