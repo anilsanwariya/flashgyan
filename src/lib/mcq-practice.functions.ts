@@ -139,6 +139,8 @@ export const createMcqPracticeTest = createServerFn({ method: "POST" })
       .insert({
         name: data.name.trim(),
         description: data.description.trim(),
+        subject: data.subject.trim(),
+        topic: data.topic.trim(),
         order_index: data.order_index,
       })
       .select("id")
