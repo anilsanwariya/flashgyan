@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { z } from "zod";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
@@ -8,10 +8,24 @@ import { motion, AnimatePresence } from "motion/react";
 import { ArrowLeft, ChevronLeft, ChevronRight, Check, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   loadReview,
   saveReview,
   applyReviewOrder,
+  newSessionId,
+  saveSession,
   type Rating,
+  type SessionCardResult,
 } from "@/lib/session-store";
 
 const testQO = (id: string) =>
@@ -51,15 +65,6 @@ export const Route = createFileRoute("/practice-mcq/$testId")({
   ),
 });
 
-function shuffle<T>(arr: T[]): T[] {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
 function PracticeMcq() {
   const { testId } = Route.useParams();
   const { review } = Route.useSearch();
@@ -77,8 +82,8 @@ function PracticeMcq() {
   });
 
   const [index, setIndex] = useState(0);
-  // null = unanswered; otherwise stores the picked option (1-4)
   const [picks, setPicks] = useState<(number | null)[]>(() => questions.map(() => null));
+  const startedAt = useRef(Date.now());
 
   const total = questions.length;
   const q = questions[index];
@@ -99,7 +104,6 @@ function PracticeMcq() {
     return { correct, wrong, unanswered };
   }, [picks, questions]);
 
-  // Persist review state immediately so review-mode behavior matches flashcards.
   const reviewRef = useRef(loadReview(testId));
   function recordRating(qId: string, rating: Rating) {
     reviewRef.current[qId] = rating;
@@ -125,8 +129,56 @@ function PracticeMcq() {
     next[index] = opt;
     setPicks(next);
     const correct = opt === q.answer;
-    // Incorrect → hard (resurfaces in review). Correct → easy (graduates).
     recordRating(q.id, correct ? "easy" : "hard");
+  }
+
+  function submit(finalPicks: (number | null)[]) {
+    const endedAt = Date.now();
+    const seconds = Math.round((endedAt - startedAt.current) / 1000);
+    const sessionId = newSessionId();
+    const results: SessionCardResult[] = [];
+    questions.forEach((qq, i) => {
+      const p = finalPicks[i];
+      if (p === null) return;
+      const correct = p === qq.answer;
+      const rating: Rating = correct ? "easy" : "hard";
+      const answerText = qq[`option_${qq.answer}` as `option_${1 | 2 | 3 | 4}`];
+      const pickedText = qq[`option_${p}` as `option_${1 | 2 | 3 | 4}`];
+      results.push({
+        id: qq.id,
+        subject: test.subject || test.name,
+        topic: test.topic || "",
+        prompt: correct ? "Correct" : "Incorrect",
+        question: qq.question,
+        answer: correct
+          ? answerText
+          : `Your answer: ${pickedText} · Correct: ${answerText}`,
+        rating,
+      });
+    });
+    const counts = { hard: 0, medium: 0, easy: 0 };
+    for (const r of results) counts[r.rating]++;
+    saveSession(sessionId, {
+      deckId: testId,
+      subject: test.subject || test.name,
+      topic: test.topic || "",
+      startedAt: startedAt.current,
+      endedAt,
+      results,
+    });
+    navigate({
+      to: "/summary",
+      search: {
+        deckId: "",
+        practiceId: testId,
+        total: results.length,
+        hard: counts.hard,
+        medium: counts.medium,
+        easy: counts.easy,
+        seconds,
+        sessionId,
+      },
+    });
   }
 
   function goPrev() {
@@ -135,19 +187,48 @@ function PracticeMcq() {
   function goNext() {
     if (!answered) return;
     if (index < total - 1) setIndex(index + 1);
-    else navigate({ to: "/" });
+    else submit(picks);
   }
 
+  const borderCls = answered
+    ? isCorrect
+      ? "border-success"
+      : "border-destructive"
+    : "border-border";
+
   return (
-    <div className="min-h-dvh flex flex-col bg-background">
-      <header className="px-5 pt-4 pb-3 max-w-2xl w-full mx-auto">
+    <div className="h-dvh flex flex-col bg-background overflow-hidden">
+      <header className="shrink-0 px-5 pt-4 pb-3 max-w-2xl w-full mx-auto">
         <div className="flex items-center justify-between">
-          <Link
-            to="/"
-            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="h-4 w-4" /> End
-          </Link>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft className="h-4 w-4" /> End Session
+              </button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>End this session?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  You can keep going, or end now and see your summary. Unanswered questions stay unanswered.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="bg-success text-success-foreground hover:bg-success/90 border-0">
+                  Continue
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => submit(picks)}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  End session
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           <div className="text-sm tabular-nums text-muted-foreground">
             {index + 1} / {total}
           </div>
@@ -172,8 +253,8 @@ function PracticeMcq() {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center px-5 max-w-2xl w-full mx-auto pb-6">
-        <div className="w-full relative">
+      <main className="flex-1 min-h-0 flex flex-col px-5 max-w-2xl w-full mx-auto pb-3">
+        <div className="w-full relative flex-1 min-h-0">
           <AnimatePresence mode="wait">
             <motion.div
               key={q.id}
@@ -181,10 +262,12 @@ function PracticeMcq() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -12 }}
               transition={{ duration: 0.18 }}
-              className="w-full"
+              className="w-full h-full"
             >
-              <div className="rounded-3xl bg-card border-2 border-border shadow-sm overflow-hidden">
-                <ScrollArea className="max-h-[68vh]">
+              <div
+                className={`h-full rounded-3xl bg-card border-2 shadow-sm overflow-hidden transition-colors ${borderCls}`}
+              >
+                <ScrollArea className="h-full">
                   <div className="p-6 space-y-5">
                     <p className="text-xl font-semibold leading-snug text-balance">
                       {q.question}
@@ -195,6 +278,11 @@ function PracticeMcq() {
                         alt=""
                         className="w-full aspect-[2/1] rounded-xl object-cover border border-border"
                       />
+                    )}
+                    {q.hint && (
+                      <p className="text-base leading-relaxed whitespace-pre-wrap text-foreground/85">
+                        {q.hint}
+                      </p>
                     )}
 
                     <div className="space-y-2.5">
@@ -267,16 +355,6 @@ function PracticeMcq() {
                             </>
                           )}
                         </div>
-                        {q.hint && (
-                          <div>
-                            <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-1.5">
-                              Hint
-                            </div>
-                            <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
-                              {q.hint}
-                            </p>
-                          </div>
-                        )}
                         {q.explanation_sections.map((s, i) => (
                           <div key={i}>
                             <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-1.5">
@@ -318,24 +396,21 @@ function PracticeMcq() {
         </div>
       </main>
 
-      <footer className="px-5 pb-6 pt-2 max-w-2xl w-full mx-auto">
+      <footer className="shrink-0 px-5 pb-6 pt-2 max-w-2xl w-full mx-auto">
         <button
           onClick={goNext}
-          disabled={!answered || index >= total - 1}
+          disabled={!answered}
           className="w-full h-14 rounded-2xl bg-primary text-primary-foreground font-semibold text-base shadow-sm active:scale-[0.99] transition-transform disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
         >
-          {index >= total - 1
-            ? answered
-              ? "Finish"
-              : "Pick an answer"
-            : answered
-            ? "Next"
-            : "Pick an answer to unlock"}
+          {!answered
+            ? "Pick an answer"
+            : index >= total - 1
+            ? "Finish"
+            : "Next"}
         </button>
       </footer>
     </div>
   );
 }
 
-// Keep import live for tooling.
 export type { McqPracticeQuestion };
