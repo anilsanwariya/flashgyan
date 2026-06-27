@@ -104,7 +104,7 @@ function Home() {
 
         {view === "home" ? (
           <>
-            <h1 className="mt-3 text-3xl font-extrabold tracking-tight">{greeting}.</h1>
+            <h1 className="mt-3 text-3xl font-bold tracking-tight">{greeting}.</h1>
             <p className="mt-2 text-left text-foreground font-semibold text-[15px] leading-relaxed">
               Choose how you want to study today.
             </p>
