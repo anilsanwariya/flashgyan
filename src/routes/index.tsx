@@ -136,7 +136,9 @@ function Home() {
                   locked={home.settings.lock_cta}
                 />
                 {home.settings.cta_caption.trim() && (
-                  <p className="-mt-2 text-muted-foreground text-[15px] leading-relaxed">{home.settings.cta_caption}</p>
+                  <p className="-mt-2 text-center text-muted-foreground text-[15px] leading-relaxed">
+                    {home.settings.cta_caption}
+                  </p>
                 )}
               </>
             )}
