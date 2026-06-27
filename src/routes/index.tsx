@@ -21,7 +21,7 @@ import {
   Timer,
 } from "lucide-react";
 import { toast } from "sonner";
-import finalLogo from "@/assets/final-logo.png.asset.json";
+import finalLogo from 
 
 function TelegramIcon({ className }: { className?: string }) {
   return (
