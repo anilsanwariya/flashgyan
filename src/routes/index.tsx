@@ -16,7 +16,6 @@ import {
   Layers,
   ListChecks,
   Lock,
-  Settings,
   Sparkles,
   Target,
   Timer,
@@ -130,7 +129,7 @@ function Home() {
         )}
       </header>
 
-      <main className="px-5 max-w-2xl mx-auto pb-32 space-y-6">
+      <main className="px-5 max-w-2xl mx-auto pb-12 space-y-6">
         {view === "home" && (
           <>
             <BannerCarousel banners={home.banners} />
