@@ -9,8 +9,10 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TermsRouteImport } from './routes/terms'
 import { Route as SummaryRouteImport } from './routes/summary'
 import { Route as SaathiRouteImport } from './routes/saathi'
+import { Route as PrivacyPolicyRouteImport } from './routes/privacy-policy'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
@@ -20,6 +22,11 @@ import { Route as McqTestIdRouteImport } from './routes/mcq.$testId'
 import { Route as McqResultTestIdRouteImport } from './routes/mcq-result.$testId'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SummaryRoute = SummaryRouteImport.update({
   id: '/summary',
   path: '/summary',
@@ -28,6 +35,11 @@ const SummaryRoute = SummaryRouteImport.update({
 const SaathiRoute = SaathiRouteImport.update({
   id: '/saathi',
   path: '/saathi',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyPolicyRoute = PrivacyPolicyRouteImport.update({
+  id: '/privacy-policy',
+  path: '/privacy-policy',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -73,8 +85,10 @@ const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/privacy-policy': typeof PrivacyPolicyRoute
   '/saathi': typeof SaathiRoute
   '/summary': typeof SummaryRoute
+  '/terms': typeof TermsRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
@@ -84,8 +98,10 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/privacy-policy': typeof PrivacyPolicyRoute
   '/saathi': typeof SaathiRoute
   '/summary': typeof SummaryRoute
+  '/terms': typeof TermsRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
@@ -97,8 +113,10 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/privacy-policy': typeof PrivacyPolicyRoute
   '/saathi': typeof SaathiRoute
   '/summary': typeof SummaryRoute
+  '/terms': typeof TermsRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
@@ -110,8 +128,10 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/privacy-policy'
     | '/saathi'
     | '/summary'
+    | '/terms'
     | '/admin'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
@@ -121,8 +141,10 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/auth'
+    | '/privacy-policy'
     | '/saathi'
     | '/summary'
+    | '/terms'
     | '/admin'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
@@ -133,8 +155,10 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/privacy-policy'
     | '/saathi'
     | '/summary'
+    | '/terms'
     | '/_authenticated/admin'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
@@ -146,8 +170,10 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  PrivacyPolicyRoute: typeof PrivacyPolicyRoute
   SaathiRoute: typeof SaathiRoute
   SummaryRoute: typeof SummaryRoute
+  TermsRoute: typeof TermsRoute
   McqResultTestIdRoute: typeof McqResultTestIdRoute
   McqTestIdRoute: typeof McqTestIdRoute
   PracticeMcqTestIdRoute: typeof PracticeMcqTestIdRoute
@@ -156,6 +182,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/summary': {
       id: '/summary'
       path: '/summary'
@@ -168,6 +201,13 @@ declare module '@tanstack/react-router' {
       path: '/saathi'
       fullPath: '/saathi'
       preLoaderRoute: typeof SaathiRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy-policy': {
+      id: '/privacy-policy'
+      path: '/privacy-policy'
+      fullPath: '/privacy-policy'
+      preLoaderRoute: typeof PrivacyPolicyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth': {
@@ -244,8 +284,10 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  PrivacyPolicyRoute: PrivacyPolicyRoute,
   SaathiRoute: SaathiRoute,
   SummaryRoute: SummaryRoute,
+  TermsRoute: TermsRoute,
   McqResultTestIdRoute: McqResultTestIdRoute,
   McqTestIdRoute: McqTestIdRoute,
   PracticeMcqTestIdRoute: PracticeMcqTestIdRoute,
