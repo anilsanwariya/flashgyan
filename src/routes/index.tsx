@@ -21,7 +21,20 @@ import {
   Timer,
 } from "lucide-react";
 import { toast } from "sonner";
-import logoAsset from "@/assets/flashgyan-logo.png.asset.json";
+import finalLogo from "@/assets/final-logo.png.asset.json";
+
+function TelegramIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M21.4 4.96c-.2-.74-.82-1.3-1.57-1.43C18.6 3.23 6.3 6.69 4.04 7.34c-.63.18-1.15.66-1.34 1.3-.5 1.58.5 2.45 1.96 3.05l.02.01 3.58 1.25.02.01c.43.15.9.09 1.28-.16.77-.51 3.25-2.19 5.47-3.74.32-.23.75-.16.98.15.23.32.16.75-.15.98-2.18 1.52-4.65 3.19-5.42 3.71-.57.38-.97.97-1.08 1.63l-.69 4.13-.02.11c-.13.78.65 1.35 1.31.99l7.05-3.95.02-.01c1.36-.78 2.62-1.52 3.63-2.12 1.41-.86 2.52-1.56 2.52-2.81 0-.45-.15-1.05-.44-1.95z" />
+    </svg>
+  );
+}
 
 import {
   Select,
@@ -99,15 +112,18 @@ function Home() {
   return (
     <div className="min-h-dvh bg-background">
       <header className="px-5 pt-10 pb-6 max-w-2xl mx-auto">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <img src={logoAsset.url} alt="Flashgyan web logo" className="h-5 w-5 rounded-sm" />
-          Flashgyan web
+        <div className="flex items-center">
+          <img
+            src={finalLogo.url}
+            alt="Flashgyan"
+            className="h-9 w-auto object-contain"
+          />
         </div>
 
         {view === "home" ? (
           <>
             <h1 className="mt-3 text-3xl font-extrabold tracking-tight">{greeting}.</h1>
-            <p className="mt-2 text-muted-foreground text-[15px] leading-relaxed">
+            <p className="mt-2 text-center text-foreground font-semibold text-[15px] leading-relaxed">
               Choose how you want to study today.
             </p>
           </>
@@ -163,11 +179,11 @@ function Home() {
 
 
       <footer className="border-t border-border bg-background/60">
-        <div className="max-w-2xl mx-auto px-5 py-8 space-y-4 text-muted-foreground">
-          <p className="text-sm uppercase tracking-wide">
-            © {new Date().getFullYear()} FLASHGYAN EDTECH LLP. All rights reserved.
+        <div className="max-w-2xl mx-auto px-5 py-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs text-muted-foreground">
+          <p className="uppercase tracking-wide font-medium">
+            © 2026 FLASHGYAN EDTECH LLP. ALL RIGHTS RESERVED.
           </p>
-          <nav className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+          <nav className="flex flex-wrap gap-x-4 gap-y-1">
             <Link to="/privacy-policy" className="hover:text-foreground">
               Privacy Policy
             </Link>
@@ -183,6 +199,7 @@ function Home() {
           </nav>
         </div>
       </footer>
+      {view === "home" && <TelegramFloatingButton />}
     </div>
   );
 }
@@ -225,17 +242,17 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
             type="button"
             aria-label="Previous banner"
             onClick={() => setIdx((i) => (i - 1 + len) % len)}
-            className="absolute left-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-black/40 text-white backdrop-blur-sm flex items-center justify-center hover:bg-black/55 active:scale-95 transition"
+            className="absolute left-2 top-1/2 -translate-y-1/2 p-1 text-white drop-shadow-md flex items-center justify-center hover:text-white/80 active:scale-95 transition"
           >
-            <ChevronLeft className="h-5 w-5" />
+            <ChevronLeft className="h-6 w-6" />
           </button>
           <button
             type="button"
             aria-label="Next banner"
             onClick={() => setIdx((i) => (i + 1) % len)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-black/40 text-white backdrop-blur-sm flex items-center justify-center hover:bg-black/55 active:scale-95 transition"
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white drop-shadow-md flex items-center justify-center hover:text-white/80 active:scale-95 transition"
           >
-            <ChevronRight className="h-5 w-5" />
+            <ChevronRight className="h-6 w-6" />
           </button>
           <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5">
             {banners.map((b, i) => (
@@ -726,6 +743,20 @@ function EmptyState({ what }: { what: string }) {
         .
       </p>
     </div>
+  );
+}
+
+function TelegramFloatingButton() {
+  return (
+    <a
+      href="https://t.me/RASbandhu"
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Join Telegram"
+      className="fixed right-5 bottom-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-soft transition-transform hover:scale-105 active:scale-95"
+    >
+      <TelegramIcon className="h-7 w-7" />
+    </a>
   );
 }
 
