@@ -3,10 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { listDecks, type DeckSummary } from "@/lib/flashcards.functions";
 import { listMcqTests, type McqTestSummary } from "@/lib/mcq.functions";
-import {
-  listMcqPracticeTests,
-  type McqPracticeTestSummary,
-} from "@/lib/mcq-practice.functions";
+import { listMcqPracticeTests, type McqPracticeTestSummary } from "@/lib/mcq-practice.functions";
 import { getHomeData, type HomeData } from "@/lib/home.functions";
 import {
   ArrowLeft,
@@ -21,28 +18,17 @@ import {
   Timer,
 } from "lucide-react";
 import { toast } from "sonner";
-import finalLogo from 
+import finalLogo from "@/assets/final-logo.png.asset.json";
 
 function TelegramIcon({ className }: { className?: string }) {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      className={className}
-      aria-hidden="true"
-    >
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
       <path d="M21.4 4.96c-.2-.74-.82-1.3-1.57-1.43C18.6 3.23 6.3 6.69 4.04 7.34c-.63.18-1.15.66-1.34 1.3-.5 1.58.5 2.45 1.96 3.05l.02.01 3.58 1.25.02.01c.43.15.9.09 1.28-.16.77-.51 3.25-2.19 5.47-3.74.32-.23.75-.16.98.15.23.32.16.75-.15.98-2.18 1.52-4.65 3.19-5.42 3.71-.57.38-.97.97-1.08 1.63l-.69 4.13-.02.11c-.13.78.65 1.35 1.31.99l7.05-3.95.02-.01c1.36-.78 2.62-1.52 3.63-2.12 1.41-.86 2.52-1.56 2.52-2.81 0-.45-.15-1.05-.44-1.95z" />
     </svg>
   );
 }
 
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const decksQO = queryOptions({ queryKey: ["decks"], queryFn: () => listDecks() });
 const mcqQO = queryOptions({ queryKey: ["mcqTests"], queryFn: () => listMcqTests() });
@@ -113,11 +99,7 @@ function Home() {
     <div className="min-h-dvh bg-background">
       <header className="px-5 pt-10 pb-6 max-w-2xl mx-auto">
         <div className="flex items-center">
-          <img
-            src={finalLogo.url}
-            alt="Flashgyan"
-            className="h-9 w-auto object-contain"
-          />
+          <img src={finalLogo.url} alt="Flashgyan" className="h-9 w-auto object-contain" />
         </div>
 
         {view === "home" ? (
@@ -135,12 +117,8 @@ function Home() {
             >
               <ArrowLeft className="h-4 w-4" /> Back
             </button>
-            <h1 className="mt-2 text-3xl font-extrabold tracking-tight">
-              {headings[view].title}
-            </h1>
-            <p className="mt-2 text-muted-foreground text-[15px] leading-relaxed">
-              {headings[view].sub}
-            </p>
+            <h1 className="mt-2 text-3xl font-extrabold tracking-tight">{headings[view].title}</h1>
+            <p className="mt-2 text-muted-foreground text-[15px] leading-relaxed">{headings[view].sub}</p>
           </>
         )}
       </header>
@@ -158,9 +136,7 @@ function Home() {
                   locked={home.settings.lock_cta}
                 />
                 {home.settings.cta_caption.trim() && (
-                  <p className="-mt-2 text-muted-foreground text-[15px] leading-relaxed">
-                    {home.settings.cta_caption}
-                  </p>
+                  <p className="-mt-2 text-muted-foreground text-[15px] leading-relaxed">{home.settings.cta_caption}</p>
                 )}
               </>
             )}
@@ -177,12 +153,9 @@ function Home() {
         {view === "mcqPractice" && <McqPracticeSection tests={practiceTests} />}
       </main>
 
-
       <footer className="border-t border-border bg-background/60">
         <div className="max-w-2xl mx-auto px-5 py-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs text-muted-foreground">
-          <p className="uppercase tracking-wide font-medium">
-            © 2026 FLASHGYAN EDTECH LLP. ALL RIGHTS RESERVED.
-          </p>
+          <p className="uppercase tracking-wide font-medium">© 2026 FLASHGYAN EDTECH LLP. ALL RIGHTS RESERVED.</p>
           <nav className="flex flex-wrap gap-x-4 gap-y-1">
             <Link to="/privacy-policy" className="hover:text-foreground">
               Privacy Policy
@@ -190,10 +163,7 @@ function Home() {
             <Link to="/terms" className="hover:text-foreground">
               Terms of Service
             </Link>
-            <a
-              href="mailto:flashgyanedtech@gmail.com"
-              className="hover:text-foreground"
-            >
+            <a href="mailto:flashgyanedtech@gmail.com" className="hover:text-foreground">
               Contact
             </a>
           </nav>
@@ -227,13 +197,7 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
         style={{ transform: `translateX(-${idx * 100}%)` }}
       >
         {banners.map((b) => (
-          <img
-            key={b.id}
-            src={b.url}
-            alt=""
-            className="w-full h-full object-cover shrink-0"
-            draggable={false}
-          />
+          <img key={b.id} src={b.url} alt="" className="w-full h-full object-cover shrink-0" draggable={false} />
         ))}
       </div>
       {len > 1 && (
@@ -260,10 +224,7 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
                 key={b.id}
                 aria-label={`Show banner ${i + 1}`}
                 onClick={() => setIdx(i)}
-                className={
-                  "h-1.5 rounded-full transition-all " +
-                  (i === idx ? "w-5 bg-white" : "w-1.5 bg-white/60")
-                }
+                className={"h-1.5 rounded-full transition-all " + (i === idx ? "w-5 bg-white" : "w-1.5 bg-white/60")}
               />
             ))}
           </div>
@@ -347,15 +308,9 @@ function ExternalCtaButton({
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-base font-bold tracking-tight">{label}</div>
-          {subtitle && (
-            <div className="mt-0.5 truncate text-sm text-primary-foreground/80">
-              {subtitle}
-            </div>
-          )}
+          {subtitle && <div className="mt-0.5 truncate text-sm text-primary-foreground/80">{subtitle}</div>}
         </div>
-        {!locked && (
-          <ChevronRight className="h-5 w-5 shrink-0 text-primary-foreground/90" />
-        )}
+        {!locked && <ChevronRight className="h-5 w-5 shrink-0 text-primary-foreground/90" />}
       </div>
     </button>
   );
@@ -430,25 +385,13 @@ function FlashcardsSection({ decks }: { decks: DeckSummary[] }) {
   const [subject, setSubject] = useState<string | null>(null);
   const [topic, setTopic] = useState<string | null>(null);
 
-  const subjects = useMemo(
-    () => Array.from(new Set(decks.map((d) => d.subject))).sort(),
-    [decks],
-  );
+  const subjects = useMemo(() => Array.from(new Set(decks.map((d) => d.subject))).sort(), [decks]);
   const topics = useMemo(
-    () =>
-      subject
-        ? Array.from(
-            new Set(decks.filter((d) => d.subject === subject).map((d) => d.topic)),
-          ).sort()
-        : [],
+    () => (subject ? Array.from(new Set(decks.filter((d) => d.subject === subject).map((d) => d.topic))).sort() : []),
     [decks, subject],
   );
   const filtered = useMemo(
-    () =>
-      decks.filter(
-        (d) =>
-          (!subject || d.subject === subject) && (!topic || d.topic === topic),
-      ),
+    () => decks.filter((d) => (!subject || d.subject === subject) && (!topic || d.topic === topic)),
     [decks, subject, topic],
   );
 
@@ -530,11 +473,7 @@ function McqSection({ tests }: { tests: McqTestSummary[] }) {
                 <div className="mt-0.5 text-sm text-foreground/70">
                   {Math.round(t.duration_seconds / 60)} min · {t.question_count} Q
                 </div>
-                {t.description && (
-                  <div className="mt-1 text-sm text-foreground/60 line-clamp-2">
-                    {t.description}
-                  </div>
-                )}
+                {t.description && <div className="mt-1 text-sm text-foreground/60 line-clamp-2">{t.description}</div>}
               </div>
               <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
             </Link>
@@ -549,27 +488,23 @@ function McqPracticeSection({ tests }: { tests: McqPracticeTestSummary[] }) {
   const [subject, setSubject] = useState<string | null>(null);
   const [topic, setTopic] = useState<string | null>(null);
 
-  const subjects = useMemo(
-    () => Array.from(new Set(tests.map((t) => t.subject).filter(Boolean))).sort(),
-    [tests],
-  );
+  const subjects = useMemo(() => Array.from(new Set(tests.map((t) => t.subject).filter(Boolean))).sort(), [tests]);
   const topics = useMemo(
     () =>
       subject
         ? Array.from(
             new Set(
-              tests.filter((t) => t.subject === subject).map((t) => t.topic).filter(Boolean),
+              tests
+                .filter((t) => t.subject === subject)
+                .map((t) => t.topic)
+                .filter(Boolean),
             ),
           ).sort()
         : [],
     [tests, subject],
   );
   const filtered = useMemo(
-    () =>
-      tests.filter(
-        (t) =>
-          (!subject || t.subject === subject) && (!topic || t.topic === topic),
-      ),
+    () => tests.filter((t) => (!subject || t.subject === subject) && (!topic || t.topic === topic)),
     [tests, subject, topic],
   );
 
@@ -640,9 +575,7 @@ function McqPracticeSection({ tests }: { tests: McqPracticeTestSummary[] }) {
                       {t.question_count} question{t.question_count === 1 ? "" : "s"}
                     </div>
                     {t.description && (
-                      <div className="mt-1 text-sm text-foreground/60 line-clamp-2">
-                        {t.description}
-                      </div>
+                      <div className="mt-1 text-sm text-foreground/60 line-clamp-2">{t.description}</div>
                     )}
                   </div>
                   <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
@@ -655,8 +588,6 @@ function McqPracticeSection({ tests }: { tests: McqPracticeTestSummary[] }) {
     </>
   );
 }
-
-
 
 function FilterSelect({
   label,
@@ -676,14 +607,8 @@ function FilterSelect({
   const ALL = "__all__";
   return (
     <div>
-      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-        {label}
-      </div>
-      <Select
-        value={value ?? ALL}
-        onValueChange={(v) => onChange(v === ALL ? null : v)}
-        disabled={disabled}
-      >
+      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">{label}</div>
+      <Select value={value ?? ALL} onValueChange={(v) => onChange(v === ALL ? null : v)} disabled={disabled}>
         <SelectTrigger>
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
@@ -717,11 +642,7 @@ function DeckCard({ deck, gradient }: { deck: DeckSummary; gradient: string }) {
             {deck.subject} · {deck.topic}
           </div>
           <div className="mt-0.5 text-lg font-bold text-foreground truncate">{deck.name}</div>
-          {deck.description && (
-            <div className="mt-1 text-sm text-foreground/70 line-clamp-2">
-              {deck.description}
-            </div>
-          )}
+          {deck.description && <div className="mt-1 text-sm text-foreground/70 line-clamp-2">{deck.description}</div>}
           <div className="mt-1 text-sm text-foreground/60">
             {deck.count} card{deck.count === 1 ? "" : "s"}
           </div>
@@ -759,4 +680,3 @@ function TelegramFloatingButton() {
     </a>
   );
 }
-
