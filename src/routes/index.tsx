@@ -95,12 +95,33 @@ function Home() {
     },
   };
 
-  return (
-    <div className="min-h-dvh bg-background">
-      <header className="px-5 pt-08 pb-6 max-w-2xl mx-auto">
-        <div className="flex items-center justify-center">
-          <img src={finalLogo.url} alt="Flashgyan" className="h-10 w-auto object-contain" />
+ <header className="bg-muted border-b border-border px-5 pt-6 pb-6 w-full text-center mb-6">
+        <div className="max-w-2xl mx-auto">
+          <div className="flex items-center justify-center">
+            <img src={finalLogo.url} alt="Flashgyan" className="h-7 w-auto object-contain" />
+          </div>
+
+          {view === "home" ? (
+            <>
+              <h1 className="mt-3 text-3xl font-semibold tracking-tight">{greeting}.</h1>
+              <p className="mt-2 text-foreground font-semibold text-[15px] leading-relaxed">
+                "Welcome to FlashGyan! Let's make your exam preparation smarter and faster."
+              </p>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => setView("home")}
+                className="mt-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft className="h-4 w-4" /> Back
+              </button>
+              <h1 className="mt-2 text-3xl font-extrabold tracking-tight">{headings[view].title}</h1>
+              <p className="mt-2 text-muted-foreground text-[15px] leading-relaxed">{headings[view].sub}</p>
+            </>
+          )}
         </div>
+      </header>
 
         {view === "home" ? (
           <>
