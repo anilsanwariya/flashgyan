@@ -21,7 +21,20 @@ import {
   Timer,
 } from "lucide-react";
 import { toast } from "sonner";
-import logoAsset from "@/assets/flashgyan-logo.png.asset.json";
+import finalLogo from "@/assets/final-logo.png.asset.json";
+
+function TelegramIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M21.4 4.96c-.2-.74-.82-1.3-1.57-1.43C18.6 3.23 6.3 6.69 4.04 7.34c-.63.18-1.15.66-1.34 1.3-.5 1.58.5 2.45 1.96 3.05l.02.01 3.58 1.25.02.01c.43.15.9.09 1.28-.16.77-.51 3.25-2.19 5.47-3.74.32-.23.75-.16.98.15.23.32.16.75-.15.98-2.18 1.52-4.65 3.19-5.42 3.71-.57.38-.97.97-1.08 1.63l-.69 4.13-.02.11c-.13.78.65 1.35 1.31.99l7.05-3.95.02-.01c1.36-.78 2.62-1.52 3.63-2.12 1.41-.86 2.52-1.56 2.52-2.81 0-.45-.15-1.05-.44-1.95z" />
+    </svg>
+  );
+}
 
 import {
   Select,
@@ -99,15 +112,18 @@ function Home() {
   return (
     <div className="min-h-dvh bg-background">
       <header className="px-5 pt-10 pb-6 max-w-2xl mx-auto">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <img src={logoAsset.url} alt="Flashgyan web logo" className="h-5 w-5 rounded-sm" />
-          Flashgyan web
+        <div className="flex items-center">
+          <img
+            src={finalLogo.url}
+            alt="Flashgyan"
+            className="h-9 w-auto object-contain"
+          />
         </div>
 
         {view === "home" ? (
           <>
             <h1 className="mt-3 text-3xl font-extrabold tracking-tight">{greeting}.</h1>
-            <p className="mt-2 text-muted-foreground text-[15px] leading-relaxed">
+            <p className="mt-2 text-center text-foreground font-semibold text-[15px] leading-relaxed">
               Choose how you want to study today.
             </p>
           </>
