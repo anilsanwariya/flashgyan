@@ -242,9 +242,9 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
             type="button"
             aria-label="Previous banner"
             onClick={() => setIdx((i) => (i - 1 + len) % len)}
-            className="absolute left-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-black/40 text-white backdrop-blur-sm flex items-center justify-center hover:bg-black/55 active:scale-95 transition"
+            className="absolute left-2 top-1/2 -translate-y-1/2 p-1 text-white drop-shadow-md flex items-center justify-center hover:text-white/80 active:scale-95 transition"
           >
-            <ChevronLeft className="h-5 w-5" />
+            <ChevronLeft className="h-6 w-6" />
           </button>
           <button
             type="button"
