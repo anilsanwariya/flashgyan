@@ -163,14 +163,25 @@ function Home() {
       </main>
 
 
-      <footer className="fixed bottom-0 inset-x-0 border-t border-border bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-        <div className="max-w-2xl mx-auto px-5 py-3 flex justify-end">
-          <Link
-            to="/admin"
-            className="text-xs text-muted-foreground inline-flex items-center gap-1 hover:text-foreground"
-          >
-            <Settings className="h-3.5 w-3.5" /> Admin
-          </Link>
+      <footer className="border-t border-border bg-background/60">
+        <div className="max-w-2xl mx-auto px-5 py-8 space-y-4 text-muted-foreground">
+          <p className="text-sm uppercase tracking-wide">
+            © {new Date().getFullYear()} FLASHGYAN EDTECH LLP. All rights reserved.
+          </p>
+          <nav className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+            <Link to="/privacy-policy" className="hover:text-foreground">
+              Privacy Policy
+            </Link>
+            <Link to="/terms" className="hover:text-foreground">
+              Terms of Service
+            </Link>
+            <a
+              href="mailto:flashgyanedtech@gmail.com"
+              className="hover:text-foreground"
+            >
+              Contact
+            </a>
+          </nav>
         </div>
       </footer>
     </div>
