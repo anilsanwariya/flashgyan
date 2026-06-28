@@ -119,33 +119,37 @@ function Home() {
       <main className="px-5 max-w-2xl mx-auto pb-12 space-y-6">
         {view === "home" && (
           <>
-            {/* Wrapper div */}
+            {/* Wrapper div for relative badge positioning */}
             <div className="relative w-full">
               <BannerCarousel banners={home.banners} />
 
-              {/* Fake Cutout Overlay */}
-              <div
-                className="absolute bottom-0 right-0 z-10 bg-background pt-3 pl-3"
-                style={{
-                  width: "40%", // Badge scales proportionally to banner width
-                  borderTopLeftRadius: "6px", // Rounds the inner cutout corner
-                  // INSET shadow simulates the ad banner casting a shadow DOWN and RIGHT onto the cutout
-                  boxShadow: "inset 4px 4px 6px rgba(0,0,0,0.08)",
-                }}
-              >
+              {/* Store Badges floating on bottom right */}
+              <div className="absolute bottom-3 right-3 z-10 flex items-center gap-2.5">
+                {/* Apple App Store (Coming Soon Popup) */}
+                <button
+                  onClick={() => toast.info("iOS app is coming soon!")}
+                  className="transition-transform hover:scale-105 active:scale-95 block"
+                  aria-label="Download on the App Store (Coming Soon)"
+                >
+                  <img
+                    src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//Download_on_the_App_Store_Badge_US-UK_RGB_blk_092917.svg"
+                    alt="Download on the App Store"
+                    className="h-10 w-auto drop-shadow-md"
+                  />
+                </button>
+
+                {/* Google Play Store (Working Link) */}
                 <a
                   href="https://play.google.com/store/apps/details?id=com.flashgyan"
                   target="_blank"
                   rel="noopener noreferrer"
-                  // Removed right and bottom padding so it sits perfectly flush
-                  className="block w-full transition-transform hover:scale-105 active:scale-95"
+                  className="transition-transform hover:scale-105 active:scale-95 block"
                   aria-label="Get it on Google Play"
                 >
                   <img
                     src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//GetItOnGooglePlay_Badge_Web_color_English.svg"
                     alt="Get it on Google Play"
-                    className="w-full h-auto"
-                    style={{ aspectRatio: "10 / 3" }}
+                    className="h-10 w-auto drop-shadow-md"
                   />
                 </a>
               </div>
@@ -219,8 +223,8 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
 
   return (
     <section
-      className="relative w-full overflow-hidden rounded-[06px] shadow-soft bg-muted"
-      style={{ aspectRatio: "3 / 2" }}
+      className="relative w-full overflow-hidden rounded-2xl shadow-soft bg-muted border-2 border-primary/20"
+      style={{ aspectRatio: "2 / 1" }}
       aria-label="Featured banners"
     >
       <div
@@ -249,8 +253,8 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
           >
             <ChevronRight className="h-6 w-6" />
           </button>
-          {/* Centered navigation dots strictly within the remaining 60% uncut bottom space */}
-          <div className="absolute bottom-2 left-0 flex justify-center gap-1.5" style={{ width: "60%" }}>
+          {/* Centered navigation dots */}
+          <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5">
             {banners.map((b, i) => (
               <button
                 key={b.id}
