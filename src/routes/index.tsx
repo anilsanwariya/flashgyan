@@ -119,26 +119,36 @@ function Home() {
       <main className="px-5 max-w-2xl mx-auto pb-12 space-y-6">
         {view === "home" && (
           <>
-            {/* Wrapper div using filter drop-shadow to trace the custom cut shape */}
-            <div className="relative w-full" style={{ filter: "drop-shadow(0 4px 8px rgba(0,0,0,0.08))" }}>
+            {/* Wrapper div */}
+            <div className="relative w-full">
               <BannerCarousel banners={home.banners} />
 
-              {/* Floating Google Play Badge scales proportionally using percentages */}
-              <a
-                href="https://play.google.com/store/apps/details?id=com.flashgyan"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="absolute z-10 transition-transform hover:scale-105 active:scale-95"
-                style={{ width: "40%", bottom: "3%", right: "2%" }}
-                aria-label="Get it on Google Play"
+              {/* Fake Cutout Overlay */}
+              <div
+                className="absolute bottom-0 right-0 z-10 bg-background pt-3 pl-3"
+                style={{
+                  width: "40%", // Badge scales proportionally to banner width
+                  borderTopLeftRadius: "16px", // Rounds the inner cutout corner
+                  // INSET shadow simulates the ad banner casting a shadow DOWN and RIGHT onto the cutout
+                  boxShadow: "inset 4px 4px 6px rgba(0,0,0,0.08)",
+                }}
               >
-                <img
-                  src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//GetItOnGooglePlay_Badge_Web_color_English.svg"
-                  alt="Get it on Google Play"
-                  className="w-full h-auto drop-shadow-sm"
-                  style={{ aspectRatio: "10 / 3" }}
-                />
-              </a>
+                <a
+                  href="https://play.google.com/store/apps/details?id=com.flashgyan"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  // Removed right and bottom padding so it sits perfectly flush
+                  className="block w-full transition-transform hover:scale-105 active:scale-95"
+                  aria-label="Get it on Google Play"
+                >
+                  <img
+                    src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//GetItOnGooglePlay_Badge_Web_color_English.svg"
+                    alt="Get it on Google Play"
+                    className="w-full h-auto"
+                    style={{ aspectRatio: "10 / 3" }}
+                  />
+                </a>
+              </div>
             </div>
 
             {/* 1. Only hide the CTA button if URL/Label is empty */}
@@ -209,16 +219,8 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
 
   return (
     <section
-      className="relative w-full overflow-hidden bg-muted"
-      style={{
-        aspectRatio: "3 / 2",
-        // This draws the custom cutout shape matching the badge
-        clipPath: "polygon(0% 0%, 100% 0%, 100% 76%, 56% 76%, 56% 100%, 0% 100%)",
-        // Re-applying border radii to the remaining 3 corners
-        borderTopLeftRadius: "6px",
-        borderTopRightRadius: "6px",
-        borderBottomLeftRadius: "6px",
-      }}
+      className="relative w-full overflow-hidden rounded-[06px] shadow-soft bg-muted"
+      style={{ aspectRatio: "3 / 2" }}
       aria-label="Featured banners"
     >
       <div
@@ -247,8 +249,8 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
           >
             <ChevronRight className="h-6 w-6" />
           </button>
-          {/* Centered navigation dots strictly within the remaining 56% uncut bottom space */}
-          <div className="absolute bottom-2 left-0 flex justify-center gap-1.5" style={{ width: "56%" }}>
+          {/* Centered navigation dots strictly within the remaining 60% uncut bottom space */}
+          <div className="absolute bottom-2 left-0 flex justify-center gap-1.5" style={{ width: "60%" }}>
             {banners.map((b, i) => (
               <button
                 key={b.id}
