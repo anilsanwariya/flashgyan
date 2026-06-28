@@ -91,10 +91,11 @@ function Home() {
 
   return (
     <div className="min-h-dvh bg-background">
-      <header className="px-5 pt-08 pb-6 max-w-2xl mx-auto">
-        <div className="flex items-center justify-center">
-          <img src={finalLogo.url} alt="Flashgyan" className="h-10 w-auto object-contain" />
+      <header className="px-5 pt-6 pb-6 max-w-2xl mx-auto">
+        <div className="flex items-center justify-center pb-4 border-b-2 border-primary/60">
+          <img src={finalLogo.url} alt="Flashgyan" className="h-16 w-auto object-contain" />
         </div>
+
 
         {view === "home" ? (
           <>
