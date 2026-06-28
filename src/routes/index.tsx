@@ -97,7 +97,7 @@ function Home() {
 
         {view === "home" ? (
           <>
-            <h1 className="mt-3 text-1xl font-semibold tracking-tight">{greeting}.</h1>
+            <h1 className="mt-3 text-1xl font-semibold tracking-tight text-[#910000]">{greeting}.</h1>
             <p className="mt-2 text-center text-foreground font-semibold text-[15px] leading-relaxed">
               "Welcome to FlashGyan! Let's make your exam preparation smarter and faster."
             </p>
@@ -129,7 +129,7 @@ function Home() {
                   locked={home.settings.lock_cta}
                 />
                 {home.settings.cta_caption.trim() && (
-                  <p className="-mt-2 text-center text-[#FF5733] text-[15px] leading-relaxed">
+                  <p className="-mt-2 text-center text-[#910000] text-[15px] leading-relaxed">
                     {home.settings.cta_caption}
                   </p>
                 )}
