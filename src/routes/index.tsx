@@ -206,7 +206,7 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
 
   return (
     <section
-      className="relative w-full overflow-hidden rounded-none shadow-soft bg-muted"
+      className="relative w-full overflow-hidden rounded-sm shadow-soft bg-muted"
       style={{ aspectRatio: "2 / 1" }}
       aria-label="Featured banners"
     >
