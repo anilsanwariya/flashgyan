@@ -130,7 +130,7 @@ function Home() {
                 />
 
                 {/* NEW: Google Play Badge */}
-                <div className="mt-2 mb-2 flex justify-center">
+                <div className="mt-1 mb-2 flex justify-center">
                   <a
                     href="https://play.google.com/store/apps/details?id=com.flashgyan"
                     target="_blank"
