@@ -211,7 +211,7 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
       aria-label="Featured banners"
     >
       <div
-        className="flex h-full transition-transform duration-500 ease-out"
+        className="flex h-full transition-transform duration-800 ease-out"
         style={{ transform: `translateX(-${idx * 100}%)` }}
       >
         {banners.map((b) => (
@@ -224,7 +224,7 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
             type="button"
             aria-label="Previous banner"
             onClick={() => setIdx((i) => (i - 1 + len) % len)}
-            className="absolute left-2 top-1/2 -translate-y-1/2 p-1 text-white drop-shadow-md flex items-center justify-center hover:text-white/80 active:scale-95 transition"
+            className="absolute left-1 top-1/2 -translate-y-1/2 p-2 text-white drop-shadow-md flex items-center justify-center hover:text-white/80 active:scale-95 transition"
           >
             <ChevronLeft className="h-6 w-6" />
           </button>
@@ -232,7 +232,7 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
             type="button"
             aria-label="Next banner"
             onClick={() => setIdx((i) => (i + 1) % len)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white drop-shadow-md flex items-center justify-center hover:text-white/80 active:scale-95 transition"
+            className="absolute right-1 top-1/2 -translate-y-1/2 p-2 text-white drop-shadow-md flex items-center justify-center hover:text-white/80 active:scale-95 transition"
           >
             <ChevronRight className="h-6 w-6" />
           </button>
