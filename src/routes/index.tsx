@@ -670,9 +670,9 @@ function TelegramFloatingButton() {
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Join Telegram"
-      className="fixed right-5 bottom-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-soft transition-transform hover:scale-105 active:scale-95"
+      className="fixed right-5 bottom-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-primary shadow-soft transition-transform hover:scale-105 active:scale-95 overflow-hidden"
     >
-      <TelegramIcon className="h-7 w-7" />
+      <img src={tgIcon.url} alt="Telegram" className="h-full w-full object-cover" />
     </a>
   );
 }
