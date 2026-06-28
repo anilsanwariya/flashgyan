@@ -150,7 +150,7 @@ function Home() {
 
       <footer className="border-t border-border bg-background/60">
         <div className="max-w-2xl mx-auto px-5 py-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs text-muted-foreground">
-          <p className="uppercase tracking-wide font-medium">© 2026 FLASHGYAN EDTECH LLP. ALL RIGHTS RESERVED.</p>
+          <p className="uppercase tracking-wide font-small">© 2026 FLASHGYAN EDTECH LLP. ALL RIGHTS RESERVED.</p>
           <nav className="flex flex-wrap gap-x-4 gap-y-1">
             <Link to="/privacy-policy" className="hover:text-foreground">
               Privacy Policy
