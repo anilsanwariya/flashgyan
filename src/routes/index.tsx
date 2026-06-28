@@ -119,24 +119,25 @@ function Home() {
       <main className="px-5 max-w-2xl mx-auto pb-12 space-y-6">
         {view === "home" && (
           <>
-            {/* Wrapper div using filter drop-shadow so the complex bordered shape casts one unified shadow */}
-            <div className="relative w-full" style={{ filter: "drop-shadow(0 4px 6px rgba(0,0,0,0.1))" }}>
+            {/* Wrapper div */}
+            <div className="relative w-full">
               <BannerCarousel banners={home.banners} />
 
-              {/* Fake Cutout Overlay with matching borders to complete the shape */}
+              {/* Fake Cutout Overlay */}
               <div
-                className="absolute z-10 bottom-0 right-0 bg-background p-2.5"
+                className="absolute bottom-0 right-0 z-10 bg-background pt-3 pl-3"
                 style={{
-                  width: "42%", // Badge scales proportionally
+                  width: "40%", // Badge scales proportionally to banner width
                   borderTopLeftRadius: "16px", // Rounds the inner cutout corner
-                  borderTop: "3px solid #000", // Matches banner border
-                  borderLeft: "3px solid #000", // Matches banner border
+                  // INSET shadow simulates the ad banner casting a shadow DOWN and RIGHT onto the cutout
+                  boxShadow: "inset 4px 4px 6px rgba(0,0,0,0.08)",
                 }}
               >
                 <a
                   href="https://play.google.com/store/apps/details?id=com.flashgyan"
                   target="_blank"
                   rel="noopener noreferrer"
+                  // Removed right and bottom padding so it sits perfectly flush
                   className="block w-full transition-transform hover:scale-105 active:scale-95"
                   aria-label="Get it on Google Play"
                 >
@@ -218,9 +219,8 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
 
   return (
     <section
-      className="relative w-full overflow-hidden rounded-2xl bg-muted"
-      // Added the thick 3px black border here to match your image reference
-      style={{ aspectRatio: "3 / 2", border: "3px solid #000" }}
+      className="relative w-full overflow-hidden rounded-[06px] shadow-soft bg-muted"
+      style={{ aspectRatio: "3 / 2" }}
       aria-label="Featured banners"
     >
       <div
@@ -249,8 +249,8 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
           >
             <ChevronRight className="h-6 w-6" />
           </button>
-          {/* Centered navigation dots strictly within the remaining 58% uncut bottom space */}
-          <div className="absolute bottom-2 left-0 flex justify-center gap-1.5" style={{ width: "58%" }}>
+          {/* Centered navigation dots strictly within the remaining 60% uncut bottom space */}
+          <div className="absolute bottom-2 left-0 flex justify-center gap-1.5" style={{ width: "60%" }}>
             {banners.map((b, i) => (
               <button
                 key={b.id}
