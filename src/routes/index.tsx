@@ -120,39 +120,41 @@ function Home() {
         {view === "home" && (
           <>
             <BannerCarousel banners={home.banners} />
+
+            {/* 1. Only hide the CTA button if URL/Label is empty */}
             {home.settings.cta_url.trim() && home.settings.cta_label.trim() && (
-              <>
-                <ExternalCtaButton
-                  label={home.settings.cta_label}
-                  subtitle={home.settings.cta_subtitle}
-                  url={home.settings.cta_url}
-                  locked={home.settings.lock_cta}
-                />
-
-                {/* NEW: Google Play Badge */}
-                <div className="mt-1 mb-2 flex justify-center">
-                  <a
-                    href="https://play.google.com/store/apps/details?id=com.flashgyan"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="transition-transform hover:scale-105 active:scale-95 inline-block"
-                    aria-label="Get it on Google Play"
-                  >
-                    <img
-                      src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//GetItOnGooglePlay_Badge_Web_color_English.svg"
-                      alt="Get it on Google Play"
-                      className="h-14 w-auto object-contain"
-                    />
-                  </a>
-                </div>
-
-                {home.settings.cta_caption.trim() && (
-                  <p className="mt-3 text-center text-[#910000] text-[15px] leading-relaxed">
-                    {home.settings.cta_caption}
-                  </p>
-                )}
-              </>
+              <ExternalCtaButton
+                label={home.settings.cta_label}
+                subtitle={home.settings.cta_subtitle}
+                url={home.settings.cta_url}
+                locked={home.settings.lock_cta}
+              />
             )}
+
+            {/* 2. Google Play Badge now sits outside the condition so it always shows */}
+            <div className="mt-5 mb-3 flex justify-center">
+              <a
+                href="https://play.google.com/store/apps/details?id=com.flashgyan"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="transition-transform hover:scale-105 active:scale-95 inline-block"
+                aria-label="Get it on Google Play"
+              >
+                <img
+                  src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//GetItOnGooglePlay_Badge_Web_color_English.svg"
+                  alt="Get it on Google Play"
+                  className="h-14 w-auto object-contain"
+                />
+              </a>
+            </div>
+
+            {/* 3. Caption now only checks if the caption text itself exists */}
+            {home.settings.cta_caption.trim() && (
+              <p className="mt-3 mb-2 text-center text-[#910000] text-[15px] leading-relaxed">
+                {home.settings.cta_caption}
+              </p>
+            )}
+
             <FeaturePicker
               settings={home.settings}
               onOpenFlashcards={() => setView("flashcards")}
