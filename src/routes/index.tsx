@@ -21,7 +21,6 @@ import { toast } from "sonner";
 import finalLogo from "@/assets/final-logo.png.asset.json";
 import tgIcon from "@/assets/tg-icon.svg.asset.json";
 
-
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const decksQO = queryOptions({ queryKey: ["decks"], queryFn: () => listDecks() });
@@ -93,9 +92,8 @@ function Home() {
     <div className="min-h-dvh bg-background">
       <header className="px-5 pt-6 pb-6 max-w-2xl mx-auto">
         <div className="flex items-center justify-center pb-4 border-b-2 border-primary/60">
-          <img src={finalLogo.url} alt="Flashgyan" className="h-16 w-auto object-contain" />
+          <img src={finalLogo.url} alt="Flashgyan" className="h-10 w-auto object-contain" />
         </div>
-
 
         {view === "home" ? (
           <>
