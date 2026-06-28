@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { listDecks, type DeckSummary } from "@/lib/flashcards.functions";
 import { listMcqTests, type McqTestSummary } from "@/lib/mcq.functions";
@@ -19,14 +19,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import finalLogo from "@/assets/final-logo.png.asset.json";
+import tgIcon from "@/assets/tg-icon.svg.asset.json";
 
-function TelegramIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-      <path d="M21.4 4.96c-.2-.74-.82-1.3-1.57-1.43C18.6 3.23 6.3 6.69 4.04 7.34c-.63.18-1.15.66-1.34 1.3-.5 1.58.5 2.45 1.96 3.05l.02.01 3.58 1.25.02.01c.43.15.9.09 1.28-.16.77-.51 3.25-2.19 5.47-3.74.32-.23.75-.16.98.15.23.32.16.75-.15.98-2.18 1.52-4.65 3.19-5.42 3.71-.57.38-.97.97-1.08 1.63l-.69 4.13-.02.11c-.13.78.65 1.35 1.31.99l7.05-3.95.02-.01c1.36-.78 2.62-1.52 3.63-2.12 1.41-.86 2.52-1.56 2.52-2.81 0-.45-.15-1.05-.44-1.95z" />
-    </svg>
-  );
-}
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -676,9 +670,9 @@ function TelegramFloatingButton() {
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Join Telegram"
-      className="fixed right-5 bottom-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-soft transition-transform hover:scale-105 active:scale-95"
+      className="fixed right-5 bottom-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-primary shadow-soft transition-transform hover:scale-105 active:scale-95 overflow-hidden"
     >
-      <TelegramIcon className="h-7 w-7" />
+      <img src={tgIcon.url} alt="Telegram" className="h-full w-full object-cover" />
     </a>
   );
 }
