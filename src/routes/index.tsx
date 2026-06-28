@@ -76,15 +76,15 @@ function Home() {
   const headings: Record<Exclude<View, "home">, { title: string; sub: string }> = {
     flashcards: {
       title: "Flashcards",
-      sub: "Filter by subject and topic, then flip through cards and rate your recall.",
+      sub: "Flip through cards and rate your recall.",
     },
     mcqs: {
       title: "MCQ Tests",
-      sub: "Pick a test, answer the questions before time runs out, and review your score.",
+      sub: "Answer the questions before time runs out, and review your score.",
     },
     mcqPractice: {
       title: "MCQ Practice",
-      sub: "Untimed practice. Tap an option, see what's right, and read the explanation.",
+      sub: "Answer the questions, see what's right, and read the explanation.",
     },
   };
 
