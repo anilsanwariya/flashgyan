@@ -124,17 +124,17 @@ function Home() {
               <BannerCarousel banners={home.banners} />
 
               {/* Store Badges Row - Below the Banner */}
-              <div className="flex justify-between items-center w-full">
+              <div className="flex justify-between items-center w-full gap-3">
                 {/* Apple App Store (Coming Soon Popup) - Touches Left */}
                 <button
                   onClick={() => toast.info("iOS app is coming soon!")}
-                  className="w-[48%] transition-transform hover:scale-105 active:scale-95 block"
+                  className="flex-1 transition-transform hover:scale-105 active:scale-95 block"
                   aria-label="Download on the App Store (Coming Soon)"
                 >
                   <img
                     src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//Download_on_the_App_Store_Badge_US-UK_RGB_blk_092917.svg"
                     alt="Download on the App Store"
-                    className="w-full h-auto drop-shadow-sm"
+                    className="h-10 w-full object-contain drop-shadow-sm"
                   />
                 </button>
 
@@ -143,13 +143,13 @@ function Home() {
                   href="https://play.google.com/store/apps/details?id=com.flashgyan"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-[48%] transition-transform hover:scale-105 active:scale-95 block"
+                  className="flex-1 transition-transform hover:scale-105 active:scale-95 block"
                   aria-label="Get it on Google Play"
                 >
                   <img
                     src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//GetItOnGooglePlay_Badge_Web_color_English.svg"
                     alt="Get it on Google Play"
-                    className="w-full h-auto drop-shadow-sm"
+                    className="h-10 w-full object-contain drop-shadow-sm"
                   />
                 </a>
               </div>
