@@ -90,7 +90,7 @@ function Home() {
 
   return (
     <div className="min-h-dvh bg-background">
-      <header className="px-5 pt-6 pb-6 max-w-2xl mx-auto">
+      <header className="px-5 pt-4 pb-4 max-w-2xl mx-auto">
         <div className="flex items-center justify-center pb-4 border-b-2 border-primary/60">
           <img src={finalLogo.url} alt="Flashgyan" className="h-10 w-auto object-contain" />
         </div>
@@ -669,7 +669,8 @@ function TelegramFloatingButton() {
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Join Telegram"
-      className="fixed right-5 bottom-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-primary shadow-soft transition-transform hover:scale-105 active:scale-95 overflow-hidden"
+      // Changed bg-primary to an arbitrary hex code:#229ed9
+      className="fixed right-5 bottom-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[#0088cc] shadow-soft transition-transform hover:scale-105 active:scale-95 overflow-hidden"
     >
       <img src={tgIcon.url} alt="Telegram" className="h-full w-full object-cover" />
     </a>
