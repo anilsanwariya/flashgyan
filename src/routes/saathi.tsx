@@ -9,11 +9,7 @@ import remarkGfm from "remark-gfm";
 import mermaid from "mermaid";
 import { askSaathi, listSaathiSubjects, type SaathiChatSource } from "@/lib/saathi.functions";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 export const Route = createFileRoute("/saathi")({
   ssr: false,
@@ -76,7 +72,6 @@ function SaathiChat() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, sending]);
 
-
   const canSend = input.trim().length > 0 && selected.length > 0 && !sending;
 
   async function send() {
@@ -100,10 +95,7 @@ function SaathiChat() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Something went wrong";
       toast.error(msg);
-      setMessages((m) => [
-        ...m,
-        { id: crypto.randomUUID(), role: "assistant", content: `⚠️ ${msg}` },
-      ]);
+      setMessages((m) => [...m, { id: crypto.randomUUID(), role: "assistant", content: `⚠️ ${msg}` }]);
     } finally {
       setSending(false);
       setTimeout(() => inputRef.current?.focus(), 0);
@@ -118,18 +110,10 @@ function SaathiChat() {
   }
 
   return (
-    <div
-      ref={containerRef}
-      className="fixed inset-0 flex flex-col bg-background"
-      style={{ height: "100dvh" }}
-    >
-
+    <div ref={containerRef} className="fixed inset-0 flex flex-col bg-background" style={{ height: "100dvh" }}>
       <header className="border-b border-border bg-background/80 backdrop-blur sticky top-0 z-10">
         <div className="max-w-3xl mx-auto px-5 py-3 flex items-center gap-3">
-          <Link
-            to="/"
-            className="text-sm text-muted-foreground inline-flex items-center gap-1 hover:text-foreground"
-          >
+          <Link to="/" className="text-sm text-muted-foreground inline-flex items-center gap-1 hover:text-foreground">
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -138,9 +122,7 @@ function SaathiChat() {
             </div>
             <div className="min-w-0">
               <div className="font-bold leading-tight">SAATHI</div>
-              <div className="text-xs text-muted-foreground leading-tight">
-                Your study assistant
-              </div>
+              <div className="text-xs text-muted-foreground leading-tight">Your study assistant</div>
             </div>
           </div>
         </div>
@@ -155,8 +137,7 @@ function SaathiChat() {
               </div>
               <h1 className="text-2xl font-extrabold tracking-tight">Ask SAATHI anything</h1>
               <p className="mt-2 text-sm text-muted-foreground max-w-md mx-auto">
-                Pick one or more subjects below, then ask your question. SAATHI only
-                answers from saved study material.
+                Pick one or more subjects below, then ask your question.
               </p>
             </div>
           )}
@@ -179,22 +160,14 @@ function SaathiChat() {
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         <div className="max-w-3xl mx-auto px-5 pt-3 pb-3 space-y-2">
-          <SubjectMultiSelect
-            options={subjectsQ.data ?? []}
-            selected={selected}
-            onChange={setSelected}
-          />
+          <SubjectMultiSelect options={subjectsQ.data ?? []} selected={selected} onChange={setSelected} />
           <div className="flex items-end gap-2">
             <Textarea
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKey}
-              placeholder={
-                selected.length === 0
-                  ? "Select at least one subject above to start…"
-                  : "Ask SAATHI about your study material…"
-              }
+              placeholder={selected.length === 0 ? "Ask SAATHI" : "Ask SAATHI about your study material…"}
               rows={1}
               className="resize-none min-h-[44px] max-h-40"
             />
@@ -243,9 +216,7 @@ function SubjectMultiSelect({
         <button
           type="button"
           className={`w-full h-10 rounded-lg border px-3 text-sm flex items-center justify-between gap-2 bg-background ${
-            selected.length === 0
-              ? "border-destructive/60 text-muted-foreground"
-              : "border-border"
+            selected.length === 0 ? "border-destructive/60 text-muted-foreground" : "border-border"
           }`}
         >
           <span className="truncate text-left">{label}</span>
@@ -329,9 +300,7 @@ function MessageBubble({ msg }: { msg: Msg }) {
                     </pre>
                   );
                 }
-                return (
-                  <code className="bg-muted rounded px-1 py-0.5 text-xs">{children}</code>
-                );
+                return <code className="bg-muted rounded px-1 py-0.5 text-xs">{children}</code>;
               },
               table(props) {
                 return (
@@ -387,11 +356,7 @@ function MermaidBlock({ chart }: { chart: string }) {
   }, [chart, id]);
 
   if (error) {
-    return (
-      <pre className="bg-muted rounded-lg p-3 overflow-x-auto text-xs text-destructive">
-        {chart}
-      </pre>
-    );
+    return <pre className="bg-muted rounded-lg p-3 overflow-x-auto text-xs text-destructive">{chart}</pre>;
   }
   return <div ref={ref} className="my-3 rounded-lg bg-white p-3 overflow-x-auto" />;
 }
