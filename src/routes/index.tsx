@@ -132,7 +132,7 @@ function Home() {
             )}
 
             {/* 2. Google Play Badge now sits outside the condition so it always shows */}
-            <div className="mt-5 mb-3 flex justify-center">
+            <div className="mt-3 mb-3 flex justify-center">
               <a
                 href="https://play.google.com/store/apps/details?id=com.flashgyan"
                 target="_blank"
