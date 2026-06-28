@@ -255,7 +255,7 @@ function FeaturePicker({
       />
       <FeatureCard
         title="MCQ Practice"
-        subtitle="Untimed Q&A with instant feedback."
+        subtitle="Q&A with instant feedback."
         icon={<Target className="h-5 w-5" />}
         gradient="grad-mint"
         locked={settings.lock_mcq_practice}
