@@ -119,37 +119,37 @@ function Home() {
       <main className="px-5 max-w-2xl mx-auto pb-12 space-y-6">
         {view === "home" && (
           <>
-            {/* Wrapper div for relative badge positioning */}
-            <div className="relative w-full">
+            {/* Wrapper for Banner and Store Badges */}
+            <div className="w-full space-y-3">
               <BannerCarousel banners={home.banners} />
 
-              {/* Store Badges floating on bottom right */}
-              <div className="absolute bottom-3 right-3 z-10 flex items-center gap-2.5">
-                {/* Apple App Store (Coming Soon Popup) */}
+              {/* Store Badges Row - Below the Banner */}
+              <div className="flex justify-between items-center w-full">
+                {/* Apple App Store (Coming Soon Popup) - Touches Left */}
                 <button
                   onClick={() => toast.info("iOS app is coming soon!")}
-                  className="transition-transform hover:scale-105 active:scale-95 block"
+                  className="w-[48%] transition-transform hover:scale-105 active:scale-95 block"
                   aria-label="Download on the App Store (Coming Soon)"
                 >
                   <img
                     src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//Download_on_the_App_Store_Badge_US-UK_RGB_blk_092917.svg"
                     alt="Download on the App Store"
-                    className="h-10 w-auto drop-shadow-md"
+                    className="w-full h-auto drop-shadow-sm"
                   />
                 </button>
 
-                {/* Google Play Store (Working Link) */}
+                {/* Google Play Store (Working Link) - Touches Right */}
                 <a
                   href="https://play.google.com/store/apps/details?id=com.flashgyan"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="transition-transform hover:scale-105 active:scale-95 block"
+                  className="w-[48%] transition-transform hover:scale-105 active:scale-95 block"
                   aria-label="Get it on Google Play"
                 >
                   <img
                     src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//GetItOnGooglePlay_Badge_Web_color_English.svg"
                     alt="Get it on Google Play"
-                    className="h-10 w-auto drop-shadow-md"
+                    className="w-full h-auto drop-shadow-sm"
                   />
                 </a>
               </div>
