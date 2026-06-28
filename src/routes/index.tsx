@@ -119,7 +119,25 @@ function Home() {
       <main className="px-5 max-w-2xl mx-auto pb-12 space-y-6">
         {view === "home" && (
           <>
-            <BannerCarousel banners={home.banners} />
+            {/* Wrapper div to hold the banner and floating badge together */}
+            <div className="relative">
+              <BannerCarousel banners={home.banners} />
+
+              {/* Floating Google Play Badge (Bottom Right) */}
+              <a
+                href="https://play.google.com/store/apps/details?id=com.flashgyan"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="absolute bottom-3 right-3 z-10 transition-transform hover:scale-105 active:scale-95 inline-block"
+                aria-label="Get it on Google Play"
+              >
+                <img
+                  src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//GetItOnGooglePlay_Badge_Web_color_English.svg"
+                  alt="Get it on Google Play"
+                  className="h-10 w-auto object-contain drop-shadow-md"
+                />
+              </a>
+            </div>
 
             {/* 1. Only hide the CTA button if URL/Label is empty */}
             {home.settings.cta_url.trim() && home.settings.cta_label.trim() && (
@@ -131,24 +149,7 @@ function Home() {
               />
             )}
 
-            {/* 2. Google Play Badge now sits outside the condition so it always shows */}
-            <div className="mt-3 mb-3 flex justify-center">
-              <a
-                href="https://play.google.com/store/apps/details?id=com.flashgyan"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="transition-transform hover:scale-105 active:scale-95 inline-block"
-                aria-label="Get it on Google Play"
-              >
-                <img
-                  src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//GetItOnGooglePlay_Badge_Web_color_English.svg"
-                  alt="Get it on Google Play"
-                  className="h-14 w-auto object-contain"
-                />
-              </a>
-            </div>
-
-            {/* 3. Caption now only checks if the caption text itself exists */}
+            {/* 2. Caption now only checks if the caption text itself exists */}
             {home.settings.cta_caption.trim() && (
               <p className="mt-3 mb-2 text-center text-[#910000] text-[15px] leading-relaxed">
                 {home.settings.cta_caption}
