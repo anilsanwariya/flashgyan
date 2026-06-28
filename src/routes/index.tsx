@@ -124,7 +124,7 @@ function Home() {
               <BannerCarousel banners={home.banners} />
 
               {/* Store Badges Row - Below the Banner */}
-              <div className="flex justify-between items-center w-full gap-3">
+              <div className="flex justify-end items-center w-full gap-3">
                 {/* Apple App Store (Coming Soon Popup) - Touches Left */}
                 <button
                   onClick={() => toast.info("iOS app is coming soon!")}
