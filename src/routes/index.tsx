@@ -128,7 +128,7 @@ function Home() {
                 href="https://play.google.com/store/apps/details?id=com.flashgyan"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="absolute bottom-3 right-3 z-10 transition-transform hover:scale-105 active:scale-95 inline-block"
+                className="absolute bottom-0 right-0 z-10 transition-transform hover:scale-105 active:scale-95 inline-block"
                 aria-label="Get it on Google Play"
               >
                 <img
