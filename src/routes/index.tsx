@@ -91,7 +91,7 @@ function Home() {
   return (
     <div className="min-h-dvh bg-background">
       <header className="px-5 pt-2 pb-2 max-w-2xl mx-auto">
-        <div className="flex items-center justify-center pb-4 border-b-2 border-primary/60">
+        <div className="flex items-center justify-center pb-1 border-b-2 border-primary/60">
           <img src={finalLogo.url} alt="Flashgyan" className="h-10 w-auto object-contain" />
         </div>
 
