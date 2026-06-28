@@ -128,7 +128,7 @@ function Home() {
                 className="absolute bottom-0 right-0 z-10 bg-background pt-3 pl-3"
                 style={{
                   width: "40%", // Badge scales proportionally to banner width
-                  borderTopLeftRadius: "16px", // Rounds the inner cutout corner
+                  borderTopLeftRadius: "6px", // Rounds the inner cutout corner
                   // INSET shadow simulates the ad banner casting a shadow DOWN and RIGHT onto the cutout
                   boxShadow: "inset 4px 4px 6px rgba(0,0,0,0.08)",
                 }}
