@@ -97,7 +97,7 @@ function Home() {
 
         {view === "home" ? (
           <>
-            <h1 className="mt-3 text-2xl font-semibold tracking-tight">{greeting}.</h1>
+            <h1 className="mt-3 text-1xl font-semibold tracking-tight">{greeting}.</h1>
             <p className="mt-2 text-center text-foreground font-semibold text-[15px] leading-relaxed">
               "Welcome to FlashGyan! Let's make your exam preparation smarter and faster."
             </p>
