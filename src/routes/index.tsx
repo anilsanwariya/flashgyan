@@ -128,8 +128,26 @@ function Home() {
                   url={home.settings.cta_url}
                   locked={home.settings.lock_cta}
                 />
+
+                {/* NEW: Google Play Badge */}
+                <div className="mt-5 mb-2 flex justify-center">
+                  <a
+                    href="https://play.google.com/store/apps/details?id=com.flashgyan"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="transition-transform hover:scale-105 active:scale-95 inline-block"
+                    aria-label="Get it on Google Play"
+                  >
+                    <img
+                      src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//GetItOnGooglePlay_Badge_Web_color_English.svg"
+                      alt="Get it on Google Play"
+                      className="h-14 w-auto object-contain"
+                    />
+                  </a>
+                </div>
+
                 {home.settings.cta_caption.trim() && (
-                  <p className="-mt-2 text-center text-[#910000] text-[15px] leading-relaxed">
+                  <p className="mt-3 text-center text-[#910000] text-[15px] leading-relaxed">
                     {home.settings.cta_caption}
                   </p>
                 )}
@@ -672,7 +690,6 @@ function TelegramFloatingButton() {
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Join Telegram"
-      // Changed bg-primary to an arbitrary hex code:#2aabee
       className="fixed right-5 bottom-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[#2aabee] shadow-soft transition-transform hover:scale-105 active:scale-95 overflow-hidden"
     >
       <img src={tgIcon.url} alt="Telegram" className="h-full w-full object-cover" />
