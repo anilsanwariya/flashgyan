@@ -119,22 +119,24 @@ function Home() {
       <main className="px-5 max-w-2xl mx-auto pb-12 space-y-6">
         {view === "home" && (
           <>
-            {/* Wrapper div to hold the banner and floating badge together */}
-            <div className="relative">
+            {/* Wrapper div using filter drop-shadow to trace the custom cut shape */}
+            <div className="relative w-full" style={{ filter: "drop-shadow(0 4px 8px rgba(0,0,0,0.08))" }}>
               <BannerCarousel banners={home.banners} />
 
-              {/* Floating Google Play Badge (Bottom Right) */}
+              {/* Floating Google Play Badge scales proportionally using percentages */}
               <a
                 href="https://play.google.com/store/apps/details?id=com.flashgyan"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="absolute bottom-2 right-2 z-10 transition-transform hover:scale-105 active:scale-95 inline-block"
+                className="absolute z-10 transition-transform hover:scale-105 active:scale-95"
+                style={{ width: "40%", bottom: "3%", right: "2%" }}
                 aria-label="Get it on Google Play"
               >
                 <img
                   src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//GetItOnGooglePlay_Badge_Web_color_English.svg"
                   alt="Get it on Google Play"
-                  className="h-10 w-auto object-contain drop-shadow-md"
+                  className="w-full h-auto drop-shadow-sm"
+                  style={{ aspectRatio: "10 / 3" }}
                 />
               </a>
             </div>
@@ -207,8 +209,16 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
 
   return (
     <section
-      className="relative w-full overflow-hidden rounded-[06px] shadow-soft bg-muted"
-      style={{ aspectRatio: "3 / 2" }}
+      className="relative w-full overflow-hidden bg-muted"
+      style={{
+        aspectRatio: "3 / 2",
+        // This draws the custom cutout shape matching the badge
+        clipPath: "polygon(0% 0%, 100% 0%, 100% 76%, 56% 76%, 56% 100%, 0% 100%)",
+        // Re-applying border radii to the remaining 3 corners
+        borderTopLeftRadius: "6px",
+        borderTopRightRadius: "6px",
+        borderBottomLeftRadius: "6px",
+      }}
       aria-label="Featured banners"
     >
       <div
@@ -237,7 +247,8 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
           >
             <ChevronRight className="h-6 w-6" />
           </button>
-          <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5">
+          {/* Centered navigation dots strictly within the remaining 56% uncut bottom space */}
+          <div className="absolute bottom-2 left-0 flex justify-center gap-1.5" style={{ width: "56%" }}>
             {banners.map((b, i) => (
               <button
                 key={b.id}
