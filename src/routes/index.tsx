@@ -672,7 +672,7 @@ function TelegramFloatingButton() {
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Join Telegram"
-      // Changed bg-primary to an arbitrary hex code:#229ed9
+      // Changed bg-primary to an arbitrary hex code:#2aabee
       className="fixed right-5 bottom-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[#0088cc] shadow-soft transition-transform hover:scale-105 active:scale-95 overflow-hidden"
     >
       <img src={tgIcon.url} alt="Telegram" className="h-full w-full object-cover" />
