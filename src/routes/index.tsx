@@ -134,7 +134,7 @@ function Home() {
                   <img
                     src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//Download_on_the_App_Store_Badge_US-UK_RGB_blk_092917.svg"
                     alt="Download on the App Store"
-                    className="h-10 w-full object-contain drop-shadow-sm"
+                    className="h-14 w-full object-contain drop-shadow-sm"
                   />
                 </button>
 
@@ -149,7 +149,7 @@ function Home() {
                   <img
                     src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//GetItOnGooglePlay_Badge_Web_color_English.svg"
                     alt="Get it on Google Play"
-                    className="h-10 w-full object-contain drop-shadow-sm"
+                    className="h-14 w-full object-contain drop-shadow-sm"
                   />
                 </a>
               </div>
