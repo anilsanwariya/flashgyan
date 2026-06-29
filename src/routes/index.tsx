@@ -41,7 +41,7 @@ function Home() {
 
   return (
     <div className="min-h-dvh bg-background">
-      <header className="px-5 pt-2 pb-2 max-w-2xl mx-auto">
+      <header className="sticky top-0 z-50 bg-background px-5 pt-2 pb-2 max-w-2xl mx-auto shadow-sm">
         <div className="flex items-center justify-between pb-1 border-b-2 border-primary/60">
           <img src={finalLogo.url} alt="Flashgyan" className="h-10 w-auto object-contain" />
           <img
@@ -56,7 +56,7 @@ function Home() {
         </p>
       </header>
 
-      <main className="px-5 max-w-2xl mx-auto pb-12 space-y-6">
+      <main className="px-5 max-w-2xl mx-auto pb-12 space-y-6 pt-2">
         <div className="w-full space-y-3">
           <BannerCarousel banners={home.banners} />
 
