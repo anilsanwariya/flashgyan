@@ -188,12 +188,12 @@ function Home() {
       </main>
 
       <footer className="border-t border-border bg-background/60">
-        <div className="max-w-2xl mx-auto px-5 py-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs text-muted-foreground">
+        <div className="max-w-2xl mx-auto px-5 py-6 flex flex-col items-center justify-center text-center gap-3 text-xs text-muted-foreground">
           <p className="uppercase tracking-wide font-small">
             <span className="block">© 2026 FLASHGYAN EDTECH LLP.</span>
             <span className="block mt-1">ALL RIGHTS RESERVED.</span>
           </p>
-          <nav className="flex flex-wrap gap-x-4 gap-y-1">
+          <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
             <Link to="/privacy-policy" className="hover:text-foreground">
               Privacy Policy
             </Link>
