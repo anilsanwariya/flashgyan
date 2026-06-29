@@ -45,7 +45,7 @@ function Home() {
         <div className="flex items-center justify-between pb-1 border-b-2 border-primary/60">
           <img src={finalLogo.url} alt="Flashgyan" className="h-10 w-auto object-contain" />
           <img
-            src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//RASbandhu_logo_purple.png"
+            src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//RASbandhu-logo-green.png"
             alt="RASbandhu"
             className="h-10 w-auto object-contain"
           />
