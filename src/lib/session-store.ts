@@ -1,5 +1,14 @@
 export type Rating = "hard" | "medium" | "easy";
 
+export type McqCardData = {
+  options: [string, string, string, string];
+  answerIndex: 1 | 2 | 3 | 4;
+  pickedIndex: 1 | 2 | 3 | 4;
+  explanationSections: Array<{ title: string; body: string }>;
+  imageUrl?: string | null;
+  hint?: string | null;
+};
+
 export type SessionCardResult = {
   id: string;
   subject: string;
@@ -8,6 +17,7 @@ export type SessionCardResult = {
   question: string;
   answer: string;
   rating: Rating;
+  mcq?: McqCardData;
 };
 
 export type SessionDetail = {

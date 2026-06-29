@@ -1,12 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
-import { listDecks, type DeckSummary } from "@/lib/flashcards.functions";
-import { listMcqTests, type McqTestSummary } from "@/lib/mcq.functions";
-import { listMcqPracticeTests, type McqPracticeTestSummary } from "@/lib/mcq-practice.functions";
 import { getHomeData, type HomeData } from "@/lib/home.functions";
 import {
-  ArrowLeft,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
@@ -15,20 +11,11 @@ import {
   Lock,
   Sparkles,
   Target,
-  Timer,
 } from "lucide-react";
 import { toast } from "sonner";
 import finalLogo from "@/assets/final-logo.png.asset.json";
 import tgIcon from "@/assets/tg-icon.svg.asset.json";
 
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-
-const decksQO = queryOptions({ queryKey: ["decks"], queryFn: () => listDecks() });
-const mcqQO = queryOptions({ queryKey: ["mcqTests"], queryFn: () => listMcqTests() });
-const mcqPracticeQO = queryOptions({
-  queryKey: ["mcqPracticeTests"],
-  queryFn: () => listMcqPracticeTests(),
-});
 const homeQO = queryOptions({ queryKey: ["homeData"], queryFn: () => getHomeData() });
 
 export const Route = createFileRoute("/")({
@@ -41,17 +28,9 @@ export const Route = createFileRoute("/")({
       },
     ],
   }),
-  loader: ({ context }) =>
-    Promise.all([
-      context.queryClient.ensureQueryData(decksQO),
-      context.queryClient.ensureQueryData(mcqQO),
-      context.queryClient.ensureQueryData(mcqPracticeQO),
-      context.queryClient.ensureQueryData(homeQO),
-    ]),
+  loader: ({ context }) => context.queryClient.ensureQueryData(homeQO),
   component: Home,
 });
-
-type View = "home" | "flashcards" | "mcqs" | "mcqPractice";
 
 function greetingFor(date: Date) {
   const h = date.getHours();
@@ -61,11 +40,7 @@ function greetingFor(date: Date) {
 }
 
 function Home() {
-  const { data: decks } = useSuspenseQuery(decksQO);
-  const { data: tests } = useSuspenseQuery(mcqQO);
-  const { data: practiceTests } = useSuspenseQuery(mcqPracticeQO);
   const { data: home } = useSuspenseQuery(homeQO);
-  const [view, setView] = useState<View>("home");
   const [greeting, setGreeting] = useState(() => greetingFor(new Date()));
 
   useEffect(() => {
@@ -73,118 +48,67 @@ function Home() {
     return () => clearInterval(t);
   }, []);
 
-  const headings: Record<Exclude<View, "home">, { title: string; sub: string }> = {
-    flashcards: {
-      title: "Flashcards",
-      sub: "Flip through cards and rate your recall.",
-    },
-    mcqs: {
-      title: "MCQ Tests",
-      sub: "Answer the questions before time runs out, and review your score.",
-    },
-    mcqPractice: {
-      title: "MCQ Practice",
-      sub: "Answer the questions, see what's right, and read the explanation.",
-    },
-  };
-
   return (
     <div className="min-h-dvh bg-background">
       <header className="px-5 pt-2 pb-2 max-w-2xl mx-auto">
         <div className="flex items-center justify-center pb-1 border-b-2 border-primary/60">
           <img src={finalLogo.url} alt="Flashgyan" className="h-10 w-auto object-contain" />
         </div>
-
-        {view === "home" ? (
-          <>
-            <h1 className="mt-3 text-1xl font-semibold tracking-tight text-[#910000]">{greeting}.</h1>
-            <p className="mt-2 text-center text-foreground font-semibold text-[15px] leading-relaxed">
-              "Welcome to FlashGyan! Let's make your exam preparation smarter and faster."
-            </p>
-          </>
-        ) : (
-          <>
-            <button
-              onClick={() => setView("home")}
-              className="mt-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-            >
-              <ArrowLeft className="h-4 w-4" /> Back
-            </button>
-            <h1 className="mt-2 text-3xl font-extrabold tracking-tight">{headings[view].title}</h1>
-            <p className="mt-2 text-muted-foreground text-[15px] leading-relaxed">{headings[view].sub}</p>
-          </>
-        )}
+        <h1 className="mt-3 text-1xl font-semibold tracking-tight text-[#910000]">{greeting}.</h1>
+        <p className="mt-2 text-center text-foreground font-semibold text-[15px] leading-relaxed">
+          "Welcome to FlashGyan! Let's make your exam preparation smarter and faster."
+        </p>
       </header>
 
       <main className="px-5 max-w-2xl mx-auto pb-12 space-y-6">
-        {view === "home" && (
-          <>
-            {/* Wrapper for Banner and Store Badges */}
-            <div className="w-full space-y-3">
-              <BannerCarousel banners={home.banners} />
+        <div className="w-full space-y-3">
+          <BannerCarousel banners={home.banners} />
 
-              {/* Store Badges Row - Flex space-between pushes natural sized elements to the edges */}
-              <div className="flex justify-between items-center w-full">
-                {/* Apple App Store (Coming Soon Popup) - Touches Left */}
-                <button
-                  onClick={() => toast.info("iOS app is coming soon!")}
-                  className="transition-transform hover:scale-105 active:scale-95 block"
-                  aria-label="Download on the App Store (Coming Soon)"
-                >
-                  <img
-                    src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//Download_on_the_App_Store_Badge_US-UK_RGB_blk_092917.svg"
-                    alt="Download on the App Store"
-                    // Size 13 (52px) height, auto width maintains natural aspect ratio
-                    className="h-[52px] w-auto object-contain drop-shadow-sm"
-                  />
-                </button>
-
-                {/* Google Play Store (Working Link) - Touches Right */}
-                <a
-                  href="https://play.google.com/store/apps/details?id=com.flashgyan"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="transition-transform hover:scale-105 active:scale-95 block"
-                  aria-label="Get it on Google Play"
-                >
-                  <img
-                    src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//GetItOnGooglePlay_Badge_Web_color_English.svg"
-                    alt="Get it on Google Play"
-                    // Size 13 (52px) height, auto width maintains natural aspect ratio
-                    className="h-[52px] w-auto object-contain drop-shadow-sm"
-                  />
-                </a>
-              </div>
-            </div>
-
-            {/* 1. Only hide the CTA button if URL/Label is empty */}
-            {home.settings.cta_url.trim() && home.settings.cta_label.trim() && (
-              <ExternalCtaButton
-                label={home.settings.cta_label}
-                subtitle={home.settings.cta_subtitle}
-                url={home.settings.cta_url}
-                locked={home.settings.lock_cta}
+          <div className="flex justify-between items-center w-full">
+            <button
+              onClick={() => toast.info("iOS app is coming soon!")}
+              className="transition-transform hover:scale-105 active:scale-95 block"
+              aria-label="Download on the App Store (Coming Soon)"
+            >
+              <img
+                src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//Download_on_the_App_Store_Badge_US-UK_RGB_blk_092917.svg"
+                alt="Download on the App Store"
+                className="h-[52px] w-auto object-contain drop-shadow-sm"
               />
-            )}
+            </button>
 
-            {/* 2. Caption now only checks if the caption text itself exists */}
-            {home.settings.cta_caption.trim() && (
-              <p className="mt-3 mb-2 text-center text-[#910000] text-[15px] leading-relaxed">
-                {home.settings.cta_caption}
-              </p>
-            )}
+            <a
+              href="https://play.google.com/store/apps/details?id=com.flashgyan"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="transition-transform hover:scale-105 active:scale-95 block"
+              aria-label="Get it on Google Play"
+            >
+              <img
+                src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//GetItOnGooglePlay_Badge_Web_color_English.svg"
+                alt="Get it on Google Play"
+                className="h-[52px] w-auto object-contain drop-shadow-sm"
+              />
+            </a>
+          </div>
+        </div>
 
-            <FeaturePicker
-              settings={home.settings}
-              onOpenFlashcards={() => setView("flashcards")}
-              onOpenMcqs={() => setView("mcqs")}
-              onOpenMcqPractice={() => setView("mcqPractice")}
-            />
-          </>
+        {home.settings.cta_url.trim() && home.settings.cta_label.trim() && (
+          <ExternalCtaButton
+            label={home.settings.cta_label}
+            subtitle={home.settings.cta_subtitle}
+            url={home.settings.cta_url}
+            locked={home.settings.lock_cta}
+          />
         )}
-        {view === "flashcards" && <FlashcardsSection decks={decks} />}
-        {view === "mcqs" && <McqSection tests={tests} />}
-        {view === "mcqPractice" && <McqPracticeSection tests={practiceTests} />}
+
+        {home.settings.cta_caption.trim() && (
+          <p className="mt-3 mb-2 text-center text-[#910000] text-[15px] leading-relaxed">
+            {home.settings.cta_caption}
+          </p>
+        )}
+
+        <FeaturePicker settings={home.settings} />
       </main>
 
       <footer className="border-t border-border bg-background/60">
@@ -206,7 +130,7 @@ function Home() {
           </nav>
         </div>
       </footer>
-      {view === "home" && <TelegramFloatingButton />}
+      <TelegramFloatingButton />
     </div>
   );
 }
@@ -234,7 +158,13 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
         style={{ transform: `translateX(-${idx * 100}%)` }}
       >
         {banners.map((b) => (
-          <img key={b.id} src={b.url} alt="" className="w-full h-full object-cover shrink-0" draggable={false} />
+          <img
+            key={b.id}
+            src={b.url}
+            alt=""
+            className="w-full h-full object-cover shrink-0"
+            draggable={false}
+          />
         ))}
       </div>
       {len > 1 && (
@@ -255,14 +185,16 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
           >
             <ChevronRight className="h-6 w-6" />
           </button>
-          {/* Centered navigation dots */}
           <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5">
             {banners.map((b, i) => (
               <button
                 key={b.id}
                 aria-label={`Show banner ${i + 1}`}
                 onClick={() => setIdx(i)}
-                className={"h-1.5 rounded-full transition-all " + (i === idx ? "w-5 bg-white" : "w-1.5 bg-white/60")}
+                className={
+                  "h-1.5 rounded-full transition-all " +
+                  (i === idx ? "w-5 bg-white" : "w-1.5 bg-white/60")
+                }
               />
             ))}
           </div>
@@ -272,17 +204,8 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
   );
 }
 
-function FeaturePicker({
-  settings,
-  onOpenFlashcards,
-  onOpenMcqs,
-  onOpenMcqPractice,
-}: {
-  settings: HomeData["settings"];
-  onOpenFlashcards: () => void;
-  onOpenMcqs: () => void;
-  onOpenMcqPractice: () => void;
-}) {
+function FeaturePicker({ settings }: { settings: HomeData["settings"] }) {
+  const navigate = useNavigate();
   return (
     <section className="space-y-3">
       <FeatureCard
@@ -291,7 +214,7 @@ function FeaturePicker({
         icon={<Layers className="h-5 w-5" />}
         gradient="grad-pink"
         locked={settings.lock_flashcards}
-        onClick={onOpenFlashcards}
+        onClick={() => navigate({ to: "/flashcards" })}
       />
       <FeatureCard
         title="MCQ Practice"
@@ -299,7 +222,7 @@ function FeaturePicker({
         icon={<Target className="h-5 w-5" />}
         gradient="grad-mint"
         locked={settings.lock_mcq_practice}
-        onClick={onOpenMcqPractice}
+        onClick={() => navigate({ to: "/mcq-practice" })}
       />
       <FeatureCard
         title="MCQ Tests"
@@ -307,9 +230,16 @@ function FeaturePicker({
         icon={<ListChecks className="h-5 w-5" />}
         gradient="grad-lavender"
         locked={settings.lock_mcq}
-        onClick={onOpenMcqs}
+        onClick={() => navigate({ to: "/mcq-tests" })}
       />
-      <SaathiFeatureLink locked={settings.lock_saathi} />
+      <FeatureCard
+        title="SAATHI"
+        subtitle="Ask the AI study assistant."
+        icon={<Sparkles className="h-5 w-5" />}
+        gradient="grad-peach"
+        locked={settings.lock_saathi}
+        onClick={() => navigate({ to: "/saathi" })}
+      />
     </section>
   );
 }
@@ -346,32 +276,15 @@ function ExternalCtaButton({
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-base font-bold tracking-tight">{label}</div>
-          {subtitle && <div className="mt-0.5 truncate text-sm text-primary-foreground/80">{subtitle}</div>}
+          {subtitle && (
+            <div className="mt-0.5 truncate text-sm text-primary-foreground/80">{subtitle}</div>
+          )}
         </div>
         {!locked && <ChevronRight className="h-5 w-5 shrink-0 text-primary-foreground/90" />}
       </div>
     </button>
   );
 }
-
-function SaathiFeatureLink({ locked }: { locked: boolean }) {
-  const navigate = useNavigate();
-  return (
-    <FeatureCard
-      title="SAATHI"
-      subtitle="Ask the AI study assistant."
-      icon={<Sparkles className="h-5 w-5" />}
-      gradient="grad-peach"
-      locked={locked}
-      onClick={() => {
-        if (locked) return;
-        navigate({ to: "/saathi" });
-      }}
-    />
-  );
-}
-
-const GRADIENTS = ["grad-pink", "grad-lavender", "grad-peach", "grad-mint"] as const;
 
 function FeatureCard({
   title,
@@ -416,292 +329,6 @@ function FeatureCard({
         <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
       )}
     </button>
-  );
-}
-
-function FlashcardsSection({ decks }: { decks: DeckSummary[] }) {
-  const [subject, setSubject] = useState<string | null>(null);
-  const [topic, setTopic] = useState<string | null>(null);
-
-  const subjects = useMemo(() => Array.from(new Set(decks.map((d) => d.subject))).sort(), [decks]);
-  const topics = useMemo(
-    () => (subject ? Array.from(new Set(decks.filter((d) => d.subject === subject).map((d) => d.topic))).sort() : []),
-    [decks, subject],
-  );
-  const filtered = useMemo(
-    () => decks.filter((d) => (!subject || d.subject === subject) && (!topic || d.topic === topic)),
-    [decks, subject, topic],
-  );
-
-  return (
-    <>
-      <section className="grid grid-cols-2 gap-3">
-        <FilterSelect
-          label="Subject"
-          placeholder="All subjects"
-          options={subjects}
-          value={subject}
-          onChange={(v) => {
-            setSubject(v);
-            setTopic(null);
-          }}
-        />
-        <FilterSelect
-          label="Topic"
-          placeholder={subject ? "All topics" : "Pick subject first"}
-          options={topics}
-          value={topic}
-          onChange={setTopic}
-          disabled={!subject}
-        />
-      </section>
-
-      <section className="space-y-3">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-            {filtered.length} deck{filtered.length === 1 ? "" : "s"}
-          </h2>
-          {(subject || topic) && (
-            <button
-              onClick={() => {
-                setSubject(null);
-                setTopic(null);
-              }}
-              className="text-xs text-primary font-medium"
-            >
-              Clear filters
-            </button>
-          )}
-        </div>
-
-        {filtered.length === 0 ? (
-          <EmptyState what="decks" />
-        ) : (
-          <ul className="space-y-3">
-            {filtered.map((d, i) => (
-              <DeckCard key={d.id} deck={d} gradient={GRADIENTS[i % GRADIENTS.length]} />
-            ))}
-          </ul>
-        )}
-      </section>
-    </>
-  );
-}
-
-function McqSection({ tests }: { tests: McqTestSummary[] }) {
-  if (tests.length === 0) return <EmptyState what="tests" />;
-  return (
-    <section className="space-y-3">
-      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-        {tests.length} test{tests.length === 1 ? "" : "s"}
-      </h2>
-      <ul className="space-y-3">
-        {tests.map((t, i) => (
-          <li key={t.id}>
-            <Link
-              to="/mcq/$testId"
-              params={{ testId: t.id }}
-              className={`group flex items-center gap-4 rounded-3xl ${GRADIENTS[i % GRADIENTS.length]} p-5 shadow-soft active:scale-[0.99] transition-transform`}
-            >
-              <div className="h-12 w-12 rounded-full bg-white/70 text-foreground flex items-center justify-center shrink-0">
-                <Timer className="h-5 w-5" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-lg font-bold text-foreground truncate">{t.name}</div>
-                <div className="mt-0.5 text-sm text-foreground/70">
-                  {Math.round(t.duration_seconds / 60)} min · {t.question_count} Q
-                </div>
-                {t.description && <div className="mt-1 text-sm text-foreground/60 line-clamp-2">{t.description}</div>}
-              </div>
-              <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-function McqPracticeSection({ tests }: { tests: McqPracticeTestSummary[] }) {
-  const [subject, setSubject] = useState<string | null>(null);
-  const [topic, setTopic] = useState<string | null>(null);
-
-  const subjects = useMemo(() => Array.from(new Set(tests.map((t) => t.subject).filter(Boolean))).sort(), [tests]);
-  const topics = useMemo(
-    () =>
-      subject
-        ? Array.from(
-            new Set(
-              tests
-                .filter((t) => t.subject === subject)
-                .map((t) => t.topic)
-                .filter(Boolean),
-            ),
-          ).sort()
-        : [],
-    [tests, subject],
-  );
-  const filtered = useMemo(
-    () => tests.filter((t) => (!subject || t.subject === subject) && (!topic || t.topic === topic)),
-    [tests, subject, topic],
-  );
-
-  return (
-    <>
-      <section className="grid grid-cols-2 gap-3">
-        <FilterSelect
-          label="Subject"
-          placeholder="All subjects"
-          options={subjects}
-          value={subject}
-          onChange={(v) => {
-            setSubject(v);
-            setTopic(null);
-          }}
-        />
-        <FilterSelect
-          label="Topic"
-          placeholder={subject ? "All topics" : "Pick subject first"}
-          options={topics}
-          value={topic}
-          onChange={setTopic}
-          disabled={!subject}
-        />
-      </section>
-
-      <section className="space-y-3">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-            {filtered.length} practice set{filtered.length === 1 ? "" : "s"}
-          </h2>
-          {(subject || topic) && (
-            <button
-              onClick={() => {
-                setSubject(null);
-                setTopic(null);
-              }}
-              className="text-xs text-primary font-medium"
-            >
-              Clear filters
-            </button>
-          )}
-        </div>
-
-        {filtered.length === 0 ? (
-          <EmptyState what="practice sets" />
-        ) : (
-          <ul className="space-y-3">
-            {filtered.map((t, i) => (
-              <li key={t.id}>
-                <Link
-                  to="/practice-mcq/$testId"
-                  params={{ testId: t.id }}
-                  search={{ review: false }}
-                  className={`group flex items-center gap-4 rounded-3xl ${GRADIENTS[i % GRADIENTS.length]} p-5 shadow-soft active:scale-[0.99] transition-transform`}
-                >
-                  <div className="h-12 w-12 rounded-full bg-white/70 text-foreground flex items-center justify-center shrink-0">
-                    <Target className="h-5 w-5" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    {(t.subject || t.topic) && (
-                      <div className="text-xs uppercase tracking-wide text-foreground/60">
-                        {[t.subject, t.topic].filter(Boolean).join(" · ")}
-                      </div>
-                    )}
-                    <div className="mt-0.5 text-lg font-bold text-foreground truncate">{t.name}</div>
-                    <div className="mt-0.5 text-sm text-foreground/70">
-                      {t.question_count} question{t.question_count === 1 ? "" : "s"}
-                    </div>
-                    {t.description && (
-                      <div className="mt-1 text-sm text-foreground/60 line-clamp-2">{t.description}</div>
-                    )}
-                  </div>
-                  <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </>
-  );
-}
-
-function FilterSelect({
-  label,
-  placeholder,
-  options,
-  value,
-  onChange,
-  disabled,
-}: {
-  label: string;
-  placeholder: string;
-  options: string[];
-  value: string | null;
-  onChange: (v: string | null) => void;
-  disabled?: boolean;
-}) {
-  const ALL = "__all__";
-  return (
-    <div>
-      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">{label}</div>
-      <Select value={value ?? ALL} onValueChange={(v) => onChange(v === ALL ? null : v)} disabled={disabled}>
-        <SelectTrigger>
-          <SelectValue placeholder={placeholder} />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={ALL}>{placeholder}</SelectItem>
-          {options.map((opt) => (
-            <SelectItem key={opt} value={opt}>
-              {opt}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-}
-
-function DeckCard({ deck, gradient }: { deck: DeckSummary; gradient: string }) {
-  return (
-    <li>
-      <Link
-        to="/practice/$deckId"
-        params={{ deckId: deck.id }}
-        search={{ review: false }}
-        className={`group flex items-center gap-4 rounded-3xl ${gradient} p-5 shadow-soft active:scale-[0.99] transition-transform`}
-      >
-        <div className="h-12 w-12 rounded-full bg-white/70 text-foreground flex items-center justify-center shrink-0">
-          <Layers className="h-5 w-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-xs uppercase tracking-wide text-foreground/60">
-            {deck.subject} · {deck.topic}
-          </div>
-          <div className="mt-0.5 text-lg font-bold text-foreground truncate">{deck.name}</div>
-          {deck.description && <div className="mt-1 text-sm text-foreground/70 line-clamp-2">{deck.description}</div>}
-          <div className="mt-1 text-sm text-foreground/60">
-            {deck.count} card{deck.count === 1 ? "" : "s"}
-          </div>
-        </div>
-        <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
-      </Link>
-    </li>
-  );
-}
-
-function EmptyState({ what }: { what: string }) {
-  return (
-    <div className="rounded-2xl border border-dashed border-border p-8 text-center">
-      <p className="text-sm text-muted-foreground">
-        No {what} yet. An admin can add them from{" "}
-        <Link to="/admin" className="text-primary font-medium">
-          Admin
-        </Link>
-        .
-      </p>
-    </div>
   );
 }
 

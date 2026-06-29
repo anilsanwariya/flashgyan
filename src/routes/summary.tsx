@@ -1,9 +1,9 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { z } from "zod";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
-import { Trophy, Clock, Layers } from "lucide-react";
-import { useEffect, useState } from "react";
-import { loadSession, type SessionDetail, type Rating } from "@/lib/session-store";
+import { Trophy, Clock, Layers, Check, X, ChevronDown } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { loadSession, type SessionDetail, type Rating, type SessionCardResult } from "@/lib/session-store";
 
 const summarySchema = z.object({
   deckId: fallback(z.string(), "").default(""),
@@ -33,12 +33,6 @@ function fmtTime(s: number) {
   return m > 0 ? `${m}m ${r}s` : `${r}s`;
 }
 
-const ratingTone: Record<Rating, "success" | "warning" | "destructive"> = {
-  easy: "success",
-  medium: "warning",
-  hard: "destructive",
-};
-
 const ratingLabel: Record<Rating, string> = {
   hard: "Hard",
   medium: "Medium",
@@ -54,39 +48,31 @@ function Summary() {
     if (sessionId) setDetail(loadSession(sessionId));
   }, [sessionId]);
 
+  const isPractice = !!practiceId;
+  // In MCQ practice, easy = correct, hard = incorrect (medium unused).
+  const correct = easy;
+  const incorrect = hard + medium;
+
   const pct = (n: number) => (total ? Math.round((n / total) * 100) : 0);
   const avgSec = total ? Math.round(seconds / total) : 0;
 
-  // Group results by subject/topic
-  const grouped = new Map<
-    string,
-    { subject: string; topic: string; counts: Record<Rating, number>; cards: typeof detail extends null ? never : NonNullable<SessionDetail>["results"] }
-  >();
-  if (detail) {
-    for (const r of detail.results) {
-      const key = `${r.subject}|||${r.topic}`;
-      let g = grouped.get(key);
-      if (!g) {
-        g = {
-          subject: r.subject,
-          topic: r.topic,
-          counts: { hard: 0, medium: 0, easy: 0 },
-          cards: [],
-        };
-        grouped.set(key, g);
-      }
-      g.counts[r.rating]++;
-      g.cards.push(r);
+  // Selection: for practice → "correct" | "incorrect"; for decks → Rating
+  const [selectedPractice, setSelectedPractice] = useState<"correct" | "incorrect" | null>(
+    null,
+  );
+  const [selectedRating, setSelectedRating] = useState<Rating | null>(null);
+
+  const filteredCards = useMemo(() => {
+    if (!detail) return [];
+    if (isPractice) {
+      if (!selectedPractice) return [];
+      return detail.results.filter((r) =>
+        selectedPractice === "correct" ? r.rating === "easy" : r.rating !== "easy",
+      );
     }
-  }
-
-  const [selected, setSelected] = useState<Rating | null>(null);
-  const selectedCards =
-    selected && detail ? detail.results.filter((r) => r.rating === selected) : [];
-
-  function toggle(r: Rating) {
-    setSelected((s) => (s === r ? null : r));
-  }
+    if (!selectedRating) return [];
+    return detail.results.filter((r) => r.rating === selectedRating);
+  }, [detail, isPractice, selectedPractice, selectedRating]);
 
   return (
     <div className="min-h-dvh bg-background flex flex-col">
@@ -95,103 +81,136 @@ function Summary() {
           <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
             <Trophy className="h-7 w-7" />
           </div>
-          <h1 className="mt-4 text-3xl font-extrabold tracking-tight">
-            Session complete
-          </h1>
+          <h1 className="mt-4 text-3xl font-extrabold tracking-tight">Session complete</h1>
           <p className="mt-2 text-muted-foreground">
-            {total} card{total === 1 ? "" : "s"} · {fmtTime(seconds)}
+            {total} {isPractice ? "question" : "card"}
+            {total === 1 ? "" : "s"} · {fmtTime(seconds)}
           </p>
         </div>
 
         <div className="mt-8 grid grid-cols-3 gap-3">
-          <Stat icon={<Layers className="h-4 w-4" />} label="Cards" value={String(total)} />
+          <Stat
+            icon={<Layers className="h-4 w-4" />}
+            label={isPractice ? "Questions" : "Cards"}
+            value={String(total)}
+          />
           <Stat icon={<Clock className="h-4 w-4" />} label="Total" value={fmtTime(seconds)} />
-          <Stat icon={<Clock className="h-4 w-4" />} label="Per card" value={`${avgSec}s`} />
+          <Stat icon={<Clock className="h-4 w-4" />} label="Per item" value={`${avgSec}s`} />
         </div>
 
-        <section className="mt-8">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-            By difficulty {detail ? "· tap to view cards" : ""}
-          </h2>
-          <div className="space-y-3">
-            <Row label="Easy" value={easy} pct={pct(easy)} tone="success"
-              active={selected === "easy"} disabled={!detail || easy === 0}
-              onClick={() => toggle("easy")} />
-            <Row label="Medium" value={medium} pct={pct(medium)} tone="warning"
-              active={selected === "medium"} disabled={!detail || medium === 0}
-              onClick={() => toggle("medium")} />
-            <Row label="Hard" value={hard} pct={pct(hard)} tone="destructive"
-              active={selected === "hard"} disabled={!detail || hard === 0}
-              onClick={() => toggle("hard")} />
-          </div>
-
-          {selected && (
-            <div className="mt-4">
-              <div className="text-xs text-muted-foreground mb-2">
-                Showing {selectedCards.length} {ratingLabel[selected].toLowerCase()} card{selectedCards.length === 1 ? "" : "s"}
-              </div>
-              <ul className="space-y-2">
-                {selectedCards.map((c) => (
-                  <li key={c.id} className="rounded-2xl border border-border bg-card p-4">
-                    <div className="text-xs text-muted-foreground truncate">
-                      {c.subject} · {c.topic}
-                    </div>
-                    <div className="mt-1 font-medium leading-snug">
-                      <span className="text-xs text-muted-foreground uppercase tracking-wider mr-2">{c.prompt}</span>
-                      {c.question}
-                    </div>
-                    <div className="mt-1 text-sm text-muted-foreground leading-snug">{c.answer}</div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </section>
-
-
-        {grouped.size > 0 && (
+        {isPractice ? (
           <section className="mt-8">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-              By subject · topic
+              Results {detail ? "· tap to review questions" : ""}
             </h2>
             <div className="space-y-3">
-              {Array.from(grouped.values()).map((g) => {
-                const gTotal = g.cards.length;
-                return (
-                  <div
-                    key={`${g.subject}-${g.topic}`}
-                    className="rounded-2xl border border-border bg-card p-4"
-                  >
-                    <div className="flex items-baseline justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="font-semibold truncate">{g.topic}</div>
-                        <div className="text-xs text-muted-foreground truncate">
-                          {g.subject}
-                        </div>
-                      </div>
-                      <div className="text-sm tabular-nums text-muted-foreground shrink-0">
-                        {gTotal} card{gTotal === 1 ? "" : "s"}
-                      </div>
-                    </div>
-                    <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-muted">
-                      <Seg n={g.counts.easy} total={gTotal} className="bg-success" />
-                      <Seg n={g.counts.medium} total={gTotal} className="bg-warning" />
-                      <Seg n={g.counts.hard} total={gTotal} className="bg-destructive" />
-                    </div>
-                    <div className="mt-2 flex gap-3 text-xs text-muted-foreground tabular-nums">
-                      <span><span className="inline-block h-2 w-2 rounded-full bg-success mr-1 align-middle" />{g.counts.easy} easy</span>
-                      <span><span className="inline-block h-2 w-2 rounded-full bg-warning mr-1 align-middle" />{g.counts.medium} med</span>
-                      <span><span className="inline-block h-2 w-2 rounded-full bg-destructive mr-1 align-middle" />{g.counts.hard} hard</span>
-                    </div>
-                  </div>
-                );
-              })}
+              <Row
+                label="Correct"
+                value={correct}
+                pct={pct(correct)}
+                tone="success"
+                active={selectedPractice === "correct"}
+                disabled={!detail || correct === 0}
+                onClick={() =>
+                  setSelectedPractice((s) => (s === "correct" ? null : "correct"))
+                }
+              />
+              <Row
+                label="Incorrect"
+                value={incorrect}
+                pct={pct(incorrect)}
+                tone="destructive"
+                active={selectedPractice === "incorrect"}
+                disabled={!detail || incorrect === 0}
+                onClick={() =>
+                  setSelectedPractice((s) => (s === "incorrect" ? null : "incorrect"))
+                }
+              />
             </div>
+
+            {selectedPractice && (
+              <div className="mt-4">
+                <div className="text-xs text-muted-foreground mb-2">
+                  Showing {filteredCards.length} {selectedPractice} question
+                  {filteredCards.length === 1 ? "" : "s"}
+                </div>
+                <ul className="space-y-3">
+                  {filteredCards.map((c, i) => (
+                    <McqReviewCard key={c.id} index={i} card={c} />
+                  ))}
+                </ul>
+              </div>
+            )}
+          </section>
+        ) : (
+          <section className="mt-8">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+              By difficulty {detail ? "· tap to view cards" : ""}
+            </h2>
+            <div className="space-y-3">
+              <Row
+                label="Easy"
+                value={easy}
+                pct={pct(easy)}
+                tone="success"
+                active={selectedRating === "easy"}
+                disabled={!detail || easy === 0}
+                onClick={() =>
+                  setSelectedRating((s) => (s === "easy" ? null : "easy"))
+                }
+              />
+              <Row
+                label="Medium"
+                value={medium}
+                pct={pct(medium)}
+                tone="warning"
+                active={selectedRating === "medium"}
+                disabled={!detail || medium === 0}
+                onClick={() =>
+                  setSelectedRating((s) => (s === "medium" ? null : "medium"))
+                }
+              />
+              <Row
+                label="Hard"
+                value={hard}
+                pct={pct(hard)}
+                tone="destructive"
+                active={selectedRating === "hard"}
+                disabled={!detail || hard === 0}
+                onClick={() =>
+                  setSelectedRating((s) => (s === "hard" ? null : "hard"))
+                }
+              />
+            </div>
+
+            {selectedRating && (
+              <div className="mt-4">
+                <div className="text-xs text-muted-foreground mb-2">
+                  Showing {filteredCards.length} {ratingLabel[selectedRating].toLowerCase()} card
+                  {filteredCards.length === 1 ? "" : "s"}
+                </div>
+                <ul className="space-y-2">
+                  {filteredCards.map((c) => (
+                    <li key={c.id} className="rounded-2xl border border-border bg-card p-4">
+                      <div className="text-xs text-muted-foreground truncate">
+                        {c.subject} · {c.topic}
+                      </div>
+                      <div className="mt-1 font-medium leading-snug">
+                        <span className="text-xs text-muted-foreground uppercase tracking-wider mr-2">
+                          {c.prompt}
+                        </span>
+                        {c.question}
+                      </div>
+                      <div className="mt-1 text-sm text-muted-foreground leading-snug">
+                        {c.answer}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </section>
         )}
-
-
-
 
         <div className="mt-10 grid grid-cols-2 gap-3">
           <Link
@@ -204,10 +223,10 @@ function Summary() {
             <Link
               to="/practice-mcq/$testId"
               params={{ testId: practiceId }}
-              search={{ review: hard + medium > 0 }}
+              search={{ review: incorrect > 0 }}
               className="h-12 rounded-2xl bg-primary text-primary-foreground font-semibold grid place-items-center"
             >
-              {hard + medium > 0 ? "Review" : "Practice again"}
+              {incorrect > 0 ? "Review incorrect" : "Practice again"}
             </Link>
           ) : deckId ? (
             <Link
@@ -232,6 +251,140 @@ function Summary() {
   );
 }
 
+function McqReviewCard({ index, card }: { index: number; card: SessionCardResult }) {
+  const [showExplanation, setShowExplanation] = useState(false);
+  const correct = card.rating === "easy";
+  const mcq = card.mcq;
+
+  // Fallback for sessions saved before mcq data was attached.
+  if (!mcq) {
+    return (
+      <li className="rounded-2xl border border-border bg-card p-4">
+        <div className="text-xs text-muted-foreground truncate">
+          {card.subject} · {card.topic}
+        </div>
+        <div className="mt-1 font-medium leading-snug">{card.question}</div>
+        <div className="mt-1 text-sm text-muted-foreground leading-snug">{card.answer}</div>
+      </li>
+    );
+  }
+
+  const borderCls = correct ? "border-success" : "border-destructive";
+
+  return (
+    <li className={`rounded-2xl border-2 bg-card p-5 ${borderCls}`}>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="text-xs uppercase tracking-wider text-muted-foreground">
+          Q{index + 1} · {card.subject}
+          {card.topic ? ` · ${card.topic}` : ""}
+        </div>
+        <div
+          className={
+            "inline-flex items-center gap-1 text-xs font-semibold " +
+            (correct ? "text-success" : "text-destructive")
+          }
+        >
+          {correct ? (
+            <>
+              <Check className="h-3.5 w-3.5" /> Correct
+            </>
+          ) : (
+            <>
+              <X className="h-3.5 w-3.5" /> Incorrect
+            </>
+          )}
+        </div>
+      </div>
+
+      <p className="text-base font-semibold leading-snug whitespace-pre-wrap">
+        {card.question}
+      </p>
+
+      {mcq.imageUrl && (
+        <img
+          src={mcq.imageUrl}
+          alt=""
+          className="mt-3 w-full aspect-[2/1] rounded-xl object-cover border border-border"
+        />
+      )}
+
+      {mcq.hint && (
+        <p className="mt-3 text-sm leading-relaxed whitespace-pre-wrap text-foreground/85">
+          {mcq.hint}
+        </p>
+      )}
+
+      <div className="mt-3 space-y-2">
+        {mcq.options.map((text, i) => {
+          const n = (i + 1) as 1 | 2 | 3 | 4;
+          const isAnswer = n === mcq.answerIndex;
+          const isPick = n === mcq.pickedIndex;
+          let cls = "border-border bg-background opacity-70";
+          if (isAnswer) cls = "border-success bg-success/15 text-foreground opacity-100";
+          else if (isPick) cls = "border-destructive bg-destructive/15 text-foreground opacity-100";
+          return (
+            <div
+              key={n}
+              className={`w-full text-left rounded-2xl border-2 px-4 py-3 flex items-start gap-3 ${cls}`}
+            >
+              <div
+                className={
+                  "h-7 w-7 shrink-0 rounded-full grid place-items-center text-xs font-semibold border " +
+                  (isAnswer
+                    ? "bg-success text-success-foreground border-success"
+                    : isPick
+                    ? "bg-destructive text-destructive-foreground border-destructive"
+                    : "bg-muted text-foreground border-border")
+                }
+              >
+                {isAnswer ? (
+                  <Check className="h-4 w-4" />
+                ) : isPick ? (
+                  <X className="h-4 w-4" />
+                ) : (
+                  String.fromCharCode(64 + n)
+                )}
+              </div>
+              <div className="text-sm leading-snug flex-1 min-w-0 whitespace-pre-wrap">
+                {text}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {mcq.explanationSections.length > 0 && (
+        <div className="mt-3 border-t border-border pt-3">
+          <button
+            type="button"
+            onClick={() => setShowExplanation((s) => !s)}
+            className="inline-flex items-center gap-1 text-sm font-semibold text-primary"
+          >
+            <ChevronDown
+              className={`h-4 w-4 transition-transform ${showExplanation ? "rotate-180" : ""}`}
+            />
+            {showExplanation ? "Hide explanation" : "Show explanation"}
+          </button>
+          {showExplanation && (
+            <div className="mt-3 space-y-4">
+              {mcq.explanationSections.map((s, i) => (
+                <div key={i}>
+                  <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-1.5">
+                    {s.title}
+                  </div>
+                  <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                    {s.body}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
 function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
     <div className="rounded-2xl border border-border bg-card p-3 text-center">
@@ -242,12 +395,6 @@ function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; va
       <div className="mt-1 text-lg font-bold tabular-nums">{value}</div>
     </div>
   );
-}
-
-function Seg({ n, total, className }: { n: number; total: number; className: string }) {
-  if (!n) return null;
-  const w = total ? (n / total) * 100 : 0;
-  return <div className={className} style={{ width: `${w}%` }} />;
 }
 
 function Row({
@@ -268,17 +415,9 @@ function Row({
   onClick?: () => void;
 }) {
   const bar =
-    tone === "success"
-      ? "bg-success"
-      : tone === "warning"
-      ? "bg-warning"
-      : "bg-destructive";
+    tone === "success" ? "bg-success" : tone === "warning" ? "bg-warning" : "bg-destructive";
   const ring =
-    tone === "success"
-      ? "ring-success"
-      : tone === "warning"
-      ? "ring-warning"
-      : "ring-destructive";
+    tone === "success" ? "ring-success" : tone === "warning" ? "ring-warning" : "ring-destructive";
   return (
     <button
       type="button"

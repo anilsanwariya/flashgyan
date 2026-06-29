@@ -154,6 +154,14 @@ function PracticeMcq() {
           ? answerText
           : `Your answer: ${pickedText} · Correct: ${answerText}`,
         rating,
+        mcq: {
+          options: [qq.option_1, qq.option_2, qq.option_3, qq.option_4],
+          answerIndex: qq.answer as 1 | 2 | 3 | 4,
+          pickedIndex: p as 1 | 2 | 3 | 4,
+          explanationSections: qq.explanation_sections,
+          imageUrl: qq.image_url,
+          hint: qq.hint,
+        },
       });
     });
     const counts = { hard: 0, medium: 0, easy: 0 };
