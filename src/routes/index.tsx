@@ -51,8 +51,13 @@ function Home() {
   return (
     <div className="min-h-dvh bg-background">
       <header className="px-5 pt-2 pb-2 max-w-2xl mx-auto">
-        <div className="flex items-center justify-center pb-1 border-b-2 border-primary/60">
+        <div className="flex items-center justify-between pb-1 border-b-2 border-primary/60">
           <img src={finalLogo.url} alt="Flashgyan" className="h-10 w-auto object-contain" />
+          <img 
+            src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//RASbandhu_logo_purple.png" 
+            alt="RASbandhu" 
+            className="h-10 w-auto object-contain" 
+          />
         </div>
         <h1 className="mt-3 text-1xl font-semibold tracking-tight text-[#910000]">{greeting}.</h1>
         <p className="mt-2 text-center text-foreground font-semibold text-[15px] leading-relaxed">
@@ -338,10 +343,4 @@ function TelegramFloatingButton() {
       href="https://t.me/RASbandhu"
       target="_blank"
       rel="noopener noreferrer"
-      aria-label="Join Telegram"
-      className="fixed right-5 bottom-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[#2aabee] shadow-soft transition-transform hover:scale-105 active:scale-95 overflow-hidden"
-    >
-      <img src={tgIcon.url} alt="Telegram" className="h-full w-full object-cover" />
-    </a>
-  );
-}
+      aria-label
