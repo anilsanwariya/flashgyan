@@ -7,6 +7,8 @@ import { getMcqPracticeTest, type McqPracticeQuestion } from "@/lib/mcq-practice
 import { motion, AnimatePresence } from "motion/react";
 import { ArrowLeft, ChevronLeft, ChevronRight, Check, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { triggerHaptic } from "@/lib/haptics";
+import confetti from "canvas-confetti";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -128,7 +130,15 @@ function PracticeMcq() {
     const next = picks.slice();
     next[index] = opt;
     setPicks(next);
+    
     const correct = opt === q.answer;
+    if (correct) {
+      triggerHaptic("success");
+      confetti({ particleCount: 50, spread: 60, origin: { y: 0.8 } });
+    } else {
+      triggerHaptic("error");
+    }
+    
     recordRating(q.id, correct ? "easy" : "hard");
   }
 
@@ -298,8 +308,11 @@ function PracticeMcq() {
                         const text = q[`option_${n}` as `option_${1 | 2 | 3 | 4}`];
                         const isAnswer = n === q.answer;
                         const isPick = pick === n;
-                        let cls =
-                          "border-border bg-background hover:bg-accent active:scale-[0.99]";
+                        
+                        // Add shake class if this button was picked and is wrong
+                        const shakeCls = (answered && isPick && !isAnswer) ? "animate-shake" : "";
+                        
+                        let cls = "border-border bg-background hover:bg-accent active:scale-[0.99]";
                         if (answered) {
                           if (isAnswer) {
                             cls = "border-success bg-success/15 text-foreground";
@@ -309,13 +322,14 @@ function PracticeMcq() {
                             cls = "border-border bg-background opacity-70";
                           }
                         }
+                        
                         return (
                           <button
                             key={n}
                             type="button"
                             disabled={answered}
                             onClick={() => onPick(n)}
-                            className={`w-full text-left rounded-2xl border-2 px-4 py-3.5 transition-colors flex items-start gap-3 ${cls} ${
+                            className={`w-full text-left rounded-2xl border-2 px-4 py-3.5 transition-colors flex items-start gap-3 ${cls} ${shakeCls} ${
                               answered ? "cursor-default" : "cursor-pointer"
                             }`}
                           >
