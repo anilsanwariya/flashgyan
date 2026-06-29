@@ -89,8 +89,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "theme-color", content: "#f7f5ed" },
       { name: "twitter:title", content: "Flashgyan: Smart Flashcards for Exam Success" },
       { name: "twitter:description", content: "FlashGyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go." },
-      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/f50f37db-f226-47ba-982e-59cef42a4ff8" },
-      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/f50f37db-f226-47ba-982e-59cef42a4ff8" },
+      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/d41aadb9-a809-4d28-a7cb-615634015c40" },
+      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/d41aadb9-a809-4d28-a7cb-615634015c40" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
