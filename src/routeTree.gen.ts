@@ -13,6 +13,9 @@ import { Route as TermsRouteImport } from './routes/terms'
 import { Route as SummaryRouteImport } from './routes/summary'
 import { Route as SaathiRouteImport } from './routes/saathi'
 import { Route as PrivacyPolicyRouteImport } from './routes/privacy-policy'
+import { Route as McqTestsRouteImport } from './routes/mcq-tests'
+import { Route as McqPracticeRouteImport } from './routes/mcq-practice'
+import { Route as FlashcardsRouteImport } from './routes/flashcards'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
@@ -40,6 +43,21 @@ const SaathiRoute = SaathiRouteImport.update({
 const PrivacyPolicyRoute = PrivacyPolicyRouteImport.update({
   id: '/privacy-policy',
   path: '/privacy-policy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McqTestsRoute = McqTestsRouteImport.update({
+  id: '/mcq-tests',
+  path: '/mcq-tests',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McqPracticeRoute = McqPracticeRouteImport.update({
+  id: '/mcq-practice',
+  path: '/mcq-practice',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FlashcardsRoute = FlashcardsRouteImport.update({
+  id: '/flashcards',
+  path: '/flashcards',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -85,6 +103,9 @@ const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/flashcards': typeof FlashcardsRoute
+  '/mcq-practice': typeof McqPracticeRoute
+  '/mcq-tests': typeof McqTestsRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
   '/saathi': typeof SaathiRoute
   '/summary': typeof SummaryRoute
@@ -98,6 +119,9 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/flashcards': typeof FlashcardsRoute
+  '/mcq-practice': typeof McqPracticeRoute
+  '/mcq-tests': typeof McqTestsRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
   '/saathi': typeof SaathiRoute
   '/summary': typeof SummaryRoute
@@ -113,6 +137,9 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/flashcards': typeof FlashcardsRoute
+  '/mcq-practice': typeof McqPracticeRoute
+  '/mcq-tests': typeof McqTestsRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
   '/saathi': typeof SaathiRoute
   '/summary': typeof SummaryRoute
@@ -128,6 +155,9 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/flashcards'
+    | '/mcq-practice'
+    | '/mcq-tests'
     | '/privacy-policy'
     | '/saathi'
     | '/summary'
@@ -141,6 +171,9 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/auth'
+    | '/flashcards'
+    | '/mcq-practice'
+    | '/mcq-tests'
     | '/privacy-policy'
     | '/saathi'
     | '/summary'
@@ -155,6 +188,9 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/flashcards'
+    | '/mcq-practice'
+    | '/mcq-tests'
     | '/privacy-policy'
     | '/saathi'
     | '/summary'
@@ -170,6 +206,9 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  FlashcardsRoute: typeof FlashcardsRoute
+  McqPracticeRoute: typeof McqPracticeRoute
+  McqTestsRoute: typeof McqTestsRoute
   PrivacyPolicyRoute: typeof PrivacyPolicyRoute
   SaathiRoute: typeof SaathiRoute
   SummaryRoute: typeof SummaryRoute
@@ -208,6 +247,27 @@ declare module '@tanstack/react-router' {
       path: '/privacy-policy'
       fullPath: '/privacy-policy'
       preLoaderRoute: typeof PrivacyPolicyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcq-tests': {
+      id: '/mcq-tests'
+      path: '/mcq-tests'
+      fullPath: '/mcq-tests'
+      preLoaderRoute: typeof McqTestsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcq-practice': {
+      id: '/mcq-practice'
+      path: '/mcq-practice'
+      fullPath: '/mcq-practice'
+      preLoaderRoute: typeof McqPracticeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/flashcards': {
+      id: '/flashcards'
+      path: '/flashcards'
+      fullPath: '/flashcards'
+      preLoaderRoute: typeof FlashcardsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth': {
@@ -284,6 +344,9 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  FlashcardsRoute: FlashcardsRoute,
+  McqPracticeRoute: McqPracticeRoute,
+  McqTestsRoute: McqTestsRoute,
   PrivacyPolicyRoute: PrivacyPolicyRoute,
   SaathiRoute: SaathiRoute,
   SummaryRoute: SummaryRoute,
