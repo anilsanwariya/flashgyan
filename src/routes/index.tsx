@@ -2,16 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { getHomeData, type HomeData } from "@/lib/home.functions";
-import {
-  ChevronLeft,
-  ChevronRight,
-  ExternalLink,
-  Layers,
-  ListChecks,
-  Lock,
-  Sparkles,
-  Target,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, ExternalLink, Layers, ListChecks, Lock, Sparkles, Target } from "lucide-react";
 import { toast } from "sonner";
 import finalLogo from "@/assets/final-logo.png.asset.json";
 import tgIcon from "@/assets/tg-icon.svg.asset.json";
@@ -53,10 +44,10 @@ function Home() {
       <header className="px-5 pt-2 pb-2 max-w-2xl mx-auto">
         <div className="flex items-center justify-between pb-1 border-b-2 border-primary/60">
           <img src={finalLogo.url} alt="Flashgyan" className="h-10 w-auto object-contain" />
-          <img 
-            src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//RASbandhu_logo_purple.png" 
-            alt="RASbandhu" 
-            className="h-10 w-auto object-contain" 
+          <img
+            src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//RASbandhu_logo_purple.png"
+            alt="RASbandhu"
+            className="h-10 w-auto object-contain"
           />
         </div>
         <h1 className="mt-3 text-1xl font-semibold tracking-tight text-[#910000]">{greeting}.</h1>
@@ -163,13 +154,7 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
         style={{ transform: `translateX(-${idx * 100}%)` }}
       >
         {banners.map((b) => (
-          <img
-            key={b.id}
-            src={b.url}
-            alt=""
-            className="w-full h-full object-cover shrink-0"
-            draggable={false}
-          />
+          <img key={b.id} src={b.url} alt="" className="w-full h-full object-cover shrink-0" draggable={false} />
         ))}
       </div>
       {len > 1 && (
@@ -196,10 +181,7 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
                 key={b.id}
                 aria-label={`Show banner ${i + 1}`}
                 onClick={() => setIdx(i)}
-                className={
-                  "h-1.5 rounded-full transition-all " +
-                  (i === idx ? "w-5 bg-white" : "w-1.5 bg-white/60")
-                }
+                className={"h-1.5 rounded-full transition-all " + (i === idx ? "w-5 bg-white" : "w-1.5 bg-white/60")}
               />
             ))}
           </div>
@@ -281,9 +263,7 @@ function ExternalCtaButton({
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-base font-bold tracking-tight">{label}</div>
-          {subtitle && (
-            <div className="mt-0.5 truncate text-sm text-primary-foreground/80">{subtitle}</div>
-          )}
+          {subtitle && <div className="mt-0.5 truncate text-sm text-primary-foreground/80">{subtitle}</div>}
         </div>
         {!locked && <ChevronRight className="h-5 w-5 shrink-0 text-primary-foreground/90" />}
       </div>
@@ -343,4 +323,10 @@ function TelegramFloatingButton() {
       href="https://t.me/RASbandhu"
       target="_blank"
       rel="noopener noreferrer"
-      aria-label
+      aria-label="Join Telegram"
+      className="fixed right-5 bottom-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[#2aabee] shadow-soft transition-transform hover:scale-105 active:scale-95 overflow-hidden"
+    >
+      <img src={tgIcon.url} alt="Telegram" className="h-full w-full object-cover" />
+    </a>
+  );
+}
