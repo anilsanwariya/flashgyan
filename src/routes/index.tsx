@@ -41,20 +41,25 @@ function Home() {
 
   return (
     <div className="min-h-dvh bg-background">
-      <header className="sticky top-0 z-50 bg-background px-5 pt-2 pb-3 max-w-2xl mx-auto shadow-sm">
-        <div className="flex items-center justify-between pb-2 border-b-2 border-primary/60">
-          <img src={finalLogo.url} alt="Flashgyan" className="h-10 w-auto object-contain" />
+      {/* Header Updates: 
+        - pt-1 pb-1.5 (reduced top/bottom padding)
+        - pb-1 on the logo wrapper (reduced space above the line)
+        - h-8 on the logos (smaller logos)
+        - mt-1.5 on the greeting (reduced space below the line)
+      */}
+      <header className="sticky top-0 z-50 bg-background px-5 pt-1 pb-1.5 max-w-2xl mx-auto shadow-sm">
+        <div className="flex items-center justify-between pb-1 border-b-2 border-primary/60">
+          <img src={finalLogo.url} alt="Flashgyan" className="h-8 w-auto object-contain" />
           <img
             src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//RASbandhu-logo-green.png"
             alt="RASbandhu"
-            className="h-10 w-auto object-contain"
+            className="h-8 w-auto object-contain"
           />
         </div>
-        <h1 className="mt-3 text-1xl font-semibold tracking-tight text-[#910000]">{greeting}.</h1>
+        <h1 className="mt-1.5 text-1xl font-semibold tracking-tight text-[#910000]">{greeting}.</h1>
       </header>
 
       <main className="px-5 max-w-2xl mx-auto pb-12 space-y-6 pt-4">
-        {/* Welcome Message Separated from Header */}
         <p className="text-center text-foreground font-semibold text-[15px] leading-relaxed">
           "Welcome to FlashGyan! Let's make your exam preparation smarter and faster."
         </p>
