@@ -1,3 +1,4 @@
+// src/routes/practice.$deckId.tsx
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
@@ -26,6 +27,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
+import { AppDownloadPopup } from "@/components/app-download-popup"; // Added import
 
 const deckQO = (deckId: string) =>
   queryOptions({
@@ -85,6 +87,10 @@ function Practice() {
   const navigate = useNavigate();
   const startedAt = useRef(Date.now());
 
+  // Added states for popup interception
+  const [showDownloadPopup, setShowDownloadPopup] = useState(false);
+  const [navData, setNavData] = useState<any>(null);
+
   const [cards] = useState(() => {
     if (review) {
       const state = loadReview(deckId);
@@ -128,8 +134,6 @@ function Practice() {
   useEffect(() => {
     setFlipped(cardRatings[index] !== null);
   }, [index, cardRatings]);
-
-
 
 
   if (total === 0) {
@@ -176,18 +180,28 @@ function Practice() {
     const state = loadReview(deckId);
     for (const r of results) state[r.id] = r.rating;
     saveReview(deckId, state);
-    navigate({
-      to: "/summary",
-      search: {
-        deckId,
-        total: results.length,
-        hard: counts.hard,
-        medium: counts.medium,
-        easy: counts.easy,
-        seconds,
-        sessionId,
-      },
+    
+    // Intercept navigation by saving data and opening popup
+    setNavData({
+      deckId,
+      total: results.length,
+      hard: counts.hard,
+      medium: counts.medium,
+      easy: counts.easy,
+      seconds,
+      sessionId,
     });
+    setShowDownloadPopup(true);
+  }
+
+  function handleContinueToSummary() {
+    setShowDownloadPopup(false);
+    if (navData) {
+      navigate({
+        to: "/summary",
+        search: navData,
+      });
+    }
   }
 
   function rate(r: Rating) {
@@ -209,11 +223,6 @@ function Practice() {
     if (currentRating === null) return;
     if (index < total - 1) setIndex(index + 1);
   }
-
-
-
-
-
 
   return (
     <div className="min-h-dvh flex flex-col bg-background">
@@ -360,8 +369,6 @@ function Practice() {
                       </div>
                     </ScrollArea>
                   </div>
-
-
                 </div>
               </button>
             </motion.div>
@@ -387,7 +394,6 @@ function Practice() {
             </button>
           )}
         </div>
-
       </main>
 
       <footer className="px-5 pb-6 pt-2 max-w-2xl w-full mx-auto">
@@ -423,9 +429,14 @@ function Practice() {
             Reveal answer
           </button>
         )}
-
-
       </footer>
+
+      {/* Added App Download Popup */}
+      <AppDownloadPopup
+        isOpen={showDownloadPopup}
+        onClose={() => setShowDownloadPopup(false)}
+        onContinue={handleContinueToSummary}
+      />
     </div>
   );
 }

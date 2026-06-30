@@ -1,7 +1,9 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+// src/routes/mcq-result.$testId.tsx
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import type { McqAttempt } from "./mcq.$testId";
 import { ArrowLeft, CheckCircle2, XCircle, MinusCircle } from "lucide-react";
+import { AppDownloadPopup } from "@/components/app-download-popup"; // Added import
 
 const STORAGE_KEY = (id: string) => `mcq-attempt:${id}`;
 
@@ -13,7 +15,9 @@ export const Route = createFileRoute("/mcq-result/$testId")({
 
 function Result() {
   const { testId } = Route.useParams();
+  const router = useRouter(); // Added router for manual navigation
   const [attempt, setAttempt] = useState<McqAttempt | null>(null);
+  const [showDownloadPopup, setShowDownloadPopup] = useState(false); // Added state
 
   useEffect(() => {
     try {
@@ -44,15 +48,28 @@ function Result() {
     return { correct, wrong, unanswered, score, total, timeTakenSec };
   }, [attempt]);
 
+  const handleGoHome = () => {
+    setShowDownloadPopup(false);
+    router.navigate({ to: "/" });
+  };
+
   if (!attempt || !stats) {
     return (
       <div className="min-h-dvh grid place-items-center p-6 text-center">
         <div>
           <p className="text-muted-foreground">No result found for this test.</p>
-          <Link to="/" className="mt-3 inline-block text-sm text-primary">
+          <button 
+            onClick={() => setShowDownloadPopup(true)}
+            className="mt-3 inline-block text-sm text-primary"
+          >
             Back home
-          </Link>
+          </button>
         </div>
+        <AppDownloadPopup
+          isOpen={showDownloadPopup}
+          onClose={() => setShowDownloadPopup(false)}
+          onContinue={handleGoHome}
+        />
       </div>
     );
   }
@@ -61,12 +78,12 @@ function Result() {
     <div className="min-h-dvh bg-background">
       <header className="border-b border-border bg-background">
         <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between">
-          <Link
-            to="/"
+          <button
+            onClick={() => setShowDownloadPopup(true)}
             className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="h-4 w-4" /> Home
-          </Link>
+          </button>
           <div className="text-sm font-semibold">Result</div>
           <div className="w-12" />
         </div>
@@ -221,6 +238,13 @@ function Result() {
           </ul>
         </section>
       </main>
+
+      {/* Added App Download Popup */}
+      <AppDownloadPopup
+        isOpen={showDownloadPopup}
+        onClose={() => setShowDownloadPopup(false)}
+        onContinue={handleGoHome}
+      />
     </div>
   );
 }

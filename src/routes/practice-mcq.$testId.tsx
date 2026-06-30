@@ -7,7 +7,7 @@ import { getMcqPracticeTest, type McqPracticeQuestion } from "@/lib/mcq-practice
 import { motion, AnimatePresence } from "motion/react";
 import { ArrowLeft, ChevronLeft, ChevronRight, Check, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { triggerHaptic } from "@/lib/haptics";
+import { triggerHaptic } from "../lib/haptics";
 import confetti from "canvas-confetti";
 import {
   AlertDialog,
