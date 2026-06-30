@@ -4,8 +4,8 @@ import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { getHomeData, type HomeData } from "@/lib/home.functions";
 import { ChevronLeft, ChevronRight, ExternalLink, Layers, ListChecks, Lock, Sparkles, Target } from "lucide-react";
 import { toast } from "sonner";
-import finalLogo from "@/assets/final-logo.png.asset.json";
-import tgIcon from "@/assets/tg-icon.svg.asset.json";
+import finalLogo from "@/assets/final-logo.png";
+import tgIcon from "@/assets/tg-icon.svg";
 import { useDisplayName } from "@/hooks/use-auth";
 
 
@@ -47,7 +47,7 @@ function Home() {
     <div className="min-h-dvh bg-background">
       <header className="sticky top-0 z-50 bg-background px-5 py-2 max-w-2xl mx-auto shadow-sm">
         <div className="flex items-center justify-between">
-          <img src={finalLogo.url} alt="Flashgyan" className="h-10 w-auto object-contain" />
+          <img src={finalLogo} alt="Flashgyan" className="h-10 w-auto object-contain" />
           <img
             src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//RASbandhu-logo-green.png"
             alt="RASbandhu"
@@ -333,7 +333,7 @@ function TelegramFloatingButton() {
       aria-label="Join Telegram"
       className="fixed right-5 bottom-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[#2aabee] shadow-soft transition-transform hover:scale-105 active:scale-95 overflow-hidden"
     >
-      <img src={tgIcon.url} alt="Telegram" className="h-full w-full object-cover" />
+      <img src={tgIcon} alt="Telegram" className="h-full w-full object-cover" />
     </a>
   );
 }

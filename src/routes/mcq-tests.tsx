@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
-import finalLogo from "@/assets/final-logo.png.asset.json";
+import finalLogo from "@/assets/final-logo.png";
 import { listMcqTests } from "@/lib/mcq.functions";
 import { McqSection } from "@/components/feature-sections";
 
