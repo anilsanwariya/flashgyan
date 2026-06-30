@@ -129,12 +129,14 @@ export const getDeckCards = createServerFn({ method: "GET" })
 
 async function assertAdmin(userId: string) {
   const admin = await getAdmin();
-  const { data: isAdmin, error } = await admin.rpc("has_role", {
-    _user_id: userId,
-    _role: "admin",
-  });
+  const { data, error } = await admin
+    .from("user_roles")
+    .select("user_id")
+    .eq("user_id", userId)
+    .eq("role", "admin")
+    .maybeSingle();
   if (error) throw new Error(error.message);
-  if (!isAdmin) throw new Error("Forbidden: admin role required");
+  if (!data) throw new Error("Forbidden: admin role required");
   return admin;
 }
 
@@ -409,9 +411,11 @@ export const checkIsAdmin = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const admin = await getAdmin();
-    const { data: isAdmin } = await admin.rpc("has_role", {
-      _user_id: context.userId,
-      _role: "admin",
-    });
-    return { isAdmin: !!isAdmin, userId: context.userId };
+    const { data } = await admin
+      .from("user_roles")
+      .select("user_id")
+      .eq("user_id", context.userId)
+      .eq("role", "admin")
+      .maybeSingle();
+    return { isAdmin: !!data, userId: context.userId };
   });

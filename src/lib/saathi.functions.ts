@@ -54,10 +54,12 @@ async function getAdmin() {
 
 async function assertAdmin(userId: string) {
   const admin = await getAdmin();
-  const { data, error } = await admin.rpc("has_role", {
-    _user_id: userId,
-    _role: "admin",
-  });
+  const { data, error } = await admin
+    .from("user_roles")
+    .select("user_id")
+    .eq("user_id", userId)
+    .eq("role", "admin")
+    .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Admin access required");
   return admin;
