@@ -29,6 +29,7 @@ import {
   type Rating,
   type SessionCardResult,
 } from "@/lib/session-store";
+import { AppDownloadPopup } from "@/components/app-download-popup"; // Added import
 
 const testQO = (id: string) =>
   queryOptions({
@@ -42,8 +43,7 @@ const searchSchema = z.object({
 
 export const Route = createFileRoute("/practice-mcq/$testId")({
   validateSearch: zodValidator(searchSchema),
-  loader: ({ context, params }) =>
-    context.queryClient.ensureQueryData(testQO(params.testId)),
+  loader: ({ context, params }) => context.queryClient.ensureQueryData(testQO(params.testId)),
   component: PracticeMcq,
   notFoundComponent: () => (
     <div className="min-h-dvh grid place-items-center p-6 text-center">
@@ -73,6 +73,10 @@ function PracticeMcq() {
   const navigate = useNavigate();
   const { data } = useSuspenseQuery(testQO(testId));
   const { test, questions: qRaw } = data;
+
+  // Added states for popup interception
+  const [showDownloadPopup, setShowDownloadPopup] = useState(false);
+  const [navData, setNavData] = useState<any>(null);
 
   const [questions] = useState(() => {
     if (review) {
@@ -130,7 +134,7 @@ function PracticeMcq() {
     const next = picks.slice();
     next[index] = opt;
     setPicks(next);
-    
+
     const correct = opt === q.answer;
     if (correct) {
       triggerHaptic("success");
@@ -138,7 +142,7 @@ function PracticeMcq() {
     } else {
       triggerHaptic("error");
     }
-    
+
     recordRating(q.id, correct ? "easy" : "hard");
   }
 
@@ -160,9 +164,7 @@ function PracticeMcq() {
         topic: test.topic || "",
         prompt: correct ? "Correct" : "Incorrect",
         question: qq.question,
-        answer: correct
-          ? answerText
-          : `Your answer: ${pickedText} · Correct: ${answerText}`,
+        answer: correct ? answerText : `Your answer: ${pickedText} · Correct: ${answerText}`,
         rating,
         mcq: {
           options: [qq.option_1, qq.option_2, qq.option_3, qq.option_4],
@@ -184,19 +186,29 @@ function PracticeMcq() {
       endedAt,
       results,
     });
-    navigate({
-      to: "/summary",
-      search: {
-        deckId: "",
-        practiceId: testId,
-        total: results.length,
-        hard: counts.hard,
-        medium: counts.medium,
-        easy: counts.easy,
-        seconds,
-        sessionId,
-      },
+
+    // Save navigation data and trigger popup instead of navigating immediately
+    setNavData({
+      deckId: "",
+      practiceId: testId,
+      total: results.length,
+      hard: counts.hard,
+      medium: counts.medium,
+      easy: counts.easy,
+      seconds,
+      sessionId,
     });
+    setShowDownloadPopup(true);
+  }
+
+  function handleContinueToSummary() {
+    setShowDownloadPopup(false);
+    if (navData) {
+      navigate({
+        to: "/summary",
+        search: navData,
+      });
+    }
   }
 
   function goPrev() {
@@ -208,11 +220,7 @@ function PracticeMcq() {
     else submit(picks);
   }
 
-  const borderCls = answered
-    ? isCorrect
-      ? "border-success"
-      : "border-destructive"
-    : "border-border";
+  const borderCls = answered ? (isCorrect ? "border-success" : "border-destructive") : "border-border";
 
   return (
     <div className="h-dvh flex flex-col bg-background overflow-hidden">
@@ -287,9 +295,7 @@ function PracticeMcq() {
               >
                 <ScrollArea className="h-full">
                   <div className="p-6 space-y-5">
-                    <p className="text-xl font-semibold leading-snug text-balance">
-                      {q.question}
-                    </p>
+                    <p className="text-xl font-semibold leading-snug text-balance">{q.question}</p>
                     {q.image_url && (
                       <img
                         src={q.image_url}
@@ -298,9 +304,7 @@ function PracticeMcq() {
                       />
                     )}
                     {q.hint && (
-                      <p className="text-base leading-relaxed whitespace-pre-wrap text-foreground/85">
-                        {q.hint}
-                      </p>
+                      <p className="text-base leading-relaxed whitespace-pre-wrap text-foreground/85">{q.hint}</p>
                     )}
 
                     <div className="space-y-2.5">
@@ -308,10 +312,10 @@ function PracticeMcq() {
                         const text = q[`option_${n}` as `option_${1 | 2 | 3 | 4}`];
                         const isAnswer = n === q.answer;
                         const isPick = pick === n;
-                        
+
                         // Add shake class if this button was picked and is wrong
-                        const shakeCls = (answered && isPick && !isAnswer) ? "animate-shake" : "";
-                        
+                        const shakeCls = answered && isPick && !isAnswer ? "animate-shake" : "";
+
                         let cls = "border-border bg-background hover:bg-accent active:scale-[0.99]";
                         if (answered) {
                           if (isAnswer) {
@@ -322,7 +326,7 @@ function PracticeMcq() {
                             cls = "border-border bg-background opacity-70";
                           }
                         }
-                        
+
                         return (
                           <button
                             key={n}
@@ -339,8 +343,8 @@ function PracticeMcq() {
                                 (answered && isAnswer
                                   ? "bg-success text-success-foreground border-success"
                                   : answered && isPick
-                                  ? "bg-destructive text-destructive-foreground border-destructive"
-                                  : "bg-muted text-foreground border-border")
+                                    ? "bg-destructive text-destructive-foreground border-destructive"
+                                    : "bg-muted text-foreground border-border")
                               }
                             >
                               {answered && isAnswer ? (
@@ -351,9 +355,7 @@ function PracticeMcq() {
                                 String.fromCharCode(64 + n)
                               )}
                             </div>
-                            <div className="text-sm leading-snug flex-1 min-w-0 whitespace-pre-wrap">
-                              {text}
-                            </div>
+                            <div className="text-sm leading-snug flex-1 min-w-0 whitespace-pre-wrap">{text}</div>
                           </button>
                         );
                       })}
@@ -424,13 +426,16 @@ function PracticeMcq() {
           disabled={!answered}
           className="w-full h-14 rounded-2xl bg-primary text-primary-foreground font-semibold text-base shadow-sm active:scale-[0.99] transition-transform disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
         >
-          {!answered
-            ? "Pick an answer"
-            : index >= total - 1
-            ? "Finish"
-            : "Next"}
+          {!answered ? "Pick an answer" : index >= total - 1 ? "Finish" : "Next"}
         </button>
       </footer>
+
+      {/* Added App Download Popup */}
+      <AppDownloadPopup
+        isOpen={showDownloadPopup}
+        onClose={() => setShowDownloadPopup(false)}
+        onContinue={handleContinueToSummary}
+      />
     </div>
   );
 }
