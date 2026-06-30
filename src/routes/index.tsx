@@ -58,7 +58,7 @@ function Home() {
 
       <main className="px-5 max-w-2xl mx-auto pb-12 space-y-6 pt-5">
         <div className="text-center space-y-1.5">
-          <h1 className="text-xl font-semibold tracking-tight text-[#910000]">{greeting}.</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-[#910000]">{greeting}{displayName ? `, ${displayName}` : ""}.</h1>
           <p className="text-foreground font-semibold text-[15px] leading-relaxed">
             "Welcome to FlashGyan! Let's make your exam preparation smarter and faster."
           </p>
