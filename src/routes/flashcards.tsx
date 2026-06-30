@@ -27,7 +27,7 @@ function FlashcardsPage() {
     <div className="min-h-dvh bg-background">
       <header className="sticky top-0 z-50 bg-background px-5 py-2 max-w-2xl mx-auto shadow-sm">
         <div className="flex items-center justify-between">
-          <img src={finalLogo.url} alt="Flashgyan" className="h-10 w-auto object-contain" />
+          <img src={finalLogo} alt="Flashgyan" className="h-10 w-auto object-contain" />
           <img
             src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//RASbandhu-logo-green.png"
             alt="RASbandhu"
