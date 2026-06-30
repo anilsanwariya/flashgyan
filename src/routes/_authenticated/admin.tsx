@@ -88,7 +88,7 @@ export const Route = createFileRoute("/_authenticated/admin")({
 import { SaathiPanel } from "@/components/saathi-panel";
 import { HomePanel } from "@/components/home-panel";
 
-type Tab = "home" | "flashcards" | "mcq" | "mcqPractice" | "saathi";
+type Tab = "home" | "flashcards" | "mcq" | "mcqPractice" | "saathi" | "users";
 
 
 // ---------- Flashcard Excel parsing ----------
