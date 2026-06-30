@@ -120,12 +120,14 @@ const importRowSchema = z.object({
 
 async function assertAdmin(userId: string) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data: isAdmin, error } = await supabaseAdmin.rpc("has_role", {
-    _user_id: userId,
-    _role: "admin",
-  });
+  const { data, error } = await supabaseAdmin
+    .from("user_roles")
+    .select("user_id")
+    .eq("user_id", userId)
+    .eq("role", "admin")
+    .maybeSingle();
   if (error) throw new Error(error.message);
-  if (!isAdmin) throw new Error("Forbidden: admin role required");
+  if (!data) throw new Error("Forbidden: admin role required");
   return supabaseAdmin;
 }
 
