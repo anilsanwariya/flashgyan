@@ -13,7 +13,7 @@ const homeQO = queryOptions({ queryKey: ["homeData"], queryFn: () => getHomeData
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Flashgyan — Pick a feature" },
+      { title: "Flashgyan: Smart Flashcards for Exam Success" },
       {
         name: "description",
         content: "Choose a study feature: flashcards, MCQ practice or timed MCQ tests.",
