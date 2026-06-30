@@ -6,6 +6,8 @@ import { ChevronLeft, ChevronRight, ExternalLink, Layers, ListChecks, Lock, Spar
 import { toast } from "sonner";
 import finalLogo from "@/assets/final-logo.png.asset.json";
 import tgIcon from "@/assets/tg-icon.svg.asset.json";
+import { useDisplayName } from "@/hooks/use-auth";
+
 
 const homeQO = queryOptions({ queryKey: ["homeData"], queryFn: () => getHomeData() });
 

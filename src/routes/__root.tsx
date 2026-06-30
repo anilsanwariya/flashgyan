@@ -13,6 +13,8 @@ import appCss from "../styles.css?url";
 import logoAsset from "@/assets/flashgyan-logo.png.asset.json";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Toaster } from "@/components/ui/sonner";
+import { AuthProvider } from "@/hooks/use-auth";
+
 
 
 function NotFoundComponent() {
@@ -99,6 +101,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700;9..144,800&display=swap" },
     ],
+    scripts: [
+      { src: "https://telegram.org/js/telegram-web-app.js", async: true },
+    ],
+
 
   }),
   shellComponent: RootShell,
@@ -145,7 +151,10 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <Toaster richColors position="top-center" />
-      <Outlet />
+      <AuthProvider>
+        <Outlet />
+      </AuthProvider>
     </QueryClientProvider>
   );
+
 }
