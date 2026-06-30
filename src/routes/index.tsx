@@ -16,8 +16,7 @@ export const Route = createFileRoute("/")({
       { title: "Flashgyan: Smart Flashcards for Exam Success" },
       {
         name: "description",
-        content:
-          "FlashGyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go.",
+        content: "Choose a study feature: flashcards, MCQ practice or timed MCQ tests.",
       },
     ],
   }),
