@@ -34,7 +34,9 @@ function greetingFor(date: Date) {
 
 function Home() {
   const { data: home } = useSuspenseQuery(homeQO);
+  const displayName = useDisplayName();
   const [greeting, setGreeting] = useState(() => greetingFor(new Date()));
+
 
   useEffect(() => {
     const t = setInterval(() => setGreeting(greetingFor(new Date())), 60_000);
