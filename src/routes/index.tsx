@@ -6,6 +6,8 @@ import { ChevronLeft, ChevronRight, ExternalLink, Layers, ListChecks, Lock, Spar
 import { toast } from "sonner";
 import finalLogo from "@/assets/final-logo.png.asset.json";
 import tgIcon from "@/assets/tg-icon.svg.asset.json";
+import { useDisplayName } from "@/hooks/use-auth";
+
 
 const homeQO = queryOptions({ queryKey: ["homeData"], queryFn: () => getHomeData() });
 
@@ -32,7 +34,9 @@ function greetingFor(date: Date) {
 
 function Home() {
   const { data: home } = useSuspenseQuery(homeQO);
+  const displayName = useDisplayName();
   const [greeting, setGreeting] = useState(() => greetingFor(new Date()));
+
 
   useEffect(() => {
     const t = setInterval(() => setGreeting(greetingFor(new Date())), 60_000);
@@ -54,7 +58,7 @@ function Home() {
 
       <main className="px-5 max-w-2xl mx-auto pb-12 space-y-6 pt-5">
         <div className="text-center space-y-1.5">
-          <h1 className="text-xl font-semibold tracking-tight text-[#910000]">{greeting}.</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-[#910000]">{greeting}{displayName ? `, ${displayName}` : ""}.</h1>
           <p className="text-foreground font-semibold text-[15px] leading-relaxed">
             "Welcome to FlashGyan! Let's make your exam preparation smarter and faster."
           </p>
