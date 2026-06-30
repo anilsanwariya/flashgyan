@@ -15,6 +15,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { AppDownloadPopup } from "@/components/app-download-popup"; // Added import
 
 const testQO = (id: string) =>
   queryOptions({
@@ -25,8 +26,7 @@ const testQO = (id: string) =>
 export const Route = createFileRoute("/mcq/$testId")({
   ssr: false,
   head: () => ({ meta: [{ title: "MCQ Test — Flashgyan web" }] }),
-  loader: ({ context, params }) =>
-    context.queryClient.ensureQueryData(testQO(params.testId)),
+  loader: ({ context, params }) => context.queryClient.ensureQueryData(testQO(params.testId)),
   component: TakeTest,
   errorComponent: ({ error }) => (
     <div className="min-h-dvh grid place-items-center p-6 text-center">
@@ -61,12 +61,13 @@ function TakeTest() {
   const navigate = useNavigate();
 
   const { test, questions } = data;
-  const [answers, setAnswers] = useState<Answers>(() =>
-    Object.fromEntries(questions.map((q) => [q.id, null])),
-  );
+  const [answers, setAnswers] = useState<Answers>(() => Object.fromEntries(questions.map((q) => [q.id, null])));
   const [idx, setIdx] = useState(0);
   const [startedAt] = useState(() => Date.now());
   const [remaining, setRemaining] = useState(test.duration_seconds);
+
+  // Added state for download popup
+  const [showDownloadPopup, setShowDownloadPopup] = useState(false);
 
   useEffect(() => {
     if (remaining <= 0) {
@@ -93,6 +94,12 @@ function TakeTest() {
     } catch {
       /* ignore */
     }
+    // Trigger the popup instead of navigating immediately
+    setShowDownloadPopup(true);
+  }
+
+  function handleContinueToResults() {
+    setShowDownloadPopup(false);
     navigate({ to: "/mcq-result/$testId", params: { testId } });
   }
 
@@ -140,9 +147,7 @@ function TakeTest() {
       <main className="flex-1 min-h-0 max-w-2xl w-full mx-auto px-5 py-4 flex flex-col">
         <div className="flex-1 min-h-0 flex flex-col rounded-2xl bg-card border border-border p-5">
           <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-4">
-            <p className="text-base font-medium leading-relaxed whitespace-pre-wrap">
-              {q.question}
-            </p>
+            <p className="text-base font-medium leading-relaxed whitespace-pre-wrap">{q.question}</p>
             {q.image_url && (
               <img
                 src={q.image_url}
@@ -150,11 +155,7 @@ function TakeTest() {
                 className="max-h-72 w-full object-contain rounded-lg border border-border"
               />
             )}
-            {q.hint && (
-              <p className="text-base font-medium leading-relaxed whitespace-pre-wrap">
-                {q.hint}
-              </p>
-            )}
+            {q.hint && <p className="text-base font-medium leading-relaxed whitespace-pre-wrap">{q.hint}</p>}
 
             <div className="space-y-2">
               {opts.map((o, i) => {
@@ -166,9 +167,7 @@ function TakeTest() {
                     onClick={() => setChoice(n)}
                     className={
                       "w-full text-left rounded-xl border p-3 text-sm transition-colors " +
-                      (selected
-                        ? "border-primary bg-primary/5"
-                        : "border-border bg-background hover:bg-accent/50")
+                      (selected ? "border-primary bg-primary/5" : "border-border bg-background hover:bg-accent/50")
                     }
                   >
                     <span className="font-semibold mr-2">{n}.</span>
@@ -206,11 +205,7 @@ function TakeTest() {
       <footer className="shrink-0 border-t border-border bg-background">
         <div className="max-w-2xl mx-auto px-5 py-3 grid grid-cols-3 items-center gap-3">
           <div className="justify-self-start">
-            <Button
-              variant="outline"
-              disabled={idx === 0}
-              onClick={() => setIdx((i) => Math.max(0, i - 1))}
-            >
+            <Button variant="outline" disabled={idx === 0} onClick={() => setIdx((i) => Math.max(0, i - 1))}>
               Prev
             </Button>
           </div>
@@ -227,6 +222,13 @@ function TakeTest() {
           </div>
         </div>
       </footer>
+
+      {/* Added App Download Popup */}
+      <AppDownloadPopup
+        isOpen={showDownloadPopup}
+        onClose={() => setShowDownloadPopup(false)}
+        onContinue={handleContinueToResults}
+      />
     </div>
   );
 }
@@ -290,10 +292,7 @@ function QuestionPalette({
             {Array.from({ length: Math.ceil(questions.length / 20) }).map((_, pageIdx) => {
               const pageQs = questions.slice(pageIdx * 20, pageIdx * 20 + 20);
               return (
-                <div
-                  key={pageIdx}
-                  className="w-full shrink-0 snap-start grid grid-cols-10 grid-rows-2 gap-1"
-                >
+                <div key={pageIdx} className="w-full shrink-0 snap-start grid grid-cols-10 grid-rows-2 gap-1">
                   {pageQs.map((q, j) => {
                     const i = pageIdx * 20 + j;
                     const a = answers[q.id];
@@ -366,15 +365,7 @@ function EndTestDialog({ onConfirm }: { onConfirm: () => void }) {
   );
 }
 
-function SubmitDialog({
-  onConfirm,
-  answered,
-  total,
-}: {
-  onConfirm: () => void;
-  answered: number;
-  total: number;
-}) {
+function SubmitDialog({ onConfirm, answered, total }: { onConfirm: () => void; answered: number; total: number }) {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
