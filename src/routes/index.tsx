@@ -48,7 +48,7 @@ function Home() {
         <div className="flex items-center justify-between">
           <img src={finalLogo} alt="Flashgyan" className="h-10 w-auto object-contain" />
           <img
-            src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//RASbandhu-logo-green.png"
+            src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images/RASbandhu-logo-green.png"
             alt="RASbandhu"
             className="h-10 w-auto object-contain"
           />
@@ -76,7 +76,7 @@ function Home() {
               aria-label="Download on the App Store (Coming Soon)"
             >
               <img
-                src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//Download_on_the_App_Store_Badge_US-UK_RGB_blk_092917.svg"
+                src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images/Download_on_the_App_Store_Badge_US-UK_RGB_blk_092917.svg"
                 alt="Download on the App Store"
                 className="h-[52px] w-auto object-contain drop-shadow-sm"
               />
@@ -90,7 +90,7 @@ function Home() {
               aria-label="Get it on Google Play"
             >
               <img
-                src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//GetItOnGooglePlay_Badge_Web_color_English.svg"
+                src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images/GetItOnGooglePlay_Badge_Web_color_English.svg"
                 alt="Get it on Google Play"
                 className="h-[52px] w-auto object-contain drop-shadow-sm"
               />
@@ -118,7 +118,7 @@ function Home() {
 
       <footer className="border-t border-border bg-background/60">
         <div className="max-w-2xl mx-auto px-5 py-6 flex flex-col items-center justify-center text-center gap-3 text-xs text-muted-foreground">
-          <p className="uppercase tracking-wide font-small">
+          <p className="uppercase tracking-wide">
             <span className="block">© 2026 FLASHGYAN EDTECH LLP.</span>
             <span className="block mt-1">ALL RIGHTS RESERVED.</span>
           </p>
@@ -159,7 +159,7 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
       aria-label="Featured banners"
     >
       <div
-        className="flex h-full transition-transform duration-800 ease-out"
+        className="flex h-full transition-transform duration-700 ease-out"
         style={{ transform: `translateX(-${idx * 100}%)` }}
       >
         {banners.map((b) => (
