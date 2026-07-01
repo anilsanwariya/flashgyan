@@ -43,42 +43,45 @@ function Home() {
   }, []);
 
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="sticky top-0 z-50 bg-background px-5 py-2 max-w-2xl mx-auto shadow-sm">
+    <div className="min-h-dvh bg-background relative selection:bg-primary/20">
+      {/* GLASSMORPHIC HEADER 
+        Uses backdrop-blur and a semi-transparent background so content blurs beautifully as it scrolls underneath 
+      */}
+      <header className="sticky top-0 z-50 backdrop-blur-xl bg-background/70 border-b border-border/40 px-5 py-3 md:max-w-4xl lg:max-w-6xl mx-auto shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-all">
         <div className="flex items-center justify-between">
-          <img src={finalLogo} alt="Flashgyan" className="h-10 w-auto object-contain" />
+          <img src={finalLogo} alt="Flashgyan" className="h-10 w-auto object-contain drop-shadow-sm" />
           <img
             src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images/RASbandhu-logo-green.png"
             alt="RASbandhu"
-            className="h-10 w-auto object-contain"
+            className="h-10 w-auto object-contain drop-shadow-sm"
           />
         </div>
       </header>
 
-      <main className="px-5 max-w-2xl mx-auto pb-12 space-y-6 pt-5">
-        <div className="text-center space-y-1.5">
-          <h1 className="text-xl font-semibold tracking-tight text-[#910000]">
+      <main className="px-5 max-w-2xl md:max-w-4xl lg:max-w-6xl mx-auto pb-12 space-y-7 pt-6">
+        <div className="text-center space-y-1.5 animate-in fade-in slide-in-from-bottom-3 duration-700">
+          <h1 className="text-2xl font-bold tracking-tight text-[#910000] drop-shadow-sm">
             {greeting}
-            {displayName ? `, ${displayName}` : ""}.
+            {displayName ? `, ${displayName}` : ""}!
           </h1>
-          <p className="text-foreground font-semibold text-[15px] leading-relaxed">
-            "Welcome to Flashgyan! Let's make your exam preparation smarter and faster."
+          <p className="text-foreground/80 font-medium text-[15px] leading-relaxed max-w-md mx-auto">
+            Welcome to Flashgyan. Let's make your exam preparation smarter and faster today.
           </p>
         </div>
 
-        <div className="w-full space-y-3">
+        <div className="w-full space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both">
           <BannerCarousel banners={home.banners} />
 
-          <div className="flex justify-between items-center w-full">
+          <div className="flex justify-center gap-4 items-center w-full max-w-sm mx-auto">
             <button
               onClick={() => toast.info("iOS app is coming soon!")}
-              className="transition-transform hover:scale-105 active:scale-95 block"
+              className="transition-all hover:scale-105 hover:-translate-y-1 active:scale-95 block drop-shadow-md"
               aria-label="Download on the App Store (Coming Soon)"
             >
               <img
                 src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images/Download_on_the_App_Store_Badge_US-UK_RGB_blk_092917.svg"
                 alt="Download on the App Store"
-                className="h-[52px] w-auto object-contain drop-shadow-sm"
+                className="h-[48px] w-auto object-contain"
               />
             </button>
 
@@ -86,51 +89,55 @@ function Home() {
               href="https://play.google.com/store/apps/details?id=com.flashgyan"
               target="_blank"
               rel="noopener noreferrer"
-              className="transition-transform hover:scale-105 active:scale-95 block"
+              className="transition-all hover:scale-105 hover:-translate-y-1 active:scale-95 block drop-shadow-md"
               aria-label="Get it on Google Play"
             >
               <img
                 src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images/GetItOnGooglePlay_Badge_Web_color_English.svg"
                 alt="Get it on Google Play"
-                className="h-[52px] w-auto object-contain drop-shadow-sm"
+                className="h-[48px] w-auto object-contain"
               />
             </a>
           </div>
         </div>
 
-        {home.settings.cta_url.trim() && home.settings.cta_label.trim() && (
-          <ExternalCtaButton
-            label={home.settings.cta_label}
-            subtitle={home.settings.cta_subtitle}
-            url={home.settings.cta_url}
-            locked={home.settings.lock_cta}
-          />
-        )}
+        <div className="animate-in fade-in slide-in-from-bottom-5 duration-700 delay-200 fill-mode-both">
+          {home.settings.cta_url.trim() && home.settings.cta_label.trim() && (
+            <ExternalCtaButton
+              label={home.settings.cta_label}
+              subtitle={home.settings.cta_subtitle}
+              url={home.settings.cta_url}
+              locked={home.settings.lock_cta}
+            />
+          )}
 
-        {home.settings.cta_caption.trim() && (
-          <p className="mt-3 mb-2 text-center text-[#910000] text-[15px] leading-relaxed">
-            {home.settings.cta_caption}
-          </p>
-        )}
+          {home.settings.cta_caption.trim() && (
+            <p className="mt-3 mb-2 text-center text-[#910000] font-medium text-[14px] opacity-90">
+              {home.settings.cta_caption}
+            </p>
+          )}
+        </div>
 
-        <FeaturePicker settings={home.settings} />
+        <div className="animate-in fade-in slide-in-from-bottom-6 duration-700 delay-300 fill-mode-both">
+          <FeaturePicker settings={home.settings} />
+        </div>
       </main>
 
-      <footer className="border-t border-border bg-background/60">
-        <div className="max-w-2xl mx-auto px-5 py-6 flex flex-col items-center justify-center text-center gap-3 text-xs text-muted-foreground">
-          <p className="uppercase tracking-wide">
+      <footer className="border-t border-border/50 bg-background/40 backdrop-blur-md">
+        <div className="max-w-2xl mx-auto px-5 py-8 flex flex-col items-center justify-center text-center gap-4 text-xs text-muted-foreground">
+          <p className="uppercase tracking-widest font-semibold opacity-70">
             <span className="block">© 2026 FLASHGYAN EDTECH LLP.</span>
             <span className="block mt-1">ALL RIGHTS RESERVED.</span>
           </p>
-          <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
-            <Link to="/privacy-policy" className="hover:text-foreground">
+          <nav className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 font-medium">
+            <Link to="/privacy-policy" className="hover:text-primary transition-colors">
               Privacy Policy
             </Link>
-            <Link to="/terms" className="hover:text-foreground">
+            <Link to="/terms" className="hover:text-primary transition-colors">
               Terms of Service
             </Link>
-            <a href="mailto:flashgyanedtech@gmail.com" className="hover:text-foreground">
-              Contact
+            <a href="mailto:flashgyanedtech@gmail.com" className="hover:text-primary transition-colors">
+              Contact Support
             </a>
           </nav>
         </div>
@@ -154,7 +161,7 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
 
   return (
     <section
-      className="relative w-full overflow-hidden rounded-[06px] shadow-soft bg-muted border-2 border-primary/20"
+      className="relative w-full overflow-hidden rounded-3xl shadow-[0_12px_40px_rgba(0,0,0,0.12)] bg-muted border border-border/50"
       style={{ aspectRatio: "2 / 1" }}
       aria-label="Featured banners"
     >
@@ -172,25 +179,27 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
             type="button"
             aria-label="Previous banner"
             onClick={() => setIdx((i) => (i - 1 + len) % len)}
-            className="absolute left-0 top-1/2 -translate-y-1/2 px-0 py-3 text-white drop-shadow-md flex items-center justify-center hover:text-white/80 active:scale-95 transition"
+            className="absolute left-2 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-black/20 backdrop-blur-md border border-white/20 text-white flex items-center justify-center hover:bg-black/40 active:scale-95 transition-all"
           >
-            <ChevronLeft className="h-6 w-6" />
+            <ChevronLeft className="h-5 w-5" />
           </button>
           <button
             type="button"
             aria-label="Next banner"
             onClick={() => setIdx((i) => (i + 1) % len)}
-            className="absolute right-0 top-1/2 -translate-y-1/2 px-0 py-3 text-white drop-shadow-md flex items-center justify-center hover:text-white/80 active:scale-95 transition"
+            className="absolute right-2 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-black/20 backdrop-blur-md border border-white/20 text-white flex items-center justify-center hover:bg-black/40 active:scale-95 transition-all"
           >
-            <ChevronRight className="h-6 w-6" />
+            <ChevronRight className="h-5 w-5" />
           </button>
-          <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5">
+          <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-2">
             {banners.map((b, i) => (
               <button
                 key={b.id}
                 aria-label={`Show banner ${i + 1}`}
                 onClick={() => setIdx(i)}
-                className={"h-1.5 rounded-full transition-all " + (i === idx ? "w-5 bg-white" : "w-1.5 bg-white/60")}
+                className={`h-2 rounded-full transition-all duration-300 shadow-sm ${
+                  i === idx ? "w-6 bg-white" : "w-2 bg-white/50 hover:bg-white/80"
+                }`}
               />
             ))}
           </div>
@@ -203,36 +212,36 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
 function FeaturePicker({ settings }: { settings: HomeData["settings"] }) {
   const navigate = useNavigate();
   return (
-    <section className="space-y-3">
+    <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <FeatureCard
         title="Flashcards"
         subtitle="Flip cards and rate recall."
-        icon={<Layers className="h-5 w-5" />}
-        gradient="grad-pink"
+        icon={<Layers className="h-6 w-6 text-pink-600" />}
+        gradient="bg-gradient-to-br from-pink-100 to-pink-50 border-pink-200"
         locked={settings.lock_flashcards}
         onClick={() => navigate({ to: "/flashcards" })}
       />
       <FeatureCard
         title="MCQ Practice"
         subtitle="Q&A with instant feedback."
-        icon={<Target className="h-5 w-5" />}
-        gradient="grad-mint"
+        icon={<Target className="h-6 w-6 text-emerald-600" />}
+        gradient="bg-gradient-to-br from-emerald-100 to-emerald-50 border-emerald-200"
         locked={settings.lock_mcq_practice}
         onClick={() => navigate({ to: "/mcq-practice" })}
       />
       <FeatureCard
         title="MCQ Tests"
         subtitle="Timed multiple choice tests."
-        icon={<ListChecks className="h-5 w-5" />}
-        gradient="grad-lavender"
+        icon={<ListChecks className="h-6 w-6 text-violet-600" />}
+        gradient="bg-gradient-to-br from-violet-100 to-violet-50 border-violet-200"
         locked={settings.lock_mcq}
         onClick={() => navigate({ to: "/mcq-tests" })}
       />
       <FeatureCard
         title="SAATHI"
         subtitle="Ask the AI study assistant."
-        icon={<Sparkles className="h-5 w-5" />}
-        gradient="grad-peach"
+        icon={<Sparkles className="h-6 w-6 text-amber-600" />}
+        gradient="bg-gradient-to-br from-amber-100 to-amber-50 border-amber-200"
         locked={settings.lock_saathi}
         onClick={() => navigate({ to: "/saathi" })}
       />
@@ -253,28 +262,31 @@ function ExternalCtaButton({
 }) {
   const handle = () => {
     if (locked) {
-      toast.info(`${label} is coming soon!`);
+      toast.info(`${label} is locked.`);
       return;
     }
     window.open(url, "_blank", "noopener,noreferrer");
   };
   return (
+    /* 3D BUTTON EFFECT 
+      Uses a thick bottom border that disappears when clicked (active:translate-y) to create a physical push-down feeling 
+    */
     <button
       onClick={handle}
       aria-disabled={locked}
-      className={`w-full rounded-2xl bg-primary px-5 py-4 text-left text-primary-foreground shadow-soft transition-colors hover:bg-primary/90 active:scale-[0.99] ${
+      className={`w-full rounded-2xl bg-primary px-6 py-4 text-left text-primary-foreground transition-all duration-150 border-b-[6px] border-primary/80 hover:-translate-y-1 hover:border-b-[8px] active:translate-y-[6px] active:border-b-0 shadow-sm ${
         locked ? "opacity-80 cursor-not-allowed" : ""
       }`}
     >
-      <div className="flex items-center gap-3">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-foreground/20">
-          {locked ? <Lock className="h-5 w-5" /> : <ExternalLink className="h-5 w-5" />}
+      <div className="flex items-center gap-4">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/20 backdrop-blur-sm border border-white/30 shadow-inner">
+          {locked ? <Lock className="h-6 w-6" /> : <ExternalLink className="h-6 w-6" />}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-base font-bold tracking-tight">{label}</div>
-          {subtitle && <div className="mt-0.5 truncate text-sm text-primary-foreground/80">{subtitle}</div>}
+          <div className="truncate text-lg font-bold tracking-tight drop-shadow-sm">{label}</div>
+          {subtitle && <div className="mt-0.5 truncate text-sm font-medium text-primary-foreground/80">{subtitle}</div>}
         </div>
-        {!locked && <ChevronRight className="h-5 w-5 shrink-0 text-primary-foreground/90" />}
+        {!locked && <ChevronRight className="h-6 w-6 shrink-0 text-primary-foreground/90" />}
       </div>
     </button>
   );
@@ -297,7 +309,7 @@ function FeatureCard({
 }) {
   const handle = () => {
     if (locked) {
-      toast.info(`${title} is coming soon!`);
+      toast.info(`${title} is locked.`);
       return;
     }
     onClick();
@@ -306,22 +318,30 @@ function FeatureCard({
     <button
       onClick={handle}
       aria-disabled={locked}
-      className={`group w-full text-left flex items-center gap-4 rounded-3xl ${gradient} p-5 shadow-soft transition-transform ${
-        locked ? "opacity-80 cursor-not-allowed" : "active:scale-[0.99]"
+      className={`group w-full text-left flex items-center gap-4 rounded-[28px] border-[1.5px] p-5 transition-all duration-200 shadow-[0_8px_20px_rgba(0,0,0,0.04)] hover:shadow-[0_12px_25px_rgba(0,0,0,0.08)] hover:-translate-y-1 active:translate-y-0.5 active:shadow-sm relative overflow-hidden ${gradient} ${
+        locked ? "opacity-80 cursor-not-allowed" : ""
       }`}
     >
-      <div className="h-12 w-12 rounded-full bg-white/70 text-foreground flex items-center justify-center shrink-0">
+      {/* GLASSY ICON WRAPPER 
+        Uses backdrop blur and white borders to look like a frosted piece of glass 
+      */}
+      <div className="relative h-14 w-14 rounded-2xl bg-white/60 backdrop-blur-md border border-white flex items-center justify-center shrink-0 shadow-[inset_0_2px_4px_rgba(255,255,255,0.8)] z-10">
         {icon}
       </div>
-      <div className="min-w-0 flex-1">
-        <div className="text-lg font-bold text-foreground">{title}</div>
-        <div className="mt-0.5 text-sm text-foreground/70">{subtitle}</div>
+
+      <div className="min-w-0 flex-1 z-10">
+        <div className="text-[17px] font-bold text-foreground/90 tracking-tight drop-shadow-sm">{title}</div>
+        <div className="mt-0.5 text-[14px] font-medium text-foreground/70">{subtitle}</div>
       </div>
+
       {locked ? (
-        <Lock className="h-5 w-5 text-foreground/70 shrink-0" aria-label="Locked" />
+        <Lock className="h-5 w-5 text-foreground/40 shrink-0 z-10" aria-label="Locked" />
       ) : (
-        <ChevronRight className="h-5 w-5 text-foreground/70 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+        <ChevronRight className="h-6 w-6 text-foreground/40 shrink-0 group-hover:translate-x-1 group-hover:text-foreground/70 transition-all z-10" />
       )}
+
+      {/* Decorative background glow */}
+      <div className="absolute -right-8 -top-8 w-32 h-32 bg-white/40 blur-3xl rounded-full pointer-events-none" />
     </button>
   );
 }
@@ -333,9 +353,9 @@ function TelegramFloatingButton() {
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Join Telegram"
-      className="fixed right-5 bottom-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[#2aabee] shadow-soft transition-transform hover:scale-105 active:scale-95 overflow-hidden"
+      className="fixed right-6 bottom-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[#2aabee] shadow-[0_8px_30px_rgba(42,171,238,0.4)] transition-all hover:scale-110 hover:-translate-y-1 active:scale-95 overflow-hidden border-2 border-white"
     >
-      <img src={tgIcon} alt="Telegram" className="h-full w-full object-cover" />
+      <img src={tgIcon} alt="Telegram" className="h-8 w-8 object-contain" />
     </a>
   );
 }
