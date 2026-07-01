@@ -130,17 +130,17 @@ function TakeTest() {
     <div className="h-dvh overflow-hidden bg-background flex flex-col">
       <header className="shrink-0 border-b border-border bg-background z-10">
         <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-xs text-muted-foreground">{test.name}</div>
-            <div className="text-sm font-medium">
-              Q {idx + 1} / {questions.length}
+          <SubmitTestDialog onConfirm={submit} answered={answeredCount} total={questions.length} />
+          <div className="min-w-0 text-center flex-1">
+            <div className="text-xs text-muted-foreground truncate">{test.name}</div>
+            <div className="inline-flex items-center gap-1 tabular-nums font-mono text-sm">
+              <Timer className="h-4 w-4 text-muted-foreground" />
+              {formatTime(remaining)}
             </div>
           </div>
-          <div className="inline-flex items-center gap-1 tabular-nums font-mono text-sm">
-            <Timer className="h-4 w-4 text-muted-foreground" />
-            {formatTime(remaining)}
+          <div className="text-sm font-medium tabular-nums">
+            Q {idx + 1} / {questions.length}
           </div>
-          <EndTestDialog onConfirm={submit} />
         </div>
       </header>
 
