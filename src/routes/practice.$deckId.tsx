@@ -269,7 +269,6 @@ function Practice() {
             </span>
           )}
         </div>
-        {/* Sleek, thin progress bar */}
         <div className="mt-3 flex h-1 w-full overflow-hidden rounded-full bg-black/5 dark:bg-white/10">
           <div
             className="h-full bg-success transition-all duration-500 ease-out"
@@ -298,21 +297,24 @@ function Practice() {
               transition={{ duration: 0.3, ease: "easeOut" }}
               className="w-full h-full relative"
             >
-              {/* FRONT CARD */}
+              {/* SINGLE ROTATING WRAPPER */}
               <motion.div
                 initial={false}
-                animate={{ rotateY: flipped ? -180 : 0 }}
+                animate={{ rotateY: flipped ? 180 : 0 }}
                 transition={{ duration: 0.5, type: "spring", bounce: 0.2 }}
-                className="absolute inset-0 w-full h-full"
-                style={{
-                  backfaceVisibility: "hidden",
-                  WebkitBackfaceVisibility: "hidden",
-                  pointerEvents: flipped ? "none" : "auto",
-                }}
+                className="w-full h-full relative"
+                style={{ transformStyle: "preserve-3d" }}
               >
-                {/* iOS Frosted Card */}
+                {/* FRONT CARD */}
                 <div
-                  className={`w-full h-full rounded-[36px] backdrop-blur-3xl border transition-colors duration-500 ${borderClass} overflow-hidden flex flex-col`}
+                  className={`absolute inset-0 w-full h-full rounded-[36px] backdrop-blur-3xl border transition-colors duration-500 ${borderClass} overflow-hidden flex flex-col`}
+                  style={{
+                    backfaceVisibility: "hidden",
+                    WebkitBackfaceVisibility: "hidden",
+                    transform: "translateZ(1px)", // Solves Z-fighting
+                    zIndex: flipped ? 0 : 10, // Prevents blurred bleed-through
+                    pointerEvents: flipped ? "none" : "auto",
+                  }}
                 >
                   <ScrollArea className="flex-1 h-full">
                     <div className="p-8 min-h-full flex flex-col justify-center">
@@ -332,22 +334,17 @@ function Practice() {
                     </div>
                   </ScrollArea>
                 </div>
-              </motion.div>
 
-              {/* BACK CARD */}
-              <motion.div
-                initial={false}
-                animate={{ rotateY: flipped ? 0 : 180 }}
-                transition={{ duration: 0.5, type: "spring", bounce: 0.2 }}
-                className="absolute inset-0 w-full h-full"
-                style={{
-                  backfaceVisibility: "hidden",
-                  WebkitBackfaceVisibility: "hidden",
-                  pointerEvents: flipped ? "auto" : "none",
-                }}
-              >
+                {/* BACK CARD */}
                 <div
-                  className={`w-full h-full rounded-[36px] backdrop-blur-3xl border transition-colors duration-500 ${borderClass} overflow-hidden flex flex-col`}
+                  className={`absolute inset-0 w-full h-full rounded-[36px] backdrop-blur-3xl border transition-colors duration-500 ${borderClass} overflow-hidden flex flex-col`}
+                  style={{
+                    backfaceVisibility: "hidden",
+                    WebkitBackfaceVisibility: "hidden",
+                    transform: "rotateY(180deg) translateZ(1px)", // Flips backface correctly
+                    zIndex: flipped ? 10 : 0, // Drops underneath when inactive
+                    pointerEvents: flipped ? "auto" : "none",
+                  }}
                 >
                   <ScrollArea className="flex-1 h-full">
                     <div className="p-8">
