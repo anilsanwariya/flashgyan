@@ -203,23 +203,16 @@ function TakeTest() {
       </main>
 
       <footer className="shrink-0 border-t border-border bg-background">
-        <div className="max-w-2xl mx-auto px-5 py-3 grid grid-cols-3 items-center gap-3">
-          <div className="justify-self-start">
-            <Button variant="outline" disabled={idx === 0} onClick={() => setIdx((i) => Math.max(0, i - 1))}>
-              Prev
-            </Button>
-          </div>
-          <div className="justify-self-center">
-            <SubmitDialog onConfirm={submit} answered={answeredCount} total={questions.length} />
-          </div>
-          <div className="justify-self-end">
-            <Button
-              disabled={idx === questions.length - 1}
-              onClick={() => setIdx((i) => Math.min(questions.length - 1, i + 1))}
-            >
-              Next
-            </Button>
-          </div>
+        <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between gap-3">
+          <Button variant="outline" disabled={idx === 0} onClick={() => setIdx((i) => Math.max(0, i - 1))}>
+            Prev
+          </Button>
+          <Button
+            disabled={idx === questions.length - 1}
+            onClick={() => setIdx((i) => Math.min(questions.length - 1, i + 1))}
+          >
+            Next
+          </Button>
         </div>
       </footer>
 
