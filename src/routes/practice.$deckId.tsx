@@ -289,70 +289,91 @@ function Practice() {
               transition={{ duration: 0.18 }}
               className="w-full [perspective:1000px]"
             >
-              <div
-                className={
-                  "relative w-full min-h-[60vh] transition-transform duration-500 [transform-style:preserve-3d] " +
-                  (flipped ? "[transform:rotateY(180deg)]" : "")
-                }
+              {/* Framer Motion smoothly handles the robust 3D rotation independent of CSS classes */}
+              <motion.div
+                className="relative w-full min-h-[60vh]"
+                initial={false}
+                animate={{ rotateY: flipped ? 180 : 0 }}
+                transition={{ duration: 0.4, ease: "easeInOut" }}
+                style={{ transformStyle: "preserve-3d" }}
               >
                 {/* Front */}
                 <div
-                  className={`absolute inset-0 [backface-visibility:hidden] rounded-3xl bg-card border-2 shadow-sm overflow-hidden transition-colors ${borderClass}`}
-                  style={{ WebkitBackfaceVisibility: "hidden" }}
+                  className={`absolute inset-0 rounded-3xl bg-card border-2 shadow-sm transition-colors ${borderClass}`}
+                  style={{
+                    backfaceVisibility: "hidden",
+                    WebkitBackfaceVisibility: "hidden",
+                    pointerEvents: flipped ? "none" : "auto",
+                  }}
                 >
-                  <ScrollArea className="h-full">
-                    <div className="p-7 min-h-[60vh] flex flex-col">
-                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground text-center">
-                        {card.prompt}
+                  {/* Inner wrapper prevents WebKit overflow-hidden glitch */}
+                  <div className="w-full h-full rounded-[22px] overflow-hidden">
+                    <ScrollArea className="h-full">
+                      <div className="p-7 min-h-[60vh] flex flex-col">
+                        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground text-center">
+                          {card.prompt}
+                        </div>
+                        <div className="flex-1 flex flex-col items-center justify-center gap-4 py-4">
+                          <p className="text-2xl font-semibold leading-snug text-center text-balance">
+                            {card.question}
+                          </p>
+                          {card.image_url && (
+                            <img
+                              src={card.image_url}
+                              alt=""
+                              className="w-full aspect-[2/1] rounded-xl object-cover border border-border"
+                            />
+                          )}
+                        </div>
                       </div>
-                      <div className="flex-1 flex flex-col items-center justify-center gap-4 py-4">
-                        <p className="text-2xl font-semibold leading-snug text-center text-balance">{card.question}</p>
-                        {card.image_url && (
-                          <img
-                            src={card.image_url}
-                            alt=""
-                            className="w-full aspect-[2/1] rounded-xl object-cover border border-border"
-                          />
-                        )}
-                      </div>
-                    </div>
-                  </ScrollArea>
+                    </ScrollArea>
+                  </div>
                 </div>
 
                 {/* Back */}
                 <div
-                  className={`absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] rounded-3xl bg-card border-2 shadow-sm transition-colors ${borderClass} overflow-hidden flex flex-col`}
-                  style={{ WebkitBackfaceVisibility: "hidden" }}
+                  className={`absolute inset-0 rounded-3xl bg-card border-2 shadow-sm transition-colors ${borderClass}`}
+                  style={{
+                    backfaceVisibility: "hidden",
+                    WebkitBackfaceVisibility: "hidden",
+                    transform: "rotateY(180deg)",
+                    pointerEvents: flipped ? "auto" : "none",
+                  }}
                 >
-                  <ScrollArea className="flex-1 h-full">
-                    <div className="p-7">
-                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        {card.prompt}
-                      </div>
-                      <p className="mt-2 text-base font-medium leading-snug">{card.question}</p>
-                      {card.image_url && (
-                        <img
-                          src={card.image_url}
-                          alt=""
-                          className="mt-3 w-full aspect-[2/1] rounded-xl object-cover border border-border"
-                        />
-                      )}
-                      <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
-                        Answer
-                      </div>
-                      <p className="mt-3 text-2xl font-semibold leading-snug text-balance">{card.answer}</p>
-                      {card.sections.map((s, i) => (
-                        <div key={i} className="mt-5 pt-5 border-t border-border">
-                          <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
-                            {s.title}
-                          </div>
-                          <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">{s.body}</p>
+                  {/* Inner wrapper prevents WebKit overflow-hidden glitch */}
+                  <div className="w-full h-full rounded-[22px] overflow-hidden flex flex-col">
+                    <ScrollArea className="flex-1 h-full">
+                      <div className="p-7">
+                        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          {card.prompt}
                         </div>
-                      ))}
-                    </div>
-                  </ScrollArea>
+                        <p className="mt-2 text-base font-medium leading-snug">{card.question}</p>
+                        {card.image_url && (
+                          <img
+                            src={card.image_url}
+                            alt=""
+                            className="mt-3 w-full aspect-[2/1] rounded-xl object-cover border border-border"
+                          />
+                        )}
+                        <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
+                          Answer
+                        </div>
+                        <p className="mt-3 text-2xl font-semibold leading-snug text-balance">{card.answer}</p>
+                        {card.sections.map((s, i) => (
+                          <div key={i} className="mt-5 pt-5 border-t border-border">
+                            <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
+                              {s.title}
+                            </div>
+                            <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                              {s.body}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  </div>
                 </div>
-              </div>
+              </motion.div>
             </motion.div>
           </AnimatePresence>
           {index > 0 && (
