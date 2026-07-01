@@ -3,6 +3,7 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import type { McqAttempt } from "./mcq.$testId";
 import { ArrowLeft, CheckCircle2, XCircle, MinusCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { AppDownloadPopup } from "@/components/app-download-popup"; // Added import
 
 const STORAGE_KEY = (id: string) => `mcq-attempt:${id}`;
@@ -78,14 +79,13 @@ function Result() {
     <div className="min-h-dvh bg-background">
       <header className="border-b border-border bg-background">
         <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between">
-          <button
-            onClick={() => setShowDownloadPopup(true)}
-            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="h-4 w-4" /> Home
-          </button>
+          <Button asChild variant="outline" className="rounded-full h-9 px-4 text-sm">
+            <Link to="/mcq-tests">
+              <ArrowLeft className="h-4 w-4" /> MCQ Tests
+            </Link>
+          </Button>
           <div className="text-sm font-semibold">Result</div>
-          <div className="w-12" />
+          <div className="w-24" />
         </div>
       </header>
 

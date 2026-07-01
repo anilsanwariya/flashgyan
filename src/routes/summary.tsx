@@ -1,8 +1,9 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { z } from "zod";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
-import { Trophy, Clock, Layers, Check, X, ChevronDown } from "lucide-react";
+import { Trophy, Clock, Layers, Check, X, ChevronDown, ArrowLeft } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { loadSession, type SessionDetail, type Rating, type SessionCardResult } from "@/lib/session-store";
 
 const summarySchema = z.object({
@@ -74,9 +75,24 @@ function Summary() {
     return detail.results.filter((r) => r.rating === selectedRating);
   }, [detail, isPractice, selectedPractice, selectedRating]);
 
+  const featureLink = deckId ? "/flashcards" : practiceId ? "/mcq-practice" : "/";
+  const featureName = deckId ? "Flashcards" : practiceId ? "MCQ Practice" : "Home";
+
   return (
     <div className="min-h-dvh bg-background flex flex-col">
-      <main className="flex-1 max-w-2xl w-full mx-auto px-5 pt-12 pb-8">
+      <header className="sticky top-0 z-50 bg-background border-b border-border">
+        <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between">
+          <Button asChild variant="outline" className="rounded-full h-9 px-4 text-sm">
+            <Link to={featureLink}>
+              <ArrowLeft className="h-4 w-4" /> {featureName}
+            </Link>
+          </Button>
+          <div className="text-sm font-semibold">Summary</div>
+          <div className="w-24" />
+        </div>
+      </header>
+
+      <main className="flex-1 max-w-2xl w-full mx-auto px-5 pt-6 pb-8">
         <div className="text-center">
           <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
             <Trophy className="h-7 w-7" />
