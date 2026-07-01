@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { getMcqTest, type McqQuestion } from "@/lib/mcq.functions";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, ChevronLeft, ChevronRight, Timer } from "lucide-react";
+import { ChevronLeft, ChevronRight, Timer } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -129,17 +129,19 @@ function TakeTest() {
   return (
     <div className="h-dvh overflow-hidden bg-background flex flex-col">
       <header className="shrink-0 border-b border-border bg-background z-10">
-        <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between gap-3">
-          <SubmitTestDialog onConfirm={submit} answered={answeredCount} total={questions.length} />
-          <div className="min-w-0 text-center flex-1">
+        <div className="max-w-2xl mx-auto px-5 py-3 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+          <div className="text-sm font-medium tabular-nums">
+            Q {idx + 1} / {questions.length}
+          </div>
+          <div className="text-center">
             <div className="text-xs text-muted-foreground truncate">{test.name}</div>
             <div className="inline-flex items-center gap-1 tabular-nums font-mono text-sm">
               <Timer className="h-4 w-4 text-muted-foreground" />
               {formatTime(remaining)}
             </div>
           </div>
-          <div className="text-sm font-medium tabular-nums">
-            Q {idx + 1} / {questions.length}
+          <div className="flex justify-end">
+            <SubmitTestDialog onConfirm={submit} answered={answeredCount} total={questions.length} />
           </div>
         </div>
       </header>
@@ -343,7 +345,7 @@ function SubmitTestDialog({
           type="button"
           className="inline-flex items-center gap-1 rounded-full h-9 px-4 text-sm font-medium border border-destructive text-destructive hover:bg-destructive/10 transition-colors"
         >
-          <ArrowLeft className="h-4 w-4" /> Submit
+          Submit
         </button>
       </AlertDialogTrigger>
       <AlertDialogContent>
