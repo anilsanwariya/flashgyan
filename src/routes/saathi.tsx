@@ -24,7 +24,7 @@ type Msg = {
   sources?: SaathiChatSource[];
 };
 
-mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose" });
+mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "strict" });
 
 function SaathiChat() {
   const askFn = useServerFn(askSaathi);
