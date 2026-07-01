@@ -327,42 +327,24 @@ function QuestionPalette({
   );
 }
 
-function EndTestDialog({ onConfirm }: { onConfirm: () => void }) {
+function SubmitTestDialog({
+  onConfirm,
+  answered,
+  total,
+}: {
+  onConfirm: () => void;
+  answered: number;
+  total: number;
+}) {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <ArrowLeft className="h-4 w-4" /> End
-        </Button>
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>End test now?</AlertDialogTitle>
-          <AlertDialogDescription>
-            Unanswered questions will count as 0. You'll be taken to the result page.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="bg-emerald-600 text-white hover:bg-emerald-700 hover:text-white">
-            Continue
-          </AlertDialogCancel>
-          <AlertDialogAction
-            onClick={onConfirm}
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-          >
-            End test
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
-function SubmitDialog({ onConfirm, answered, total }: { onConfirm: () => void; answered: number; total: number }) {
-  return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <Button>Submit</Button>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 rounded-full h-9 px-4 text-sm font-medium border border-destructive text-destructive hover:bg-destructive/10 transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" /> Submit
+        </button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -372,8 +354,15 @@ function SubmitDialog({ onConfirm, answered, total }: { onConfirm: () => void; a
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Keep going</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm}>Submit</AlertDialogAction>
+          <AlertDialogCancel className="bg-success text-success-foreground hover:bg-success/90 border-0">
+            Keep going
+          </AlertDialogCancel>
+          <AlertDialogAction
+            onClick={onConfirm}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            Submit
+          </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
