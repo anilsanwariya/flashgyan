@@ -88,7 +88,6 @@ function Summary() {
             </Link>
           </Button>
           <div className="text-sm font-semibold">Summary</div>
-          <div className="w-24" />
         </div>
       </header>
 
