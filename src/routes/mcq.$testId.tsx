@@ -15,7 +15,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { AppDownloadPopup } from "@/components/app-download-popup"; // Added import
+import { AppDownloadPopup } from "@/components/app-download-popup";
 
 const testQO = (id: string) =>
   queryOptions({
@@ -41,7 +41,7 @@ export const Route = createFileRoute("/mcq/$testId")({
   notFoundComponent: () => <div className="p-6">Test not found.</div>,
 });
 
-type Answers = Record<string, number | null>; // null = not answered
+type Answers = Record<string, number | null>;
 
 export type McqAttempt = {
   testId: string;
@@ -66,7 +66,6 @@ function TakeTest() {
   const [startedAt] = useState(() => Date.now());
   const [remaining, setRemaining] = useState(test.duration_seconds);
 
-  // Added state for download popup
   const [showDownloadPopup, setShowDownloadPopup] = useState(false);
 
   useEffect(() => {
@@ -94,7 +93,6 @@ function TakeTest() {
     } catch {
       /* ignore */
     }
-    // Trigger the popup instead of navigating immediately
     setShowDownloadPopup(true);
   }
 
@@ -129,18 +127,24 @@ function TakeTest() {
   return (
     <div className="h-dvh overflow-hidden bg-background flex flex-col">
       <header className="shrink-0 border-b border-border bg-background z-10">
-        <div className="max-w-2xl mx-auto px-5 py-3 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-          <div className="text-sm font-medium tabular-nums">
-            Q {idx + 1} / {questions.length}
+        {/* 3-Column Grid for strict alignment */}
+        <div className="max-w-2xl mx-auto px-5 py-3 grid grid-cols-3 items-center gap-3">
+          {/* LEFT: Question Counter */}
+          <div className="text-sm font-semibold tabular-nums justify-self-start text-foreground">
+            {idx + 1} / {questions.length}
           </div>
-          <div className="text-center">
-            <div className="text-xs text-muted-foreground truncate">{test.name}</div>
+
+          {/* CENTER: Title and Timer */}
+          <div className="text-center min-w-0 justify-self-center flex flex-col items-center w-full">
+            <div className="text-xs text-muted-foreground truncate w-full">{test.name}</div>
             <div className="inline-flex items-center gap-1 tabular-nums font-mono text-sm">
               <Timer className="h-4 w-4 text-muted-foreground" />
               {formatTime(remaining)}
             </div>
           </div>
-          <div className="flex justify-end">
+
+          {/* RIGHT: Submit Button */}
+          <div className="flex justify-end justify-self-end">
             <SubmitTestDialog onConfirm={submit} answered={answeredCount} total={questions.length} />
           </div>
         </div>
@@ -218,7 +222,6 @@ function TakeTest() {
         </div>
       </footer>
 
-      {/* Added App Download Popup */}
       <AppDownloadPopup
         isOpen={showDownloadPopup}
         onClose={() => setShowDownloadPopup(false)}
@@ -329,15 +332,7 @@ function QuestionPalette({
   );
 }
 
-function SubmitTestDialog({
-  onConfirm,
-  answered,
-  total,
-}: {
-  onConfirm: () => void;
-  answered: number;
-  total: number;
-}) {
+function SubmitTestDialog({ onConfirm, answered, total }: { onConfirm: () => void; answered: number; total: number }) {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
