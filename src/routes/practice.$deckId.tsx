@@ -6,7 +6,7 @@ import { z } from "zod";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
 import { getDeck } from "@/lib/flashcards.functions";
 import { motion, AnimatePresence } from "motion/react";
-import { RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
+import { RotateCcw, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   newSessionId,
@@ -27,7 +27,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
-import { AppDownloadPopup } from "@/components/app-download-popup"; // Added import
+import { AppDownloadPopup } from "@/components/app-download-popup";
 
 const deckQO = (deckId: string) =>
   queryOptions({
@@ -35,15 +35,13 @@ const deckQO = (deckId: string) =>
     queryFn: () => getDeck({ data: { id: deckId } }),
   });
 
-
 const practiceSearchSchema = z.object({
   review: fallback(z.boolean(), false).default(false),
 });
 
 export const Route = createFileRoute("/practice/$deckId")({
   validateSearch: zodValidator(practiceSearchSchema),
-  loader: ({ context, params }) =>
-    context.queryClient.ensureQueryData(deckQO(params.deckId)),
+  loader: ({ context, params }) => context.queryClient.ensureQueryData(deckQO(params.deckId)),
   component: Practice,
   notFoundComponent: () => (
     <div className="min-h-dvh grid place-items-center p-6 text-center">
@@ -87,7 +85,6 @@ function Practice() {
   const navigate = useNavigate();
   const startedAt = useRef(Date.now());
 
-  // Added states for popup interception
   const [showDownloadPopup, setShowDownloadPopup] = useState(false);
   const [navData, setNavData] = useState<any>(null);
 
@@ -101,15 +98,12 @@ function Practice() {
   });
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
-  const [cardRatings, setCardRatings] = useState<(Rating | null)[]>(() =>
-    cards.map(() => null),
-  );
+  const [cardRatings, setCardRatings] = useState<(Rating | null)[]>(() => cards.map(() => null));
   const [priorRatings] = useState<(Rating | null)[]>(() => {
     if (!review) return cards.map(() => null);
     const state = loadReview(deckId);
     return cards.map((c) => state[c.id] ?? null);
   });
-
 
   const ratings = useMemo(() => {
     const r = { hard: 0, medium: 0, easy: 0 };
@@ -125,16 +119,14 @@ function Practice() {
     displayRating === "hard"
       ? "border-destructive"
       : displayRating === "medium"
-      ? "border-warning"
-      : displayRating === "easy"
-      ? "border-success"
-      : "border-border";
-
+        ? "border-warning"
+        : displayRating === "easy"
+          ? "border-success"
+          : "border-border";
 
   useEffect(() => {
     setFlipped(cardRatings[index] !== null);
   }, [index, cardRatings]);
-
 
   if (total === 0) {
     return (
@@ -180,8 +172,7 @@ function Practice() {
     const state = loadReview(deckId);
     for (const r of results) state[r.id] = r.rating;
     saveReview(deckId, state);
-    
-    // Intercept navigation by saving data and opening popup
+
     setNavData({
       deckId,
       total: results.length,
@@ -228,13 +219,16 @@ function Practice() {
     <div className="min-h-dvh flex flex-col bg-background">
       <header className="px-5 pt-4 pb-3 max-w-2xl w-full mx-auto">
         <div className="flex items-center justify-between">
+          <div className="text-sm font-semibold tabular-nums text-foreground">
+            {index + 1} / {total}
+          </div>
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <button
                 type="button"
-                className="inline-flex items-center gap-1 rounded-full h-9 px-4 text-sm font-medium border border-destructive text-destructive hover:bg-destructive/10 transition-colors"
+                className="inline-flex items-center gap-1 text-sm font-medium text-destructive hover:text-destructive/80 transition-colors"
               >
-                End Session
+                End Session <X className="h-4 w-4" />
               </button>
             </AlertDialogTrigger>
             <AlertDialogContent>
@@ -257,12 +251,11 @@ function Practice() {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-          <div className="text-sm tabular-nums text-muted-foreground">
-            {index + 1} / {total}
-          </div>
         </div>
         <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="truncate">{subject} · {topic}</span>
+          <span className="truncate">
+            {subject} · {topic}
+          </span>
           {review && (
             <span className="shrink-0 rounded-full bg-primary/10 text-primary px-2 py-0.5 font-medium">
               Review mode
@@ -309,7 +302,9 @@ function Practice() {
                   }
                 >
                   {/* Front */}
-                  <div className={`absolute inset-0 backface-hidden rounded-3xl bg-card border-2 shadow-sm overflow-hidden transition-colors ${borderClass}`}>
+                  <div
+                    className={`absolute inset-0 backface-hidden rounded-3xl bg-card border-2 shadow-sm overflow-hidden transition-colors ${borderClass}`}
+                  >
                     <ScrollArea className="h-full">
                       <div className="p-7 min-h-[60vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
                         <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground text-center">
@@ -334,15 +329,15 @@ function Practice() {
                     </ScrollArea>
                   </div>
                   {/* Back */}
-                  <div className={`absolute inset-0 backface-hidden rotate-y-180 rounded-3xl bg-card border-2 shadow-sm transition-colors ${borderClass} overflow-hidden flex flex-col`}>
+                  <div
+                    className={`absolute inset-0 backface-hidden rotate-y-180 rounded-3xl bg-card border-2 shadow-sm transition-colors ${borderClass} overflow-hidden flex flex-col`}
+                  >
                     <ScrollArea className="flex-1 h-full">
                       <div className="p-7" onClick={(e) => e.stopPropagation()}>
                         <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                           {card.prompt}
                         </div>
-                        <p className="mt-2 text-base font-medium leading-snug">
-                          {card.question}
-                        </p>
+                        <p className="mt-2 text-base font-medium leading-snug">{card.question}</p>
                         {card.image_url && (
                           <img
                             src={card.image_url}
@@ -353,9 +348,7 @@ function Practice() {
                         <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
                           Answer
                         </div>
-                        <p className="mt-3 text-2xl font-semibold leading-snug text-balance">
-                          {card.answer}
-                        </p>
+                        <p className="mt-3 text-2xl font-semibold leading-snug text-balance">{card.answer}</p>
                         {card.sections.map((s, i) => (
                           <div key={i} className="mt-5 pt-5 border-t border-border">
                             <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
@@ -376,7 +369,10 @@ function Practice() {
           {index > 0 && (
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); goPrev(); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                goPrev();
+              }}
               aria-label="Previous card"
               className="absolute left-2 top-1/2 -translate-y-1/2 z-10 h-10 w-10 rounded-full bg-background/60 backdrop-blur-sm border border-border shadow-sm flex items-center justify-center hover:bg-background/80 transition-colors"
             >
@@ -386,7 +382,10 @@ function Practice() {
           {currentRating !== null && index < total - 1 && (
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); goNext(); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                goNext();
+              }}
               aria-label="Next card"
               className="absolute right-2 top-1/2 -translate-y-1/2 z-10 h-10 w-10 rounded-full bg-background/60 backdrop-blur-sm border border-border shadow-sm flex items-center justify-center hover:bg-background/80 transition-colors"
             >
@@ -431,7 +430,6 @@ function Practice() {
         )}
       </footer>
 
-      {/* Added App Download Popup */}
       <AppDownloadPopup
         isOpen={showDownloadPopup}
         onClose={() => setShowDownloadPopup(false)}
@@ -458,13 +456,9 @@ function RatingButton({
     tone === "destructive"
       ? "bg-destructive text-destructive-foreground"
       : tone === "warning"
-      ? "bg-warning text-warning-foreground"
-      : "bg-success text-success-foreground";
-  const stateCls = disabled
-    ? active
-      ? "cursor-not-allowed"
-      : "opacity-40 cursor-not-allowed"
-    : "active:scale-[0.98]";
+        ? "bg-warning text-warning-foreground"
+        : "bg-success text-success-foreground";
+  const stateCls = disabled ? (active ? "cursor-not-allowed" : "opacity-40 cursor-not-allowed") : "active:scale-[0.98]";
   return (
     <button
       onClick={onClick}
