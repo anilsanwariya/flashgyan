@@ -323,7 +323,7 @@ function Practice() {
                           )}
                         </div>
                         <div className="text-center text-xs text-muted-foreground inline-flex items-center justify-center gap-1.5">
-                          <RotateCcw className="h-3.5 w-3.5" /> Tap to reveal
+                          <RotateCcw className="h-3.5 w-3.5" />
                         </div>
                       </div>
                     </ScrollArea>
