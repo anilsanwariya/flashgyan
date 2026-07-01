@@ -130,17 +130,17 @@ function TakeTest() {
     <div className="h-dvh overflow-hidden bg-background flex flex-col">
       <header className="shrink-0 border-b border-border bg-background z-10">
         <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-xs text-muted-foreground">{test.name}</div>
-            <div className="text-sm font-medium">
-              Q {idx + 1} / {questions.length}
+          <SubmitTestDialog onConfirm={submit} answered={answeredCount} total={questions.length} />
+          <div className="min-w-0 text-center flex-1">
+            <div className="text-xs text-muted-foreground truncate">{test.name}</div>
+            <div className="inline-flex items-center gap-1 tabular-nums font-mono text-sm">
+              <Timer className="h-4 w-4 text-muted-foreground" />
+              {formatTime(remaining)}
             </div>
           </div>
-          <div className="inline-flex items-center gap-1 tabular-nums font-mono text-sm">
-            <Timer className="h-4 w-4 text-muted-foreground" />
-            {formatTime(remaining)}
+          <div className="text-sm font-medium tabular-nums">
+            Q {idx + 1} / {questions.length}
           </div>
-          <EndTestDialog onConfirm={submit} />
         </div>
       </header>
 
@@ -203,23 +203,16 @@ function TakeTest() {
       </main>
 
       <footer className="shrink-0 border-t border-border bg-background">
-        <div className="max-w-2xl mx-auto px-5 py-3 grid grid-cols-3 items-center gap-3">
-          <div className="justify-self-start">
-            <Button variant="outline" disabled={idx === 0} onClick={() => setIdx((i) => Math.max(0, i - 1))}>
-              Prev
-            </Button>
-          </div>
-          <div className="justify-self-center">
-            <SubmitDialog onConfirm={submit} answered={answeredCount} total={questions.length} />
-          </div>
-          <div className="justify-self-end">
-            <Button
-              disabled={idx === questions.length - 1}
-              onClick={() => setIdx((i) => Math.min(questions.length - 1, i + 1))}
-            >
-              Next
-            </Button>
-          </div>
+        <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between gap-3">
+          <Button variant="outline" disabled={idx === 0} onClick={() => setIdx((i) => Math.max(0, i - 1))}>
+            Prev
+          </Button>
+          <Button
+            disabled={idx === questions.length - 1}
+            onClick={() => setIdx((i) => Math.min(questions.length - 1, i + 1))}
+          >
+            Next
+          </Button>
         </div>
       </footer>
 
@@ -334,42 +327,24 @@ function QuestionPalette({
   );
 }
 
-function EndTestDialog({ onConfirm }: { onConfirm: () => void }) {
+function SubmitTestDialog({
+  onConfirm,
+  answered,
+  total,
+}: {
+  onConfirm: () => void;
+  answered: number;
+  total: number;
+}) {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <ArrowLeft className="h-4 w-4" /> End
-        </Button>
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>End test now?</AlertDialogTitle>
-          <AlertDialogDescription>
-            Unanswered questions will count as 0. You'll be taken to the result page.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="bg-emerald-600 text-white hover:bg-emerald-700 hover:text-white">
-            Continue
-          </AlertDialogCancel>
-          <AlertDialogAction
-            onClick={onConfirm}
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-          >
-            End test
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
-function SubmitDialog({ onConfirm, answered, total }: { onConfirm: () => void; answered: number; total: number }) {
-  return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <Button>Submit</Button>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 rounded-full h-9 px-4 text-sm font-medium border border-destructive text-destructive hover:bg-destructive/10 transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" /> Submit
+        </button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -379,8 +354,15 @@ function SubmitDialog({ onConfirm, answered, total }: { onConfirm: () => void; a
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Keep going</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm}>Submit</AlertDialogAction>
+          <AlertDialogCancel className="bg-success text-success-foreground hover:bg-success/90 border-0">
+            Keep going
+          </AlertDialogCancel>
+          <AlertDialogAction
+            onClick={onConfirm}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            Submit
+          </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

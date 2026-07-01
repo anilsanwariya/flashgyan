@@ -85,7 +85,6 @@ function Result() {
             </Link>
           </Button>
           <div className="text-sm font-semibold">Result</div>
-          <div className="w-24" />
         </div>
       </header>
 
