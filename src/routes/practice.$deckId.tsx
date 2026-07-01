@@ -6,7 +6,7 @@ import { z } from "zod";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
 import { getDeck } from "@/lib/flashcards.functions";
 import { motion, AnimatePresence } from "motion/react";
-import { RotateCcw, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   newSessionId,
@@ -289,12 +289,7 @@ function Practice() {
               transition={{ duration: 0.18 }}
               className="w-full perspective-1000"
             >
-              <button
-                type="button"
-                onClick={() => setFlipped((f) => !f)}
-                className="w-full text-left perspective-1000"
-                aria-label={flipped ? "Show question" : "Reveal answer"}
-              >
+              <div className="w-full perspective-1000">
                 <div
                   className={
                     "relative w-full min-h-[60vh] preserve-3d transition-transform duration-500 " +
@@ -306,7 +301,7 @@ function Practice() {
                     className={`absolute inset-0 backface-hidden rounded-3xl bg-card border-2 shadow-sm overflow-hidden transition-colors ${borderClass}`}
                   >
                     <ScrollArea className="h-full">
-                      <div className="p-7 min-h-[60vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+                      <div className="p-7 min-h-[60vh] flex flex-col">
                         <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground text-center">
                           {card.prompt}
                         </div>
@@ -322,9 +317,6 @@ function Practice() {
                             />
                           )}
                         </div>
-                        <div className="text-center text-xs text-muted-foreground inline-flex items-center justify-center gap-1.5">
-                          <RotateCcw className="h-3.5 w-3.5" /> Tap to reveal
-                        </div>
                       </div>
                     </ScrollArea>
                   </div>
@@ -333,7 +325,7 @@ function Practice() {
                     className={`absolute inset-0 backface-hidden rotate-y-180 rounded-3xl bg-card border-2 shadow-sm transition-colors ${borderClass} overflow-hidden flex flex-col`}
                   >
                     <ScrollArea className="flex-1 h-full">
-                      <div className="p-7" onClick={(e) => e.stopPropagation()}>
+                      <div className="p-7">
                         <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                           {card.prompt}
                         </div>
@@ -363,16 +355,13 @@ function Practice() {
                     </ScrollArea>
                   </div>
                 </div>
-              </button>
+              </div>
             </motion.div>
           </AnimatePresence>
           {index > 0 && (
             <button
               type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                goPrev();
-              }}
+              onClick={() => goPrev()}
               aria-label="Previous card"
               className="absolute left-2 top-1/2 -translate-y-1/2 z-10 h-10 w-10 rounded-full bg-background/60 backdrop-blur-sm border border-border shadow-sm flex items-center justify-center hover:bg-background/80 transition-colors"
             >
@@ -382,10 +371,7 @@ function Practice() {
           {currentRating !== null && index < total - 1 && (
             <button
               type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                goNext();
-              }}
+              onClick={() => goNext()}
               aria-label="Next card"
               className="absolute right-2 top-1/2 -translate-y-1/2 z-10 h-10 w-10 rounded-full bg-background/60 backdrop-blur-sm border border-border shadow-sm flex items-center justify-center hover:bg-background/80 transition-colors"
             >
