@@ -287,73 +287,70 @@ function Practice() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -12 }}
               transition={{ duration: 0.18 }}
-              className="w-full perspective-1000"
+              className="w-full [perspective:1000px]"
             >
-              <div className="w-full perspective-1000">
+              <div
+                className={
+                  "relative w-full min-h-[60vh] transition-transform duration-500 [transform-style:preserve-3d] " +
+                  (flipped ? "[transform:rotateY(180deg)]" : "")
+                }
+              >
+                {/* Front */}
                 <div
-                  className={
-                    "relative w-full min-h-[60vh] preserve-3d transition-transform duration-500 " +
-                    (flipped ? "rotate-y-180" : "")
-                  }
+                  className={`absolute inset-0 [backface-visibility:hidden] rounded-3xl bg-card border-2 shadow-sm overflow-hidden transition-colors ${borderClass}`}
+                  style={{ WebkitBackfaceVisibility: "hidden" }}
                 >
-                  {/* Front */}
-                  <div
-                    className={`absolute inset-0 backface-hidden rounded-3xl bg-card border-2 shadow-sm overflow-hidden transition-colors ${borderClass}`}
-                  >
-                    <ScrollArea className="h-full">
-                      <div className="p-7 min-h-[60vh] flex flex-col">
-                        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground text-center">
-                          {card.prompt}
-                        </div>
-                        <div className="flex-1 flex flex-col items-center justify-center gap-4 py-4">
-                          <p className="text-2xl font-semibold leading-snug text-center text-balance">
-                            {card.question}
-                          </p>
-                          {card.image_url && (
-                            <img
-                              src={card.image_url}
-                              alt=""
-                              className="w-full aspect-[2/1] rounded-xl object-cover border border-border"
-                            />
-                          )}
-                        </div>
+                  <ScrollArea className="h-full">
+                    <div className="p-7 min-h-[60vh] flex flex-col">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground text-center">
+                        {card.prompt}
                       </div>
-                    </ScrollArea>
-                  </div>
-                  {/* Back */}
-                  <div
-                    className={`absolute inset-0 backface-hidden rotate-y-180 rounded-3xl bg-card border-2 shadow-sm transition-colors ${borderClass} overflow-hidden flex flex-col`}
-                  >
-                    <ScrollArea className="flex-1 h-full">
-                      <div className="p-7">
-                        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                          {card.prompt}
-                        </div>
-                        <p className="mt-2 text-base font-medium leading-snug">{card.question}</p>
+                      <div className="flex-1 flex flex-col items-center justify-center gap-4 py-4">
+                        <p className="text-2xl font-semibold leading-snug text-center text-balance">{card.question}</p>
                         {card.image_url && (
                           <img
                             src={card.image_url}
                             alt=""
-                            className="mt-3 w-full aspect-[2/1] rounded-xl object-cover border border-border"
+                            className="w-full aspect-[2/1] rounded-xl object-cover border border-border"
                           />
                         )}
-                        <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
-                          Answer
-                        </div>
-                        <p className="mt-3 text-2xl font-semibold leading-snug text-balance">{card.answer}</p>
-                        {card.sections.map((s, i) => (
-                          <div key={i} className="mt-5 pt-5 border-t border-border">
-                            <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
-                              {s.title}
-                            </div>
-                            <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
-                              {s.body}
-                            </p>
-                          </div>
-                        ))}
                       </div>
-                    </ScrollArea>
-                  </div>
+                    </div>
+                  </ScrollArea>
+                </div>
+
+                {/* Back */}
+                <div
+                  className={`absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] rounded-3xl bg-card border-2 shadow-sm transition-colors ${borderClass} overflow-hidden flex flex-col`}
+                  style={{ WebkitBackfaceVisibility: "hidden" }}
+                >
+                  <ScrollArea className="flex-1 h-full">
+                    <div className="p-7">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        {card.prompt}
+                      </div>
+                      <p className="mt-2 text-base font-medium leading-snug">{card.question}</p>
+                      {card.image_url && (
+                        <img
+                          src={card.image_url}
+                          alt=""
+                          className="mt-3 w-full aspect-[2/1] rounded-xl object-cover border border-border"
+                        />
+                      )}
+                      <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
+                        Answer
+                      </div>
+                      <p className="mt-3 text-2xl font-semibold leading-snug text-balance">{card.answer}</p>
+                      {card.sections.map((s, i) => (
+                        <div key={i} className="mt-5 pt-5 border-t border-border">
+                          <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
+                            {s.title}
+                          </div>
+                          <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">{s.body}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
                 </div>
               </div>
             </motion.div>
