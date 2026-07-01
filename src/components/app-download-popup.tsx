@@ -40,7 +40,7 @@ export function AppDownloadPopup({
               window.open(appLink, "_blank");
             }}
           >
-            Download App to Study More
+            Download App
           </Button>
         </div>
 
