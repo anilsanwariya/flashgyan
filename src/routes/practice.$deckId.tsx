@@ -43,9 +43,9 @@ export const Route = createFileRoute("/practice/$deckId")({
   loader: ({ context, params }) => context.queryClient.ensureQueryData(deckQO(params.deckId)),
   component: Practice,
   notFoundComponent: () => (
-    <div className="min-h-dvh grid place-items-center p-6 text-center">
+    <div className="min-h-dvh grid place-items-center p-6 text-center bg-background">
       <div>
-        <p className="text-muted-foreground">Deck not found.</p>
+        <p className="text-muted-foreground font-medium">Deck not found.</p>
         <Link to="/" className="text-primary mt-2 inline-block font-bold">
           Back to decks
         </Link>
@@ -53,7 +53,7 @@ export const Route = createFileRoute("/practice/$deckId")({
     </div>
   ),
   errorComponent: ({ error }) => (
-    <div className="min-h-dvh grid place-items-center p-6 text-center">
+    <div className="min-h-dvh grid place-items-center p-6 text-center bg-background">
       <div>
         <p className="text-destructive font-semibold">{error.message}</p>
         <Link to="/" className="text-primary mt-2 inline-block font-bold">
@@ -114,14 +114,15 @@ function Practice() {
   const total = cards.length;
   const currentRating = cardRatings[index];
   const displayRating = currentRating ?? priorRatings[index];
+
   const borderClass =
     displayRating === "hard"
-      ? "border-destructive"
+      ? "border-destructive shadow-[0_8px_30px_rgba(239,68,68,0.1)]"
       : displayRating === "medium"
-        ? "border-warning"
+        ? "border-warning shadow-[0_8px_30px_rgba(245,158,11,0.1)]"
         : displayRating === "easy"
-          ? "border-success"
-          : "border-border/50";
+          ? "border-success shadow-[0_8px_30px_rgba(16,185,129,0.1)]"
+          : "border-border/50 shadow-[0_8px_30px_rgba(0,0,0,0.06)]";
 
   useEffect(() => {
     setFlipped(cardRatings[index] !== null);
@@ -129,9 +130,9 @@ function Practice() {
 
   if (total === 0) {
     return (
-      <div className="min-h-dvh grid place-items-center p-6 text-center">
+      <div className="min-h-dvh grid place-items-center p-6 text-center bg-background">
         <div>
-          <p className="text-muted-foreground">This deck has no cards.</p>
+          <p className="text-muted-foreground font-medium">This deck has no cards.</p>
           <Link to="/" className="text-primary mt-2 inline-block font-bold">
             Back to decks
           </Link>
@@ -216,10 +217,9 @@ function Practice() {
 
   return (
     <div className="h-dvh flex flex-col bg-background/50 overflow-hidden relative">
-      {/* Background Decor */}
       <div className="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-primary/5 to-transparent -z-10 pointer-events-none" />
 
-      {/* Glassmorphic Header */}
+      {/* Header: shrink-0 keeps it from collapsing */}
       <header className="shrink-0 px-5 pt-4 pb-3 max-w-2xl w-full mx-auto backdrop-blur-xl bg-background/60 sticky top-0 z-50 border-b border-border/40">
         <div className="flex items-center justify-between">
           <AlertDialog>
@@ -231,7 +231,7 @@ function Practice() {
                 End Session <X className="h-4 w-4" />
               </button>
             </AlertDialogTrigger>
-            <AlertDialogContent>
+            <AlertDialogContent className="rounded-[24px]">
               <AlertDialogHeader>
                 <AlertDialogTitle>End this session?</AlertDialogTitle>
                 <AlertDialogDescription>
@@ -239,12 +239,10 @@ function Practice() {
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel className="bg-success text-success-foreground hover:bg-success/90 border-0">
-                  Continue
-                </AlertDialogCancel>
+                <AlertDialogCancel className="rounded-xl font-semibold border-2 h-11">Continue</AlertDialogCancel>
                 <AlertDialogAction
                   onClick={() => submit(cardRatings)}
-                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  className="rounded-xl font-semibold bg-destructive hover:bg-destructive/90 text-white h-11"
                 >
                   End session
                 </AlertDialogAction>
@@ -281,8 +279,9 @@ function Practice() {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center px-5 pt-4 max-w-2xl w-full mx-auto pb-6">
-        <div className="w-full relative min-h-[60vh] [perspective:1000px]">
+      {/* Main Area: flex-1 min-h-0 prevents it from pushing the footer off the screen */}
+      <main className="flex-1 min-h-0 flex flex-col px-5 pt-5 max-w-2xl w-full mx-auto pb-4">
+        <div className="w-full h-full relative [perspective:1000px]">
           <AnimatePresence mode="wait">
             <motion.div
               key={card.id}
@@ -290,9 +289,9 @@ function Practice() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96, y: -10 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
-              className="w-full relative min-h-[60vh]"
+              className="w-full h-full relative"
             >
-              {/* FRONT CARD - Animated independently */}
+              {/* FRONT CARD */}
               <motion.div
                 initial={false}
                 animate={{ rotateY: flipped ? -180 : 0 }}
@@ -305,19 +304,19 @@ function Practice() {
                 }}
               >
                 <div
-                  className={`w-full h-full rounded-[28px] bg-card border-2 shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-colors duration-300 ${borderClass} overflow-hidden flex flex-col`}
+                  className={`w-full h-full rounded-[28px] bg-card border-2 transition-colors duration-300 ${borderClass} overflow-hidden flex flex-col`}
                 >
                   <ScrollArea className="flex-1 h-full">
-                    <div className="p-7 md:p-8 min-h-[60vh] flex flex-col">
+                    <div className="p-7 md:p-8 min-h-full flex flex-col justify-center">
                       <div className="text-xs font-bold uppercase tracking-widest text-primary/80 text-center mb-6">
                         {card.prompt}
                       </div>
-                      <div className="flex-1 flex flex-col items-center justify-center gap-4 py-4">
+                      <div className="flex flex-col items-center justify-center gap-4 py-4">
                         <p className="text-[20px] md:text-2xl font-bold leading-snug text-center text-balance text-foreground/90">
                           {card.question}
                         </p>
                         {card.image_url && (
-                          <div className="relative rounded-2xl overflow-hidden border-2 border-border/50 shadow-sm mt-4">
+                          <div className="relative rounded-2xl overflow-hidden border-2 border-border/50 shadow-sm mt-4 w-full">
                             <img src={card.image_url} alt="" className="w-full aspect-[2/1] object-cover" />
                           </div>
                         )}
@@ -327,7 +326,7 @@ function Practice() {
                 </div>
               </motion.div>
 
-              {/* BACK CARD - Animated independently */}
+              {/* BACK CARD */}
               <motion.div
                 initial={false}
                 animate={{ rotateY: flipped ? 0 : 180 }}
@@ -340,14 +339,14 @@ function Practice() {
                 }}
               >
                 <div
-                  className={`w-full h-full rounded-[28px] bg-card border-2 shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-colors duration-300 ${borderClass} overflow-hidden flex flex-col`}
+                  className={`w-full h-full rounded-[28px] bg-card border-2 transition-colors duration-300 ${borderClass} overflow-hidden flex flex-col`}
                 >
                   <ScrollArea className="flex-1 h-full">
                     <div className="p-7 md:p-8">
                       <div className="text-xs font-bold uppercase tracking-widest text-primary/80">{card.prompt}</div>
                       <p className="mt-2 text-[15px] font-medium leading-snug text-foreground/80">{card.question}</p>
                       {card.image_url && (
-                        <div className="relative rounded-2xl overflow-hidden border-2 border-border/50 shadow-sm mt-3">
+                        <div className="relative rounded-2xl overflow-hidden border-2 border-border/50 shadow-sm mt-3 w-full">
                           <img src={card.image_url} alt="" className="w-full aspect-[2/1] object-cover" />
                         </div>
                       )}
@@ -374,7 +373,7 @@ function Practice() {
             </motion.div>
           </AnimatePresence>
 
-          {/* Navigation Overlay Buttons */}
+          {/* Floating Navigation Controls */}
           {index > 0 && (
             <button
               type="button"
@@ -404,7 +403,8 @@ function Practice() {
         </div>
       </main>
 
-      <footer className="shrink-0 px-5 pb-6 pt-3 max-w-2xl w-full mx-auto relative z-10">
+      {/* Footer: Guaranteed to stay at bottom with shrink-0 and pb-8 */}
+      <footer className="shrink-0 px-5 pb-8 pt-3 max-w-2xl w-full mx-auto relative z-10">
         {flipped ? (
           <div className="grid grid-cols-3 gap-3">
             <RatingButton
@@ -464,15 +464,17 @@ function RatingButton({
   const isDestructive = tone === "destructive";
   const isWarning = tone === "warning";
 
+  // Base colors mapped to Semantic Tailwind classes
   const bgCls = isDestructive
     ? "bg-destructive text-destructive-foreground border-destructive/80"
     : isWarning
       ? "bg-warning text-warning-foreground border-warning/80"
       : "bg-success text-success-foreground border-success/80";
 
+  // 3D Depth & Squish States
   const stateCls = disabled
     ? active
-      ? "cursor-not-allowed translate-y-[4px] border-b-0"
+      ? "cursor-not-allowed translate-y-[4px] border-b-0 shadow-[inset_0_4px_8px_rgba(0,0,0,0.2)] opacity-100"
       : "opacity-40 cursor-not-allowed border-b-[4px]"
     : "border-b-[5px] hover:-translate-y-1 hover:border-b-[6px] active:translate-y-[4px] active:border-b-0 shadow-sm cursor-pointer";
 
@@ -480,7 +482,7 @@ function RatingButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`h-14 rounded-2xl font-bold text-base transition-all duration-150 border-x-0 border-t-0 ${bgCls} ${stateCls}`}
+      className={`w-full h-14 rounded-2xl font-bold text-[15px] transition-all duration-150 ${bgCls} ${stateCls}`}
     >
       {label}
     </button>
