@@ -5,7 +5,7 @@ import { z } from "zod";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
 import { getMcqPracticeTest, type McqPracticeQuestion } from "@/lib/mcq-practice.functions";
 import { motion, AnimatePresence } from "motion/react";
-import { ArrowLeft, ChevronLeft, ChevronRight, Check, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Check, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { triggerHaptic } from "../lib/haptics";
 import confetti from "canvas-confetti";
@@ -232,7 +232,7 @@ function PracticeMcq() {
                 type="button"
                 className="inline-flex items-center gap-1 rounded-full h-9 px-4 text-sm font-medium border border-destructive text-destructive hover:bg-destructive/10 transition-colors"
               >
-                <ArrowLeft className="h-4 w-4" /> End Session
+                End Session
               </button>
             </AlertDialogTrigger>
             <AlertDialogContent>

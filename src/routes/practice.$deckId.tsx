@@ -6,7 +6,7 @@ import { z } from "zod";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
 import { getDeck } from "@/lib/flashcards.functions";
 import { motion, AnimatePresence } from "motion/react";
-import { ArrowLeft, RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
+import { RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   newSessionId,
@@ -234,7 +234,7 @@ function Practice() {
                 type="button"
                 className="inline-flex items-center gap-1 rounded-full h-9 px-4 text-sm font-medium border border-destructive text-destructive hover:bg-destructive/10 transition-colors"
               >
-                <ArrowLeft className="h-4 w-4" /> End Session
+                End Session
               </button>
             </AlertDialogTrigger>
             <AlertDialogContent>
