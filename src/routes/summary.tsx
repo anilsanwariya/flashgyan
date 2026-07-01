@@ -1,8 +1,9 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { z } from "zod";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
-import { Trophy, Clock, Layers, Check, X, ChevronDown } from "lucide-react";
+import { Trophy, Clock, Layers, Check, X, ChevronDown, ArrowLeft } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { loadSession, type SessionDetail, type Rating, type SessionCardResult } from "@/lib/session-store";
 
 const summarySchema = z.object({
