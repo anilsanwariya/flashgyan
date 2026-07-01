@@ -287,95 +287,90 @@ function Practice() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -12 }}
               transition={{ duration: 0.18 }}
-              className="w-full [perspective:1000px]"
+              className="w-full relative min-h-[60vh] [perspective:1000px]"
             >
-              {/* Framer Motion smoothly handles the robust 3D rotation independent of CSS classes */}
+              {/* FRONT CARD - Animated independently */}
               <motion.div
-                className="relative w-full min-h-[60vh]"
                 initial={false}
-                animate={{ rotateY: flipped ? 180 : 0 }}
+                animate={{ rotateY: flipped ? -180 : 0 }}
                 transition={{ duration: 0.4, ease: "easeInOut" }}
-                style={{ transformStyle: "preserve-3d" }}
+                className="absolute inset-0 w-full h-full"
+                style={{
+                  backfaceVisibility: "hidden",
+                  WebkitBackfaceVisibility: "hidden",
+                  pointerEvents: flipped ? "none" : "auto",
+                }}
               >
-                {/* Front */}
                 <div
-                  className={`absolute inset-0 rounded-3xl bg-card border-2 shadow-sm transition-colors ${borderClass}`}
-                  style={{
-                    backfaceVisibility: "hidden",
-                    WebkitBackfaceVisibility: "hidden",
-                    pointerEvents: flipped ? "none" : "auto",
-                  }}
+                  className={`w-full h-full rounded-[22px] bg-card border-2 shadow-sm transition-colors ${borderClass} overflow-hidden flex flex-col`}
                 >
-                  {/* Inner wrapper prevents WebKit overflow-hidden glitch */}
-                  <div className="w-full h-full rounded-[22px] overflow-hidden">
-                    <ScrollArea className="h-full">
-                      <div className="p-7 min-h-[60vh] flex flex-col">
-                        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground text-center">
-                          {card.prompt}
-                        </div>
-                        <div className="flex-1 flex flex-col items-center justify-center gap-4 py-4">
-                          <p className="text-2xl font-semibold leading-snug text-center text-balance">
-                            {card.question}
-                          </p>
-                          {card.image_url && (
-                            <img
-                              src={card.image_url}
-                              alt=""
-                              className="w-full aspect-[2/1] rounded-xl object-cover border border-border"
-                            />
-                          )}
-                        </div>
+                  <ScrollArea className="flex-1 h-full">
+                    <div className="p-7 min-h-[60vh] flex flex-col">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground text-center">
+                        {card.prompt}
                       </div>
-                    </ScrollArea>
-                  </div>
-                </div>
-
-                {/* Back */}
-                <div
-                  className={`absolute inset-0 rounded-3xl bg-card border-2 shadow-sm transition-colors ${borderClass}`}
-                  style={{
-                    backfaceVisibility: "hidden",
-                    WebkitBackfaceVisibility: "hidden",
-                    transform: "rotateY(180deg)",
-                    pointerEvents: flipped ? "auto" : "none",
-                  }}
-                >
-                  {/* Inner wrapper prevents WebKit overflow-hidden glitch */}
-                  <div className="w-full h-full rounded-[22px] overflow-hidden flex flex-col">
-                    <ScrollArea className="flex-1 h-full">
-                      <div className="p-7">
-                        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                          {card.prompt}
-                        </div>
-                        <p className="mt-2 text-base font-medium leading-snug">{card.question}</p>
+                      <div className="flex-1 flex flex-col items-center justify-center gap-4 py-4">
+                        <p className="text-2xl font-semibold leading-snug text-center text-balance">{card.question}</p>
                         {card.image_url && (
                           <img
                             src={card.image_url}
                             alt=""
-                            className="mt-3 w-full aspect-[2/1] rounded-xl object-cover border border-border"
+                            className="w-full aspect-[2/1] rounded-xl object-cover border border-border"
                           />
                         )}
-                        <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
-                          Answer
-                        </div>
-                        <p className="mt-3 text-2xl font-semibold leading-snug text-balance">{card.answer}</p>
-                        {card.sections.map((s, i) => (
-                          <div key={i} className="mt-5 pt-5 border-t border-border">
-                            <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
-                              {s.title}
-                            </div>
-                            <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
-                              {s.body}
-                            </p>
-                          </div>
-                        ))}
                       </div>
-                    </ScrollArea>
-                  </div>
+                    </div>
+                  </ScrollArea>
+                </div>
+              </motion.div>
+
+              {/* BACK CARD - Animated independently */}
+              <motion.div
+                initial={false}
+                animate={{ rotateY: flipped ? 0 : 180 }}
+                transition={{ duration: 0.4, ease: "easeInOut" }}
+                className="absolute inset-0 w-full h-full"
+                style={{
+                  backfaceVisibility: "hidden",
+                  WebkitBackfaceVisibility: "hidden",
+                  pointerEvents: flipped ? "auto" : "none",
+                }}
+              >
+                <div
+                  className={`w-full h-full rounded-[22px] bg-card border-2 shadow-sm transition-colors ${borderClass} overflow-hidden flex flex-col`}
+                >
+                  <ScrollArea className="flex-1 h-full">
+                    <div className="p-7">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        {card.prompt}
+                      </div>
+                      <p className="mt-2 text-base font-medium leading-snug">{card.question}</p>
+                      {card.image_url && (
+                        <img
+                          src={card.image_url}
+                          alt=""
+                          className="mt-3 w-full aspect-[2/1] rounded-xl object-cover border border-border"
+                        />
+                      )}
+                      <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
+                        Answer
+                      </div>
+                      <p className="mt-3 text-2xl font-semibold leading-snug text-balance">{card.answer}</p>
+                      {card.sections.map((s, i) => (
+                        <div key={i} className="mt-5 pt-5 border-t border-border">
+                          <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
+                            {s.title}
+                          </div>
+                          <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">{s.body}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
                 </div>
               </motion.div>
             </motion.div>
           </AnimatePresence>
+
           {index > 0 && (
             <button
               type="button"
