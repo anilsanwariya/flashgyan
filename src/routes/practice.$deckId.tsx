@@ -1,4 +1,3 @@
-// src/routes/practice.$deckId.tsx
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
@@ -47,7 +46,7 @@ export const Route = createFileRoute("/practice/$deckId")({
     <div className="min-h-dvh grid place-items-center p-6 text-center">
       <div>
         <p className="text-muted-foreground">Deck not found.</p>
-        <Link to="/" className="text-primary mt-2 inline-block font-medium">
+        <Link to="/" className="text-primary mt-2 inline-block font-bold">
           Back to decks
         </Link>
       </div>
@@ -56,8 +55,8 @@ export const Route = createFileRoute("/practice/$deckId")({
   errorComponent: ({ error }) => (
     <div className="min-h-dvh grid place-items-center p-6 text-center">
       <div>
-        <p className="text-destructive">{error.message}</p>
-        <Link to="/" className="text-primary mt-2 inline-block font-medium">
+        <p className="text-destructive font-semibold">{error.message}</p>
+        <Link to="/" className="text-primary mt-2 inline-block font-bold">
           Back to decks
         </Link>
       </div>
@@ -122,7 +121,7 @@ function Practice() {
         ? "border-warning"
         : displayRating === "easy"
           ? "border-success"
-          : "border-border";
+          : "border-border/50";
 
   useEffect(() => {
     setFlipped(cardRatings[index] !== null);
@@ -133,7 +132,7 @@ function Practice() {
       <div className="min-h-dvh grid place-items-center p-6 text-center">
         <div>
           <p className="text-muted-foreground">This deck has no cards.</p>
-          <Link to="/" className="text-primary mt-2 inline-block font-medium">
+          <Link to="/" className="text-primary mt-2 inline-block font-bold">
             Back to decks
           </Link>
         </div>
@@ -216,17 +215,18 @@ function Practice() {
   }
 
   return (
-    <div className="min-h-dvh flex flex-col bg-background">
-      <header className="px-5 pt-4 pb-3 max-w-2xl w-full mx-auto">
+    <div className="h-dvh flex flex-col bg-background/50 overflow-hidden relative">
+      {/* Background Decor */}
+      <div className="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-primary/5 to-transparent -z-10 pointer-events-none" />
+
+      {/* Glassmorphic Header */}
+      <header className="shrink-0 px-5 pt-4 pb-3 max-w-2xl w-full mx-auto backdrop-blur-xl bg-background/60 sticky top-0 z-50 border-b border-border/40">
         <div className="flex items-center justify-between">
-          <div className="text-sm font-semibold tabular-nums text-foreground">
-            {index + 1} / {total}
-          </div>
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <button
                 type="button"
-                className="inline-flex items-center gap-1 rounded-full h-9 px-4 text-sm font-medium border border-destructive text-destructive hover:bg-destructive/10 transition-colors"
+                className="inline-flex items-center gap-1 rounded-full h-9 px-4 text-sm font-semibold border-2 border-b-[4px] border-destructive/80 text-destructive hover:-translate-y-0.5 hover:border-b-[5px] active:translate-y-[2px] active:border-b-[2px] transition-all duration-150 bg-background"
               >
                 End Session <X className="h-4 w-4" />
               </button>
@@ -251,43 +251,46 @@ function Practice() {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+          <div className="text-sm tabular-nums font-bold text-foreground/80 bg-foreground/5 px-3 py-1 rounded-full border border-border/50">
+            {index + 1} / {total}
+          </div>
         </div>
-        <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="mt-4 flex items-center gap-2 text-xs font-medium text-muted-foreground">
           <span className="truncate">
             {subject} · {topic}
           </span>
           {review && (
-            <span className="shrink-0 rounded-full bg-primary/10 text-primary px-2 py-0.5 font-medium">
-              Review mode
+            <span className="shrink-0 rounded-full bg-primary/10 text-primary px-2.5 py-0.5 font-bold tracking-wide">
+              REVIEW
             </span>
           )}
         </div>
-        <div className="mt-2 flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div className="mt-2.5 flex h-1.5 w-full overflow-hidden rounded-full bg-muted/60 shadow-inner">
           <div
-            className="h-full bg-success transition-all duration-300"
+            className="h-full bg-success transition-all duration-500 ease-out"
             style={{ width: `${(ratings.easy / total) * 100}%` }}
           />
           <div
-            className="h-full bg-warning transition-all duration-300"
+            className="h-full bg-warning transition-all duration-500 ease-out"
             style={{ width: `${(ratings.medium / total) * 100}%` }}
           />
           <div
-            className="h-full bg-destructive transition-all duration-300"
+            className="h-full bg-destructive transition-all duration-500 ease-out"
             style={{ width: `${(ratings.hard / total) * 100}%` }}
           />
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center px-5 max-w-2xl w-full mx-auto pb-6">
-        <div className="w-full relative">
+      <main className="flex-1 flex flex-col items-center justify-center px-5 pt-4 max-w-2xl w-full mx-auto pb-6">
+        <div className="w-full relative min-h-[60vh] [perspective:1000px]">
           <AnimatePresence mode="wait">
             <motion.div
               key={card.id}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.18 }}
-              className="w-full relative min-h-[60vh] [perspective:1000px]"
+              initial={{ opacity: 0, scale: 0.96, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: -10 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="w-full relative min-h-[60vh]"
             >
               {/* FRONT CARD - Animated independently */}
               <motion.div
@@ -302,21 +305,21 @@ function Practice() {
                 }}
               >
                 <div
-                  className={`w-full h-full rounded-[22px] bg-card border-2 shadow-sm transition-colors ${borderClass} overflow-hidden flex flex-col`}
+                  className={`w-full h-full rounded-[28px] bg-card border-2 shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-colors duration-300 ${borderClass} overflow-hidden flex flex-col`}
                 >
                   <ScrollArea className="flex-1 h-full">
-                    <div className="p-7 min-h-[60vh] flex flex-col">
-                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground text-center">
+                    <div className="p-7 md:p-8 min-h-[60vh] flex flex-col">
+                      <div className="text-xs font-bold uppercase tracking-widest text-primary/80 text-center mb-6">
                         {card.prompt}
                       </div>
                       <div className="flex-1 flex flex-col items-center justify-center gap-4 py-4">
-                        <p className="text-2xl font-semibold leading-snug text-center text-balance">{card.question}</p>
+                        <p className="text-[20px] md:text-2xl font-bold leading-snug text-center text-balance text-foreground/90">
+                          {card.question}
+                        </p>
                         {card.image_url && (
-                          <img
-                            src={card.image_url}
-                            alt=""
-                            className="w-full aspect-[2/1] rounded-xl object-cover border border-border"
-                          />
+                          <div className="relative rounded-2xl overflow-hidden border-2 border-border/50 shadow-sm mt-4">
+                            <img src={card.image_url} alt="" className="w-full aspect-[2/1] object-cover" />
+                          </div>
                         )}
                       </div>
                     </div>
@@ -337,31 +340,31 @@ function Practice() {
                 }}
               >
                 <div
-                  className={`w-full h-full rounded-[22px] bg-card border-2 shadow-sm transition-colors ${borderClass} overflow-hidden flex flex-col`}
+                  className={`w-full h-full rounded-[28px] bg-card border-2 shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-colors duration-300 ${borderClass} overflow-hidden flex flex-col`}
                 >
                   <ScrollArea className="flex-1 h-full">
-                    <div className="p-7">
-                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        {card.prompt}
-                      </div>
-                      <p className="mt-2 text-base font-medium leading-snug">{card.question}</p>
+                    <div className="p-7 md:p-8">
+                      <div className="text-xs font-bold uppercase tracking-widest text-primary/80">{card.prompt}</div>
+                      <p className="mt-2 text-[15px] font-medium leading-snug text-foreground/80">{card.question}</p>
                       {card.image_url && (
-                        <img
-                          src={card.image_url}
-                          alt=""
-                          className="mt-3 w-full aspect-[2/1] rounded-xl object-cover border border-border"
-                        />
+                        <div className="relative rounded-2xl overflow-hidden border-2 border-border/50 shadow-sm mt-3">
+                          <img src={card.image_url} alt="" className="w-full aspect-[2/1] object-cover" />
+                        </div>
                       )}
-                      <div className="mt-4 pt-4 border-t border-border text-xs font-semibold uppercase tracking-wider text-primary">
+
+                      <div className="mt-6 pt-6 border-t-2 border-border/50 text-xs font-bold uppercase tracking-widest text-success">
                         Answer
                       </div>
-                      <p className="mt-3 text-2xl font-semibold leading-snug text-balance">{card.answer}</p>
+                      <p className="mt-3 text-[20px] md:text-2xl font-bold leading-snug text-balance text-foreground/90">
+                        {card.answer}
+                      </p>
+
                       {card.sections.map((s, i) => (
-                        <div key={i} className="mt-5 pt-5 border-t border-border">
-                          <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
+                        <div key={i} className="mt-5 pt-5 border-t border-border/40">
+                          <div className="text-xs font-bold uppercase tracking-widest text-primary/80 mb-2">
                             {s.title}
                           </div>
-                          <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">{s.body}</p>
+                          <p className="text-[15px] text-foreground/80 leading-relaxed whitespace-pre-wrap">{s.body}</p>
                         </div>
                       ))}
                     </div>
@@ -371,32 +374,39 @@ function Practice() {
             </motion.div>
           </AnimatePresence>
 
+          {/* Navigation Overlay Buttons */}
           {index > 0 && (
             <button
               type="button"
-              onClick={() => goPrev()}
+              onClick={(e) => {
+                e.stopPropagation();
+                goPrev();
+              }}
               aria-label="Previous card"
-              className="absolute left-2 top-1/2 -translate-y-1/2 z-10 h-10 w-10 rounded-full bg-background/60 backdrop-blur-sm border border-border shadow-sm flex items-center justify-center hover:bg-background/80 transition-colors"
+              className="absolute left-2 top-1/2 -translate-y-1/2 z-10 h-12 w-12 rounded-full bg-background/80 backdrop-blur-md border-2 border-border shadow-lg flex items-center justify-center hover:scale-110 active:scale-95 transition-all"
             >
-              <ChevronLeft className="h-5 w-5" />
+              <ChevronLeft className="h-6 w-6 text-foreground/70" />
             </button>
           )}
           {currentRating !== null && index < total - 1 && (
             <button
               type="button"
-              onClick={() => goNext()}
+              onClick={(e) => {
+                e.stopPropagation();
+                goNext();
+              }}
               aria-label="Next card"
-              className="absolute right-2 top-1/2 -translate-y-1/2 z-10 h-10 w-10 rounded-full bg-background/60 backdrop-blur-sm border border-border shadow-sm flex items-center justify-center hover:bg-background/80 transition-colors"
+              className="absolute right-2 top-1/2 -translate-y-1/2 z-10 h-12 w-12 rounded-full bg-background/80 backdrop-blur-md border-2 border-border shadow-lg flex items-center justify-center hover:scale-110 active:scale-95 transition-all animate-in zoom-in duration-300"
             >
-              <ChevronRight className="h-5 w-5" />
+              <ChevronRight className="h-6 w-6 text-foreground/70" />
             </button>
           )}
         </div>
       </main>
 
-      <footer className="px-5 pb-6 pt-2 max-w-2xl w-full mx-auto">
+      <footer className="shrink-0 px-5 pb-6 pt-3 max-w-2xl w-full mx-auto relative z-10">
         {flipped ? (
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-3 gap-3">
             <RatingButton
               label="Hard"
               tone="destructive"
@@ -422,7 +432,7 @@ function Practice() {
         ) : (
           <button
             onClick={() => setFlipped(true)}
-            className="w-full h-14 rounded-2xl bg-primary text-primary-foreground font-semibold text-base shadow-sm active:scale-[0.99] transition-transform"
+            className="w-full h-14 rounded-2xl bg-primary text-primary-foreground font-bold text-lg border-b-[5px] border-primary/80 hover:-translate-y-1 hover:border-b-[6px] active:translate-y-[4px] active:border-b-0 shadow-sm transition-all"
           >
             Reveal answer
           </button>
@@ -451,18 +461,26 @@ function RatingButton({
   disabled?: boolean;
   active?: boolean;
 }) {
-  const cls =
-    tone === "destructive"
-      ? "bg-destructive text-destructive-foreground"
-      : tone === "warning"
-        ? "bg-warning text-warning-foreground"
-        : "bg-success text-success-foreground";
-  const stateCls = disabled ? (active ? "cursor-not-allowed" : "opacity-40 cursor-not-allowed") : "active:scale-[0.98]";
+  const isDestructive = tone === "destructive";
+  const isWarning = tone === "warning";
+
+  const bgCls = isDestructive
+    ? "bg-destructive text-destructive-foreground border-destructive/80"
+    : isWarning
+      ? "bg-warning text-warning-foreground border-warning/80"
+      : "bg-success text-success-foreground border-success/80";
+
+  const stateCls = disabled
+    ? active
+      ? "cursor-not-allowed translate-y-[4px] border-b-0"
+      : "opacity-40 cursor-not-allowed border-b-[4px]"
+    : "border-b-[5px] hover:-translate-y-1 hover:border-b-[6px] active:translate-y-[4px] active:border-b-0 shadow-sm cursor-pointer";
+
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`h-14 rounded-2xl font-semibold text-base shadow-sm transition-transform ${cls} ${stateCls}`}
+      className={`h-14 rounded-2xl font-bold text-base transition-all duration-150 border-x-0 border-t-0 ${bgCls} ${stateCls}`}
     >
       {label}
     </button>
