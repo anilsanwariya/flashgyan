@@ -226,7 +226,7 @@ function Practice() {
             <AlertDialogTrigger asChild>
               <button
                 type="button"
-                className="inline-flex items-center gap-1 text-sm font-medium text-destructive hover:text-destructive/80 transition-colors"
+                className="inline-flex items-center gap-1 rounded-full h-9 px-4 text-sm font-medium border border-destructive text-destructive hover:bg-destructive/10 transition-colors"
               >
                 End Session <X className="h-4 w-4" />
               </button>
