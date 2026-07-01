@@ -5,7 +5,7 @@ import { z } from "zod";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
 import { getMcqPracticeTest, type McqPracticeQuestion } from "@/lib/mcq-practice.functions";
 import { motion, AnimatePresence } from "motion/react";
-import { ChevronLeft, ChevronRight, Check, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Check, X, Sparkles } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { triggerHaptic } from "../lib/haptics";
 import confetti from "canvas-confetti";
