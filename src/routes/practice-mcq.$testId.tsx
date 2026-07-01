@@ -29,7 +29,7 @@ import {
   type Rating,
   type SessionCardResult,
 } from "@/lib/session-store";
-import { AppDownloadPopup } from "@/components/app-download-popup"; // Added import
+import { AppDownloadPopup } from "@/components/app-download-popup";
 
 const testQO = (id: string) =>
   queryOptions({
@@ -74,7 +74,6 @@ function PracticeMcq() {
   const { data } = useSuspenseQuery(testQO(testId));
   const { test, questions: qRaw } = data;
 
-  // Added states for popup interception
   const [showDownloadPopup, setShowDownloadPopup] = useState(false);
   const [navData, setNavData] = useState<any>(null);
 
@@ -187,7 +186,6 @@ function PracticeMcq() {
       results,
     });
 
-    // Save navigation data and trigger popup instead of navigating immediately
     setNavData({
       deckId: "",
       practiceId: testId,
@@ -226,13 +224,16 @@ function PracticeMcq() {
     <div className="h-dvh flex flex-col bg-background overflow-hidden">
       <header className="shrink-0 px-5 pt-4 pb-3 max-w-2xl w-full mx-auto">
         <div className="flex items-center justify-between">
+          <div className="text-sm font-semibold tabular-nums text-foreground">
+            {index + 1} / {total}
+          </div>
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <button
                 type="button"
-                className="inline-flex items-center gap-1 rounded-full h-9 px-4 text-sm font-medium border border-destructive text-destructive hover:bg-destructive/10 transition-colors"
+                className="inline-flex items-center gap-1 text-sm font-medium text-destructive hover:text-destructive/80 transition-colors"
               >
-                End Session
+                End Session <X className="h-4 w-4" />
               </button>
             </AlertDialogTrigger>
             <AlertDialogContent>
@@ -255,9 +256,6 @@ function PracticeMcq() {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-          <div className="text-sm tabular-nums text-muted-foreground">
-            {index + 1} / {total}
-          </div>
         </div>
         <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
           <span className="truncate">{test.name}</span>
@@ -313,7 +311,6 @@ function PracticeMcq() {
                         const isAnswer = n === q.answer;
                         const isPick = pick === n;
 
-                        // Add shake class if this button was picked and is wrong
                         const shakeCls = answered && isPick && !isAnswer ? "animate-shake" : "";
 
                         let cls = "border-border bg-background hover:bg-accent active:scale-[0.99]";
@@ -430,7 +427,6 @@ function PracticeMcq() {
         </button>
       </footer>
 
-      {/* Added App Download Popup */}
       <AppDownloadPopup
         isOpen={showDownloadPopup}
         onClose={() => setShowDownloadPopup(false)}
