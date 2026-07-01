@@ -253,7 +253,7 @@ function ExternalCtaButton({
 }) {
   const handle = () => {
     if (locked) {
-      toast.info(`${label} is coming soon.`);
+      toast.info(`${label} is coming soon!`);
       return;
     }
     window.open(url, "_blank", "noopener,noreferrer");
@@ -297,7 +297,7 @@ function FeatureCard({
 }) {
   const handle = () => {
     if (locked) {
-      toast.info(`${title} is coming soon.`);
+      toast.info(`${title} is coming soon!`);
       return;
     }
     onClick();
