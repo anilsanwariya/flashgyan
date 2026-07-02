@@ -17,8 +17,11 @@ function TelegramExpander() {
       tg?.ready();
       tg?.expand();
       
-      // Inject a class into the body so we can safely adjust the UI for Telegram's notch
+      // 1. Inject class for the notch fix
       document.body.classList.add("tg-mini-app");
+      
+      // 2. Protect the app from being aggressively killed in the background
+      tg?.enableClosingConfirmation(); 
     }
   }, []);
 
