@@ -160,37 +160,23 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
   if (len === 0) return null;
 
   return (
-    <section
-      className="relative w-full overflow-hidden rounded-3xl shadow-[0_12px_40px_rgba(0,0,0,0.12)] bg-muted border border-border/50"
-      style={{ aspectRatio: "2 / 1" }}
-      aria-label="Featured banners"
-    >
+    <section className="relative w-full" aria-label="Featured banners">
+      {/* Inner wrapper with overflow-hidden to clip images but allow buttons to overflow the section */}
       <div
-        className="flex h-full transition-transform duration-700 ease-out"
-        style={{ transform: `translateX(-${idx * 100}%)` }}
+        className="relative w-full overflow-hidden rounded-3xl shadow-[0_12px_40px_rgba(0,0,0,0.12)] bg-muted border border-border/50"
+        style={{ aspectRatio: "2 / 1" }}
       >
-        {banners.map((b) => (
-          <img key={b.id} src={b.url} alt="" className="w-full h-full object-cover shrink-0" draggable={false} />
-        ))}
-      </div>
-      {len > 1 && (
-        <>
-          <button
-            type="button"
-            aria-label="Previous banner"
-            onClick={() => setIdx((i) => (i - 1 + len) % len)}
-            className="absolute left-2 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-black/20 backdrop-blur-md border border-white/20 text-white flex items-center justify-center hover:bg-black/40 active:scale-95 transition-all"
-          >
-            <ChevronLeft className="h-5 w-5" />
-          </button>
-          <button
-            type="button"
-            aria-label="Next banner"
-            onClick={() => setIdx((i) => (i + 1) % len)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-black/20 backdrop-blur-md border border-white/20 text-white flex items-center justify-center hover:bg-black/40 active:scale-95 transition-all"
-          >
-            <ChevronRight className="h-5 w-5" />
-          </button>
+        <div
+          className="flex h-full transition-transform duration-700 ease-out"
+          style={{ transform: `translateX(-${idx * 100}%)` }}
+        >
+          {banners.map((b) => (
+            <img key={b.id} src={b.url} alt="" className="w-full h-full object-cover shrink-0" draggable={false} />
+          ))}
+        </div>
+
+        {/* Pagination Dots (Inside the image track) */}
+        {len > 1 && (
           <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-2">
             {banners.map((b, i) => (
               <button
@@ -203,6 +189,28 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
               />
             ))}
           </div>
+        )}
+      </div>
+
+      {/* Floating Edge Navigation Buttons (Like Flashcards) */}
+      {len > 1 && (
+        <>
+          <button
+            type="button"
+            aria-label="Previous banner"
+            onClick={() => setIdx((i) => (i - 1 + len) % len)}
+            className="absolute -left-3 top-1/2 -translate-y-1/2 z-10 h-12 w-12 rounded-full bg-white/10 dark:bg-black/10 backdrop-blur-xl border border-white/20 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] flex items-center justify-center hover:bg-white/20 dark:hover:bg-black/20 active:scale-90 transition-all"
+          >
+            <ChevronLeft className="h-6 w-6 text-foreground/80 ml-[-2px]" />
+          </button>
+          <button
+            type="button"
+            aria-label="Next banner"
+            onClick={() => setIdx((i) => (i + 1) % len)}
+            className="absolute -right-3 top-1/2 -translate-y-1/2 z-10 h-12 w-12 rounded-full bg-white/10 dark:bg-black/10 backdrop-blur-xl border border-white/20 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] flex items-center justify-center hover:bg-white/20 dark:hover:bg-black/20 active:scale-90 transition-all"
+          >
+            <ChevronRight className="h-6 w-6 text-foreground/80 mr-[-2px]" />
+          </button>
         </>
       )}
     </section>
