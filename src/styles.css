@@ -199,6 +199,14 @@
   animation: shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
 }
 
+/* Keep TMA layers in GPU memory to prevent the blank screen on restore */
+body.tg-mini-app {
+  -webkit-transform: translate3d(0, 0, 0);
+  transform: translate3d(0, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
 /* TELEGRAM FULL-SCREEN NOTCH FIX
    Pushes header content safely below the Telegram close button and device notch.
    This ONLY applies when the app is running inside Telegram.
