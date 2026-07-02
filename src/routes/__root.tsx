@@ -20,14 +20,28 @@ function TelegramExpander() {
       document.body.classList.add("tg-mini-app");
       tg?.enableClosingConfirmation(); 
 
+      // Matches Telegram's native backdrop to prevent white/black flashing underneath
+      try {
+        if (tg.themeParams?.bg_color) {
+          tg.setBackgroundColor(tg.themeParams.bg_color);
+        }
+      } catch (e) {
+        // Ignore if older Telegram version doesn't support this
+      }
+
       const handleVisibilityChange = () => {
         if (document.visibilityState === "visible") {
-          // Wait 100ms for the OS WebView to "thaw" before communicating with Telegram
-          setTimeout(() => {
+          // 🚀 Syncs the scroll jolt exactly with the phone's screen refresh rate
+          // This eliminates the visual delay of the screen repainting.
+          requestAnimationFrame(() => {
             tg?.expand();
-            // A harmless style tweak that forces a gentle GPU repaint without lagging the thread
-            document.body.style.transform = "translateZ(0)";
-          }, 100);
+            window.scrollBy(0, 1);
+            
+            // Queue the reverse scroll for the very next frame
+            requestAnimationFrame(() => {
+              window.scrollBy(0, -1);
+            });
+          });
         }
       };
 
