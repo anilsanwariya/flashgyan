@@ -3,7 +3,6 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import type { McqAttempt } from "./mcq.$testId";
 import { ArrowLeft, CheckCircle2, XCircle, MinusCircle, Trophy, ChevronDown } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { AppDownloadPopup } from "@/components/app-download-popup";
 
 const STORAGE_KEY = (id: string) => `mcq-attempt:${id}`;
@@ -53,7 +52,7 @@ function Result() {
 
   if (!attempt || !stats) {
     return (
-      <div className="min-h-dvh grid place-items-center p-6 text-center bg-background">
+      <div className="min-h-dvh grid place-items-center p-6 text-center bg-gradient-to-br from-primary/10 via-background to-secondary/10">
         <div>
           <p className="text-muted-foreground font-medium text-lg">No result found for this test.</p>
           <button
@@ -73,26 +72,28 @@ function Result() {
   }
 
   return (
-    <div className="min-h-dvh bg-background/50 relative overflow-hidden selection:bg-primary/20">
-      {/* Background Decor */}
-      <div className="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-primary/5 to-transparent -z-10 pointer-events-none" />
+    <div className="min-h-dvh bg-gradient-to-br from-primary/10 via-background to-secondary/10 relative overflow-hidden selection:bg-primary/20">
+      {/* Ambient orbs */}
+      <div className="pointer-events-none absolute -top-40 -left-24 h-[500px] w-[500px] rounded-full bg-primary/10 blur-[120px]" />
+      <div className="pointer-events-none absolute top-1/3 -right-32 h-[500px] w-[500px] rounded-full bg-secondary/30 blur-[120px]" />
 
-      {/* Glassmorphic Header */}
-      <header className="sticky top-0 z-50 backdrop-blur-xl bg-background/70 border-b border-border/40 px-5 py-3 shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
-          <Button asChild variant="outline" className="rounded-xl shadow-sm border-2">
-            <Link to="/mcq-tests">
-              <ArrowLeft className="h-4 w-4 mr-1.5" /> MCQ Tests
-            </Link>
-          </Button>
+      {/* Glass Header */}
+      <header className="relative z-50 sticky top-0 backdrop-blur-2xl bg-white/40 dark:bg-black/40 border-b border-border/20">
+        <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between">
+          <Link
+            to="/mcq-tests"
+            className="inline-flex items-center gap-1.5 rounded-full h-10 px-4 text-sm font-semibold text-foreground/80 bg-white/50 dark:bg-black/40 border border-border/30 backdrop-blur-xl active:scale-95 transition-all"
+          >
+            <ArrowLeft className="h-4 w-4" /> MCQ Tests
+          </Link>
           <div className="text-sm font-bold text-foreground/80 tracking-tight">Test Result</div>
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-5 py-8 space-y-8 pb-24 animate-in fade-in slide-in-from-bottom-6 duration-700">
-        {/* Premium Hero Score Section */}
+      <main className="relative z-10 max-w-2xl mx-auto px-5 py-8 space-y-8 pb-24 animate-in fade-in slide-in-from-bottom-6 duration-700">
+        {/* Hero */}
         <section className="text-center space-y-3">
-          <div className="inline-flex h-20 w-20 items-center justify-center rounded-[32px] bg-primary/10 text-primary border-2 border-primary/20 shadow-inner mb-2">
+          <div className="inline-flex h-20 w-20 items-center justify-center rounded-[32px] bg-primary/10 text-primary border border-primary/25 backdrop-blur-xl shadow-[0_8px_32px_rgba(var(--primary),0.15)] mb-2">
             <Trophy className="h-10 w-10" />
           </div>
           <div className="text-xs font-bold uppercase tracking-widest text-primary/80">{attempt.testName}</div>
@@ -100,30 +101,33 @@ function Result() {
             {stats.score.toFixed(2)}
           </div>
           <div className="text-sm font-semibold text-muted-foreground">out of {stats.total} points</div>
-          <div className="mt-2 text-xs font-bold text-muted-foreground/70 bg-muted/40 inline-block px-3 py-1 rounded-full border border-border/40">
+          <div className="mt-2 text-xs font-bold text-muted-foreground/80 bg-white/50 dark:bg-black/30 inline-block px-3 py-1 rounded-full border border-border/30 backdrop-blur-xl">
             Time taken {formatTime(stats.timeTakenSec)} · Marking +1 / −⅓ / 0
           </div>
         </section>
 
-        {/* Glassmorphic Stats Grid */}
+        {/* Glass Stats */}
         <div className="grid grid-cols-3 gap-3">
           <StatBox
             icon={<CheckCircle2 className="h-5 w-5" />}
             label="Correct"
             value={stats.correct}
-            tone="text-emerald-600 dark:text-emerald-400"
+            tone="text-success"
+            glow="shadow-[0_8px_32px_rgba(16,185,129,0.12)] border-success/30"
           />
           <StatBox
             icon={<XCircle className="h-5 w-5" />}
             label="Wrong"
             value={stats.wrong}
-            tone="text-red-600 dark:text-red-400"
+            tone="text-destructive"
+            glow="shadow-[0_8px_32px_rgba(239,68,68,0.12)] border-destructive/30"
           />
           <StatBox
             icon={<MinusCircle className="h-5 w-5" />}
             label="Skipped"
             value={stats.unanswered}
             tone="text-muted-foreground"
+            glow="border-border/30"
           />
         </div>
 
@@ -135,29 +139,29 @@ function Result() {
               const isCorrect = userChoice === q.answer;
               const opts = [q.option_1, q.option_2, q.option_3, q.option_4];
 
-              const borderCls = isCorrect
-                ? "border-emerald-500/40 shadow-[0_8px_30px_rgba(16,185,129,0.06)]"
+              const glowCls = isCorrect
+                ? "border-success/40 shadow-[0_8px_32px_rgba(16,185,129,0.12)]"
                 : userChoice === null
-                  ? "border-border/60 shadow-[0_8px_30px_rgba(0,0,0,0.04)]"
-                  : "border-red-500/40 shadow-[0_8px_30px_rgba(239,68,68,0.06)]";
+                  ? "border-border/30"
+                  : "border-destructive/40 shadow-[0_8px_32px_rgba(239,68,68,0.12)]";
 
               return (
                 <li
                   key={q.id}
-                  className={`rounded-[28px] border-2 bg-card p-6 md:p-8 space-y-5 transition-colors ${borderCls}`}
+                  className={`rounded-[32px] border bg-white/50 dark:bg-black/30 backdrop-blur-3xl p-6 md:p-8 space-y-5 transition-colors ${glowCls}`}
                 >
                   <div className="flex items-start justify-between gap-4">
-                    <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest bg-muted px-2.5 py-1 rounded-lg">
+                    <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest bg-white/60 dark:bg-black/40 border border-border/30 backdrop-blur-xl px-2.5 py-1 rounded-full">
                       Q{i + 1}
                     </span>
                     <div className="text-xs font-bold">
                       <span
                         className={
                           isCorrect
-                            ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-md"
+                            ? "text-success bg-success/10 border border-success/25 backdrop-blur-xl px-2.5 py-1 rounded-full"
                             : userChoice === null
-                              ? "text-muted-foreground bg-muted px-2 py-1 rounded-md"
-                              : "text-red-600 dark:text-red-400 bg-red-500/10 px-2 py-1 rounded-md"
+                              ? "text-muted-foreground bg-white/60 border border-border/30 backdrop-blur-xl px-2.5 py-1 rounded-full"
+                              : "text-destructive bg-destructive/10 border border-destructive/25 backdrop-blur-xl px-2.5 py-1 rounded-full"
                         }
                       >
                         {isCorrect ? "+1 Point" : userChoice === null ? "0 Points" : "−1/3 Point"}
@@ -168,13 +172,13 @@ function Result() {
                   <p className="text-[18px] font-bold leading-snug text-foreground/90">{q.question}</p>
 
                   {q.image_url && (
-                    <div className="relative rounded-2xl overflow-hidden border-2 border-border/50 shadow-sm">
-                      <img src={q.image_url} alt="" className="max-h-60 w-full object-contain bg-muted/20" />
+                    <div className="relative rounded-3xl overflow-hidden border border-border/30 shadow-sm">
+                      <img src={q.image_url} alt="" className="max-h-60 w-full object-contain bg-white/40" />
                     </div>
                   )}
 
                   {q.hint && (
-                    <p className="text-[15px] font-medium leading-relaxed whitespace-pre-wrap text-amber-700 dark:text-amber-400 bg-amber-500/10 p-4 rounded-2xl border border-amber-500/20">
+                    <p className="text-[15px] font-medium leading-relaxed whitespace-pre-wrap text-amber-700 dark:text-amber-400 bg-amber-500/10 p-4 rounded-3xl border border-amber-500/20 backdrop-blur-xl">
                       <strong className="block mb-1 text-xs uppercase tracking-widest">Hint</strong>
                       {q.hint}
                     </p>
@@ -187,21 +191,21 @@ function Result() {
                       const isUserOpt = n === userChoice;
 
                       let optBaseCls =
-                        "w-full text-left rounded-[16px] border-2 px-4 py-3 flex items-start gap-3 transition-colors ";
-                      if (isCorrectOpt) optBaseCls += "border-emerald-500/60 bg-emerald-500/10";
-                      else if (isUserOpt) optBaseCls += "border-red-500/60 bg-red-500/10";
-                      else optBaseCls += "border-border/40 bg-muted/20";
+                        "w-full text-left rounded-[20px] border px-4 py-3 flex items-start gap-3 transition-colors backdrop-blur-xl ";
+                      if (isCorrectOpt) optBaseCls += "border-success/40 bg-success/10";
+                      else if (isUserOpt) optBaseCls += "border-destructive/40 bg-destructive/10";
+                      else optBaseCls += "border-border/30 bg-white/40 dark:bg-black/20";
 
                       return (
                         <li key={oi} className={optBaseCls}>
                           <div
                             className={
-                              "h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-xs font-bold border-2 " +
+                              "h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-xs font-bold border " +
                               (isCorrectOpt
-                                ? "bg-emerald-500 text-white border-emerald-500"
+                                ? "bg-success text-white border-transparent"
                                 : isUserOpt
-                                  ? "bg-red-500 text-white border-red-500"
-                                  : "bg-muted text-foreground/60 border-border")
+                                  ? "bg-destructive text-white border-transparent"
+                                  : "bg-white/60 text-foreground/60 border-border/40")
                             }
                           >
                             {String.fromCharCode(64 + n)}
@@ -212,17 +216,17 @@ function Result() {
                             </span>
                             <div className="flex gap-2 mt-1.5">
                               {isCorrectOpt && (
-                                <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-400">
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-success">
                                   Correct Answer
                                 </span>
                               )}
                               {isUserOpt && !isCorrectOpt && (
-                                <span className="text-[10px] font-bold uppercase tracking-widest text-red-700 dark:text-red-400">
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-destructive">
                                   Your Answer
                                 </span>
                               )}
                               {isUserOpt && isCorrectOpt && (
-                                <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-400">
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-success">
                                   (Your Answer)
                                 </span>
                               )}
@@ -234,18 +238,18 @@ function Result() {
                   </ul>
 
                   {userChoice === null && (
-                    <div className="text-[13px] font-bold text-muted-foreground uppercase tracking-widest bg-muted/50 inline-block px-3 py-1.5 rounded-lg border border-border/40">
+                    <div className="text-[12px] font-bold text-muted-foreground uppercase tracking-widest bg-white/50 inline-block px-3 py-1.5 rounded-full border border-border/30 backdrop-blur-xl">
                       Not answered
                     </div>
                   )}
 
                   {q.explanation_sections.length > 0 && (
-                    <details className="text-sm group border-t-2 border-border/40 pt-4 mt-2">
+                    <details className="text-sm group border-t border-border/30 pt-4 mt-2">
                       <summary className="cursor-pointer font-bold text-[14px] text-primary flex items-center gap-1.5 list-none">
                         <ChevronDown className="h-4 w-4 transition-transform group-open:-rotate-180" />
                         Explanation
                       </summary>
-                      <div className="mt-4 space-y-4 bg-muted/30 p-5 rounded-2xl border border-border/40">
+                      <div className="mt-4 space-y-4 bg-white/40 dark:bg-black/20 backdrop-blur-xl p-5 rounded-3xl border border-border/30">
                         {q.explanation_sections.map((s, si) => (
                           <div key={si}>
                             <div className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">
@@ -266,13 +270,12 @@ function Result() {
         </section>
 
         <div className="pt-6">
-          <Button
+          <button
             onClick={() => setShowDownloadPopup(true)}
-            className="w-full h-14 rounded-2xl font-bold text-lg shadow-lg"
-            size="lg"
+            className="w-full h-14 rounded-[24px] bg-primary/10 text-primary font-semibold text-[17px] border border-primary/20 backdrop-blur-xl hover:bg-primary/20 active:scale-[0.98] transition-all shadow-[0_4px_24px_rgba(var(--primary),0.1)]"
           >
             Finish & Return Home
-          </Button>
+          </button>
         </div>
       </main>
 
@@ -285,9 +288,23 @@ function Result() {
   );
 }
 
-function StatBox({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: number; tone: string }) {
+function StatBox({
+  icon,
+  label,
+  value,
+  tone,
+  glow,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  tone: string;
+  glow: string;
+}) {
   return (
-    <div className="rounded-[24px] bg-card border-2 border-border/60 p-4 text-center shadow-sm backdrop-blur-md bg-white/60">
+    <div
+      className={`rounded-[28px] bg-white/50 dark:bg-black/30 border backdrop-blur-3xl p-4 text-center ${glow}`}
+    >
       <div className={`flex justify-center mb-1.5 ${tone}`}>{icon}</div>
       <div className="text-2xl font-extrabold tabular-nums tracking-tight mb-0.5">{value}</div>
       <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</div>
