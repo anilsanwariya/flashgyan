@@ -2,7 +2,6 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { getMcqTest, type McqQuestion } from "@/lib/mcq.functions";
-import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, Timer, Sparkles } from "lucide-react";
 import {
   AlertDialog,
@@ -29,7 +28,7 @@ export const Route = createFileRoute("/mcq/$testId")({
   loader: ({ context, params }) => context.queryClient.ensureQueryData(testQO(params.testId)),
   component: TakeTest,
   errorComponent: ({ error }) => (
-    <div className="min-h-dvh grid place-items-center p-6 text-center bg-background">
+    <div className="min-h-dvh grid place-items-center p-6 text-center bg-gradient-to-br from-primary/10 via-background to-secondary/10">
       <div>
         <p className="text-destructive font-semibold">{error.message}</p>
         <Link to="/" className="mt-3 inline-block text-sm font-bold text-primary">
@@ -39,7 +38,7 @@ export const Route = createFileRoute("/mcq/$testId")({
     </div>
   ),
   notFoundComponent: () => (
-    <div className="p-6 text-center font-medium text-muted-foreground bg-background min-h-dvh flex items-center justify-center">
+    <div className="p-6 text-center font-medium text-muted-foreground min-h-dvh flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-secondary/10">
       Test not found.
     </div>
   ),
@@ -107,7 +106,7 @@ function TakeTest() {
 
   if (questions.length === 0) {
     return (
-      <div className="min-h-dvh grid place-items-center p-6 text-center bg-background">
+      <div className="min-h-dvh grid place-items-center p-6 text-center bg-gradient-to-br from-primary/10 via-background to-secondary/10">
         <div>
           <p className="text-muted-foreground font-medium">This test has no questions yet.</p>
           <Link to="/" className="mt-3 inline-block text-sm font-bold text-primary">
@@ -129,52 +128,50 @@ function TakeTest() {
   const answeredCount = Object.values(answers).filter((v) => v !== null).length;
 
   return (
-    <div className="h-dvh overflow-hidden bg-background/50 flex flex-col relative">
-      {/* Background Decor */}
-      <div className="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-primary/5 to-transparent -z-10 pointer-events-none" />
+    <div className="h-dvh overflow-hidden bg-gradient-to-br from-primary/10 via-background to-secondary/10 flex flex-col relative">
+      {/* Ambient orbs */}
+      <div className="pointer-events-none absolute -top-32 -left-24 h-[420px] w-[420px] rounded-full bg-primary/10 blur-[120px]" />
+      <div className="pointer-events-none absolute -bottom-40 -right-20 h-[480px] w-[480px] rounded-full bg-secondary/30 blur-[120px]" />
 
       {/* Glassmorphic Header */}
-      <header className="shrink-0 z-50 backdrop-blur-xl bg-background/60 border-b border-border/40 sticky top-0">
+      <header className="relative z-50 shrink-0 backdrop-blur-2xl bg-white/40 dark:bg-black/40 border-b border-border/20 sticky top-0">
         <div className="max-w-2xl mx-auto px-5 py-3 grid grid-cols-3 items-center gap-3">
-          {/* LEFT: Question Counter */}
-          <div className="text-sm font-bold tabular-nums justify-self-start text-foreground/80 bg-foreground/5 px-3 py-1 rounded-full border border-border/50">
+          <div className="text-sm font-bold tabular-nums justify-self-start text-foreground/80 bg-white/50 dark:bg-black/40 backdrop-blur-xl px-3.5 py-1.5 rounded-full border border-border/30">
             {idx + 1} / {questions.length}
           </div>
 
-          {/* CENTER: Title and Timer */}
           <div className="text-center min-w-0 justify-self-center flex flex-col items-center w-full">
-            <div className="text-xs font-semibold uppercase tracking-widest text-primary/80 truncate w-full mb-0.5">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-primary/80 truncate w-full mb-1">
               {test.name}
             </div>
-            <div className="inline-flex items-center gap-1.5 tabular-nums font-mono text-sm font-bold text-foreground/90 bg-muted/50 px-2.5 py-0.5 rounded-lg border border-border/50">
-              <Timer className="h-4 w-4 text-primary" />
+            <div className="inline-flex items-center gap-1.5 tabular-nums font-mono text-sm font-bold text-foreground/90 bg-white/50 dark:bg-black/40 backdrop-blur-xl px-3 py-0.5 rounded-full border border-border/30">
+              <Timer className="h-3.5 w-3.5 text-primary" />
               {formatTime(remaining)}
             </div>
           </div>
 
-          {/* RIGHT: Submit Button */}
           <div className="flex justify-end justify-self-end">
             <SubmitTestDialog onConfirm={submit} answered={answeredCount} total={questions.length} />
           </div>
         </div>
       </header>
 
-      <main className="flex-1 min-h-0 max-w-2xl w-full mx-auto px-5 py-4 flex flex-col">
-        {/* Premium Question Card */}
-        <div className="flex-1 min-h-0 flex flex-col rounded-[28px] bg-card border-2 shadow-[0_8px_30px_rgba(0,0,0,0.06)] overflow-hidden">
-          <div className="flex-1 min-h-0 overflow-y-auto p-6 md:p-8 space-y-6 custom-scrollbar">
+      <main className="relative z-10 flex-1 min-h-0 max-w-2xl w-full mx-auto px-5 py-4 flex flex-col">
+        {/* Glass Question Card */}
+        <div className="flex-1 min-h-0 flex flex-col rounded-[32px] bg-white/50 dark:bg-black/30 backdrop-blur-3xl border border-border/30 shadow-[0_8px_32px_rgba(0,0,0,0.06)] overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-y-auto p-6 md:p-8 space-y-6">
             <p className="text-[20px] md:text-2xl font-bold leading-snug text-balance text-foreground/90">
               {q.question}
             </p>
 
             {q.image_url && (
-              <div className="relative rounded-2xl overflow-hidden border-2 border-border/50 shadow-sm">
-                <img src={q.image_url} alt="" className="max-h-72 w-full object-contain bg-muted/30" />
+              <div className="relative rounded-3xl overflow-hidden border border-border/30 shadow-sm">
+                <img src={q.image_url} alt="" className="max-h-72 w-full object-contain bg-white/40 backdrop-blur-xl" />
               </div>
             )}
 
             {q.hint && (
-              <div className="bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 p-4 rounded-2xl text-[15px] leading-relaxed">
+              <div className="bg-amber-500/10 border border-amber-500/20 backdrop-blur-xl text-amber-700 dark:text-amber-400 p-4 rounded-3xl text-[15px] leading-relaxed">
                 <span className="font-bold flex items-center gap-1.5 mb-1">
                   <Sparkles className="h-4 w-4" /> Hint
                 </span>
@@ -187,59 +184,54 @@ function TakeTest() {
                 const n = i + 1;
                 const selected = choice === n;
 
-                let baseCls =
-                  "w-full text-left rounded-[20px] border-2 transition-all duration-150 flex items-start gap-4 px-5 py-4 ";
-
-                if (!selected) {
-                  // Unclicked state: Hover off page, thick bottom border
-                  baseCls +=
-                    "border-border border-b-[6px] bg-background hover:-translate-y-1 hover:border-b-[8px] active:translate-y-[4px] active:border-b-[2px] cursor-pointer shadow-sm";
-                } else {
-                  // Clicked State: Squished down into page
-                  baseCls +=
-                    "translate-y-[4px] border-b-[2px] border-primary bg-primary/10 text-foreground shadow-[inset_0_0_0_1px_rgba(var(--primary),0.2)] cursor-default";
-                }
+                const cls = selected
+                  ? "w-full text-left rounded-[20px] px-5 py-4 flex items-start gap-4 bg-primary text-primary-foreground border border-transparent shadow-md transition-all duration-200 cursor-default"
+                  : "w-full text-left rounded-[20px] px-5 py-4 flex items-start gap-4 bg-white/40 dark:bg-black/30 border border-border/30 backdrop-blur-xl active:scale-[0.98] hover:bg-white/60 dark:hover:bg-black/40 transition-all duration-150 cursor-pointer";
 
                 return (
-                  <button key={i} onClick={() => setChoice(n)} className={baseCls}>
+                  <button key={i} onClick={() => setChoice(n)} className={cls}>
                     <div
                       className={
-                        "h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-colors " +
+                        "h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-sm font-bold border transition-colors " +
                         (selected
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-muted text-foreground/60 border-border")
+                          ? "bg-white/25 text-primary-foreground border-transparent"
+                          : "bg-white/60 dark:bg-black/40 text-foreground/70 border-border/40")
                       }
                     >
                       {String.fromCharCode(64 + n)}
                     </div>
-                    <div className="text-[15px] font-medium leading-snug flex-1 min-w-0 whitespace-pre-wrap mt-1 text-foreground/90">
+                    <div
+                      className={
+                        "text-[15px] font-medium leading-snug flex-1 min-w-0 whitespace-pre-wrap mt-1 " +
+                        (selected ? "text-primary-foreground" : "text-foreground/90")
+                      }
+                    >
                       {o}
                     </div>
                   </button>
                 );
               })}
 
-              {/* Not Answered Button */}
+              {/* Not Answered */}
               <button
                 onClick={() => setChoice(null)}
                 className={
-                  "w-full text-left rounded-[20px] border-2 border-dashed transition-all duration-150 flex items-start gap-4 px-5 py-4 " +
-                  (choice !== null
-                    ? "border-border border-b-[6px] bg-background/50 hover:-translate-y-1 hover:border-b-[8px] active:translate-y-[4px] active:border-b-[2px] cursor-pointer shadow-sm"
-                    : "translate-y-[4px] border-b-[2px] border-muted-foreground/40 bg-muted/40 cursor-default")
+                  choice === null
+                    ? "w-full text-left rounded-[20px] px-5 py-4 flex items-start gap-4 bg-muted-foreground/80 text-background border border-transparent shadow-md transition-all duration-200 cursor-default"
+                    : "w-full text-left rounded-[20px] px-5 py-4 flex items-start gap-4 bg-white/30 dark:bg-black/20 border border-dashed border-border/40 backdrop-blur-xl active:scale-[0.98] hover:bg-white/50 transition-all duration-150 cursor-pointer"
                 }
               >
                 <div
                   className={
-                    "h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-colors " +
+                    "h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-sm font-bold border transition-colors " +
                     (choice === null
-                      ? "bg-muted-foreground text-background border-muted-foreground"
-                      : "bg-muted/50 text-foreground/40 border-dashed border-border")
+                      ? "bg-white/25 text-background border-transparent"
+                      : "bg-white/50 text-foreground/40 border-dashed border-border/50")
                   }
                 >
                   —
                 </div>
-                <div className="text-[15px] font-medium leading-snug flex-1 min-w-0 whitespace-pre-wrap mt-1 text-foreground/90">
+                <div className="text-[15px] font-medium leading-snug flex-1 min-w-0 whitespace-pre-wrap mt-1">
                   Not answered
                 </div>
               </button>
@@ -247,7 +239,7 @@ function TakeTest() {
           </div>
         </div>
 
-        <div className="shrink-0 mt-4">
+        <div className="shrink-0 mt-3">
           <QuestionPalette
             questions={questions}
             answers={answers}
@@ -258,19 +250,22 @@ function TakeTest() {
         </div>
       </main>
 
-      {/* Footer using the globally upgraded Button component */}
-      <footer className="shrink-0 border-t border-border/40 bg-background/60 backdrop-blur-md">
-        <div className="max-w-2xl mx-auto px-5 py-4 flex items-center justify-between gap-3">
-          <Button variant="outline" disabled={idx === 0} onClick={() => setIdx((i) => Math.max(0, i - 1))}>
-            <ChevronLeft className="h-5 w-5 mr-1" /> Previous
-          </Button>
-          <Button
+      <footer className="relative z-10 shrink-0 border-t border-border/20 bg-white/40 dark:bg-black/40 backdrop-blur-2xl">
+        <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between gap-3">
+          <button
+            disabled={idx === 0}
+            onClick={() => setIdx((i) => Math.max(0, i - 1))}
+            className="inline-flex items-center gap-1 h-12 px-5 rounded-full bg-white/50 dark:bg-black/40 backdrop-blur-xl border border-border/40 text-foreground/80 font-semibold text-[15px] active:scale-95 transition-all disabled:opacity-40 disabled:active:scale-100"
+          >
+            <ChevronLeft className="h-5 w-5" /> Previous
+          </button>
+          <button
             disabled={idx === questions.length - 1}
             onClick={() => setIdx((i) => Math.min(questions.length - 1, i + 1))}
-            className="px-6"
+            className="inline-flex items-center gap-1 h-12 px-6 rounded-full bg-primary/15 text-primary border border-primary/25 backdrop-blur-xl font-semibold text-[15px] active:scale-95 hover:bg-primary/25 transition-all shadow-[0_4px_20px_rgba(var(--primary),0.12)] disabled:opacity-40 disabled:active:scale-100"
           >
-            Next <ChevronRight className="h-5 w-5 ml-1" />
-          </Button>
+            Next <ChevronRight className="h-5 w-5" />
+          </button>
         </div>
       </footer>
 
@@ -318,25 +313,23 @@ function QuestionPalette({
   }
 
   return (
-    <div className="bg-card border-2 border-border/60 rounded-[24px] p-3 shadow-sm">
+    <div className="bg-white/50 dark:bg-black/30 backdrop-blur-3xl border border-border/30 rounded-[24px] p-3 shadow-[0_8px_32px_rgba(0,0,0,0.04)]">
       <div className="flex items-center justify-between mb-2 px-1">
-        <div className="text-[11px] font-bold uppercase tracking-widest text-primary/80">Questions</div>
-        <div className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+        <div className="text-[10px] font-bold uppercase tracking-widest text-primary/80">Questions</div>
+        <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
           {answeredCount}/{questions.length} Answered
         </div>
       </div>
 
       <div className="flex items-center gap-1.5">
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-8 w-8 shrink-0 rounded-xl"
+        <button
           onClick={() => page(-1)}
           disabled={atStart}
           aria-label="Scroll left"
+          className="h-8 w-8 shrink-0 rounded-full bg-white/60 dark:bg-black/40 border border-border/30 backdrop-blur-xl text-foreground/70 grid place-items-center active:scale-90 transition-all disabled:opacity-40 disabled:active:scale-100"
         >
           <ChevronLeft className="h-4 w-4" />
-        </Button>
+        </button>
         <div
           ref={scrollRef}
           onScroll={updateEdges}
@@ -353,15 +346,14 @@ function QuestionPalette({
                     const cur = i === current;
 
                     let cls =
-                      "h-8 rounded-[10px] text-[13px] font-bold tabular-nums border-2 transition-all duration-150 ";
+                      "h-8 rounded-[10px] text-[13px] font-bold tabular-nums border transition-all duration-150 backdrop-blur-xl ";
 
                     if (cur) {
-                      cls += "border-primary bg-primary text-primary-foreground shadow-sm scale-110 z-10";
+                      cls += "border-transparent bg-primary text-primary-foreground shadow-md scale-110 z-10";
                     } else if (a !== null) {
-                      cls +=
-                        "border-success/50 bg-success/15 text-success shadow-sm hover:-translate-y-0.5 active:translate-y-0";
+                      cls += "border-success/40 bg-success/10 text-success active:scale-95";
                     } else {
-                      cls += "border-border bg-background text-muted-foreground hover:bg-muted active:scale-95";
+                      cls += "border-border/30 bg-white/40 dark:bg-black/30 text-muted-foreground active:scale-95";
                     }
 
                     return (
@@ -375,16 +367,14 @@ function QuestionPalette({
             })}
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-8 w-8 shrink-0 rounded-xl"
+        <button
           onClick={() => page(1)}
           disabled={atEnd}
           aria-label="Scroll right"
+          className="h-8 w-8 shrink-0 rounded-full bg-white/60 dark:bg-black/40 border border-border/30 backdrop-blur-xl text-foreground/70 grid place-items-center active:scale-90 transition-all disabled:opacity-40 disabled:active:scale-100"
         >
           <ChevronRight className="h-4 w-4" />
-        </Button>
+        </button>
       </div>
     </div>
   );
@@ -396,12 +386,12 @@ function SubmitTestDialog({ onConfirm, answered, total }: { onConfirm: () => voi
       <AlertDialogTrigger asChild>
         <button
           type="button"
-          className="inline-flex items-center gap-1 rounded-full h-9 px-4 text-sm font-semibold border-2 border-b-[4px] border-destructive/80 text-destructive hover:-translate-y-0.5 hover:border-b-[5px] active:translate-y-[2px] active:border-b-[2px] transition-all duration-150 bg-background shadow-sm"
+          className="inline-flex items-center gap-1 rounded-full h-9 px-4 text-sm font-semibold text-destructive bg-destructive/10 border border-destructive/25 backdrop-blur-xl active:scale-95 hover:bg-destructive/20 transition-all shadow-[0_4px_16px_rgba(239,68,68,0.1)]"
         >
           Submit
         </button>
       </AlertDialogTrigger>
-      <AlertDialogContent className="rounded-[24px]">
+      <AlertDialogContent className="rounded-[28px] bg-white/80 dark:bg-black/70 backdrop-blur-3xl border-border/30">
         <AlertDialogHeader>
           <AlertDialogTitle className="text-xl">Submit test?</AlertDialogTitle>
           <AlertDialogDescription className="text-[15px]">
@@ -410,12 +400,12 @@ function SubmitTestDialog({ onConfirm, answered, total }: { onConfirm: () => voi
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter className="mt-4">
-          <AlertDialogCancel className="rounded-xl h-11 font-semibold hover:bg-muted border-2">
+          <AlertDialogCancel className="rounded-full h-11 px-5 font-semibold bg-white/60 dark:bg-black/40 border border-border/40 backdrop-blur-xl active:scale-95 transition-all">
             Keep going
           </AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
-            className="rounded-xl h-11 font-semibold bg-destructive hover:bg-destructive/90 text-destructive-foreground border-b-[4px] border-destructive/80 active:border-b-0 active:translate-y-[4px] transition-all"
+            className="rounded-full h-11 px-5 font-semibold bg-destructive/15 text-destructive border border-destructive/30 backdrop-blur-xl hover:bg-destructive/25 active:scale-95 transition-all shadow-[0_4px_20px_rgba(239,68,68,0.15)]"
           >
             Submit Test
           </AlertDialogAction>
