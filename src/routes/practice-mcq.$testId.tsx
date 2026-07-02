@@ -88,6 +88,8 @@ function PracticeMcq() {
 
   const [index, setIndex] = useState(0);
   const [picks, setPicks] = useState<(number | null)[]>(() => questions.map(() => null));
+  // PERFORMANCE FIX: Tracks which question is currently delaying its heavy DOM insertions
+  const [pendingAnim, setPendingAnim] = useState<number | null>(null);
   const startedAt = useRef(Date.now());
 
   const total = questions.length;
@@ -95,6 +97,9 @@ function PracticeMcq() {
   const pick = picks[index];
   const answered = pick !== null;
   const isCorrect = answered && pick === q?.answer;
+
+  // The card is fully "revealed" only if it's answered AND the initial 150ms animation delay has passed
+  const isRevealed = answered && pendingAnim !== index;
 
   const stats = useMemo(() => {
     let correct = 0;
@@ -131,32 +136,42 @@ function PracticeMcq() {
   function onPick(opt: number) {
     if (answered) return;
 
+    // 1. INSTANT RENDER: Lock the pending state and update the button color immediately
+    setPendingAnim(index);
     const next = picks.slice();
     next[index] = opt;
     setPicks(next);
 
     const correct = opt === q.answer;
 
-    if (correct) {
-      triggerHaptic("success");
-      try {
-        confetti({
-          particleCount: 50,
-          spread: 60,
-          origin: { y: 0.8 },
-          disableForReducedMotion: true,
-          useWorker: true,
-        });
-      } catch (e) {
-        // Ignore
-      }
-    } else {
-      triggerHaptic("error");
-    }
-
+    // 2. DELAYED PAYLOAD: Wait 150ms for the browser to comfortably paint the button change,
+    // THEN insert the heavy DOM elements (Explanation, Glow, Confetti)
     setTimeout(() => {
-      recordRating(q.id, correct ? "easy" : "hard");
-    }, 100);
+      setPendingAnim(null);
+
+      if (correct) {
+        triggerHaptic("success");
+        try {
+          confetti({
+            particleCount: 50,
+            spread: 60,
+            origin: { y: 0.8 },
+            disableForReducedMotion: true,
+            useWorker: true,
+            zIndex: 100,
+          });
+        } catch (e) {
+          // Ignore
+        }
+      } else {
+        triggerHaptic("error");
+      }
+
+      // 3. SUPER DELAYED STORAGE: Save data out of the way of the animation
+      setTimeout(() => {
+        recordRating(q.id, correct ? "easy" : "hard");
+      }, 100);
+    }, 150);
   }
 
   function submit(finalPicks: (number | null)[]) {
@@ -228,16 +243,17 @@ function PracticeMcq() {
   }
 
   function goNext() {
-    if (!answered) return;
+    if (!isRevealed) return;
     if (index < total - 1) setIndex(index + 1);
     else submit(picks);
   }
 
+  // The main card only changes color AFTER the 150ms delay
   const baseBg = "bg-white/60 dark:bg-black/40";
-  const borderClass = answered
+  const borderClass = isRevealed
     ? isCorrect
-      ? `border-success/60 shadow-[0_8px_32px_rgba(16,185,129,0.15)] ${baseBg}`
-      : `border-destructive/60 shadow-[0_8px_32px_rgba(239,68,68,0.15)] ${baseBg}`
+      ? `border-success/50 shadow-[0_8px_32px_rgba(16,185,129,0.15)] ${baseBg}`
+      : `border-destructive/50 shadow-[0_8px_32px_rgba(239,68,68,0.15)] ${baseBg}`
     : `border-border/30 shadow-[0_8px_32px_rgba(0,0,0,0.08)] ${baseBg}`;
 
   return (
@@ -246,7 +262,6 @@ function PracticeMcq() {
       <div className="absolute -top-[20%] -left-[10%] w-[60%] h-[50%] rounded-full bg-primary/10 blur-[100px] -z-10 pointer-events-none" />
       <div className="absolute top-[40%] -right-[20%] w-[50%] h-[60%] rounded-full bg-blue-500/10 blur-[120px] -z-10 pointer-events-none" />
 
-      {/* FIXED Padding */}
       <header className="shrink-0 px-5 pt-4 pb-3 max-w-2xl w-full mx-auto backdrop-blur-2xl bg-white/40 dark:bg-black/40 sticky top-0 z-50 border-b border-border/20">
         <div className="flex items-center justify-between mt-2">
           <AlertDialog>
@@ -310,14 +325,14 @@ function PracticeMcq() {
           <AnimatePresence mode="wait">
             <motion.div
               key={q.id}
-              initial={{ opacity: 0, scale: 0.94, filter: "blur(4px)" }}
-              animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-              exit={{ opacity: 0, scale: 0.94, filter: "blur(4px)" }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              transition={{ duration: 0.25, ease: "easeOut" }}
               className="w-full h-full relative"
             >
               <div
-                className={`w-full h-full rounded-[36px] backdrop-blur-3xl border transition-colors duration-500 ${borderClass} overflow-hidden flex flex-col`}
+                className={`w-full h-full rounded-[36px] backdrop-blur-3xl border transition-all duration-300 ease-out ${borderClass} overflow-hidden flex flex-col`}
               >
                 <ScrollArea className="h-full flex-1">
                   <div className="p-7 md:p-8 space-y-6">
@@ -346,11 +361,13 @@ function PracticeMcq() {
                         const isAnswer = n === q.answer;
                         const isPick = pick === n;
 
-                        const shakeCls = answered && isPick && !isAnswer ? "animate-shake" : "";
+                        // Only shake if it's incorrect and the delay has finished
+                        const shakeCls = isRevealed && isPick && !isAnswer ? "animate-shake" : "";
 
                         let baseCls =
                           "w-full text-left rounded-[24px] border transition-all duration-300 flex items-start gap-4 px-5 py-4 ";
 
+                        // The buttons colors highlight immediately based on `answered`, ensuring a snappy feel
                         if (!answered) {
                           baseCls +=
                             "border-border/30 bg-white/40 dark:bg-black/40 hover:bg-white/60 dark:hover:bg-black/60 active:scale-[0.98] shadow-sm backdrop-blur-md cursor-pointer";
@@ -398,7 +415,8 @@ function PracticeMcq() {
                       })}
                     </div>
 
-                    {answered && (
+                    {/* Renders only AFTER the 150ms delay, removing DOM thrashing */}
+                    {isRevealed && (
                       <motion.div
                         initial={{ opacity: 0, y: 15 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -455,7 +473,7 @@ function PracticeMcq() {
               <ChevronLeft className="h-6 w-6 text-foreground/80 ml-[-2px]" />
             </button>
           )}
-          {answered && index < total - 1 && (
+          {isRevealed && index < total - 1 && (
             <button
               type="button"
               onClick={goNext}
@@ -468,11 +486,10 @@ function PracticeMcq() {
         </div>
       </main>
 
-      {/* FIXED Padding */}
       <footer className="shrink-0 px-5 pb-6 pt-2 max-w-2xl w-full mx-auto relative z-10 mb-2">
         <button
           onClick={goNext}
-          disabled={!answered}
+          disabled={!isRevealed}
           className="w-full h-[52px] rounded-[24px] bg-primary/10 text-primary font-semibold text-[17px] border border-primary/20 backdrop-blur-xl hover:bg-primary/20 active:scale-[0.98] transition-all shadow-[0_4px_24px_rgba(var(--primary),0.1)] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
         >
           {!answered ? "Pick an answer" : index >= total - 1 ? "Finish Session" : "Next Question"}
