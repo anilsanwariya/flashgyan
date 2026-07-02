@@ -98,7 +98,7 @@ function Practice() {
 
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
-  const [isTransitioning, setIsTransitioning] = useState(false); // Prevents multi-clicks during delay
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const [cardRatings, setCardRatings] = useState<(Rating | null)[]>(() => cards.map(() => null));
   const [priorRatings] = useState<(Rating | null)[]>(() => {
     if (!review) return cards.map(() => null);
@@ -117,7 +117,6 @@ function Practice() {
   const currentRating = cardRatings[index];
   const displayRating = currentRating ?? priorRatings[index];
 
-  // iOS delicate border glow styling with slightly higher opacity for immediate feedback
   const borderClass =
     displayRating === "hard"
       ? "border-destructive/60 shadow-[0_8px_32px_rgba(239,68,68,0.25)] bg-destructive/10"
@@ -199,15 +198,12 @@ function Practice() {
   }
 
   function rate(r: Rating) {
-    if (isTransitioning) return; // Prevent double-clicking
+    if (isTransitioning) return;
 
-    // 1. INSTANT STATE UPDATE: This instantly applies the colored `borderClass`
     const next = cardRatings.slice();
     next[index] = r;
     setCardRatings(next);
 
-    // 2. DELAYED NAVIGATION: Wait 450ms so the user can see the card glow,
-    // before the AnimatePresence pushes it off screen.
     if (index < total - 1) {
       setIsTransitioning(true);
       setTimeout(() => {
@@ -235,12 +231,11 @@ function Practice() {
 
   return (
     <div className="h-dvh flex flex-col bg-background overflow-hidden relative">
-      {/* Background Decor to give the glass something to blur */}
       <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-primary/10 via-background to-secondary/10 -z-10 pointer-events-none" />
       <div className="absolute -top-[20%] -left-[10%] w-[60%] h-[50%] rounded-full bg-primary/10 blur-[100px] -z-10 pointer-events-none" />
       <div className="absolute top-[40%] -right-[20%] w-[50%] h-[60%] rounded-full bg-blue-500/10 blur-[120px] -z-10 pointer-events-none" />
 
-      {/* Thin, ultra-blurry iOS Header */}
+      {/* FIXED Padding */}
       <header className="shrink-0 px-5 pt-4 pb-3 max-w-2xl w-full mx-auto backdrop-blur-2xl bg-white/40 dark:bg-black/40 sticky top-0 z-50 border-b border-border/20">
         <div className="flex items-center justify-between mt-2">
           <AlertDialog>
@@ -252,26 +247,29 @@ function Practice() {
                 End Session <X className="h-3.5 w-3.5" />
               </button>
             </AlertDialogTrigger>
-            <AlertDialogContent className="rounded-[28px] backdrop-blur-3xl bg-white/80 dark:bg-black/80 border-white/20 shadow-2xl">
+            <AlertDialogContent className="rounded-[32px] backdrop-blur-3xl bg-white/80 dark:bg-black/80 border border-white/20 dark:border-white/10 shadow-2xl p-6 sm:max-w-sm">
               <AlertDialogHeader>
-                <AlertDialogTitle className="text-center text-xl">End Session?</AlertDialogTitle>
-                <AlertDialogDescription className="text-center">
+                <AlertDialogTitle className="text-xl font-bold text-foreground text-center tracking-tight">
+                  End Session?
+                </AlertDialogTitle>
+                <AlertDialogDescription className="text-[14px] text-center text-muted-foreground mt-1.5 leading-snug">
                   You can keep going, or end now and see your summary. Unrated cards stay unrated.
                 </AlertDialogDescription>
               </AlertDialogHeader>
-              <AlertDialogFooter className="flex-col gap-2 mt-4 sm:space-x-0">
+              <AlertDialogFooter className="flex-col gap-3 pt-4 sm:space-x-0">
                 <AlertDialogAction
                   onClick={() => submit(cardRatings)}
-                  className="w-full rounded-2xl font-semibold bg-destructive hover:bg-destructive/90 text-white h-12 active:scale-95 transition-transform"
+                  className="w-full h-[52px] rounded-[24px] bg-destructive text-white font-semibold text-[16px] shadow-[0_4px_24px_rgba(239,68,68,0.25)] active:scale-[0.98] transition-all"
                 >
                   End Session
                 </AlertDialogAction>
-                <AlertDialogCancel className="w-full rounded-2xl font-semibold bg-secondary/50 border-0 hover:bg-secondary/70 h-12 m-0 active:scale-95 transition-transform">
+                <AlertDialogCancel className="w-full h-[48px] m-0 rounded-[20px] font-semibold bg-secondary/50 text-secondary-foreground border border-border/30 hover:bg-secondary/70 active:scale-[0.98] transition-all">
                   Continue
                 </AlertDialogCancel>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+
           <div className="text-[13px] font-medium text-muted-foreground/80 tracking-widest bg-black/5 dark:bg-white/10 px-3 py-1 rounded-full border border-black/5 dark:border-white/5">
             {index + 1} OF {total}
           </div>
@@ -302,7 +300,6 @@ function Practice() {
         </div>
       </header>
 
-      {/* Main Area */}
       <main className="flex-1 min-h-0 flex flex-col px-5 pt-6 max-w-2xl w-full mx-auto pb-4">
         <div className="w-full h-full relative [perspective:1200px]">
           <AnimatePresence mode="wait">
@@ -314,7 +311,6 @@ function Practice() {
               transition={{ duration: 0.3, ease: "easeOut" }}
               className="w-full h-full relative"
             >
-              {/* SINGLE ROTATING WRAPPER */}
               <motion.div
                 initial={false}
                 animate={{ rotateY: flipped ? 180 : 0 }}
@@ -322,7 +318,6 @@ function Practice() {
                 className="w-full h-full relative"
                 style={{ transformStyle: "preserve-3d" }}
               >
-                {/* FRONT CARD (Note the transition-all duration-200 for instant color snaps) */}
                 <div
                   className={`absolute inset-0 w-full h-full rounded-[36px] backdrop-blur-3xl border transition-all duration-200 ease-out ${borderClass} overflow-hidden flex flex-col`}
                   style={{
@@ -352,7 +347,6 @@ function Practice() {
                   </ScrollArea>
                 </div>
 
-                {/* BACK CARD */}
                 <div
                   className={`absolute inset-0 w-full h-full rounded-[36px] backdrop-blur-3xl border transition-all duration-200 ease-out ${borderClass} overflow-hidden flex flex-col`}
                   style={{
@@ -394,7 +388,6 @@ function Practice() {
             </motion.div>
           </AnimatePresence>
 
-          {/* Minimal Floating Nav Controls */}
           {index > 0 && (
             <button
               type="button"
@@ -424,7 +417,7 @@ function Practice() {
         </div>
       </main>
 
-      {/* iOS Floating Footer */}
+      {/* FIXED Padding */}
       <footer className="shrink-0 px-5 pb-6 pt-2 max-w-2xl w-full mx-auto relative z-10 mb-2">
         {flipped ? (
           <div className="grid grid-cols-3 gap-3">
