@@ -88,6 +88,7 @@ function PracticeMcq() {
 
   const [index, setIndex] = useState(0);
   const [picks, setPicks] = useState<(number | null)[]>(() => questions.map(() => null));
+  // Track cards that have been answered AND navigated away from to prevent instant massive repaints
   const [historicAnswers, setHistoricAnswers] = useState<boolean[]>(() => questions.map(() => false));
   const startedAt = useRef(Date.now());
 
@@ -132,41 +133,38 @@ function PracticeMcq() {
   function onPick(opt: number) {
     if (answered) return;
 
-    // 1. Immediately update UI state so React starts painting instantly
+    // 1. INSTANT UI UPDATE: React paints the small button green/red immediately
     const next = picks.slice();
     next[index] = opt;
     setPicks(next);
 
     const correct = opt === q.answer;
 
-    // 2. Yield to the browser's paint cycle TWICE to guarantee the green/red button
-    //    is physically visible on the screen before we do heavy math.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        // 3. Fire Confetti (using a Web Worker so it doesn't lag CSS transitions)
-        if (correct) {
-          triggerHaptic("success");
-          try {
-            confetti({
-              particleCount: 50,
-              spread: 60,
-              origin: { y: 0.8 },
-              disableForReducedMotion: true,
-              useWorker: true, // MAGIC BULLET: Offloads physics to background thread
-            });
-          } catch (e) {
-            // Silently fail if worker isn't supported
-          }
-        } else {
-          triggerHaptic("error");
+    // 2. DELAYED PHYSICS: Give the GPU 300ms to smoothly expand the explanation box
+    //    BEFORE we ask it to calculate 50 particles of confetti physics.
+    setTimeout(() => {
+      if (correct) {
+        triggerHaptic("success");
+        try {
+          confetti({
+            particleCount: 50,
+            spread: 60,
+            origin: { y: 0.8 },
+            disableForReducedMotion: true,
+            useWorker: true,
+          });
+        } catch (e) {
+          // Ignore
         }
+      } else {
+        triggerHaptic("error");
+      }
+    }, 300);
 
-        // 4. Push the synchronous localStorage write to the very back of the event queue
-        setTimeout(() => {
-          recordRating(q.id, correct ? "easy" : "hard");
-        }, 150);
-      });
-    });
+    // 3. SUPER DELAYED STORAGE: Write to localStorage 800ms later so it completely misses the animation window
+    setTimeout(() => {
+      recordRating(q.id, correct ? "easy" : "hard");
+    }, 800);
   }
 
   function submit(finalPicks: (number | null)[]) {
@@ -255,6 +253,8 @@ function PracticeMcq() {
     else submit(picks);
   }
 
+  // OPTIMIZATION: Only color the massive outer container if we have navigated away and come back.
+  // This prevents the instant full-screen repaint lag when you first tap an answer.
   const isHistoric = historicAnswers[index];
   const borderClass =
     isHistoric && answered
@@ -329,10 +329,10 @@ function PracticeMcq() {
           <AnimatePresence mode="wait">
             <motion.div
               key={q.id}
-              initial={{ opacity: 0, scale: 0.94, filter: "blur(4px)" }}
-              animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-              exit={{ opacity: 0, scale: 0.94, filter: "blur(4px)" }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              transition={{ duration: 0.25, ease: "easeOut" }}
               className="w-full h-full relative"
             >
               <div
@@ -417,10 +417,12 @@ function PracticeMcq() {
                       })}
                     </div>
 
+                    {/* OPTIMIZATION: Removed filter:blur() from animation to save GPU repaint cost */}
                     {answered && (
                       <motion.div
-                        initial={{ opacity: 0, filter: "blur(4px)", y: 10 }}
-                        animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
+                        initial={{ opacity: 0, y: 15 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3, ease: "easeOut" }}
                         className="pt-6 mt-4 border-t border-border/20 space-y-5"
                       >
                         <div
