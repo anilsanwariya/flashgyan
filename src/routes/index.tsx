@@ -1,8 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { getHomeData, type HomeData } from "@/lib/home.functions";
-import { ChevronLeft, ChevronRight, ExternalLink, Layers, ListChecks, Lock, Sparkles, Target } from "lucide-react";
+import { ChevronRight, ExternalLink, Layers, ListChecks, Lock, Sparkles, Target } from "lucide-react";
 import { toast } from "sonner";
 import finalLogo from "@/assets/final-logo.png";
 import tgIcon from "@/assets/tg-icon.svg";
@@ -44,9 +44,7 @@ function Home() {
 
   return (
     <div className="min-h-dvh bg-background relative selection:bg-primary/20">
-      {/* GLASSMORPHIC HEADER 
-        Uses backdrop-blur and a semi-transparent background so content blurs beautifully as it scrolls underneath 
-      */}
+      {/* GLASSMORPHIC HEADER */}
       <header className="sticky top-0 z-50 backdrop-blur-xl bg-background/70 border-b border-border/40 px-5 py-3 md:max-w-4xl lg:max-w-6xl mx-auto shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-all">
         <div className="flex items-center justify-between">
           <img src={finalLogo} alt="Flashgyan" className="h-10 w-auto object-contain drop-shadow-sm" />
@@ -149,19 +147,88 @@ function Home() {
 
 function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
   const [idx, setIdx] = useState(0);
-  const len = banners.length;
+  const [isPaused, setIsPaused] = useState(false);
 
+  // Touch & Swipe states
+  const [touchStart, setTouchStart] = useState<number | null>(null);
+  const [touchEnd, setTouchEnd] = useState<number | null>(null);
+  const pauseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const len = banners.length;
+  const minSwipeDistance = 50;
+
+  // Auto-rotate logic
   useEffect(() => {
-    if (len <= 1) return;
+    if (len <= 1 || isPaused) return;
     const t = setInterval(() => setIdx((i) => (i + 1) % len), 4500);
     return () => clearInterval(t);
-  }, [len]);
+  }, [len, isPaused]);
+
+  // Pause rotation for 5 seconds upon user interaction
+  const handleInteraction = () => {
+    setIsPaused(true);
+    if (pauseTimeoutRef.current) clearTimeout(pauseTimeoutRef.current);
+    pauseTimeoutRef.current = setTimeout(() => setIsPaused(false), 5000);
+  };
+
+  // --- SWIPE HANDLERS ---
+  const onTouchStart = (e: React.TouchEvent) => {
+    setTouchEnd(null);
+    setTouchStart(e.targetTouches[0].clientX);
+    handleInteraction();
+  };
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    setTouchEnd(e.targetTouches[0].clientX);
+  };
+
+  const onTouchEnd = () => {
+    if (touchStart === null || touchEnd === null) return;
+    const distance = touchStart - touchEnd;
+    const isLeftSwipe = distance > minSwipeDistance;
+    const isRightSwipe = distance < -minSwipeDistance;
+
+    if (isLeftSwipe) setIdx((i) => (i + 1) % len);
+    if (isRightSwipe) setIdx((i) => (i - 1 + len) % len);
+
+    setTouchStart(null);
+    setTouchEnd(null);
+  };
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    setTouchEnd(null);
+    setTouchStart(e.clientX);
+    handleInteraction();
+  };
+
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (touchStart !== null) setTouchEnd(e.clientX);
+  };
+
+  const onMouseUp = () => {
+    if (touchStart !== null && touchEnd !== null) {
+      const distance = touchStart - touchEnd;
+      if (distance > minSwipeDistance) setIdx((i) => (i + 1) % len);
+      if (distance < -minSwipeDistance) setIdx((i) => (i - 1 + len) % len);
+    }
+    setTouchStart(null);
+    setTouchEnd(null);
+  };
 
   if (len === 0) return null;
 
   return (
-    <section className="relative w-full" aria-label="Featured banners">
-      {/* Inner wrapper with overflow-hidden to clip images but allow buttons to overflow the section */}
+    <section
+      className="relative w-full cursor-grab active:cursor-grabbing"
+      aria-label="Featured banners"
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
+      onMouseLeave={onMouseUp}
+    >
       <div
         className="relative w-full overflow-hidden rounded-3xl shadow-[0_12px_40px_rgba(0,0,0,0.12)] bg-muted border border-border/50"
         style={{ aspectRatio: "2 / 1" }}
@@ -171,7 +238,13 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
           style={{ transform: `translateX(-${idx * 100}%)` }}
         >
           {banners.map((b) => (
-            <img key={b.id} src={b.url} alt="" className="w-full h-full object-cover shrink-0" draggable={false} />
+            <img
+              key={b.id}
+              src={b.url}
+              alt=""
+              className="w-full h-full object-cover shrink-0 select-none"
+              draggable={false}
+            />
           ))}
         </div>
 
@@ -182,7 +255,11 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
               <button
                 key={b.id}
                 aria-label={`Show banner ${i + 1}`}
-                onClick={() => setIdx(i)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIdx(i);
+                  handleInteraction();
+                }}
                 className={`h-2 rounded-full transition-all duration-300 shadow-sm ${
                   i === idx ? "w-6 bg-white" : "w-2 bg-white/50 hover:bg-white/80"
                 }`}
@@ -191,28 +268,6 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
           </div>
         )}
       </div>
-
-      {/* Floating Edge Navigation Buttons (Like Flashcards) */}
-      {len > 1 && (
-        <>
-          <button
-            type="button"
-            aria-label="Previous banner"
-            onClick={() => setIdx((i) => (i - 1 + len) % len)}
-            className="absolute -left-3 top-1/2 -translate-y-1/2 z-10 h-12 w-12 rounded-full bg-white/10 dark:bg-black/10 backdrop-blur-xl border border-white/20 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] flex items-center justify-center hover:bg-white/20 dark:hover:bg-black/20 active:scale-90 transition-all"
-          >
-            <ChevronLeft className="h-6 w-6 text-foreground/80 ml-[-2px]" />
-          </button>
-          <button
-            type="button"
-            aria-label="Next banner"
-            onClick={() => setIdx((i) => (i + 1) % len)}
-            className="absolute -right-3 top-1/2 -translate-y-1/2 z-10 h-12 w-12 rounded-full bg-white/10 dark:bg-black/10 backdrop-blur-xl border border-white/20 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] flex items-center justify-center hover:bg-white/20 dark:hover:bg-black/20 active:scale-90 transition-all"
-          >
-            <ChevronRight className="h-6 w-6 text-foreground/80 mr-[-2px]" />
-          </button>
-        </>
-      )}
     </section>
   );
 }
@@ -276,9 +331,6 @@ function ExternalCtaButton({
     window.open(url, "_blank", "noopener,noreferrer");
   };
   return (
-    /* 3D BUTTON EFFECT 
-      Uses a thick bottom border that disappears when clicked (active:translate-y) to create a physical push-down feeling 
-    */
     <button
       onClick={handle}
       aria-disabled={locked}
@@ -330,9 +382,6 @@ function FeatureCard({
         locked ? "opacity-80 cursor-not-allowed" : ""
       }`}
     >
-      {/* GLASSY ICON WRAPPER 
-        Uses backdrop blur and white borders to look like a frosted piece of glass 
-      */}
       <div className="relative h-14 w-14 rounded-2xl bg-white/60 backdrop-blur-md border border-white flex items-center justify-center shrink-0 shadow-[inset_0_2px_4px_rgba(255,255,255,0.8)] z-10">
         {icon}
       </div>
@@ -348,7 +397,6 @@ function FeatureCard({
         <ChevronRight className="h-6 w-6 text-foreground/40 shrink-0 group-hover:translate-x-1 group-hover:text-foreground/70 transition-all z-10" />
       )}
 
-      {/* Decorative background glow */}
       <div className="absolute -right-8 -top-8 w-32 h-32 bg-white/40 blur-3xl rounded-full pointer-events-none" />
     </button>
   );
@@ -361,7 +409,7 @@ function TelegramFloatingButton() {
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Join Telegram"
-      className="fixed right-6 bottom-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[#2aabee] shadow-[0_8px_30px_rgba(42,171,238,0.4)] transition-all hover:scale-110 hover:-translate-y-1 active:scale-95 overflow-hidden border-2 border-white"
+      className="fixed right-6 bottom-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[#2aabee] shadow-[0_8px_30px_rgba(42,171,238,0.4)] transition-all hover:scale-110 hover:-translate-y-1 active:scale-95 overflow-hidden border-0"
     >
       <img src={tgIcon} alt="Telegram" className="h-8 w-8 object-contain" />
     </a>
