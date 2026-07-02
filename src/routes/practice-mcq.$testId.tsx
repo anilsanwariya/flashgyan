@@ -46,20 +46,20 @@ export const Route = createFileRoute("/practice-mcq/$testId")({
   loader: ({ context, params }) => context.queryClient.ensureQueryData(testQO(params.testId)),
   component: PracticeMcq,
   notFoundComponent: () => (
-    <div className="min-h-dvh grid place-items-center p-6 text-center">
+    <div className="min-h-dvh grid place-items-center p-6 text-center bg-background">
       <div>
-        <p className="text-muted-foreground">Practice set not found.</p>
-        <Link to="/" className="text-primary mt-2 inline-block font-medium">
+        <p className="text-muted-foreground font-medium">Practice set not found.</p>
+        <Link to="/" className="text-primary mt-2 inline-block font-semibold">
           Back home
         </Link>
       </div>
     </div>
   ),
   errorComponent: ({ error }) => (
-    <div className="min-h-dvh grid place-items-center p-6 text-center">
+    <div className="min-h-dvh grid place-items-center p-6 text-center bg-background">
       <div>
-        <p className="text-destructive">{error.message}</p>
-        <Link to="/" className="text-primary mt-2 inline-block font-medium">
+        <p className="text-destructive font-semibold">{error.message}</p>
+        <Link to="/" className="text-primary mt-2 inline-block font-semibold">
           Back home
         </Link>
       </div>
@@ -117,10 +117,10 @@ function PracticeMcq() {
 
   if (total === 0) {
     return (
-      <div className="min-h-dvh grid place-items-center p-6 text-center">
+      <div className="min-h-dvh grid place-items-center p-6 text-center bg-background">
         <div>
-          <p className="text-muted-foreground">This practice set has no questions.</p>
-          <Link to="/" className="text-primary mt-2 inline-block font-medium">
+          <p className="text-muted-foreground font-medium">This practice set has no questions.</p>
+          <Link to="/" className="text-primary mt-2 inline-block font-semibold">
             Back home
           </Link>
         </div>
@@ -218,58 +218,65 @@ function PracticeMcq() {
     else submit(picks);
   }
 
-  const borderCls = answered ? (isCorrect ? "border-success" : "border-destructive") : "border-border/50";
+  // iOS delicate border glow styling based on correctness
+  const borderClass = answered
+    ? isCorrect
+      ? "border-success/40 shadow-[0_8px_32px_rgba(16,185,129,0.15)] bg-success/5"
+      : "border-destructive/40 shadow-[0_8px_32px_rgba(239,68,68,0.15)] bg-destructive/5"
+    : "border-border/30 shadow-[0_8px_32px_rgba(0,0,0,0.08)] bg-white/60 dark:bg-black/40";
 
   return (
-    <div className="h-dvh flex flex-col bg-background/50 overflow-hidden relative">
-      {/* Background Decor */}
-      <div className="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-primary/5 to-transparent -z-10 pointer-events-none" />
+    <div className="h-dvh flex flex-col bg-background overflow-hidden relative">
+      {/* Background Decor to give the glass something to blur */}
+      <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-primary/10 via-background to-secondary/10 -z-10 pointer-events-none" />
+      <div className="absolute -top-[20%] -left-[10%] w-[60%] h-[50%] rounded-full bg-primary/10 blur-[100px] -z-10 pointer-events-none" />
+      <div className="absolute top-[40%] -right-[20%] w-[50%] h-[60%] rounded-full bg-blue-500/10 blur-[120px] -z-10 pointer-events-none" />
 
-      {/* Glassmorphic Header */}
-      <header className="shrink-0 px-5 pt-4 pb-3 max-w-2xl w-full mx-auto backdrop-blur-xl bg-background/60 sticky top-0 z-50 border-b border-border/40">
-        <div className="flex items-center justify-between">
+      {/* Thin, ultra-blurry iOS Header */}
+      <header className="shrink-0 px-5 pt-safe pb-3 max-w-2xl w-full mx-auto backdrop-blur-2xl bg-white/40 dark:bg-black/40 sticky top-0 z-50 border-b border-border/20">
+        <div className="flex items-center justify-between mt-2">
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <button
                 type="button"
-                className="inline-flex items-center gap-1 rounded-full h-9 px-4 text-sm font-semibold border-2 border-b-[4px] border-destructive/80 text-destructive hover:-translate-y-0.5 hover:border-b-[5px] active:translate-y-[2px] active:border-b-[2px] transition-all duration-150 bg-background"
+                className="inline-flex items-center gap-1 rounded-full h-8 px-4 text-[13px] font-semibold text-destructive bg-destructive/10 border border-destructive/20 active:scale-95 transition-all"
               >
-                End Session <X className="h-4 w-4" />
+                End Session <X className="h-3.5 w-3.5" />
               </button>
             </AlertDialogTrigger>
-            <AlertDialogContent>
+            <AlertDialogContent className="rounded-[28px] backdrop-blur-3xl bg-white/80 dark:bg-black/80 border-white/20 shadow-2xl">
               <AlertDialogHeader>
-                <AlertDialogTitle>End this session?</AlertDialogTitle>
-                <AlertDialogDescription>
+                <AlertDialogTitle className="text-center text-xl">End Session?</AlertDialogTitle>
+                <AlertDialogDescription className="text-center">
                   You can keep going, or end now and see your summary. Unanswered questions stay unanswered.
                 </AlertDialogDescription>
               </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel className="bg-success text-success-foreground hover:bg-success/90 border-0">
-                  Continue
-                </AlertDialogCancel>
+              <AlertDialogFooter className="flex-col gap-2 mt-4 sm:space-x-0">
                 <AlertDialogAction
                   onClick={() => submit(picks)}
-                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  className="w-full rounded-2xl font-semibold bg-destructive hover:bg-destructive/90 text-white h-12 active:scale-95 transition-transform"
                 >
                   End session
                 </AlertDialogAction>
+                <AlertDialogCancel className="w-full rounded-2xl font-semibold bg-secondary/50 border-0 hover:bg-secondary/70 h-12 m-0 active:scale-95 transition-transform">
+                  Continue
+                </AlertDialogCancel>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-          <div className="text-sm tabular-nums font-bold text-foreground/80 bg-foreground/5 px-3 py-1 rounded-full border border-border/50">
-            {index + 1} / {total}
+          <div className="text-[13px] font-medium text-muted-foreground/80 tracking-widest bg-black/5 dark:bg-white/10 px-3 py-1 rounded-full border border-black/5 dark:border-white/5">
+            {index + 1} OF {total}
           </div>
         </div>
-        <div className="mt-4 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        <div className="mt-4 flex items-center gap-2 text-xs font-medium text-foreground/70">
           <span className="truncate">{test.name}</span>
           {review && (
-            <span className="shrink-0 rounded-full bg-primary/10 text-primary px-2.5 py-0.5 font-bold tracking-wide">
+            <span className="shrink-0 rounded-md bg-primary/15 text-primary px-1.5 py-0.5 font-semibold text-[10px] tracking-widest uppercase">
               REVIEW
             </span>
           )}
         </div>
-        <div className="mt-2.5 flex h-1.5 w-full overflow-hidden rounded-full bg-muted/60 shadow-inner">
+        <div className="mt-3 flex h-1 w-full overflow-hidden rounded-full bg-black/5 dark:bg-white/10">
           <div
             className="h-full bg-success transition-all duration-500 ease-out"
             style={{ width: `${(stats.correct / total) * 100}%` }}
@@ -281,36 +288,36 @@ function PracticeMcq() {
         </div>
       </header>
 
-      <main className="flex-1 min-h-0 flex flex-col px-5 pt-4 max-w-2xl w-full mx-auto pb-3">
-        <div className="w-full relative flex-1 min-h-0">
+      <main className="flex-1 min-h-0 flex flex-col px-5 pt-6 max-w-2xl w-full mx-auto pb-4">
+        <div className="w-full h-full relative [perspective:1200px]">
           <AnimatePresence mode="wait">
             <motion.div
               key={q.id}
-              initial={{ opacity: 0, scale: 0.96, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: -10 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-              className="w-full h-full"
+              initial={{ opacity: 0, scale: 0.94, filter: "blur(4px)" }}
+              animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+              exit={{ opacity: 0, scale: 0.94, filter: "blur(4px)" }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
+              className="w-full h-full relative"
             >
-              {/* Premium Card Container */}
+              {/* Premium iOS Glass Container */}
               <div
-                className={`h-full rounded-[28px] bg-card border-2 shadow-[0_8px_30px_rgba(0,0,0,0.06)] overflow-hidden transition-colors duration-300 ${borderCls}`}
+                className={`w-full h-full rounded-[36px] backdrop-blur-3xl border transition-colors duration-500 ${borderClass} overflow-hidden flex flex-col`}
               >
-                <ScrollArea className="h-full">
-                  <div className="p-6 md:p-8 space-y-6">
-                    <p className="text-[20px] md:text-2xl font-bold leading-snug text-balance text-foreground/90">
+                <ScrollArea className="h-full flex-1">
+                  <div className="p-7 md:p-8 space-y-6">
+                    <p className="text-[20px] md:text-[24px] font-semibold leading-tight text-balance text-foreground/90 tracking-tight">
                       {q.question}
                     </p>
 
                     {q.image_url && (
-                      <div className="relative rounded-2xl overflow-hidden border-2 border-border/50 shadow-sm">
+                      <div className="relative rounded-[24px] overflow-hidden border border-border/30 shadow-sm">
                         <img src={q.image_url} alt="" className="w-full aspect-[2/1] object-cover" />
                       </div>
                     )}
 
                     {q.hint && (
-                      <div className="bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 p-4 rounded-2xl text-[15px] leading-relaxed">
-                        <span className="font-bold flex items-center gap-1.5 mb-1">
+                      <div className="bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 p-4 rounded-[20px] text-[15px] font-medium leading-relaxed">
+                        <span className="font-bold flex items-center gap-1.5 mb-1.5 text-xs uppercase tracking-widest opacity-80">
                           <Sparkles className="h-4 w-4" /> Hint
                         </span>
                         {q.hint}
@@ -325,25 +332,21 @@ function PracticeMcq() {
 
                         const shakeCls = answered && isPick && !isAnswer ? "animate-shake" : "";
 
-                        // 3D Button Classes
+                        // iOS Option Buttons
                         let baseCls =
-                          "w-full text-left rounded-[20px] border-2 transition-all duration-150 flex items-start gap-4 px-5 py-4 ";
+                          "w-full text-left rounded-[24px] border transition-all duration-300 flex items-start gap-4 px-5 py-4 ";
 
                         if (!answered) {
-                          // Unclicked state: Hover off page, thick bottom border
                           baseCls +=
-                            "border-border border-b-[6px] bg-background hover:-translate-y-1 hover:border-b-[8px] active:translate-y-[4px] active:border-b-[2px] cursor-pointer shadow-sm";
+                            "border-border/30 bg-white/40 dark:bg-black/40 hover:bg-white/60 dark:hover:bg-black/60 active:scale-[0.98] shadow-sm backdrop-blur-md cursor-pointer";
                         } else {
-                          // Clicked State: Squished down into page
-                          baseCls += "translate-y-[4px] border-b-[2px] cursor-default ";
+                          baseCls += "cursor-default backdrop-blur-md ";
                           if (isAnswer) {
-                            baseCls +=
-                              "border-success bg-success/15 text-foreground shadow-[inset_0_0_0_1px_rgba(34,197,94,0.2)]";
+                            baseCls += "border-success/40 bg-success/15 text-foreground shadow-sm";
                           } else if (isPick) {
-                            baseCls +=
-                              "border-destructive bg-destructive/15 text-foreground shadow-[inset_0_0_0_1px_rgba(239,68,68,0.2)]";
+                            baseCls += "border-destructive/40 bg-destructive/15 text-foreground shadow-sm";
                           } else {
-                            baseCls += "opacity-50 border-border bg-background/50";
+                            baseCls += "opacity-50 border-border/20 bg-background/20";
                           }
                         }
 
@@ -356,14 +359,13 @@ function PracticeMcq() {
                             className={`${baseCls} ${shakeCls}`}
                           >
                             <div
-                              className={
-                                "h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-colors " +
-                                (answered && isAnswer
-                                  ? "bg-success text-success-foreground border-success"
+                              className={`h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-sm font-semibold border transition-colors ${
+                                answered && isAnswer
+                                  ? "bg-success text-white border-success"
                                   : answered && isPick
-                                    ? "bg-destructive text-destructive-foreground border-destructive"
-                                    : "bg-muted text-foreground/60 border-border")
-                              }
+                                    ? "bg-destructive text-white border-destructive"
+                                    : "bg-white/50 dark:bg-black/50 text-foreground/60 border-border/40"
+                              }`}
                             >
                               {answered && isAnswer ? (
                                 <Check className="h-4 w-4" strokeWidth={3} />
@@ -373,7 +375,7 @@ function PracticeMcq() {
                                 String.fromCharCode(64 + n)
                               )}
                             </div>
-                            <div className="text-[15px] font-medium leading-snug flex-1 min-w-0 whitespace-pre-wrap mt-1 text-foreground/90">
+                            <div className="text-[16px] font-medium leading-snug flex-1 min-w-0 whitespace-pre-wrap mt-1 text-foreground/90">
                               {text}
                             </div>
                           </button>
@@ -383,15 +385,16 @@ function PracticeMcq() {
 
                     {answered && (
                       <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: "auto" }}
-                        className="pt-6 mt-4 border-t-2 border-border/50 space-y-5"
+                        initial={{ opacity: 0, filter: "blur(4px)", y: 10 }}
+                        animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
+                        className="pt-6 mt-4 border-t border-border/20 space-y-5"
                       >
                         <div
-                          className={
-                            "text-[15px] font-bold inline-flex items-center gap-2 px-4 py-2 rounded-xl " +
-                            (isCorrect ? "bg-success/15 text-success" : "bg-destructive/15 text-destructive")
-                          }
+                          className={`text-[15px] font-semibold inline-flex items-center gap-2 px-4 py-2.5 rounded-[16px] border ${
+                            isCorrect
+                              ? "bg-success/10 text-success border-success/20"
+                              : "bg-destructive/10 text-destructive border-destructive/20"
+                          }`}
                         >
                           {isCorrect ? (
                             <>
@@ -405,13 +408,13 @@ function PracticeMcq() {
                         </div>
 
                         {q.explanation_sections.length > 0 && (
-                          <div className="space-y-4 bg-muted/30 p-5 rounded-2xl border border-border/40">
+                          <div className="space-y-5 bg-black/5 dark:bg-white/5 p-6 rounded-[24px] border border-border/10">
                             {q.explanation_sections.map((s, i) => (
                               <div key={i}>
-                                <div className="text-xs font-bold uppercase tracking-widest text-primary mb-1.5 opacity-80">
+                                <div className="text-[11px] font-semibold uppercase tracking-widest text-primary/70 mb-2">
                                   {s.title}
                                 </div>
-                                <p className="text-[15px] text-foreground/80 leading-relaxed whitespace-pre-wrap">
+                                <p className="text-[15px] text-foreground/70 leading-relaxed whitespace-pre-wrap">
                                   {s.body}
                                 </p>
                               </div>
@@ -426,15 +429,15 @@ function PracticeMcq() {
             </motion.div>
           </AnimatePresence>
 
-          {/* Navigation Overlay Buttons */}
+          {/* Minimal Floating Nav Controls */}
           {index > 0 && (
             <button
               type="button"
               onClick={goPrev}
               aria-label="Previous question"
-              className="absolute left-2 top-1/2 -translate-y-1/2 z-10 h-12 w-12 rounded-full bg-background/80 backdrop-blur-md border-2 border-border shadow-lg flex items-center justify-center hover:scale-110 active:scale-95 transition-all"
+              className="absolute -left-3 top-1/2 -translate-y-1/2 z-10 h-14 w-14 rounded-full bg-white/20 dark:bg-black/20 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] flex items-center justify-center active:scale-90 transition-all"
             >
-              <ChevronLeft className="h-6 w-6 text-foreground/70" />
+              <ChevronLeft className="h-6 w-6 text-foreground/80 ml-[-2px]" />
             </button>
           )}
           {answered && index < total - 1 && (
@@ -442,19 +445,20 @@ function PracticeMcq() {
               type="button"
               onClick={goNext}
               aria-label="Next question"
-              className="absolute right-2 top-1/2 -translate-y-1/2 z-10 h-12 w-12 rounded-full bg-background/80 backdrop-blur-md border-2 border-border shadow-lg flex items-center justify-center hover:scale-110 active:scale-95 transition-all animate-in zoom-in duration-300"
+              className="absolute -right-3 top-1/2 -translate-y-1/2 z-10 h-14 w-14 rounded-full bg-white/20 dark:bg-black/20 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] flex items-center justify-center active:scale-90 transition-all animate-in zoom-in duration-300"
             >
-              <ChevronRight className="h-6 w-6 text-foreground/70" />
+              <ChevronRight className="h-6 w-6 text-foreground/80 mr-[-2px]" />
             </button>
           )}
         </div>
       </main>
 
-      <footer className="shrink-0 px-5 pb-6 pt-3 max-w-2xl w-full mx-auto relative z-10">
+      {/* iOS Floating Footer */}
+      <footer className="shrink-0 px-5 pb-safe pt-2 max-w-2xl w-full mx-auto relative z-10 mb-6">
         <button
           onClick={goNext}
           disabled={!answered}
-          className="w-full h-14 rounded-2xl bg-primary text-primary-foreground font-bold text-lg border-b-[5px] border-primary/80 hover:-translate-y-1 hover:border-b-[6px] active:translate-y-[4px] active:border-b-0 shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:border-b-0"
+          className="w-full h-[52px] rounded-[24px] bg-primary/10 text-primary font-semibold text-[17px] border border-primary/20 backdrop-blur-xl hover:bg-primary/20 active:scale-[0.98] transition-all shadow-[0_4px_24px_rgba(var(--primary),0.1)] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
         >
           {!answered ? "Pick an answer" : index >= total - 1 ? "Finish Session" : "Next Question"}
         </button>
