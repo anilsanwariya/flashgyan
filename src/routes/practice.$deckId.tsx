@@ -95,8 +95,10 @@ function Practice() {
     }
     return shuffle(cardsRaw);
   });
+
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false); // Prevents multi-clicks during delay
   const [cardRatings, setCardRatings] = useState<(Rating | null)[]>(() => cards.map(() => null));
   const [priorRatings] = useState<(Rating | null)[]>(() => {
     if (!review) return cards.map(() => null);
@@ -115,14 +117,14 @@ function Practice() {
   const currentRating = cardRatings[index];
   const displayRating = currentRating ?? priorRatings[index];
 
-  // iOS delicate border glow styling based on rating
+  // iOS delicate border glow styling with slightly higher opacity for immediate feedback
   const borderClass =
     displayRating === "hard"
-      ? "border-destructive/40 shadow-[0_8px_32px_rgba(239,68,68,0.15)] bg-destructive/5"
+      ? "border-destructive/60 shadow-[0_8px_32px_rgba(239,68,68,0.25)] bg-destructive/10"
       : displayRating === "medium"
-        ? "border-warning/40 shadow-[0_8px_32px_rgba(245,158,11,0.15)] bg-warning/5"
+        ? "border-warning/60 shadow-[0_8px_32px_rgba(245,158,11,0.25)] bg-warning/10"
         : displayRating === "easy"
-          ? "border-success/40 shadow-[0_8px_32px_rgba(16,185,129,0.15)] bg-success/5"
+          ? "border-success/60 shadow-[0_8px_32px_rgba(16,185,129,0.25)] bg-success/10"
           : "border-border/30 shadow-[0_8px_32px_rgba(0,0,0,0.08)] bg-white/60 dark:bg-black/40";
 
   useEffect(() => {
@@ -197,21 +199,36 @@ function Practice() {
   }
 
   function rate(r: Rating) {
+    if (isTransitioning) return; // Prevent double-clicking
+
+    // 1. INSTANT STATE UPDATE: This instantly applies the colored `borderClass`
     const next = cardRatings.slice();
     next[index] = r;
     setCardRatings(next);
+
+    // 2. DELAYED NAVIGATION: Wait 450ms so the user can see the card glow,
+    // before the AnimatePresence pushes it off screen.
     if (index < total - 1) {
-      setIndex(index + 1);
+      setIsTransitioning(true);
+      setTimeout(() => {
+        setIndex(index + 1);
+        setIsTransitioning(false);
+      }, 450);
     } else if (next.every((x) => x !== null)) {
-      submit(next);
+      setIsTransitioning(true);
+      setTimeout(() => {
+        submit(next);
+      }, 450);
     }
   }
 
   function goPrev() {
+    if (isTransitioning) return;
     if (index > 0) setIndex(index - 1);
   }
 
   function goNext() {
+    if (isTransitioning) return;
     if (currentRating === null) return;
     if (index < total - 1) setIndex(index + 1);
   }
@@ -305,14 +322,14 @@ function Practice() {
                 className="w-full h-full relative"
                 style={{ transformStyle: "preserve-3d" }}
               >
-                {/* FRONT CARD */}
+                {/* FRONT CARD (Note the transition-all duration-200 for instant color snaps) */}
                 <div
-                  className={`absolute inset-0 w-full h-full rounded-[36px] backdrop-blur-3xl border transition-colors duration-500 ${borderClass} overflow-hidden flex flex-col`}
+                  className={`absolute inset-0 w-full h-full rounded-[36px] backdrop-blur-3xl border transition-all duration-200 ease-out ${borderClass} overflow-hidden flex flex-col`}
                   style={{
                     backfaceVisibility: "hidden",
                     WebkitBackfaceVisibility: "hidden",
-                    transform: "translateZ(1px)", // Solves Z-fighting
-                    zIndex: flipped ? 0 : 10, // Prevents blurred bleed-through
+                    transform: "translateZ(1px)",
+                    zIndex: flipped ? 0 : 10,
                     pointerEvents: flipped ? "none" : "auto",
                   }}
                 >
@@ -337,12 +354,12 @@ function Practice() {
 
                 {/* BACK CARD */}
                 <div
-                  className={`absolute inset-0 w-full h-full rounded-[36px] backdrop-blur-3xl border transition-colors duration-500 ${borderClass} overflow-hidden flex flex-col`}
+                  className={`absolute inset-0 w-full h-full rounded-[36px] backdrop-blur-3xl border transition-all duration-200 ease-out ${borderClass} overflow-hidden flex flex-col`}
                   style={{
                     backfaceVisibility: "hidden",
                     WebkitBackfaceVisibility: "hidden",
-                    transform: "rotateY(180deg) translateZ(1px)", // Flips backface correctly
-                    zIndex: flipped ? 10 : 0, // Drops underneath when inactive
+                    transform: "rotateY(180deg) translateZ(1px)",
+                    zIndex: flipped ? 10 : 0,
                     pointerEvents: flipped ? "auto" : "none",
                   }}
                 >
@@ -415,21 +432,21 @@ function Practice() {
               label="Hard"
               tone="destructive"
               onClick={() => rate("hard")}
-              disabled={currentRating !== null}
+              disabled={isTransitioning}
               active={currentRating === "hard"}
             />
             <RatingButton
               label="Medium"
               tone="warning"
               onClick={() => rate("medium")}
-              disabled={currentRating !== null}
+              disabled={isTransitioning}
               active={currentRating === "medium"}
             />
             <RatingButton
               label="Easy"
               tone="success"
               onClick={() => rate("easy")}
-              disabled={currentRating !== null}
+              disabled={isTransitioning}
               active={currentRating === "easy"}
             />
           </div>
@@ -468,7 +485,6 @@ function RatingButton({
   const isDestructive = tone === "destructive";
   const isWarning = tone === "warning";
 
-  // iOS Apple-style translucent, scaling buttons
   const bgCls = isDestructive
     ? active
       ? "bg-destructive text-white shadow-md border-transparent"
@@ -484,7 +500,7 @@ function RatingButton({
   const stateCls = disabled
     ? active
       ? "opacity-100"
-      : "opacity-40 cursor-not-allowed"
+      : "opacity-50 cursor-not-allowed"
     : "cursor-pointer active:scale-95";
 
   return (
