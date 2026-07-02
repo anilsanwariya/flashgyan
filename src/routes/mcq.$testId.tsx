@@ -66,27 +66,11 @@ function TakeTest() {
   const q = questions[index];
   const pick = picks[index];
 
-  // Only scroll if the active button is out of view.
-  useEffect(() => {
-    if (!paletteRef.current) return;
-
-    const palette = paletteRef.current;
-    const activeBtn = palette.children[index] as HTMLElement;
-    if (!activeBtn) return;
-
-    // Stop scrolling if we are in the last 5 questions
-    if (index >= questions.length - 5) return;
-
-    const btnLeft = activeBtn.offsetLeft;
-    const btnWidth = activeBtn.offsetWidth;
-    const paletteScroll = palette.scrollLeft;
-    const paletteWidth = palette.offsetWidth;
-
-    // Optimized: Only scroll if the active button is partially hidden
+  // Optimized: Only scroll if the active button is partially hidden
   // Removed the "last 5" restriction so it always keeps the current button in view
   useEffect(() => {
     if (!paletteRef.current || questions.length === 0) return;
-    
+
     const palette = paletteRef.current;
     const activeBtn = palette.children[index] as HTMLElement;
     if (!activeBtn) return;
@@ -98,13 +82,13 @@ function TakeTest() {
 
     // Check if the button is partially hidden to the left or right
     const isHiddenLeft = btnLeft < paletteScroll;
-    const isHiddenRight = (btnLeft + btnWidth) > (paletteScroll + paletteWidth);
+    const isHiddenRight = btnLeft + btnWidth > paletteScroll + paletteWidth;
 
     // Only trigger scroll if it's actually clipped
     if (isHiddenLeft || isHiddenRight) {
       palette.scrollTo({
-        left: btnLeft - (paletteWidth / 2) + (btnWidth / 2),
-        behavior: "smooth"
+        left: btnLeft - paletteWidth / 2 + btnWidth / 2,
+        behavior: "smooth",
       });
     }
   }, [index, questions.length]);
@@ -177,7 +161,7 @@ function TakeTest() {
       <div className="absolute -top-[20%] -left-[10%] w-[60%] h-[50%] rounded-full bg-primary/10 blur-[100px] -z-10 pointer-events-none" />
       <div className="absolute top-[40%] -right-[20%] w-[50%] h-[60%] rounded-full bg-blue-500/10 blur-[120px] -z-10 pointer-events-none" />
 
-      {/* iOS Glass Header - FIXED: Using standard pt-4 pb-3 instead of pt-safe */}
+      {/* iOS Glass Header */}
       <header className="shrink-0 px-5 pt-4 pb-3 max-w-2xl w-full mx-auto backdrop-blur-2xl bg-white/40 dark:bg-black/40 z-50 border-b border-border/20 flex items-center justify-between">
         {/* Left: Quit */}
         <AlertDialog>
@@ -261,7 +245,6 @@ function TakeTest() {
           </span>
         </div>
 
-        {/* FIXED: Removed absolute inset-0 from children so flexbox handles heights perfectly */}
         <div className="w-full h-full relative [perspective:1200px] flex-1 min-h-0 flex flex-col">
           <AnimatePresence mode="wait">
             <motion.div
@@ -395,7 +378,7 @@ function TakeTest() {
         </div>
       </main>
 
-      {/* iOS Floating Footer: Question Palette - FIXED: Standard pb-6 instead of pb-safe */}
+      {/* iOS Floating Footer: Question Palette */}
       <footer className="shrink-0 px-5 pb-6 pt-1 max-w-2xl w-full mx-auto relative z-10">
         <div
           ref={paletteRef}
