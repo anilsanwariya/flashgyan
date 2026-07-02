@@ -17,11 +17,29 @@ function TelegramExpander() {
       tg?.ready();
       tg?.expand();
       
-      // 1. Inject class for the notch fix
+      // Inject class for the notch fix
       document.body.classList.add("tg-mini-app");
       
-      // 2. Protect the app from being aggressively killed in the background
+      // Protect the app from being aggressively killed in the background
       tg?.enableClosingConfirmation(); 
+
+      // 🚀 THE FIX: Wake up the GPU and viewport when returning from minimized state
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === "visible") {
+          // 1. Force Telegram to re-expand in case it collapsed
+          tg?.expand();
+          // 2. Force the browser to recalculate layout and redraw the blank screen
+          window.dispatchEvent(new Event("resize"));
+        }
+      };
+
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+      tg?.onEvent("viewportChanged", () => tg.expand()); // Keep it expanded if keyboard alters viewport
+
+      return () => {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+        tg?.offEvent("viewportChanged", () => tg.expand());
+      };
     }
   }, []);
 
