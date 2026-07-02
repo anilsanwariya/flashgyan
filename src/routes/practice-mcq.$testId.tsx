@@ -88,6 +88,10 @@ function PracticeMcq() {
 
   const [index, setIndex] = useState(0);
   const [picks, setPicks] = useState<(number | null)[]>(() => questions.map(() => null));
+
+  // Track cards that have been answered AND navigated away from
+  const [historicAnswers, setHistoricAnswers] = useState<boolean[]>(() => questions.map(() => false));
+
   const startedAt = useRef(Date.now());
 
   const total = questions.length;
@@ -132,11 +136,11 @@ function PracticeMcq() {
     if (answered) return;
     const next = picks.slice();
     next[index] = opt;
-    setPicks(next); // UI updates instantly now
+    setPicks(next);
 
     const correct = opt === q.answer;
 
-    // Defer heavy side-effects so they don't block the React render cycle
+    // Use a tiny timeout to ensure React paints the inner buttons FIRST, before doing heavy confetti math
     setTimeout(() => {
       if (correct) {
         triggerHaptic("success");
@@ -218,29 +222,45 @@ function PracticeMcq() {
   }
 
   function goPrev() {
+    if (answered) {
+      setHistoricAnswers((prev) => {
+        const next = [...prev];
+        next[index] = true;
+        return next;
+      });
+    }
     if (index > 0) setIndex(index - 1);
   }
+
   function goNext() {
     if (!answered) return;
+    setHistoricAnswers((prev) => {
+      const next = [...prev];
+      next[index] = true;
+      return next;
+    });
     if (index < total - 1) setIndex(index + 1);
     else submit(picks);
   }
 
-  // iOS delicate border glow styling based on correctness
-  const borderClass = answered
-    ? isCorrect
-      ? "border-success/40 shadow-[0_8px_32px_rgba(16,185,129,0.15)] bg-success/5"
-      : "border-destructive/40 shadow-[0_8px_32px_rgba(239,68,68,0.15)] bg-destructive/5"
-    : "border-border/30 shadow-[0_8px_32px_rgba(0,0,0,0.08)] bg-white/60 dark:bg-black/40";
+  // OPTIMIZATION: We only apply the heavy glowing border logic if the user is reviewing a PREVIOUSLY answered card.
+  // During the active question, the outer glass card remains neutral to avoid a massive DOM repaint lag.
+  const isHistoric = historicAnswers[index];
+  const borderClass =
+    isHistoric && answered
+      ? isCorrect
+        ? "border-success/40 shadow-[0_8px_32px_rgba(16,185,129,0.15)] bg-success/5"
+        : "border-destructive/40 shadow-[0_8px_32px_rgba(239,68,68,0.15)] bg-destructive/5"
+      : "border-border/30 shadow-[0_8px_32px_rgba(0,0,0,0.08)] bg-white/60 dark:bg-black/40";
 
   return (
     <div className="h-dvh flex flex-col bg-background overflow-hidden relative">
-      {/* Background Decor to give the glass something to blur */}
+      {/* Background Decor */}
       <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-primary/10 via-background to-secondary/10 -z-10 pointer-events-none" />
       <div className="absolute -top-[20%] -left-[10%] w-[60%] h-[50%] rounded-full bg-primary/10 blur-[100px] -z-10 pointer-events-none" />
       <div className="absolute top-[40%] -right-[20%] w-[50%] h-[60%] rounded-full bg-blue-500/10 blur-[120px] -z-10 pointer-events-none" />
 
-      {/* Thin, ultra-blurry iOS Header */}
+      {/* iOS Header */}
       <header className="shrink-0 px-5 pt-safe pb-3 max-w-2xl w-full mx-auto backdrop-blur-2xl bg-white/40 dark:bg-black/40 sticky top-0 z-50 border-b border-border/20">
         <div className="flex items-center justify-between mt-2">
           <AlertDialog>
