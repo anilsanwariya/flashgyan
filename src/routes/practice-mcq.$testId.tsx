@@ -88,10 +88,7 @@ function PracticeMcq() {
 
   const [index, setIndex] = useState(0);
   const [picks, setPicks] = useState<(number | null)[]>(() => questions.map(() => null));
-
-  // Track cards that have been answered AND navigated away from
   const [historicAnswers, setHistoricAnswers] = useState<boolean[]>(() => questions.map(() => false));
-
   const startedAt = useRef(Date.now());
 
   const total = questions.length;
@@ -134,27 +131,42 @@ function PracticeMcq() {
 
   function onPick(opt: number) {
     if (answered) return;
+
+    // 1. Immediately update UI state so React starts painting instantly
     const next = picks.slice();
     next[index] = opt;
     setPicks(next);
 
     const correct = opt === q.answer;
 
-    // Use a tiny timeout to ensure React paints the inner buttons FIRST, before doing heavy confetti math
-    setTimeout(() => {
-      if (correct) {
-        triggerHaptic("success");
-        confetti({
-          particleCount: 50,
-          spread: 60,
-          origin: { y: 0.8 },
-          disableForReducedMotion: true,
-        });
-      } else {
-        triggerHaptic("error");
-      }
-      recordRating(q.id, correct ? "easy" : "hard");
-    }, 10);
+    // 2. Yield to the browser's paint cycle TWICE to guarantee the green/red button
+    //    is physically visible on the screen before we do heavy math.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        // 3. Fire Confetti (using a Web Worker so it doesn't lag CSS transitions)
+        if (correct) {
+          triggerHaptic("success");
+          try {
+            confetti({
+              particleCount: 50,
+              spread: 60,
+              origin: { y: 0.8 },
+              disableForReducedMotion: true,
+              useWorker: true, // MAGIC BULLET: Offloads physics to background thread
+            });
+          } catch (e) {
+            // Silently fail if worker isn't supported
+          }
+        } else {
+          triggerHaptic("error");
+        }
+
+        // 4. Push the synchronous localStorage write to the very back of the event queue
+        setTimeout(() => {
+          recordRating(q.id, correct ? "easy" : "hard");
+        }, 150);
+      });
+    });
   }
 
   function submit(finalPicks: (number | null)[]) {
@@ -243,8 +255,6 @@ function PracticeMcq() {
     else submit(picks);
   }
 
-  // OPTIMIZATION: We only apply the heavy glowing border logic if the user is reviewing a PREVIOUSLY answered card.
-  // During the active question, the outer glass card remains neutral to avoid a massive DOM repaint lag.
   const isHistoric = historicAnswers[index];
   const borderClass =
     isHistoric && answered
@@ -255,12 +265,10 @@ function PracticeMcq() {
 
   return (
     <div className="h-dvh flex flex-col bg-background overflow-hidden relative">
-      {/* Background Decor */}
       <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-primary/10 via-background to-secondary/10 -z-10 pointer-events-none" />
       <div className="absolute -top-[20%] -left-[10%] w-[60%] h-[50%] rounded-full bg-primary/10 blur-[100px] -z-10 pointer-events-none" />
       <div className="absolute top-[40%] -right-[20%] w-[50%] h-[60%] rounded-full bg-blue-500/10 blur-[120px] -z-10 pointer-events-none" />
 
-      {/* iOS Header */}
       <header className="shrink-0 px-5 pt-safe pb-3 max-w-2xl w-full mx-auto backdrop-blur-2xl bg-white/40 dark:bg-black/40 sticky top-0 z-50 border-b border-border/20">
         <div className="flex items-center justify-between mt-2">
           <AlertDialog>
@@ -327,7 +335,6 @@ function PracticeMcq() {
               transition={{ duration: 0.3, ease: "easeOut" }}
               className="w-full h-full relative"
             >
-              {/* Premium iOS Glass Container */}
               <div
                 className={`w-full h-full rounded-[36px] backdrop-blur-3xl border transition-colors duration-500 ${borderClass} overflow-hidden flex flex-col`}
               >
@@ -360,7 +367,6 @@ function PracticeMcq() {
 
                         const shakeCls = answered && isPick && !isAnswer ? "animate-shake" : "";
 
-                        // iOS Option Buttons
                         let baseCls =
                           "w-full text-left rounded-[24px] border transition-all duration-300 flex items-start gap-4 px-5 py-4 ";
 
@@ -457,7 +463,6 @@ function PracticeMcq() {
             </motion.div>
           </AnimatePresence>
 
-          {/* Minimal Floating Nav Controls */}
           {index > 0 && (
             <button
               type="button"
@@ -481,7 +486,6 @@ function PracticeMcq() {
         </div>
       </main>
 
-      {/* iOS Floating Footer */}
       <footer className="shrink-0 px-5 pb-safe pt-2 max-w-2xl w-full mx-auto relative z-10 mb-6">
         <button
           onClick={goNext}
