@@ -131,14 +131,12 @@ function PracticeMcq() {
   function onPick(opt: number) {
     if (answered) return;
 
-    // 1. INSTANT STATE UPDATE
     const next = picks.slice();
     next[index] = opt;
     setPicks(next);
 
     const correct = opt === q.answer;
 
-    // 2. INSTANT CONFETTI & HAPTICS (Using web worker to avoid lagging the UI thread)
     if (correct) {
       triggerHaptic("success");
       try {
@@ -156,7 +154,6 @@ function PracticeMcq() {
       triggerHaptic("error");
     }
 
-    // 3. DEFER STORAGE SAVE so it doesn't block the click animation
     setTimeout(() => {
       recordRating(q.id, correct ? "easy" : "hard");
     }, 100);
@@ -236,8 +233,6 @@ function PracticeMcq() {
     else submit(picks);
   }
 
-  // OPTIMIZATION: The background color of the glass card is strictly locked to white/black.
-  // ONLY the border and shadow change color. This eliminates massive DOM repaints.
   const baseBg = "bg-white/60 dark:bg-black/40";
   const borderClass = answered
     ? isCorrect
@@ -251,6 +246,7 @@ function PracticeMcq() {
       <div className="absolute -top-[20%] -left-[10%] w-[60%] h-[50%] rounded-full bg-primary/10 blur-[100px] -z-10 pointer-events-none" />
       <div className="absolute top-[40%] -right-[20%] w-[50%] h-[60%] rounded-full bg-blue-500/10 blur-[120px] -z-10 pointer-events-none" />
 
+      {/* FIXED Padding */}
       <header className="shrink-0 px-5 pt-4 pb-3 max-w-2xl w-full mx-auto backdrop-blur-2xl bg-white/40 dark:bg-black/40 sticky top-0 z-50 border-b border-border/20">
         <div className="flex items-center justify-between mt-2">
           <AlertDialog>
@@ -262,26 +258,29 @@ function PracticeMcq() {
                 End Session <X className="h-3.5 w-3.5" />
               </button>
             </AlertDialogTrigger>
-            <AlertDialogContent className="rounded-[28px] backdrop-blur-3xl bg-white/80 dark:bg-black/80 border-white/20 shadow-2xl">
+            <AlertDialogContent className="rounded-[32px] backdrop-blur-3xl bg-white/80 dark:bg-black/80 border border-white/20 dark:border-white/10 shadow-2xl p-6 sm:max-w-sm">
               <AlertDialogHeader>
-                <AlertDialogTitle className="text-center text-xl">End Session?</AlertDialogTitle>
-                <AlertDialogDescription className="text-center">
+                <AlertDialogTitle className="text-xl font-bold text-foreground text-center tracking-tight">
+                  End Session?
+                </AlertDialogTitle>
+                <AlertDialogDescription className="text-[14px] text-center text-muted-foreground mt-1.5 leading-snug">
                   You can keep going, or end now and see your summary. Unanswered questions stay unanswered.
                 </AlertDialogDescription>
               </AlertDialogHeader>
-              <AlertDialogFooter className="flex-col gap-2 mt-4 sm:space-x-0">
+              <AlertDialogFooter className="flex-col gap-3 pt-4 sm:space-x-0">
                 <AlertDialogAction
                   onClick={() => submit(picks)}
-                  className="w-full rounded-2xl font-semibold bg-destructive hover:bg-destructive/90 text-white h-12 active:scale-95 transition-transform"
+                  className="w-full h-[52px] rounded-[24px] bg-destructive text-white font-semibold text-[16px] shadow-[0_4px_24px_rgba(239,68,68,0.25)] active:scale-[0.98] transition-all"
                 >
                   End session
                 </AlertDialogAction>
-                <AlertDialogCancel className="w-full rounded-2xl font-semibold bg-secondary/50 border-0 hover:bg-secondary/70 h-12 m-0 active:scale-95 transition-transform">
+                <AlertDialogCancel className="w-full h-[48px] m-0 rounded-[20px] font-semibold bg-secondary/50 text-secondary-foreground border border-border/30 hover:bg-secondary/70 active:scale-[0.98] transition-all">
                   Continue
                 </AlertDialogCancel>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+
           <div className="text-[13px] font-medium text-muted-foreground/80 tracking-widest bg-black/5 dark:bg-white/10 px-3 py-1 rounded-full border border-black/5 dark:border-white/5">
             {index + 1} OF {total}
           </div>
@@ -469,6 +468,7 @@ function PracticeMcq() {
         </div>
       </main>
 
+      {/* FIXED Padding */}
       <footer className="shrink-0 px-5 pb-6 pt-2 max-w-2xl w-full mx-auto relative z-10 mb-2">
         <button
           onClick={goNext}
