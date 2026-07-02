@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import finalLogo from "@/assets/final-logo.png";
 import tgIcon from "@/assets/tg-icon.svg";
 import { useDisplayName } from "@/hooks/use-auth";
+<script src="https://telegram.org/js/telegram-web-app.js"></script>;
 
 const homeQO = queryOptions({ queryKey: ["homeData"], queryFn: () => getHomeData() });
 
