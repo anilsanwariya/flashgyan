@@ -469,7 +469,7 @@ function PracticeMcq() {
         </div>
       </main>
 
-      <footer className="shrink-0 px-5 pb-safe pt-2 max-w-2xl w-full mx-auto relative z-10 mb-6">
+      <footer className="shrink-0 px-5 pb-6 pt-2 max-w-2xl w-full mx-auto relative z-10 mb-2">
         <button
           onClick={goNext}
           disabled={!answered}
