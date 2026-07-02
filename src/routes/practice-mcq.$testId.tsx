@@ -132,17 +132,25 @@ function PracticeMcq() {
     if (answered) return;
     const next = picks.slice();
     next[index] = opt;
-    setPicks(next);
+    setPicks(next); // UI updates instantly now
 
     const correct = opt === q.answer;
-    if (correct) {
-      triggerHaptic("success");
-      confetti({ particleCount: 50, spread: 60, origin: { y: 0.8 } });
-    } else {
-      triggerHaptic("error");
-    }
 
-    recordRating(q.id, correct ? "easy" : "hard");
+    // Defer heavy side-effects so they don't block the React render cycle
+    setTimeout(() => {
+      if (correct) {
+        triggerHaptic("success");
+        confetti({
+          particleCount: 50,
+          spread: 60,
+          origin: { y: 0.8 },
+          disableForReducedMotion: true,
+        });
+      } else {
+        triggerHaptic("error");
+      }
+      recordRating(q.id, correct ? "easy" : "hard");
+    }, 10);
   }
 
   function submit(finalPicks: (number | null)[]) {
