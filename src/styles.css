@@ -1,6 +1,7 @@
 @import "tailwindcss" source(none);
-@source "../src";
 @import "tw-animate-css";
+
+@source "../src";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -76,9 +77,9 @@
 
   /* Pastel gradient tokens */
   --grad-pink: linear-gradient(135deg, oklch(0.92 0.06 15) 0%, oklch(0.88 0.08 0) 100%);
-  --grad-lavender: linear-gradient(135deg, oklch(0.90 0.07 295) 0%, oklch(0.88 0.06 270) 100%);
-  --grad-peach: linear-gradient(135deg, oklch(0.93 0.06 70) 0%, oklch(0.90 0.07 20) 100%);
-  --grad-mint: linear-gradient(135deg, oklch(0.92 0.06 165) 0%, oklch(0.90 0.05 220) 100%);
+  --grad-lavender: linear-gradient(135deg, oklch(0.9 0.07 295) 0%, oklch(0.88 0.06 270) 100%);
+  --grad-peach: linear-gradient(135deg, oklch(0.93 0.06 70) 0%, oklch(0.9 0.07 20) 100%);
+  --grad-mint: linear-gradient(135deg, oklch(0.92 0.06 165) 0%, oklch(0.9 0.05 220) 100%);
 
   --shadow-soft: 0 10px 30px -18px oklch(0.3 0.05 280 / 0.25);
 }
@@ -110,21 +111,42 @@
 }
 
 @layer base {
-  * { border-color: var(--color-border); }
-  html, body { background-color: var(--color-background); color: var(--color-foreground); }
-  body { font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
-  h1, h2, .display {
+  * {
+    border-color: var(--color-border);
+  }
+  html,
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+  }
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  h1,
+  h2,
+  .display {
     font-family: var(--font-serif);
     letter-spacing: -0.02em;
   }
 }
 
 /* Pastel gradient utilities */
-@utility grad-pink { background-image: var(--grad-pink); }
-@utility grad-lavender { background-image: var(--grad-lavender); }
-@utility grad-peach { background-image: var(--grad-peach); }
-@utility grad-mint { background-image: var(--grad-mint); }
-@utility shadow-soft { box-shadow: var(--shadow-soft); }
+@utility grad-pink {
+  background-image: var(--grad-pink);
+}
+@utility grad-lavender {
+  background-image: var(--grad-lavender);
+}
+@utility grad-peach {
+  background-image: var(--grad-peach);
+}
+@utility grad-mint {
+  background-image: var(--grad-mint);
+}
+@utility shadow-soft {
+  box-shadow: var(--shadow-soft);
+}
 
 /* 3D flip helpers */
 @utility perspective-1000 {
@@ -142,16 +164,32 @@
 }
 @utility no-scrollbar {
   scrollbar-width: none;
-  &::-webkit-scrollbar { display: none; }
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* Custom Shake Animation for Incorrect MCQ Answers */
 @keyframes shake {
-  0%, 100% { transform: translateX(0); }
-  10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
-  20%, 40%, 60%, 80% { transform: translateX(4px); }
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  10%,
+  30%,
+  50%,
+  70%,
+  90% {
+    transform: translateX(-4px);
+  }
+  20%,
+  40%,
+  60%,
+  80% {
+    transform: translateX(4px);
+  }
 }
 
 .animate-shake {
-  animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both;
+  animation: shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
 }
