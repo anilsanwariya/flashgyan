@@ -66,8 +66,7 @@ function TakeTest() {
   const q = questions[index];
   const pick = picks[index];
 
-  // Optimized: Only scroll if the active button is partially hidden
-  // Removed the "last 5" restriction so it always keeps the current button in view
+  // Optimized scroll logic
   useEffect(() => {
     if (!paletteRef.current || questions.length === 0) return;
 
@@ -80,11 +79,9 @@ function TakeTest() {
     const paletteScroll = palette.scrollLeft;
     const paletteWidth = palette.offsetWidth;
 
-    // Check if the button is partially hidden to the left or right
     const isHiddenLeft = btnLeft < paletteScroll;
     const isHiddenRight = btnLeft + btnWidth > paletteScroll + paletteWidth;
 
-    // Only trigger scroll if it's actually clipped
     if (isHiddenLeft || isHiddenRight) {
       palette.scrollTo({
         left: btnLeft - paletteWidth / 2 + btnWidth / 2,
@@ -118,7 +115,6 @@ function TakeTest() {
     setPicks(next);
     triggerHaptic("success");
 
-    // Auto-advance if not the last question
     if (index < total - 1) {
       setTimeout(() => setIndex(index + 1), 350);
     }
@@ -152,18 +148,16 @@ function TakeTest() {
   }
 
   const answeredCount = picks.filter((x) => x !== null).length;
-  const isUrgent = timeLeft < 60; // Less than 1 minute remaining
+  const isUrgent = timeLeft < 60;
 
   return (
     <div className="h-[100dvh] w-full flex flex-col bg-background overflow-hidden relative">
-      {/* Background Decor */}
       <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-primary/10 via-background to-secondary/10 -z-10 pointer-events-none" />
       <div className="absolute -top-[20%] -left-[10%] w-[60%] h-[50%] rounded-full bg-primary/10 blur-[100px] -z-10 pointer-events-none" />
       <div className="absolute top-[40%] -right-[20%] w-[50%] h-[60%] rounded-full bg-blue-500/10 blur-[120px] -z-10 pointer-events-none" />
 
-      {/* iOS Glass Header */}
+      {/* FIXED Padding pt-4 pb-3 */}
       <header className="shrink-0 px-5 pt-4 pb-3 max-w-2xl w-full mx-auto backdrop-blur-2xl bg-white/40 dark:bg-black/40 z-50 border-b border-border/20 flex items-center justify-between">
-        {/* Left: Quit */}
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <button
@@ -173,28 +167,29 @@ function TakeTest() {
               <X className="h-3.5 w-3.5" /> Quit
             </button>
           </AlertDialogTrigger>
-          <AlertDialogContent className="rounded-[28px] backdrop-blur-3xl bg-white/80 dark:bg-black/80 border-white/20 shadow-2xl">
+          <AlertDialogContent className="rounded-[32px] backdrop-blur-3xl bg-white/80 dark:bg-black/80 border border-white/20 dark:border-white/10 shadow-2xl p-6 sm:max-w-sm">
             <AlertDialogHeader>
-              <AlertDialogTitle className="text-center text-xl">Quit Test?</AlertDialogTitle>
-              <AlertDialogDescription className="text-center">
+              <AlertDialogTitle className="text-xl font-bold text-foreground text-center tracking-tight">
+                Quit Test?
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-[14px] text-center text-muted-foreground mt-1.5 leading-snug">
                 Your progress will be lost. Are you sure you want to exit?
               </AlertDialogDescription>
             </AlertDialogHeader>
-            <AlertDialogFooter className="flex-col gap-2 mt-4 sm:space-x-0">
+            <AlertDialogFooter className="flex-col gap-3 pt-4 sm:space-x-0">
               <AlertDialogAction
                 onClick={() => navigate({ to: "/mcq-tests" })}
-                className="w-full rounded-2xl font-semibold bg-destructive hover:bg-destructive/90 text-white h-12 active:scale-95 transition-transform"
+                className="w-full h-[52px] rounded-[24px] bg-destructive text-white font-semibold text-[16px] shadow-[0_4px_24px_rgba(239,68,68,0.25)] active:scale-[0.98] transition-all"
               >
                 Yes, Quit
               </AlertDialogAction>
-              <AlertDialogCancel className="w-full rounded-2xl font-semibold bg-secondary/50 border-0 hover:bg-secondary/70 h-12 m-0 active:scale-95 transition-transform">
+              <AlertDialogCancel className="w-full h-[48px] m-0 rounded-[20px] font-semibold bg-secondary/50 text-secondary-foreground border border-border/30 hover:bg-secondary/70 active:scale-[0.98] transition-all">
                 Resume Test
               </AlertDialogCancel>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
 
-        {/* Center: Timer */}
         <div
           className={`inline-flex items-center gap-1.5 rounded-full h-8 px-3.5 text-[13px] font-bold tabular-nums border backdrop-blur-md transition-colors ${
             isUrgent
@@ -206,29 +201,30 @@ function TakeTest() {
           {formatTime(timeLeft)}
         </div>
 
-        {/* Right: Submit Button */}
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <button className="h-8 px-3.5 rounded-full bg-primary/10 text-primary font-semibold text-[13px] border border-primary/20 active:scale-95 transition-all shadow-[0_2px_10px_rgba(var(--primary),0.1)]">
               Submit
             </button>
           </AlertDialogTrigger>
-          <AlertDialogContent className="rounded-[28px] backdrop-blur-3xl bg-white/80 dark:bg-black/80 border-white/20 shadow-2xl">
+          <AlertDialogContent className="rounded-[32px] backdrop-blur-3xl bg-white/80 dark:bg-black/80 border border-white/20 dark:border-white/10 shadow-2xl p-6 sm:max-w-sm">
             <AlertDialogHeader>
-              <AlertDialogTitle className="text-center text-xl">Submit Test?</AlertDialogTitle>
-              <AlertDialogDescription className="text-center">
+              <AlertDialogTitle className="text-xl font-bold text-foreground text-center tracking-tight">
+                Submit Test?
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-[14px] text-center text-muted-foreground mt-1.5 leading-snug">
                 You answered <strong className="text-foreground">{answeredCount}</strong> out of{" "}
                 <strong className="text-foreground">{total}</strong> questions. Unanswered questions count as 0.
               </AlertDialogDescription>
             </AlertDialogHeader>
-            <AlertDialogFooter className="flex-col gap-2 mt-4 sm:space-x-0">
+            <AlertDialogFooter className="flex-col gap-3 pt-4 sm:space-x-0">
               <AlertDialogAction
                 onClick={() => submit(picks)}
-                className="w-full rounded-2xl font-semibold bg-primary hover:bg-primary/90 text-white h-12 active:scale-95 transition-transform"
+                className="w-full h-[52px] rounded-[24px] bg-primary text-primary-foreground font-semibold text-[16px] shadow-[0_4px_24px_rgba(var(--primary),0.25)] active:scale-[0.98] transition-all"
               >
                 Confirm Submission
               </AlertDialogAction>
-              <AlertDialogCancel className="w-full rounded-2xl font-semibold bg-secondary/50 border-0 hover:bg-secondary/70 h-12 m-0 active:scale-95 transition-transform">
+              <AlertDialogCancel className="w-full h-[48px] m-0 rounded-[20px] font-semibold bg-secondary/50 text-secondary-foreground border border-border/30 hover:bg-secondary/70 active:scale-[0.98] transition-all">
                 Keep Going
               </AlertDialogCancel>
             </AlertDialogFooter>
@@ -236,9 +232,7 @@ function TakeTest() {
         </AlertDialog>
       </header>
 
-      {/* Main Area */}
       <main className="flex-1 min-h-0 flex flex-col px-5 pt-4 max-w-2xl w-full mx-auto pb-4">
-        {/* Test Name Header directly above card */}
         <div className="text-center mb-4 shrink-0">
           <span className="inline-block text-[11px] font-bold uppercase tracking-widest text-primary/80 bg-primary/5 px-3 py-1 rounded-full border border-primary/10 backdrop-blur-md">
             {test.name}
@@ -255,7 +249,6 @@ function TakeTest() {
               transition={{ duration: 0.25, ease: "easeOut" }}
               className="w-full h-full flex flex-col"
             >
-              {/* Premium iOS Glass Card */}
               <div className="w-full h-full rounded-[36px] backdrop-blur-3xl border border-border/30 bg-white/60 dark:bg-black/40 shadow-[0_8px_32px_rgba(0,0,0,0.08)] overflow-hidden flex flex-col">
                 <ScrollArea className="h-full flex-1">
                   <div className="p-7 md:p-8 space-y-6">
@@ -325,7 +318,6 @@ function TakeTest() {
                         );
                       })}
 
-                      {/* Clear Selection Option */}
                       <button
                         onClick={() =>
                           setPicks((p) => {
@@ -354,7 +346,6 @@ function TakeTest() {
             </motion.div>
           </AnimatePresence>
 
-          {/* Floating Edge Navigation */}
           {index > 0 && (
             <button
               type="button"
@@ -378,7 +369,7 @@ function TakeTest() {
         </div>
       </main>
 
-      {/* iOS Floating Footer: Question Palette */}
+      {/* FIXED Padding pb-6 pt-1 */}
       <footer className="shrink-0 px-5 pb-6 pt-1 max-w-2xl w-full mx-auto relative z-10">
         <div
           ref={paletteRef}
