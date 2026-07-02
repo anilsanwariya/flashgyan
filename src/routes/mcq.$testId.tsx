@@ -66,7 +66,7 @@ function TakeTest() {
   const q = questions[index];
   const pick = picks[index];
 
-  // Only scroll if the active button is out of view, and stop 5 buttons from the end.
+  // Only scroll if the active button is out of view.
   useEffect(() => {
     if (!paletteRef.current) return;
 
