@@ -82,11 +82,29 @@ function TakeTest() {
     const paletteScroll = palette.scrollLeft;
     const paletteWidth = palette.offsetWidth;
 
-    // Only scroll if button is partially hidden
-    if (btnLeft < paletteScroll || btnLeft + btnWidth > paletteScroll + paletteWidth) {
+    // Optimized: Only scroll if the active button is partially hidden
+  // Removed the "last 5" restriction so it always keeps the current button in view
+  useEffect(() => {
+    if (!paletteRef.current || questions.length === 0) return;
+    
+    const palette = paletteRef.current;
+    const activeBtn = palette.children[index] as HTMLElement;
+    if (!activeBtn) return;
+
+    const btnLeft = activeBtn.offsetLeft;
+    const btnWidth = activeBtn.offsetWidth;
+    const paletteScroll = palette.scrollLeft;
+    const paletteWidth = palette.offsetWidth;
+
+    // Check if the button is partially hidden to the left or right
+    const isHiddenLeft = btnLeft < paletteScroll;
+    const isHiddenRight = (btnLeft + btnWidth) > (paletteScroll + paletteWidth);
+
+    // Only trigger scroll if it's actually clipped
+    if (isHiddenLeft || isHiddenRight) {
       palette.scrollTo({
-        left: btnLeft - paletteWidth / 2 + btnWidth / 2,
-        behavior: "smooth",
+        left: btnLeft - (paletteWidth / 2) + (btnWidth / 2),
+        behavior: "smooth"
       });
     }
   }, [index, questions.length]);
