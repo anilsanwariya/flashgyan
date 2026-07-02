@@ -66,14 +66,30 @@ function TakeTest() {
   const q = questions[index];
   const pick = picks[index];
 
-  // Auto-scroll the horizontal palette to keep the active question in view
+  // Only scroll if the active button is out of view, and stop 5 buttons from the end.
   useEffect(() => {
     if (!paletteRef.current) return;
-    const activeBtn = paletteRef.current.children[index] as HTMLElement;
-    if (activeBtn) {
-      activeBtn.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+
+    const palette = paletteRef.current;
+    const activeBtn = palette.children[index] as HTMLElement;
+    if (!activeBtn) return;
+
+    // Stop scrolling if we are in the last 5 questions
+    if (index >= questions.length - 5) return;
+
+    const btnLeft = activeBtn.offsetLeft;
+    const btnWidth = activeBtn.offsetWidth;
+    const paletteScroll = palette.scrollLeft;
+    const paletteWidth = palette.offsetWidth;
+
+    // Only scroll if button is partially hidden
+    if (btnLeft < paletteScroll || btnLeft + btnWidth > paletteScroll + paletteWidth) {
+      palette.scrollTo({
+        left: btnLeft - paletteWidth / 2 + btnWidth / 2,
+        behavior: "smooth",
+      });
     }
-  }, [index]);
+  }, [index, questions.length]);
 
   useEffect(() => {
     const int = setInterval(() => {
