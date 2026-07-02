@@ -16,6 +16,9 @@ function TelegramExpander() {
       const tg = getTelegramWebApp();
       tg?.ready();
       tg?.expand();
+      
+      // Inject a class into the body so we can safely adjust the UI for Telegram's notch
+      document.body.classList.add("tg-mini-app");
     }
   }, []);
 
