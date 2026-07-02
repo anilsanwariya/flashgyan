@@ -7,6 +7,20 @@ import logoAsset from "@/assets/flashgyan-logo.png";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/hooks/use-auth";
+import { isTelegramMiniApp, getTelegramWebApp } from "@/lib/telegram-env";
+
+// Telegram Expander: Forces the mini-app to take up the full screen height
+function TelegramExpander() {
+  useEffect(() => {
+    if (isTelegramMiniApp()) {
+      const tg = getTelegramWebApp();
+      tg?.ready();
+      tg?.expand();
+    }
+  }, []);
+
+  return null;
+}
 
 function NotFoundComponent() {
   return (
@@ -168,6 +182,7 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <Toaster richColors position="top-center" />
       <AuthProvider>
+        <TelegramExpander />
         <Outlet />
       </AuthProvider>
     </QueryClientProvider>

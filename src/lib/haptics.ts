@@ -1,37 +1,23 @@
-// src/lib/haptics.ts
-export type HapticStyle = "success" | "error" | "light" | "medium" | "heavy" | "warning";
+import { isTelegramMiniApp, getTelegramWebApp } from "./telegram-env";
 
-export function triggerHaptic(type: HapticStyle = "light") {
-  if (typeof window === "undefined") return;
+export function triggerHaptic(type: "success" | "error" | "light" | "medium" | "heavy") {
+  if (isTelegramMiniApp()) {
+    const tg = getTelegramWebApp();
+    if (!tg) return;
 
-  const tgWebApp = (window as any).Telegram?.WebApp;
-
-  if (tgWebApp && tgWebApp.HapticFeedback) {
-    try {
-      if (["light", "medium", "heavy"].includes(type)) {
-        tgWebApp.HapticFeedback.impactOccurred(type);
-      } else {
-        tgWebApp.HapticFeedback.notificationOccurred(type);
-      }
-      return; 
-    } catch (e) {
-      console.error("Telegram haptic failed:", e);
-    }
-  }
-
-  if ("vibrate" in navigator) {
-    try {
-      switch (type) {
-        case "success": navigator.vibrate([30, 50, 30]); break;
-        case "error":
-        case "warning": navigator.vibrate([100, 50, 100]); break;
-        case "heavy": navigator.vibrate(50); break;
-        case "medium": navigator.vibrate(30); break;
-        case "light":
-        default: navigator.vibrate(20); break;
-      }
-    } catch (e) {
-      console.error("Browser haptic failed:", e);
-    }
+    // Telegram Native Haptics Engine
+    if (type === "success") tg.HapticFeedback.notificationOccurred("success");
+    else if (type === "error") tg.HapticFeedback.notificationOccurred("error");
+    else tg.HapticFeedback.impactOccurred(type);
+    
+  } else {
+    // Standard Browser Web Haptics (Fallback)
+    if (typeof navigator === "undefined" || !navigator.vibrate) return;
+    
+    if (type === "light") navigator.vibrate(50);
+    else if (type === "medium") navigator.vibrate(100);
+    else if (type === "heavy") navigator.vibrate(150);
+    else if (type === "success") navigator.vibrate([50, 50, 50]);
+    else if (type === "error") navigator.vibrate([100, 50, 100, 50, 100]);
   }
 }
