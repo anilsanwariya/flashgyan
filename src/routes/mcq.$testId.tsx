@@ -1,8 +1,8 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { getMcqTest, type McqQuestion } from "@/lib/mcq.functions";
-import { ChevronLeft, ChevronRight, Timer, X, Check } from "lucide-react";
+import { ChevronLeft, ChevronRight, Timer, X, Check, Sparkles } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -40,6 +40,11 @@ export const Route = createFileRoute("/mcq/$testId")({
       </div>
     </div>
   ),
+  notFoundComponent: () => (
+    <div className="p-6 text-center font-medium text-muted-foreground min-h-dvh flex items-center justify-center bg-background">
+      Test not found.
+    </div>
+  ),
 });
 
 function TakeTest() {
@@ -50,7 +55,8 @@ function TakeTest() {
 
   const [index, setIndex] = useState(0);
   const [picks, setPicks] = useState<(number | null)[]>(() => questions.map(() => null));
-  const [timeLeft, setTimeLeft] = useState(test.duration_minutes * 60);
+  // FIXED: Reverted to duration_seconds to prevent NaN errors
+  const [timeLeft, setTimeLeft] = useState(test.duration_seconds || 0);
   const startedAt = useRef(Date.now());
   const paletteRef = useRef<HTMLDivElement>(null);
 
@@ -97,7 +103,7 @@ function TakeTest() {
 
     // Auto-advance if not the last question
     if (index < total - 1) {
-      setTimeout(() => setIndex(index + 1), 350); // slight delay to show selection
+      setTimeout(() => setIndex(index + 1), 350);
     }
   }
 
@@ -110,6 +116,7 @@ function TakeTest() {
       answers: {} as Record<string, number | null>,
       startedAt: startedAt.current,
       endedAt,
+      durationSeconds: test.duration_seconds,
     };
     questions.forEach((qq, i) => {
       attempt.answers[qq.id] = finalPicks[i];
@@ -139,13 +146,14 @@ function TakeTest() {
 
       {/* iOS Glass Header */}
       <header className="shrink-0 px-5 pt-safe pb-3 max-w-2xl w-full mx-auto backdrop-blur-2xl bg-white/40 dark:bg-black/40 sticky top-0 z-50 border-b border-border/20 flex items-center justify-between">
+        {/* Left: Quit */}
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <button
               type="button"
-              className="inline-flex items-center gap-1.5 rounded-full h-9 px-4 text-[13px] font-semibold text-destructive bg-destructive/10 border border-destructive/20 active:scale-95 transition-all"
+              className="inline-flex items-center gap-1 rounded-full h-8 px-3.5 text-[13px] font-semibold text-destructive bg-destructive/10 border border-destructive/20 active:scale-95 transition-all"
             >
-              <X className="h-4 w-4" /> Quit
+              <X className="h-3.5 w-3.5" /> Quit
             </button>
           </AlertDialogTrigger>
           <AlertDialogContent className="rounded-[28px] backdrop-blur-3xl bg-white/80 dark:bg-black/80 border-white/20 shadow-2xl">
@@ -169,31 +177,66 @@ function TakeTest() {
           </AlertDialogContent>
         </AlertDialog>
 
-        <div className="flex-1 text-center truncate px-4 text-[14px] font-semibold text-foreground/80">{test.name}</div>
-
+        {/* Center: Timer */}
         <div
-          className={`inline-flex items-center gap-1.5 rounded-full h-9 px-3.5 text-[13px] font-bold tabular-nums border backdrop-blur-md transition-colors ${
+          className={`inline-flex items-center gap-1.5 rounded-full h-8 px-3.5 text-[13px] font-bold tabular-nums border backdrop-blur-md transition-colors ${
             isUrgent
               ? "bg-destructive/15 text-destructive border-destructive/30 animate-pulse"
               : "bg-white/50 dark:bg-black/50 text-foreground/80 border-border/30"
           }`}
         >
-          <Timer className="h-4 w-4" />
+          <Timer className="h-3.5 w-3.5" />
           {formatTime(timeLeft)}
         </div>
+
+        {/* Right: Submit Button */}
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <button className="h-8 px-3.5 rounded-full bg-primary/10 text-primary font-semibold text-[13px] border border-primary/20 active:scale-95 transition-all shadow-[0_2px_10px_rgba(var(--primary),0.1)]">
+              Submit
+            </button>
+          </AlertDialogTrigger>
+          <AlertDialogContent className="rounded-[28px] backdrop-blur-3xl bg-white/80 dark:bg-black/80 border-white/20 shadow-2xl">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-center text-xl">Submit Test?</AlertDialogTitle>
+              <AlertDialogDescription className="text-center">
+                You answered <strong className="text-foreground">{answeredCount}</strong> out of{" "}
+                <strong className="text-foreground">{total}</strong> questions. Unanswered questions count as 0.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="flex-col gap-2 mt-4 sm:space-x-0">
+              <AlertDialogAction
+                onClick={() => submit(picks)}
+                className="w-full rounded-2xl font-semibold bg-primary hover:bg-primary/90 text-white h-12 active:scale-95 transition-transform"
+              >
+                Confirm Submission
+              </AlertDialogAction>
+              <AlertDialogCancel className="w-full rounded-2xl font-semibold bg-secondary/50 border-0 hover:bg-secondary/70 h-12 m-0 active:scale-95 transition-transform">
+                Keep Going
+              </AlertDialogCancel>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </header>
 
-      {/* Main Area with Question Card */}
-      <main className="flex-1 min-h-0 flex flex-col px-5 pt-6 max-w-2xl w-full mx-auto pb-4">
-        <div className="w-full h-full relative [perspective:1200px]">
+      {/* Main Area */}
+      <main className="flex-1 min-h-0 flex flex-col px-5 pt-4 max-w-2xl w-full mx-auto pb-4">
+        {/* Test Name Header directly above card */}
+        <div className="text-center mb-3">
+          <span className="inline-block text-[11px] font-bold uppercase tracking-widest text-primary/80 bg-primary/5 px-3 py-1 rounded-full border border-primary/10 backdrop-blur-md">
+            {test.name}
+          </span>
+        </div>
+
+        <div className="w-full h-full relative [perspective:1200px] flex-1 min-h-0">
           <AnimatePresence mode="wait">
             <motion.div
               key={q.id}
               initial={{ opacity: 0, scale: 0.94, filter: "blur(4px)" }}
               animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
               exit={{ opacity: 0, scale: 0.94, filter: "blur(4px)" }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
-              className="w-full h-full relative"
+              transition={{ duration: 0.25, ease: "easeOut" }}
+              className="absolute inset-0 w-full h-full" // STRICT absolute bounds prevent 'half squish' glitch
             >
               {/* Premium iOS Glass Card */}
               <div className="w-full h-full rounded-[36px] backdrop-blur-3xl border border-border/30 bg-white/60 dark:bg-black/40 shadow-[0_8px_32px_rgba(0,0,0,0.08)] overflow-hidden flex flex-col">
@@ -220,7 +263,16 @@ function TakeTest() {
                       </div>
                     )}
 
-                    <div className="space-y-3 pt-4">
+                    {q.hint && (
+                      <div className="bg-amber-500/10 border border-amber-500/20 backdrop-blur-xl text-amber-700 dark:text-amber-400 p-4 rounded-[20px] text-[15px] font-medium leading-relaxed">
+                        <span className="font-bold flex items-center gap-1.5 mb-1.5 text-xs uppercase tracking-widest opacity-80">
+                          <Sparkles className="h-4 w-4" /> Hint
+                        </span>
+                        {q.hint}
+                      </div>
+                    )}
+
+                    <div className="space-y-3 pt-2">
                       {[1, 2, 3, 4].map((n) => {
                         const text = q[`option_${n}` as `option_${1 | 2 | 3 | 4}`];
                         const isPick = pick === n;
@@ -255,6 +307,29 @@ function TakeTest() {
                           </button>
                         );
                       })}
+
+                      {/* Clear Selection Option */}
+                      <button
+                        onClick={() =>
+                          setPicks((p) => {
+                            const next = p.slice();
+                            next[index] = null;
+                            return next;
+                          })
+                        }
+                        className={
+                          pick === null
+                            ? "hidden"
+                            : "w-full text-left rounded-[24px] px-5 py-3.5 flex items-start gap-4 bg-transparent border border-dashed border-border/40 active:scale-[0.98] hover:bg-white/20 transition-all duration-150 cursor-pointer"
+                        }
+                      >
+                        <div className="h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-sm font-bold border border-dashed border-border/50 text-foreground/40">
+                          —
+                        </div>
+                        <div className="text-[15px] font-medium leading-snug flex-1 min-w-0 whitespace-pre-wrap mt-1 text-muted-foreground">
+                          Clear selection
+                        </div>
+                      </button>
                     </div>
                   </div>
                 </ScrollArea>
@@ -286,19 +361,19 @@ function TakeTest() {
         </div>
       </main>
 
-      {/* iOS Floating Footer: Palette & Submit */}
-      <footer className="shrink-0 px-5 pb-safe pt-2 max-w-2xl w-full mx-auto relative z-10 mb-6 flex items-center gap-4">
-        {/* Horizontal Scrolling Question Palette */}
+      {/* iOS Floating Footer: Question Palette */}
+      <footer className="shrink-0 px-5 pb-safe pt-1 max-w-2xl w-full mx-auto relative z-10 mb-4">
         <div
           ref={paletteRef}
-          className="flex-1 flex items-center gap-2.5 overflow-x-auto no-scrollbar scroll-smooth py-2 mask-fade-edges"
+          className="flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth py-2 mask-fade-edges"
         >
           {questions.map((_, i) => {
             const isAnswered = picks[i] !== null;
             const isCurrent = i === index;
 
+            // Reduced to h-9 w-9 to allow ~10 to fit on screen
             let btnCls =
-              "h-11 w-11 shrink-0 snap-center rounded-full text-[14px] font-semibold border transition-all duration-300 flex items-center justify-center backdrop-blur-md ";
+              "h-9 w-9 shrink-0 snap-center rounded-full text-[13px] font-semibold border transition-all duration-300 flex items-center justify-center backdrop-blur-md ";
 
             if (isCurrent) {
               btnCls += "border-primary shadow-[0_4px_16px_rgba(var(--primary),0.3)] scale-110 z-10 ";
@@ -316,35 +391,6 @@ function TakeTest() {
             );
           })}
         </div>
-
-        {/* Floating Submit Action */}
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <button className="shrink-0 h-12 px-5 rounded-[24px] bg-primary text-primary-foreground font-semibold text-[15px] border border-primary/20 backdrop-blur-xl shadow-[0_4px_24px_rgba(var(--primary),0.2)] active:scale-95 transition-all">
-              Submit
-            </button>
-          </AlertDialogTrigger>
-          <AlertDialogContent className="rounded-[28px] backdrop-blur-3xl bg-white/80 dark:bg-black/80 border-white/20 shadow-2xl">
-            <AlertDialogHeader>
-              <AlertDialogTitle className="text-center text-xl">Submit Test?</AlertDialogTitle>
-              <AlertDialogDescription className="text-center">
-                You answered <strong className="text-foreground">{answeredCount}</strong> out of{" "}
-                <strong className="text-foreground">{total}</strong> questions. Unanswered questions count as 0.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter className="flex-col gap-2 mt-4 sm:space-x-0">
-              <AlertDialogAction
-                onClick={() => submit(picks)}
-                className="w-full rounded-2xl font-semibold bg-primary hover:bg-primary/90 text-white h-12 active:scale-95 transition-transform"
-              >
-                Confirm Submission
-              </AlertDialogAction>
-              <AlertDialogCancel className="w-full rounded-2xl font-semibold bg-secondary/50 border-0 hover:bg-secondary/70 h-12 m-0 active:scale-95 transition-transform">
-                Keep Going
-              </AlertDialogCancel>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
       </footer>
 
       <AppDownloadPopup
