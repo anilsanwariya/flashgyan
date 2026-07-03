@@ -5,7 +5,7 @@ import { z } from "zod";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
 import { getMcqPracticeTest, type McqPracticeQuestion } from "@/lib/mcq-practice.functions";
 import { motion, AnimatePresence } from "motion/react";
-import { ChevronLeft, ChevronRight, Check, X, Sparkles } from "lucide-react";
+import { ChevronLeft, ChevronRight, Check, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { triggerHaptic } from "../lib/haptics";
 import confetti from "canvas-confetti";
@@ -200,7 +200,7 @@ function PracticeMcq() {
           pickedIndex: p as 1 | 2 | 3 | 4,
           explanationSections: qq.explanation_sections,
           imageUrl: qq.image_url,
-          hint: qq.hint,
+          question_ext: qq.question_ext,
         },
       });
     });
@@ -268,7 +268,7 @@ function PracticeMcq() {
             <AlertDialogTrigger asChild>
               <button
                 type="button"
-                className="inline-flex items-center gap-1 rounded-full h-8 px-4 text-[13px] font-semibold text-destructive bg-destructive/10 border border-destructive/20 active:scale-95 transition-all"
+                className="inline-flex items-center gap-1 rounded-full h-8 px-4 text-[13px] font-semibold text-destructive bg-destructive/10 border border-destructive/30 backdrop-blur-xl hover:bg-destructive/20 active:scale-[0.98] transition-all"
               >
                 End Session <X className="h-3.5 w-3.5" />
               </button>
@@ -285,7 +285,7 @@ function PracticeMcq() {
               <AlertDialogFooter className="flex-col gap-3 pt-4 sm:space-x-0">
                 <AlertDialogAction
                   onClick={() => submit(picks)}
-                  className="w-full h-[52px] rounded-[24px] bg-destructive text-white font-semibold text-[16px] shadow-[0_4px_24px_rgba(239,68,68,0.25)] active:scale-[0.98] transition-all"
+                  className="w-full h-[52px] rounded-[24px] bg-destructive/10 text-destructive border border-destructive/30 backdrop-blur-xl hover:bg-destructive/20 font-semibold text-[16px] active:scale-[0.98] transition-all"
                 >
                   End session
                 </AlertDialogAction>
@@ -346,12 +346,9 @@ function PracticeMcq() {
                       </div>
                     )}
 
-                    {q.hint && (
-                      <div className="bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 p-4 rounded-[20px] text-[15px] font-medium leading-relaxed">
-                        <span className="font-bold flex items-center gap-1.5 mb-1.5 text-xs uppercase tracking-widest opacity-80">
-                          <Sparkles className="h-4 w-4" /> Hint
-                        </span>
-                        {q.hint}
+                    {q.question_ext && (
+                      <div className="bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 p-4 rounded-[20px] text-[15px] font-medium leading-relaxed whitespace-pre-wrap">
+                        {q.question_ext}
                       </div>
                     )}
 

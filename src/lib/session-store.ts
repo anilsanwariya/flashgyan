@@ -6,7 +6,7 @@ export type McqCardData = {
   pickedIndex: 1 | 2 | 3 | 4;
   explanationSections: Array<{ title: string; body: string }>;
   imageUrl?: string | null;
-  hint?: string | null;
+  question_ext?: string | null;
 };
 
 export type SessionCardResult = {

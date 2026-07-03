@@ -12,7 +12,7 @@ export type McqAttempt = {
   endedAt: number;
   durationSeconds: number;
 };
-import { ChevronLeft, ChevronRight, Timer, X, Check, Sparkles } from "lucide-react";
+import { ChevronLeft, ChevronRight, Timer, X, Check } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -172,7 +172,7 @@ function TakeTest() {
           <AlertDialogTrigger asChild>
             <button
               type="button"
-              className="inline-flex items-center gap-1 rounded-full h-8 px-3.5 text-[13px] font-semibold text-destructive bg-destructive/10 border border-destructive/20 active:scale-95 transition-all"
+              className="inline-flex items-center gap-1 rounded-full h-8 px-3.5 text-[13px] font-semibold text-destructive bg-destructive/10 border border-destructive/30 backdrop-blur-xl hover:bg-destructive/20 active:scale-[0.98] transition-all"
             >
               <X className="h-3.5 w-3.5" /> Quit
             </button>
@@ -189,7 +189,7 @@ function TakeTest() {
             <AlertDialogFooter className="flex-col gap-3 pt-4 sm:space-x-0">
               <AlertDialogAction
                 onClick={() => navigate({ to: "/mcq-tests" })}
-                className="w-full h-[52px] rounded-[24px] bg-destructive text-white font-semibold text-[16px] shadow-[0_4px_24px_rgba(239,68,68,0.25)] active:scale-[0.98] transition-all"
+                className="w-full h-[52px] rounded-[24px] bg-destructive/10 text-destructive border border-destructive/30 backdrop-blur-xl hover:bg-destructive/20 font-semibold text-[16px] active:scale-[0.98] transition-all"
               >
                 Yes, Quit
               </AlertDialogAction>
@@ -283,12 +283,9 @@ function TakeTest() {
                       </div>
                     )}
 
-                    {q.hint && (
-                      <div className="bg-amber-500/10 border border-amber-500/20 backdrop-blur-xl text-amber-700 dark:text-amber-400 p-4 rounded-[20px] text-[15px] font-medium leading-relaxed">
-                        <span className="font-bold flex items-center gap-1.5 mb-1.5 text-xs uppercase tracking-widest opacity-80">
-                          <Sparkles className="h-4 w-4" /> Hint
-                        </span>
-                        {q.hint}
+                    {q.question_ext && (
+                      <div className="bg-amber-500/10 border border-amber-500/20 backdrop-blur-xl text-amber-700 dark:text-amber-400 p-4 rounded-[20px] text-[15px] font-medium leading-relaxed whitespace-pre-wrap">
+                        {q.question_ext}
                       </div>
                     )}
 
