@@ -2,6 +2,16 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { getMcqTest, type McqQuestion } from "@/lib/mcq.functions";
+
+export type McqAttempt = {
+  testId: string;
+  testName: string;
+  questions: McqQuestion[];
+  answers: Record<string, number | null>;
+  startedAt: number;
+  endedAt: number;
+  durationSeconds: number;
+};
 import { ChevronLeft, ChevronRight, Timer, X, Check, Sparkles } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { ScrollArea } from "@/components/ui/scroll-area";
