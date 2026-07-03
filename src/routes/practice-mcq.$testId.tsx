@@ -157,7 +157,7 @@ function PracticeMcq() {
             spread: 60,
             origin: { y: 0.8 },
             disableForReducedMotion: true,
-            useWorker: true,
+            
             zIndex: 100,
           });
         } catch (e) {
