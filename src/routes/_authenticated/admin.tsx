@@ -1371,7 +1371,7 @@ function McqQuestionsView({
             </h3>
             <p className="mt-1 text-xs text-muted-foreground">
               Columns: order, question, option_1, option_2, option_3, option_4, answer,
-              optional hint, optional explanation_&lt;title&gt; columns. Answer accepts 1–4,
+              optional question_ext, optional explanation_&lt;title&gt; columns. Answer accepts 1–4,
               A–D, option_1..option_4, or option text.
             </p>
             <label className="mt-4 flex items-center justify-center h-24 rounded-xl border-2 border-dashed border-border cursor-pointer hover:bg-accent/40">
@@ -1567,7 +1567,7 @@ function QuestionEditDialog({
           id: q.id,
           order_index: Number(form.order_index),
           question: form.question.trim(),
-          hint: form.hint.trim(),
+          question_ext: form.question_ext.trim(),
           image_url: form.image_url,
           option_1: form.option_1.trim(),
           option_2: form.option_2.trim(),
@@ -1630,7 +1630,7 @@ function QuestionEditDialog({
             />
           </div>
           <div>
-            <Label>Image (shown between question and hint)</Label>
+            <Label>Image (shown between question and question_ext)</Label>
             {form.image_url && (
               <img
                 src={form.image_url}
@@ -1655,8 +1655,8 @@ function QuestionEditDialog({
             <Label>Hint</Label>
             <Textarea
               rows={2}
-              value={form.hint}
-              onChange={(e) => setForm({ ...form, hint: e.target.value })}
+              value={form.question_ext}
+              onChange={(e) => setForm({ ...form, question_ext: e.target.value })}
             />
           </div>
           {[1, 2, 3, 4].map((n) => {
@@ -2089,7 +2089,7 @@ function McqPracticeQuestionsView({
             </h3>
             <p className="mt-1 text-xs text-muted-foreground">
               Same schema as MCQ Tests: order, question, option_1..option_4, answer,
-              optional hint, optional explanation_&lt;title&gt; columns.
+              optional question_ext, optional explanation_&lt;title&gt; columns.
             </p>
             <label className="mt-4 flex items-center justify-center h-24 rounded-xl border-2 border-dashed border-border cursor-pointer hover:bg-accent/40">
               <div className="text-center">
@@ -2284,7 +2284,7 @@ function PracticeQuestionEditDialog({
           id: q.id,
           order_index: Number(form.order_index),
           question: form.question.trim(),
-          hint: form.hint.trim(),
+          question_ext: form.question_ext.trim(),
           image_url: form.image_url,
           option_1: form.option_1.trim(),
           option_2: form.option_2.trim(),
@@ -2372,8 +2372,8 @@ function PracticeQuestionEditDialog({
             <Label>Hint</Label>
             <Textarea
               rows={2}
-              value={form.hint}
-              onChange={(e) => setForm({ ...form, hint: e.target.value })}
+              value={form.question_ext}
+              onChange={(e) => setForm({ ...form, question_ext: e.target.value })}
             />
           </div>
           {[1, 2, 3, 4].map((n) => {
