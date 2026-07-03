@@ -268,7 +268,7 @@ function PracticeMcq() {
             <AlertDialogTrigger asChild>
               <button
                 type="button"
-                className="inline-flex items-center gap-1 rounded-full h-8 px-4 text-[13px] font-semibold text-destructive bg-destructive/10 border border-destructive/20 active:scale-95 transition-all"
+                className="inline-flex items-center gap-1 rounded-full h-8 px-4 text-[13px] font-semibold text-destructive bg-destructive/10 border border-destructive/30 backdrop-blur-xl hover:bg-destructive/20 active:scale-[0.98] transition-all"
               >
                 End Session <X className="h-3.5 w-3.5" />
               </button>
