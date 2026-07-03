@@ -5,7 +5,7 @@ export type ExplanationSection = { title: string; body: string };
 export type ParsedMcqRow = {
   order_index: number;
   question: string;
-  hint: string;
+  question_ext: string;
   option_1: string;
   option_2: string;
   option_3: string;
@@ -92,7 +92,7 @@ export function parseMcqWorkbook(file: ArrayBuffer): {
   for (const row of json) {
     const orderRaw = pick(row, "order");
     const question = pick(row, "question");
-    const hint = pick(row, "hint");
+    const question_ext = pick(row, "question_ext");
     const o1 = pick(row, "option_1");
     const o2 = pick(row, "option_2");
     const o3 = pick(row, "option_3");
@@ -125,7 +125,7 @@ export function parseMcqWorkbook(file: ArrayBuffer): {
     rows.push({
       order_index: orderNum,
       question,
-      hint,
+      question_ext,
       option_1: o1,
       option_2: o2,
       option_3: o3,

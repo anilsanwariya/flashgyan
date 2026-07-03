@@ -200,7 +200,7 @@ function PracticeMcq() {
           pickedIndex: p as 1 | 2 | 3 | 4,
           explanationSections: qq.explanation_sections,
           imageUrl: qq.image_url,
-          hint: qq.hint,
+          hint: qq.question_ext,
         },
       });
     });
@@ -346,12 +346,12 @@ function PracticeMcq() {
                       </div>
                     )}
 
-                    {q.hint && (
+                    {q.question_ext && (
                       <div className="bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 p-4 rounded-[20px] text-[15px] font-medium leading-relaxed">
                         <span className="font-bold flex items-center gap-1.5 mb-1.5 text-xs uppercase tracking-widest opacity-80">
                           <Sparkles className="h-4 w-4" /> Hint
                         </span>
-                        {q.hint}
+                        {q.question_ext}
                       </div>
                     )}
 

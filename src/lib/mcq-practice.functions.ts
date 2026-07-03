@@ -30,7 +30,7 @@ export type McqPracticeQuestion = {
   test_id: string;
   order_index: number;
   question: string;
-  hint: string;
+  question_ext: string;
   image_url: string | null;
   option_1: string;
   option_2: string;
@@ -76,7 +76,7 @@ export const getMcqPracticeTest = createServerFn({ method: "GET" })
     const { data: rows, error } = await supabase
       .from("mcq_practice_questions")
       .select(
-        "id, test_id, order_index, question, hint, image_url, option_1, option_2, option_3, option_4, answer, explanation_sections",
+        "id, test_id, order_index, question, question_ext, image_url, option_1, option_2, option_3, option_4, answer, explanation_sections",
       )
       .eq("test_id", data.id)
       .order("order_index", { ascending: true })
@@ -109,7 +109,7 @@ const testMetaSchema = z.object({
 const importRowSchema = z.object({
   order_index: z.number().int(),
   question: z.string().min(1),
-  hint: z.string().default(""),
+  question_ext: z.string().default(""),
   option_1: z.string().min(1),
   option_2: z.string().min(1),
   option_3: z.string().min(1),
@@ -206,7 +206,7 @@ export const bulkImportMcqPractice = createServerFn({ method: "POST" })
       test_id: data.test_id,
       order_index: r.order_index,
       question: r.question.trim(),
-      hint: r.hint.trim(),
+      question_ext: r.question_ext.trim(),
       option_1: r.option_1.trim(),
       option_2: r.option_2.trim(),
       option_3: r.option_3.trim(),
@@ -233,7 +233,7 @@ export const updateMcqPracticeQuestion = createServerFn({ method: "POST" })
         id: z.string().uuid(),
         order_index: z.number().int(),
         question: z.string().min(1),
-        hint: z.string().default(""),
+        question_ext: z.string().default(""),
         image_url: z.string().nullable(),
         option_1: z.string().min(1),
         option_2: z.string().min(1),

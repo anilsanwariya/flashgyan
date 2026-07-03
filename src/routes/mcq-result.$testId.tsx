@@ -177,10 +177,10 @@ function Result() {
                     </div>
                   )}
 
-                  {q.hint && (
+                  {q.question_ext && (
                     <p className="text-[15px] font-medium leading-relaxed whitespace-pre-wrap text-amber-700 dark:text-amber-400 bg-amber-500/10 p-4 rounded-3xl border border-amber-500/20 backdrop-blur-xl">
                       <strong className="block mb-1 text-xs uppercase tracking-widest">Hint</strong>
-                      {q.hint}
+                      {q.question_ext}
                     </p>
                   )}
 
