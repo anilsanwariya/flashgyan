@@ -168,7 +168,6 @@ export type Database = {
           answer: number
           created_at: string
           explanation_sections: Json
-          hint: string
           id: string
           image_url: string | null
           option_1: string
@@ -177,6 +176,7 @@ export type Database = {
           option_4: string
           order_index: number
           question: string
+          question_ext: string
           test_id: string
           updated_at: string
         }
@@ -184,7 +184,6 @@ export type Database = {
           answer: number
           created_at?: string
           explanation_sections?: Json
-          hint?: string
           id?: string
           image_url?: string | null
           option_1: string
@@ -193,6 +192,7 @@ export type Database = {
           option_4: string
           order_index?: number
           question: string
+          question_ext?: string
           test_id: string
           updated_at?: string
         }
@@ -200,7 +200,6 @@ export type Database = {
           answer?: number
           created_at?: string
           explanation_sections?: Json
-          hint?: string
           id?: string
           image_url?: string | null
           option_1?: string
@@ -209,6 +208,7 @@ export type Database = {
           option_4?: string
           order_index?: number
           question?: string
+          question_ext?: string
           test_id?: string
           updated_at?: string
         }
@@ -260,7 +260,6 @@ export type Database = {
           answer: number
           created_at: string
           explanation_sections: Json
-          hint: string
           id: string
           image_url: string | null
           option_1: string
@@ -269,6 +268,7 @@ export type Database = {
           option_4: string
           order_index: number
           question: string
+          question_ext: string
           test_id: string
           updated_at: string
         }
@@ -276,7 +276,6 @@ export type Database = {
           answer: number
           created_at?: string
           explanation_sections?: Json
-          hint?: string
           id?: string
           image_url?: string | null
           option_1: string
@@ -285,6 +284,7 @@ export type Database = {
           option_4: string
           order_index?: number
           question: string
+          question_ext?: string
           test_id: string
           updated_at?: string
         }
@@ -292,7 +292,6 @@ export type Database = {
           answer?: number
           created_at?: string
           explanation_sections?: Json
-          hint?: string
           id?: string
           image_url?: string | null
           option_1?: string
@@ -301,6 +300,7 @@ export type Database = {
           option_4?: string
           order_index?: number
           question?: string
+          question_ext?: string
           test_id?: string
           updated_at?: string
         }
