@@ -284,10 +284,7 @@ function TakeTest() {
                     )}
 
                     {q.question_ext && (
-                      <div className="bg-amber-500/10 border border-amber-500/20 backdrop-blur-xl text-amber-700 dark:text-amber-400 p-4 rounded-[20px] text-[15px] font-medium leading-relaxed">
-                        <span className="font-bold flex items-center gap-1.5 mb-1.5 text-xs uppercase tracking-widest opacity-80">
-                          <Sparkles className="h-4 w-4" /> Hint
-                        </span>
+                      <div className="bg-amber-500/10 border border-amber-500/20 backdrop-blur-xl text-amber-700 dark:text-amber-400 p-4 rounded-[20px] text-[15px] font-medium leading-relaxed whitespace-pre-wrap">
                         {q.question_ext}
                       </div>
                     )}
