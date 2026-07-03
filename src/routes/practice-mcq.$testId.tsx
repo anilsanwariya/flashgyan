@@ -285,7 +285,7 @@ function PracticeMcq() {
               <AlertDialogFooter className="flex-col gap-3 pt-4 sm:space-x-0">
                 <AlertDialogAction
                   onClick={() => submit(picks)}
-                  className="w-full h-[52px] rounded-[24px] bg-destructive text-white font-semibold text-[16px] shadow-[0_4px_24px_rgba(239,68,68,0.25)] active:scale-[0.98] transition-all"
+                  className="w-full h-[52px] rounded-[24px] bg-destructive/10 text-destructive border border-destructive/30 backdrop-blur-xl hover:bg-destructive/20 font-semibold text-[16px] active:scale-[0.98] transition-all"
                 >
                   End session
                 </AlertDialogAction>
