@@ -12,7 +12,7 @@ export type McqAttempt = {
   endedAt: number;
   durationSeconds: number;
 };
-import { ChevronLeft, ChevronRight, Timer, X, Check, Sparkles } from "lucide-react";
+import { ChevronLeft, ChevronRight, Timer, X, Check } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
