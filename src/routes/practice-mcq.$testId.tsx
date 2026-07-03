@@ -200,7 +200,7 @@ function PracticeMcq() {
           pickedIndex: p as 1 | 2 | 3 | 4,
           explanationSections: qq.explanation_sections,
           imageUrl: qq.image_url,
-          hint: qq.question_ext,
+          question_ext: qq.question_ext,
         },
       });
     });
