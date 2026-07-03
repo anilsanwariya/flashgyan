@@ -1371,7 +1371,7 @@ function McqQuestionsView({
             </h3>
             <p className="mt-1 text-xs text-muted-foreground">
               Columns: order, question, option_1, option_2, option_3, option_4, answer,
-              optional question_ext, optional explanation_&lt;title&gt; columns. Answer accepts 1–4,
+              optional question_ext (extra question detail), optional explanation_&lt;title&gt; columns. Answer accepts 1–4,
               A–D, option_1..option_4, or option text.
             </p>
             <label className="mt-4 flex items-center justify-center h-24 rounded-xl border-2 border-dashed border-border cursor-pointer hover:bg-accent/40">
@@ -1630,7 +1630,7 @@ function QuestionEditDialog({
             />
           </div>
           <div>
-            <Label>Image (shown between question and question_ext)</Label>
+            <Label>Image (shown between question and extension)</Label>
             {form.image_url && (
               <img
                 src={form.image_url}
@@ -1652,7 +1652,7 @@ function QuestionEditDialog({
             </div>
           </div>
           <div>
-            <Label>Hint</Label>
+            <Label>Question extension</Label>
             <Textarea
               rows={2}
               value={form.question_ext}
@@ -2089,7 +2089,7 @@ function McqPracticeQuestionsView({
             </h3>
             <p className="mt-1 text-xs text-muted-foreground">
               Same schema as MCQ Tests: order, question, option_1..option_4, answer,
-              optional question_ext, optional explanation_&lt;title&gt; columns.
+              optional question_ext (extra question detail), optional explanation_&lt;title&gt; columns.
             </p>
             <label className="mt-4 flex items-center justify-center h-24 rounded-xl border-2 border-dashed border-border cursor-pointer hover:bg-accent/40">
               <div className="text-center">
@@ -2369,7 +2369,7 @@ function PracticeQuestionEditDialog({
             </div>
           </div>
           <div>
-            <Label>Hint</Label>
+            <Label>Question extension</Label>
             <Textarea
               rows={2}
               value={form.question_ext}
