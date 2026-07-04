@@ -46,8 +46,8 @@ function Home() {
   return (
     <div className="min-h-dvh bg-background relative selection:bg-primary/20">
       {/* GLASSMORPHIC HEADER */}
-      <header className="sticky top-0 z-50 backdrop-blur-xl bg-background/70 border-b border-border/40 px-5 py-3 md:max-w-4xl lg:max-w-6xl mx-auto shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-all">
-        <div className="flex items-center justify-between">
+      <header className="sticky top-0 z-50 backdrop-blur-xl bg-background/70 border-b border-border/40 shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-all">
+        <div className="max-w-6xl mx-auto px-5 py-3 flex items-center justify-between">
           <img src={finalLogo} alt="Flashgyan" className="h-10 w-auto object-contain drop-shadow-sm" />
           <img
             src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images/RASbandhu-logo-green.png"
