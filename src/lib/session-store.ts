@@ -17,6 +17,8 @@ export type SessionCardResult = {
   question: string;
   answer: string;
   rating: Rating;
+  image_url?: string | null;
+  sections?: Array<{ title: string; body: string }> | null;
   mcq?: McqCardData;
 };
 
