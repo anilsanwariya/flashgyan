@@ -195,20 +195,43 @@ function Summary() {
                   {filteredCards.map((c) => (
                     <li
                       key={c.id}
-                      className="rounded-[32px] border border-border/30 bg-white/50 dark:bg-black/30 backdrop-blur-3xl p-6"
+                      className="rounded-[32px] border border-border/30 bg-white/50 dark:bg-black/30 backdrop-blur-3xl p-6 space-y-4"
                     >
-                      <div className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground bg-white/60 dark:bg-black/40 border border-border/30 backdrop-blur-xl inline-block px-2.5 py-1 rounded-full mb-3">
+                      <div className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground bg-white/60 dark:bg-black/40 border border-border/30 backdrop-blur-xl inline-block px-2.5 py-1 rounded-full">
                         {c.subject} · {c.topic}
                       </div>
-                      <div className="font-semibold text-lg leading-snug mb-3 text-foreground/90">
+                      <div className="font-semibold text-lg leading-snug text-foreground/90">
                         <span className="text-[12px] font-bold text-primary uppercase tracking-widest mr-2 bg-primary/10 border border-primary/20 backdrop-blur-xl px-2 py-0.5 rounded-full">
                           {c.prompt}
                         </span>
                         {c.question}
                       </div>
-                      <div className="text-[15px] text-muted-foreground font-medium leading-relaxed bg-white/40 dark:bg-black/20 p-4 rounded-2xl border border-border/30 backdrop-blur-xl">
-                        {c.answer}
+
+                      {c.image_url && (
+                        <div className="relative rounded-3xl overflow-hidden border border-border/30 shadow-sm">
+                          <img src={c.image_url} alt="" className="max-h-60 w-full object-contain bg-white/40" />
+                        </div>
+                      )}
+
+                      <div className="bg-white/40 dark:bg-black/20 p-5 rounded-3xl border border-border/30 backdrop-blur-xl space-y-2">
+                        <div className="text-[11px] font-bold uppercase tracking-widest text-success/80">Answer</div>
+                        <div className="text-[18px] font-semibold leading-snug text-foreground/90">{c.answer}</div>
                       </div>
+
+                      {c.sections && c.sections.length > 0 && (
+                        <div className="bg-white/40 dark:bg-black/20 p-5 rounded-3xl border border-border/30 backdrop-blur-xl space-y-4">
+                          {c.sections.map((s, i) => (
+                            <div key={i}>
+                              <div className="text-[11px] font-bold uppercase tracking-widest text-primary/70 mb-1.5">
+                                {s.title}
+                              </div>
+                              <p className="text-[15px] text-foreground/80 leading-relaxed whitespace-pre-wrap">
+                                {s.body}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>
