@@ -46,8 +46,8 @@ function Home() {
   return (
     <div className="min-h-dvh bg-background relative selection:bg-primary/20">
       {/* GLASSMORPHIC HEADER */}
-      <header className="sticky top-0 z-50 backdrop-blur-xl bg-background/70 border-b border-border/40 px-5 py-3 md:max-w-4xl lg:max-w-6xl mx-auto shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-all">
-        <div className="flex items-center justify-between">
+      <header className="sticky top-0 z-50 backdrop-blur-xl bg-background/70 border-b border-border/40 shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-all">
+        <div className="max-w-6xl mx-auto px-5 py-3 flex items-center justify-between">
           <img src={finalLogo} alt="Flashgyan" className="h-10 w-auto object-contain drop-shadow-sm" />
           <img
             src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images/RASbandhu-logo-green.png"
@@ -58,20 +58,26 @@ function Home() {
       </header>
 
       <main className="px-5 max-w-2xl md:max-w-4xl lg:max-w-6xl mx-auto pb-12 space-y-7 pt-6">
-        <div className="text-center space-y-1.5 animate-in fade-in slide-in-from-bottom-3 duration-700">
-          <h1 className="text-2xl font-bold tracking-tight text-[#910000] drop-shadow-sm">
-            {greeting}
-            {displayName ? `, ${displayName}` : ""}!
-          </h1>
-          <p className="text-foreground/80 font-medium text-[15px] leading-relaxed max-w-md mx-auto">
-            Welcome to Flashgyan. Let's make your exam preparation smarter and faster today.
-          </p>
-        </div>
+        {/* Top section: stacked on mobile/tablet, 2-column split on desktop */}
+        <div className="space-y-7 lg:grid lg:grid-cols-2 lg:gap-12 lg:items-center lg:space-y-0">
+          {/* Left column (desktop): greeting + description */}
+          <div className="text-center space-y-1.5 animate-in fade-in slide-in-from-bottom-3 duration-700 lg:text-left lg:col-start-1 lg:row-start-1">
+            <h1 className="text-2xl font-bold tracking-tight text-[#910000] drop-shadow-sm">
+              {greeting}
+              {displayName ? `, ${displayName}` : ""}!
+            </h1>
+            <p className="text-foreground/80 font-medium text-[15px] leading-relaxed max-w-md mx-auto lg:mx-0">
+              Welcome to Flashgyan. Let's make your exam preparation smarter and faster today.
+            </p>
+          </div>
 
-        <div className="w-full space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both">
-          <BannerCarousel banners={home.banners} />
+          {/* Right column (desktop): banner spans the full left column height */}
+          <div className="w-full md:max-w-2xl md:mx-auto lg:max-w-none lg:col-start-2 lg:row-start-1 lg:row-span-3 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both">
+            <BannerCarousel banners={home.banners} />
+          </div>
 
-          <div className="flex justify-center gap-4 items-center w-full max-w-sm mx-auto">
+          {/* Left column (desktop): app store badges */}
+          <div className="flex justify-center gap-4 items-center w-full max-w-sm mx-auto lg:mx-0 lg:justify-start animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both lg:col-start-1 lg:row-start-2">
             <button
               onClick={() => toast.info("iOS app is coming soon!")}
               className="transition-all hover:scale-105 hover:-translate-y-1 active:scale-95 block drop-shadow-md"
@@ -98,23 +104,24 @@ function Home() {
               />
             </a>
           </div>
-        </div>
 
-        <div className="animate-in fade-in slide-in-from-bottom-5 duration-700 delay-200 fill-mode-both">
-          {home.settings.cta_url.trim() && home.settings.cta_label.trim() && (
-            <ExternalCtaButton
-              label={home.settings.cta_label}
-              subtitle={home.settings.cta_subtitle}
-              url={home.settings.cta_url}
-              locked={home.settings.lock_cta}
-            />
-          )}
+          {/* Left column (desktop): CTA + caption */}
+          <div className="animate-in fade-in slide-in-from-bottom-5 duration-700 delay-200 fill-mode-both lg:col-start-1 lg:row-start-3">
+            {home.settings.cta_url.trim() && home.settings.cta_label.trim() && (
+              <ExternalCtaButton
+                label={home.settings.cta_label}
+                subtitle={home.settings.cta_subtitle}
+                url={home.settings.cta_url}
+                locked={home.settings.lock_cta}
+              />
+            )}
 
-          {home.settings.cta_caption.trim() && (
-            <p className="mt-3 mb-2 text-center text-[#910000] font-medium text-[14px] opacity-90">
-              {home.settings.cta_caption}
-            </p>
-          )}
+            {home.settings.cta_caption.trim() && (
+              <p className="mt-3 mb-2 text-center lg:text-left text-[#910000] font-medium text-[14px] opacity-90">
+                {home.settings.cta_caption}
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="animate-in fade-in slide-in-from-bottom-6 duration-700 delay-300 fill-mode-both">
@@ -123,7 +130,7 @@ function Home() {
       </main>
 
       <footer className="border-t border-border/50 bg-background/40 backdrop-blur-md">
-        <div className="max-w-2xl mx-auto px-5 py-8 flex flex-col items-center justify-center text-center gap-4 text-xs text-muted-foreground">
+        <div className="max-w-6xl mx-auto px-5 py-8 flex flex-col items-center justify-center text-center gap-4 text-xs text-muted-foreground">
           <p className="uppercase tracking-widest font-semibold opacity-70">
             <span className="block">© 2026 FLASHGYAN EDTECH LLP.</span>
             <span className="block mt-1">ALL RIGHTS RESERVED.</span>
@@ -231,8 +238,7 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
       onMouseLeave={onMouseUp}
     >
       <div
-        className="relative w-full overflow-hidden rounded-3xl shadow-[0_12px_40px_rgba(0,0,0,0.12)] bg-muted border border-border/50"
-        style={{ aspectRatio: "2 / 1" }}
+        className="relative w-full overflow-hidden rounded-3xl shadow-[0_12px_40px_rgba(0,0,0,0.12)] bg-muted border border-border/50 aspect-[2/1] lg:aspect-video"
       >
         <div
           className="flex h-full transition-transform duration-700 ease-out"
@@ -276,7 +282,7 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
 function FeaturePicker({ settings }: { settings: HomeData["settings"] }) {
   const navigate = useNavigate();
   return (
-    <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
       <FeatureCard
         title="Flashcards"
         subtitle="Flip cards and rate recall."
