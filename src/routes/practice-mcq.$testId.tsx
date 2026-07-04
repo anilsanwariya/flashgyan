@@ -98,8 +98,8 @@ function PracticeMcq() {
   const answered = pick !== null;
   const isCorrect = answered && pick === q?.answer;
 
-  // The card is fully "revealed" only if it's answered AND the initial 150ms animation delay has passed
-  const isRevealed = answered && pendingAnim !== index;
+  // Reveal immediately when answered — no artificial delay
+  const isRevealed = answered;
 
   const stats = useMemo(() => {
     let correct = 0;
@@ -136,42 +136,35 @@ function PracticeMcq() {
   function onPick(opt: number) {
     if (answered) return;
 
-    // 1. INSTANT RENDER: Lock the pending state and update the button color immediately
-    setPendingAnim(index);
+    // Instant state update — border, glow, and explanation reveal on the same frame
+    setPendingAnim(null);
     const next = picks.slice();
     next[index] = opt;
     setPicks(next);
 
     const correct = opt === q.answer;
 
-    // 2. DELAYED PAYLOAD: Wait 150ms for the browser to comfortably paint the button change,
-    // THEN insert the heavy DOM elements (Explanation, Glow, Confetti)
-    setTimeout(() => {
-      setPendingAnim(null);
-
-      if (correct) {
-        triggerHaptic("success");
-        try {
-          confetti({
-            particleCount: 50,
-            spread: 60,
-            origin: { y: 0.8 },
-            disableForReducedMotion: true,
-            
-            zIndex: 100,
-          });
-        } catch (e) {
-          // Ignore
-        }
-      } else {
-        triggerHaptic("error");
+    if (correct) {
+      triggerHaptic("success");
+      try {
+        confetti({
+          particleCount: 50,
+          spread: 60,
+          origin: { y: 0.8 },
+          disableForReducedMotion: true,
+          zIndex: 100,
+        });
+      } catch (e) {
+        // Ignore
       }
+    } else {
+      triggerHaptic("error");
+    }
 
-      // 3. SUPER DELAYED STORAGE: Save data out of the way of the animation
-      setTimeout(() => {
-        recordRating(q.id, correct ? "easy" : "hard");
-      }, 100);
-    }, 150);
+    // Defer non-visual storage work off the interaction frame
+    setTimeout(() => {
+      recordRating(q.id, correct ? "easy" : "hard");
+    }, 0);
   }
 
   function submit(finalPicks: (number | null)[]) {
