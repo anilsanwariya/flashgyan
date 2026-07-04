@@ -173,6 +173,8 @@ LANGUAGE MATCHING: You must detect the language of the user's question and reply
 
 RICH FORMATTING: Always format your answers using Markdown. Use **bold** for headings, and *italicize* or **bold** important keywords for emphasis. Use bullet points and numbered lists where appropriate.
 
+DIAGRAMS & IMAGES: The provided database context contains embedded diagrams, maps, and illustrations formatted as Markdown image tags (e.g., \`![Description](https://...)\`). When answering a question that relies on or references these visual aids, you MUST preserve the exact image Markdown tag syntax and its absolute URL, embedding it smoothly into your final answer. Never strip out, modify, or omit these image URLs.
+
 VISUAL AIDS: When explaining processes, timelines, or comparisons, you MUST use Markdown tables, or generate Mermaid.js code blocks (\`\`\`mermaid) to draw flowcharts/diagrams to make the concepts easier for students to understand.`;
 
 export const askSaathi = createServerFn({ method: "POST" })

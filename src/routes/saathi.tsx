@@ -321,6 +321,18 @@ function MessageBubble({ msg }: { msg: Msg }) {
                   </div>
                 );
               },
+              // 🚀 ADDED: Custom image renderer to display diagram links elegantly inside chat bubbles
+              img(props) {
+                const { src, alt } = props;
+                return (
+                  <img
+                    src={src}
+                    alt={alt || "SAATHI Study Diagram"}
+                    className="max-w-full h-auto rounded-2xl my-3 border border-border/40 bg-white/60 dark:bg-black/20 shadow-sm max-h-[350px] object-contain block mx-auto transition-transform hover:scale-[1.01]"
+                    loading="lazy"
+                  />
+                );
+              },
             }}
           >
             {msg.content}
