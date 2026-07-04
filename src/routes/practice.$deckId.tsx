@@ -158,6 +158,8 @@ function Practice() {
         prompt: c.prompt,
         question: c.question,
         answer: c.answer,
+        image_url: c.image_url,
+        sections: c.sections,
         rating: r,
       });
     });
