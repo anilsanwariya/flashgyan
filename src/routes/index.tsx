@@ -130,7 +130,7 @@ function Home() {
       </main>
 
       <footer className="border-t border-border/50 bg-background/40 backdrop-blur-md">
-        <div className="max-w-2xl mx-auto px-5 py-8 flex flex-col items-center justify-center text-center gap-4 text-xs text-muted-foreground">
+        <div className="max-w-6xl mx-auto px-5 py-8 flex flex-col items-center justify-center text-center gap-4 text-xs text-muted-foreground">
           <p className="uppercase tracking-widest font-semibold opacity-70">
             <span className="block">© 2026 FLASHGYAN EDTECH LLP.</span>
             <span className="block mt-1">ALL RIGHTS RESERVED.</span>
