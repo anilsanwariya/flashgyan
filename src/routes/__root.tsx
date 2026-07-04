@@ -29,25 +29,36 @@ function TelegramExpander() {
         // Ignore if older Telegram version doesn't support this
       }
 
+      const forceRepaint = () => {
+        // Force iOS WKWebView to re-composite the page after resume.
+        // Toggling a transform on the root element is more reliable than scroll jolts.
+        const root = document.documentElement;
+        root.style.transform = "translateZ(0)";
+        // Read a layout property to flush styles
+        void root.offsetHeight;
+        requestAnimationFrame(() => {
+          root.style.transform = "";
+          try {
+            tg?.expand();
+          } catch {
+            /* noop */
+          }
+        });
+      };
+
       const handleVisibilityChange = () => {
         if (document.visibilityState === "visible") {
-          // 🚀 Syncs the scroll jolt exactly with the phone's screen refresh rate
-          // This eliminates the visual delay of the screen repainting.
-          requestAnimationFrame(() => {
-            tg?.expand();
-            window.scrollBy(0, 1);
-            
-            // Queue the reverse scroll for the very next frame
-            requestAnimationFrame(() => {
-              window.scrollBy(0, -1);
-            });
-          });
+          forceRepaint();
         }
       };
 
+      window.addEventListener("pageshow", forceRepaint);
+      window.addEventListener("focus", forceRepaint);
       document.addEventListener("visibilitychange", handleVisibilityChange);
 
       return () => {
+        window.removeEventListener("pageshow", forceRepaint);
+        window.removeEventListener("focus", forceRepaint);
         document.removeEventListener("visibilitychange", handleVisibilityChange);
       };
     }
