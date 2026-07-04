@@ -238,8 +238,7 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
       onMouseLeave={onMouseUp}
     >
       <div
-        className="relative w-full overflow-hidden rounded-3xl shadow-[0_12px_40px_rgba(0,0,0,0.12)] bg-muted border border-border/50"
-        style={{ aspectRatio: "2 / 1" }}
+        className="relative w-full overflow-hidden rounded-3xl shadow-[0_12px_40px_rgba(0,0,0,0.12)] bg-muted border border-border/50 aspect-[2/1] lg:aspect-video"
       >
         <div
           className="flex h-full transition-transform duration-700 ease-out"
