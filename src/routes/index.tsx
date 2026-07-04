@@ -282,7 +282,7 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
 function FeaturePicker({ settings }: { settings: HomeData["settings"] }) {
   const navigate = useNavigate();
   return (
-    <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
       <FeatureCard
         title="Flashcards"
         subtitle="Flip cards and rate recall."
