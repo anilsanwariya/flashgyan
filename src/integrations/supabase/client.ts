@@ -1,22 +1,27 @@
-// Manual Override: Hardcoded to bypass environment variable and token errors
+// Browser Supabase client. Uses ONLY the publishable/anon key — never the service role key.
+// Env vars are provided by Vite from .env at build time (VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY).
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "./types";
 
 function createSupabaseClient() {
-  // Hardcoded to your specific Supabase project URL
-  const SUPABASE_URL = "https://mhcgrpandktbuaqrkhph.supabase.co";
+  const SUPABASE_URL =
+    import.meta.env.VITE_SUPABASE_URL ?? import.meta.env.SUPABASE_URL;
+  const SUPABASE_PUBLISHABLE_KEY =
+    import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ??
+    import.meta.env.VITE_SUPABASE_ANON_KEY ??
+    import.meta.env.SUPABASE_PUBLISHABLE_KEY;
 
-  // PASTE YOUR ACTUAL 'eyJ...' ANON KEY HERE
-  const SUPABASE_ANON_KEY =
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1oY2dycGFuZGt0YnVhcXJraHBoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMxNDg5MzMsImV4cCI6MjA5ODcyNDkzM30.l2t9PmVUgUgXcuJq5jD92yxQF_RisZ0GgoPS3kYnZmM";
-
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    const message = "Missing hardcoded Supabase keys. Please check the manual override in client.ts";
+  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+    const missing = [
+      ...(!SUPABASE_URL ? ["VITE_SUPABASE_URL"] : []),
+      ...(!SUPABASE_PUBLISHABLE_KEY ? ["VITE_SUPABASE_PUBLISHABLE_KEY"] : []),
+    ];
+    const message = `Missing Supabase environment variable(s): ${missing.join(", ")}.`;
     console.error(`[Supabase] ${message}`);
     throw new Error(message);
   }
 
-  return createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
     auth: {
       storage: typeof window !== "undefined" ? localStorage : undefined,
       persistSession: true,
