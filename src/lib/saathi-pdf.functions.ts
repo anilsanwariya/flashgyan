@@ -41,7 +41,7 @@ export const parsePdfWithLlama = createServerFn({ method: "POST" })
     const form = new FormData();
     form.append(
       "file",
-      new Blob([bytes], { type: "application/pdf" }),
+      new Blob([bytes as unknown as BlobPart], { type: "application/pdf" }),
       data.filename.endsWith(".pdf") ? data.filename : `${data.filename}.pdf`,
     );
     form.append("language", "en");
