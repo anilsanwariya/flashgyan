@@ -1,7 +1,7 @@
 // Client-side document text extraction for SAATHI knowledge uploads.
 import * as XLSX from "xlsx";
 import mammoth from "mammoth";
-import { supabase } from "@/integrations/supabase/client";
+import { parsePdfWithLlama } from "@/lib/saathi-pdf.functions";
 
 export async function extractTextFromFile(file: File): Promise<string> {
   const name = file.name.toLowerCase();
@@ -30,19 +30,25 @@ async function extractXlsx(file: File): Promise<string> {
   return parts.join("\n\n").trim();
 }
 
-// 🚀 FIXED: Sends the PDF to our LlamaParse Edge Function to extract layout, tables, and diagrams perfectly!
+// Encode a File to base64 without stack-blowing on large inputs.
+async function fileToBase64(file: File): Promise<string> {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < buf.length; i += chunk) {
+    binary += String.fromCharCode(...buf.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+// Sends the PDF to our TanStack server fn which calls LlamaParse.
 async function extractPdf(file: File): Promise<string> {
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const { data, error } = await supabase.functions.invoke('parse-pdf', {
-    body: formData,
+  const base64 = await fileToBase64(file);
+  const { markdown } = await parsePdfWithLlama({
+    data: { filename: file.name, base64 },
   });
-
-  if (error) throw new Error(error.message);
-  if (!data?.markdown) throw new Error("No markdown returned from parser");
-
-  return data.markdown;
+  if (!markdown) throw new Error("No markdown returned from parser");
+  return markdown;
 }
 
 export type QnARow = {
