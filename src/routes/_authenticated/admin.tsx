@@ -704,14 +704,35 @@ function DeckCardsView({
             )}
           </section>
 
+          <FlashcardsAiPanel
+            startOrder={(deckQ.data.cards.at(-1)?.order_index ?? 0) + 1}
+            onGenerated={(rows) => {
+              setParsed(rows);
+              setInvalid(0);
+              setFileName("AI-generated");
+            }}
+          />
+
           <section>
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-3 gap-2">
               <h3 className="font-semibold">
                 Cards ({deckQ.data.cards.length})
               </h3>
-              <Button size="sm" onClick={() => setEditing("new")}>
-                <Plus className="h-4 w-4" /> Add Card
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={deckQ.data.cards.length === 0}
+                  onClick={() =>
+                    exportFlashcardsToXlsx(deckQ.data!.deck.name, deckQ.data!.cards)
+                  }
+                >
+                  <Download className="h-4 w-4" /> Download Deck
+                </Button>
+                <Button size="sm" onClick={() => setEditing("new")}>
+                  <Plus className="h-4 w-4" /> Add Card
+                </Button>
+              </div>
             </div>
             {deckQ.data.cards.length === 0 ? (
               <p className="text-sm text-muted-foreground">
