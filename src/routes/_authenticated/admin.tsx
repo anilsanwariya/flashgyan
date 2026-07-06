@@ -2166,10 +2166,31 @@ function McqPracticeQuestionsView({
             )}
           </section>
 
+          <McqAiPanel
+            startOrder={(testQ.data.questions.at(-1)?.order_index ?? 0) + 1}
+            onGenerated={(rows) => {
+              setParsed(rows);
+              setInvalid(0);
+              setFileName("AI-generated");
+            }}
+          />
+
           <section>
-            <h3 className="font-semibold mb-3">
-              Questions ({testQ.data.questions.length})
-            </h3>
+            <div className="flex items-center justify-between mb-3 gap-2">
+              <h3 className="font-semibold">
+                Questions ({testQ.data.questions.length})
+              </h3>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={testQ.data.questions.length === 0}
+                onClick={() =>
+                  exportMcqToXlsx(testQ.data!.test.name, testQ.data!.questions)
+                }
+              >
+                <Download className="h-4 w-4" /> Download Deck
+              </Button>
+            </div>
             {testQ.data.questions.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 No questions yet. Upload an Excel file above.
