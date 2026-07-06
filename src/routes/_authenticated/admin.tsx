@@ -77,7 +77,10 @@ import {
   Pencil,
   ImagePlus,
   ChevronRight,
+  Download,
 } from "lucide-react";
+import { FlashcardsAiPanel, McqAiPanel } from "@/components/ai-generate-panel";
+import { exportFlashcardsToXlsx, exportMcqToXlsx } from "@/lib/deck-export";
 
 export const Route = createFileRoute("/_authenticated/admin")({
   ssr: false,
