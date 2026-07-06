@@ -122,9 +122,8 @@ export function FlashcardsAiPanel({
   defaultCount = 25,
 }: Props<GeneratedFcRow>) {
   const { parsePdf, file, setFile, count, setCount, status, setStatus, busy } =
-    useAiPanelState();
+    useAiPanelState(defaultCount);
   const generate = useServerFn(generateFlashcardsFromMarkdown);
-  useState(() => setCount(defaultCount));
 
   async function onRun() {
     if (!file) return;
@@ -169,9 +168,8 @@ export function McqAiPanel({
   defaultCount = 20,
 }: Props<GeneratedMcqRow>) {
   const { parsePdf, file, setFile, count, setCount, status, setStatus, busy } =
-    useAiPanelState();
+    useAiPanelState(defaultCount);
   const generate = useServerFn(generateMcqsFromMarkdown);
-  useState(() => setCount(defaultCount));
 
   async function onRun() {
     if (!file) return;
