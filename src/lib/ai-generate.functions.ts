@@ -246,7 +246,9 @@ export const generateMcqsFromMarkdown = createServerFn({ method: "POST" })
     let ord = data.startOrder;
     for (const q of raw) {
       const question = String(q?.question ?? "").trim();
-      const opts = Array.isArray(q?.options) ? q.options.map((o: unknown) => String(o ?? "").trim()) : [];
+      const opts: string[] = Array.isArray(q?.options)
+        ? (q.options as unknown[]).map((o) => String(o ?? "").trim())
+        : [];
       if (!question || opts.length !== 4 || opts.some((o) => !o)) continue;
       const answer = Number(q?.answer);
       if (!Number.isInteger(answer) || answer < 1 || answer > 4) continue;
