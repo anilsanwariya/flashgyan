@@ -33,10 +33,10 @@ type Props<T> = {
   defaultCount?: number;
 };
 
-function useAiPanelState() {
+function useAiPanelState(defaultCount: number) {
   const parsePdf = useServerFn(parsePdfWithLlama);
   const [file, setFile] = useState<File | null>(null);
-  const [count, setCount] = useState(20);
+  const [count, setCount] = useState(defaultCount);
   const [status, setStatus] = useState<"idle" | "parsing" | "generating">("idle");
   const busy = status !== "idle";
   return { parsePdf, file, setFile, count, setCount, status, setStatus, busy };
