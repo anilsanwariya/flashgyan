@@ -21,7 +21,7 @@ export const Route = createFileRoute("/mcq-tests")({
 function McqTestsPage() {
   const { data: tests } = useSuspenseQuery(mcqQO);
   return (
-    <div className="min-h-dvh bg-background/50 relative overflow-hidden selection:bg-primary/20">
+    <div className="min-h-dvh bg-background/50 relative selection:bg-primary/20">
       <div className="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-primary/5 to-transparent -z-10 pointer-events-none" />
 
       <header className="sticky top-0 z-50 backdrop-blur-xl bg-background/70 border-b border-border/40 px-5 py-3 shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
