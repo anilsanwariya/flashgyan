@@ -69,6 +69,12 @@ function TakeTest() {
   const startedAt = useRef(Date.now());
   const paletteRef = useRef<HTMLDivElement>(null);
 
+  // FIX: Use a ref to keep a live track of the user's answers so the timer doesn't submit a stale state
+  const picksRef = useRef(picks);
+  useEffect(() => {
+    picksRef.current = picks;
+  }, [picks]);
+
   const [showDownloadPopup, setShowDownloadPopup] = useState(false);
   const [pendingSubmission, setPendingSubmission] = useState(false);
 
@@ -116,7 +122,8 @@ function TakeTest() {
 
   function handleTimeUp() {
     triggerHaptic("error");
-    submit(picks, true);
+    // FIX: Submit the live answers from the ref, not the stale blank state
+    submit(picksRef.current, true);
   }
 
   function onPick(opt: number) {
