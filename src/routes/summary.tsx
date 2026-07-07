@@ -72,12 +72,12 @@ function Summary() {
   const featureName = deckId ? "Flashcards" : practiceId ? "MCQ Practice" : "Home";
 
   return (
-    <div className="min-h-dvh bg-gradient-to-br from-primary/10 via-background to-secondary/10 relative overflow-hidden selection:bg-primary/20">
+    <div className="min-h-dvh bg-gradient-to-br from-primary/10 via-background to-secondary/10 relative selection:bg-primary/20">
       {/* Ambient orbs */}
       <div className="pointer-events-none absolute -top-40 -left-24 h-[500px] w-[500px] rounded-full bg-primary/10 blur-[120px]" />
       <div className="pointer-events-none absolute top-1/3 -right-32 h-[500px] w-[500px] rounded-full bg-secondary/30 blur-[120px]" />
 
-      <header className="relative z-50 sticky top-0 backdrop-blur-2xl bg-white/40 dark:bg-black/40 border-b border-border/20">
+      <header className="sticky top-0 z-50 backdrop-blur-2xl bg-white/40 dark:bg-black/40 border-b border-border/20">
         <div className="max-w-2xl mx-auto flex items-center justify-between px-5 py-3">
           <Link
             to={featureLink}
@@ -305,14 +305,18 @@ function McqReviewCard({ index, card }: { index: number; card: SessionCardResult
     : "border-destructive/40 shadow-[0_8px_32px_rgba(239,68,68,0.12)]";
 
   return (
-    <li className={`rounded-[32px] border bg-white/50 dark:bg-black/30 backdrop-blur-3xl p-6 md:p-8 space-y-5 transition-colors ${glowCls}`}>
+    <li
+      className={`rounded-[32px] border bg-white/50 dark:bg-black/30 backdrop-blur-3xl p-6 md:p-8 space-y-5 transition-colors ${glowCls}`}
+    >
       <div className="flex items-start justify-between gap-4">
         <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest bg-white/60 dark:bg-black/40 border border-border/30 backdrop-blur-xl px-2.5 py-1 rounded-full">
           Q{index + 1} · {card.subject} {card.topic ? `· ${card.topic}` : ""}
         </div>
         <div
           className={`text-xs font-bold flex items-center gap-1 backdrop-blur-xl border px-2.5 py-1 rounded-full ${
-            correct ? "text-success bg-success/10 border-success/25" : "text-destructive bg-destructive/10 border-destructive/25"
+            correct
+              ? "text-success bg-success/10 border-success/25"
+              : "text-destructive bg-destructive/10 border-destructive/25"
           }`}
         >
           {correct ? (
