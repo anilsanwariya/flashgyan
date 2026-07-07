@@ -270,6 +270,27 @@ export function HomePanel() {
       )}
 
       {settings && (
+        <section className="rounded-2xl border border-border bg-card p-4 space-y-3">
+          <div>
+            <h2 className="font-semibold">Store Buttons</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Hide the App Store or Google Play buttons on the home page.
+            </p>
+          </div>
+          <LockRow
+            label="Hide App Store button"
+            checked={settings.hide_app_store}
+            onChange={(v) => setSettings({ ...settings, hide_app_store: v })}
+          />
+          <LockRow
+            label="Hide Google Play button"
+            checked={settings.hide_google_play}
+            onChange={(v) => setSettings({ ...settings, hide_google_play: v })}
+          />
+        </section>
+      )}
+
+      {settings && (
         <div className="sticky bottom-4 flex justify-end">
           <Button onClick={() => saveMut.mutate(settings)} disabled={saveMut.isPending}>
             {saveMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}

@@ -78,31 +78,35 @@ function Home() {
 
           {/* Left column (desktop): app store badges */}
           <div className="flex justify-center gap-4 items-center w-full max-w-sm mx-auto lg:mx-0 lg:justify-start animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both lg:col-start-1 lg:row-start-2">
-            <button
-              onClick={() => toast.info("iOS app is coming soon!")}
-              className="transition-all hover:scale-105 hover:-translate-y-1 active:scale-95 block drop-shadow-md"
-              aria-label="Download on the App Store (Coming Soon)"
-            >
-              <img
-                src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images/Download_on_the_App_Store_Badge_US-UK_RGB_blk_092917.svg"
-                alt="Download on the App Store"
-                className="h-[48px] w-auto object-contain"
-              />
-            </button>
+            {!home.settings.hide_app_store && (
+              <button
+                onClick={() => toast.info("iOS app is coming soon!")}
+                className="transition-all hover:scale-105 hover:-translate-y-1 active:scale-95 block drop-shadow-md"
+                aria-label="Download on the App Store (Coming Soon)"
+              >
+                <img
+                  src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images/Download_on_the_App_Store_Badge_US-UK_RGB_blk_092917.svg"
+                  alt="Download on the App Store"
+                  className="h-[48px] w-auto object-contain"
+                />
+              </button>
+            )}
 
-            <a
-              href="https://play.google.com/store/apps/details?id=com.flashgyan"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="transition-all hover:scale-105 hover:-translate-y-1 active:scale-95 block drop-shadow-md"
-              aria-label="Get it on Google Play"
-            >
-              <img
-                src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images/GetItOnGooglePlay_Badge_Web_color_English.svg"
-                alt="Get it on Google Play"
-                className="h-[48px] w-auto object-contain"
-              />
-            </a>
+            {!home.settings.hide_google_play && (
+              <a
+                href="https://play.google.com/store/apps/details?id=com.flashgyan"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="transition-all hover:scale-105 hover:-translate-y-1 active:scale-95 block drop-shadow-md"
+                aria-label="Get it on Google Play"
+              >
+                <img
+                  src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images/GetItOnGooglePlay_Badge_Web_color_English.svg"
+                  alt="Get it on Google Play"
+                  className="h-[48px] w-auto object-contain"
+                />
+              </a>
+            )}
           </div>
 
           {/* Left column (desktop): CTA + caption */}
