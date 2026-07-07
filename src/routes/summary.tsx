@@ -73,9 +73,11 @@ function Summary() {
 
   return (
     <div className="min-h-dvh bg-gradient-to-br from-primary/10 via-background to-secondary/10 relative selection:bg-primary/20">
-      {/* Ambient orbs */}
-      <div className="pointer-events-none absolute -top-40 -left-24 h-[500px] w-[500px] rounded-full bg-primary/10 blur-[120px]" />
-      <div className="pointer-events-none absolute top-1/3 -right-32 h-[500px] w-[500px] rounded-full bg-secondary/30 blur-[120px]" />
+      {/* Ambient orbs securely wrapped to prevent mobile horizontal zooming glitches */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+        <div className="absolute -top-40 -left-24 h-[500px] w-[500px] rounded-full bg-primary/10 blur-[120px]" />
+        <div className="absolute top-1/3 -right-32 h-[500px] w-[500px] rounded-full bg-secondary/30 blur-[120px]" />
+      </div>
 
       <header className="sticky top-0 z-50 backdrop-blur-2xl bg-white/40 dark:bg-black/40 border-b border-border/20">
         <div className="max-w-2xl mx-auto flex items-center justify-between px-5 py-3">
