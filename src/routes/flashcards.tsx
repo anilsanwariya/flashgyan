@@ -24,8 +24,9 @@ function FlashcardsPage() {
     <div className="min-h-dvh bg-background/50 relative overflow-hidden selection:bg-primary/20">
       <div className="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-primary/5 to-transparent -z-10 pointer-events-none" />
 
-      <header className="sticky top-0 z-50 backdrop-blur-xl bg-background/70 border-b border-border/40 px-5 py-3 shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
-        <div className="flex items-center justify-between max-w-2xl mx-auto">
+      {/* GLASSMORPHIC HEADER */}
+      <header className="sticky top-0 z-50 backdrop-blur-xl bg-background/70 border-b border-border/40 shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-all">
+        <div className="max-w-6xl mx-auto px-5 py-3 flex items-center justify-between">
           <Link to="/" aria-label="Go to Home">
             <img src={finalLogo} alt="Flashgyan" className="h-10 w-auto object-contain drop-shadow-sm" />
           </Link>
