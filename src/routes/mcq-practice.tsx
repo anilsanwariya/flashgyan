@@ -29,7 +29,9 @@ function McqPracticePage() {
 
       <header className="sticky top-0 z-50 backdrop-blur-xl bg-background/70 border-b border-border/40 px-5 py-3 shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
         <div className="flex items-center justify-between max-w-2xl mx-auto">
-          <img src={finalLogo} alt="Flashgyan" className="h-10 w-auto object-contain drop-shadow-sm" />
+          <Link to="/" aria-label="Go to Home">
+            <img src={finalLogo} alt="Flashgyan" className="h-10 w-auto object-contain drop-shadow-sm" />
+          </Link>
           <img
             src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//RASbandhu-logo-green.png"
             alt="RASbandhu"

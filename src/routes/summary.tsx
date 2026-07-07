@@ -85,7 +85,9 @@ function Summary() {
           >
             <ArrowLeft className="h-4 w-4" /> {featureName}
           </Link>
-          <img src={finalLogo} alt="Flashgyan" className="h-9 w-auto object-contain drop-shadow-sm opacity-80" />
+          <Link to="/" aria-label="Go to Home">
+            <img src={finalLogo} alt="Flashgyan" className="h-9 w-auto object-contain drop-shadow-sm opacity-80" />
+          </Link>
         </div>
       </header>
 

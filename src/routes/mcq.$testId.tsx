@@ -116,7 +116,7 @@ function TakeTest() {
 
   function handleTimeUp() {
     triggerHaptic("error");
-    submit(picks);
+    submit(picks, true);
   }
 
   function onPick(opt: number) {
@@ -130,7 +130,7 @@ function TakeTest() {
     }
   }
 
-  function submit(finalPicks: (number | null)[]) {
+  function submit(finalPicks: (number | null)[], auto = false) {
     const endedAt = Date.now();
     const attempt = {
       testId,
@@ -146,6 +146,10 @@ function TakeTest() {
     });
 
     sessionStorage.setItem(`mcq-attempt:${testId}`, JSON.stringify(attempt));
+    if (auto) {
+      navigate({ to: "/mcq-result/$testId", params: { testId } });
+      return;
+    }
     setPendingSubmission(true);
     setShowDownloadPopup(true);
   }
