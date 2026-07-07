@@ -415,22 +415,28 @@ function FeatureCard({
 
 function TelegramFloatingButton() {
   return (
-    <a
-      href="https://t.me/RASbandhu"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="Join Telegram"
-      // 1. bg-[#229ed9]/30 makes the blue transparent
-      // 2. backdrop-blur-xl creates the frosted glass effect
-      // 3. border & border-[#229ed9]/40 gives it the crisp glass edge
-      className="fixed right-6 bottom-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[#229ed9]/30 backdrop-blur-xl border border-[#229ed9]/40 shadow-[0_8px_32px_rgba(34,158,217,0.25)] transition-all hover:scale-110 hover:bg-[#229ed9]/40 hover:-translate-y-1 active:scale-95 overflow-hidden"
+    <div
+      className="fixed right-6 bottom-6 z-50 pointer-events-none"
+      style={{ animation: "float-bob 3s ease-in-out infinite" }}
     >
-      <img
-        src={tgIcon}
-        alt="Telegram"
-        // Added drop-shadow so the icon pops off the translucent glass
-        className="h-8 w-8 object-contain drop-shadow-md"
-      />
-    </a>
+      {/* The style block injects the keyframes safely into React. 
+        It floats the wrapper, keeping the button's native hover effects perfectly intact.
+      */}
+      <style>{`
+        @keyframes float-bob {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-12px); }
+        }
+      `}</style>
+      <a
+        href="https://t.me/RASbandhu"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Join Telegram"
+        className="flex h-14 w-14 items-center justify-center rounded-full bg-[#229ed9]/30 backdrop-blur-xl border border-[#229ed9]/40 shadow-[0_8px_32px_rgba(34,158,217,0.25)] transition-all hover:scale-110 hover:bg-[#229ed9]/40 active:scale-95 overflow-hidden pointer-events-auto"
+      >
+        <img src={tgIcon} alt="Telegram" className="h-8 w-8 object-contain drop-shadow-md" />
+      </a>
+    </div>
   );
 }
