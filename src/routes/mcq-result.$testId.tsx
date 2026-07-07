@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { McqAttempt } from "./mcq.$testId";
 import { ArrowLeft, CheckCircle2, XCircle, MinusCircle, Trophy, ChevronDown } from "lucide-react";
 import { AppDownloadPopup } from "@/components/app-download-popup";
+import finalLogo from "@/assets/final-logo.png";
 
 const STORAGE_KEY = (id: string) => `mcq-attempt:${id}`;
 
@@ -77,18 +78,27 @@ function Result() {
       <div className="pointer-events-none absolute -top-40 -left-24 h-[500px] w-[500px] rounded-full bg-primary/10 blur-[120px]" />
       <div className="pointer-events-none absolute top-1/3 -right-32 h-[500px] w-[500px] rounded-full bg-secondary/30 blur-[120px]" />
 
-      {/* Glass Header */}
-      <header className="relative z-50 sticky top-0 backdrop-blur-2xl bg-white/40 dark:bg-black/40 border-b border-border/20">
-        <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between">
-          <Link
-            to="/mcq-tests"
-            className="inline-flex items-center gap-1.5 rounded-full h-10 px-4 text-sm font-semibold text-foreground/80 bg-white/50 dark:bg-black/40 border border-border/30 backdrop-blur-xl active:scale-95 transition-all"
-          >
-            <ArrowLeft className="h-4 w-4" /> MCQ Tests
+      <header className="sticky top-0 z-50 backdrop-blur-xl bg-background/70 border-b border-border/40 px-5 py-3 shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
+        <div className="flex items-center justify-between max-w-2xl mx-auto">
+          <Link to="/" aria-label="Go to Home">
+            <img src={finalLogo} alt="Flashgyan" className="h-10 w-auto object-contain drop-shadow-sm" />
           </Link>
-          <div className="text-sm font-bold text-foreground/80 tracking-tight">Test Result</div>
+          <img
+            src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//RASbandhu-logo-green.png"
+            alt="RASbandhu"
+            className="h-10 w-auto object-contain drop-shadow-sm"
+          />
         </div>
       </header>
+
+      <div className="max-w-2xl mx-auto px-5 pt-4">
+        <Link
+          to="/mcq-tests"
+          className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors bg-muted/50 hover:bg-muted px-3 py-1 rounded-full border border-border/50 shadow-sm"
+        >
+          <ArrowLeft className="h-4 w-4" /> MCQ Tests
+        </Link>
+      </div>
 
       <main className="relative z-10 max-w-2xl mx-auto px-5 py-8 space-y-8 pb-24 animate-in fade-in slide-in-from-bottom-6 duration-700">
         {/* Hero */}
