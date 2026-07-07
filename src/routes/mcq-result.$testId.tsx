@@ -78,7 +78,7 @@ function Result() {
       <div className="pointer-events-none absolute -top-40 -left-24 h-[500px] w-[500px] rounded-full bg-primary/10 blur-[120px]" />
       <div className="pointer-events-none absolute top-1/3 -right-32 h-[500px] w-[500px] rounded-full bg-secondary/30 blur-[120px]" />
 
-      {/* Unified Header matching summary.tsx */}
+      {/* Unified Header matching summary.tsx perfectly */}
       <header className="relative z-50 sticky top-0 backdrop-blur-2xl bg-white/40 dark:bg-black/40 border-b border-border/20">
         <div className="max-w-2xl mx-auto flex items-center justify-between px-5 py-3">
           <Link
@@ -87,16 +87,9 @@ function Result() {
           >
             <ArrowLeft className="h-4 w-4" /> MCQ Tests
           </Link>
-          <div className="flex items-center gap-3">
-            <Link to="/" aria-label="Go to Home">
-              <img src={finalLogo} alt="Flashgyan" className="h-9 w-auto object-contain drop-shadow-sm opacity-80" />
-            </Link>
-            <img
-              src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images//RASbandhu-logo-green.png"
-              alt="RASbandhu"
-              className="h-9 w-auto object-contain drop-shadow-sm opacity-80"
-            />
-          </div>
+          <Link to="/" aria-label="Go to Home">
+            <img src={finalLogo} alt="Flashgyan" className="h-9 w-auto object-contain drop-shadow-sm opacity-80" />
+          </Link>
         </div>
       </header>
 
