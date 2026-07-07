@@ -209,6 +209,8 @@ export const updateHomeSettings = createServerFn({ method: "POST" })
         lock_mcq_practice: data.lock_mcq_practice,
         lock_saathi: data.lock_saathi,
         lock_cta: data.lock_cta,
+        hide_app_store: data.hide_app_store,
+        hide_google_play: data.hide_google_play,
         updated_at: new Date().toISOString(),
       })
       .eq("id", 1);
