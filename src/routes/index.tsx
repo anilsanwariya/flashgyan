@@ -243,9 +243,7 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
       onMouseUp={onMouseUp}
       onMouseLeave={onMouseUp}
     >
-      <div
-        className="relative w-full overflow-hidden rounded-3xl shadow-[0_12px_40px_rgba(0,0,0,0.12)] bg-muted border border-border/50 aspect-[2/1] lg:aspect-video"
-      >
+      <div className="relative w-full overflow-hidden rounded-3xl shadow-[0_12px_40px_rgba(0,0,0,0.12)] bg-muted border border-border/50 aspect-[2/1] lg:aspect-video">
         <div
           className="flex h-full transition-transform duration-700 ease-out"
           style={{ transform: `translateX(-${idx * 100}%)` }}
@@ -338,7 +336,7 @@ function ExternalCtaButton({
 }) {
   const handle = () => {
     if (locked) {
-      toast.info(`${label} is locked.`);
+      toast.info(`${label} is coming soon!`);
       return;
     }
     window.open(url, "_blank", "noopener,noreferrer");
@@ -382,7 +380,7 @@ function FeatureCard({
 }) {
   const handle = () => {
     if (locked) {
-      toast.info(`${title} is locked.`);
+      toast.info(`${title} is coming soon!`);
       return;
     }
     onClick();
