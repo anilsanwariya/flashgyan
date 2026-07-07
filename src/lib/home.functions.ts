@@ -23,6 +23,8 @@ export type HomeSettings = {
   lock_mcq_practice: boolean;
   lock_saathi: boolean;
   lock_cta: boolean;
+  hide_app_store: boolean;
+  hide_google_play: boolean;
 };
 
 export type HomeData = {
@@ -71,6 +73,8 @@ const DEFAULT_SETTINGS: HomeSettings = {
   lock_mcq_practice: false,
   lock_saathi: false,
   lock_cta: false,
+  hide_app_store: false,
+  hide_google_play: false,
 };
 
 export const getHomeData = createServerFn({ method: "GET" }).handler(
