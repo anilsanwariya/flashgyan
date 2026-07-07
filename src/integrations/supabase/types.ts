@@ -127,6 +127,8 @@ export type Database = {
           cta_label: string
           cta_subtitle: string
           cta_url: string
+          hide_app_store: boolean
+          hide_google_play: boolean
           id: number
           lock_cta: boolean
           lock_flashcards: boolean
@@ -140,6 +142,8 @@ export type Database = {
           cta_label?: string
           cta_subtitle?: string
           cta_url?: string
+          hide_app_store?: boolean
+          hide_google_play?: boolean
           id?: number
           lock_cta?: boolean
           lock_flashcards?: boolean
@@ -153,6 +157,8 @@ export type Database = {
           cta_label?: string
           cta_subtitle?: string
           cta_url?: string
+          hide_app_store?: boolean
+          hide_google_play?: boolean
           id?: number
           lock_cta?: boolean
           lock_flashcards?: boolean
