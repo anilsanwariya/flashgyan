@@ -114,7 +114,7 @@ async function editReveal(chat_id: number, message_id: number, cardId: string, c
   }
   const expl = explanationFrom(card.sections);
   const text =
-    `📝 <b>Question ${count}/10:</b>\n${esc(card.question)}\n\n` +
+    `📝 <b>Question ${count}/10:</b>${card.prompt ? `\n<i>${esc(card.prompt)}</i>` : ""}\n${esc(card.question)}\n\n` +
     `💡 <b>Answer:</b>\n${esc(card.answer)}\n\n` +
     `📖 <b>Explanation:</b>\n${esc(expl)}`;
   const reply_markup =
