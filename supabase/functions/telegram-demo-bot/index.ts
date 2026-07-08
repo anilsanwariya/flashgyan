@@ -46,7 +46,7 @@ async function resolveSubject(code: string): Promise<string | null> {
 async function randomCardBySubject(subject: string) {
   const { data, error } = await supabase
     .from("flashcards")
-    .select("id, question, answer, sections")
+    .select("id, prompt, question, answer, sections")
     .eq("subject", subject);
   if (error) throw error;
   if (!data?.length) return null;
@@ -56,7 +56,7 @@ async function randomCardBySubject(subject: string) {
 async function cardById(id: string) {
   const { data, error } = await supabase
     .from("flashcards")
-    .select("id, question, answer, sections")
+    .select("id, prompt, question, answer, sections")
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;
@@ -98,7 +98,7 @@ async function editQuestion(chat_id: number, message_id: number, count: number, 
   await tg("editMessageText", {
     chat_id,
     message_id,
-    text: `📝 <b>Question ${count}/10:</b>\n\n${esc(card.question)}`,
+    text: `📝 <b>Question ${count}/10:</b>${card.prompt ? `\n\n<i>${esc(card.prompt)}</i>` : ""}\n\n${esc(card.question)}`,
     parse_mode: "HTML",
     reply_markup: {
       inline_keyboard: [[{ text: "👁️ Reveal Answer", callback_data: `rev_${card.id}_${count}_${subjCode}` }]],
@@ -114,7 +114,7 @@ async function editReveal(chat_id: number, message_id: number, cardId: string, c
   }
   const expl = explanationFrom(card.sections);
   const text =
-    `📝 <b>Question ${count}/10:</b>\n${esc(card.question)}\n\n` +
+    `📝 <b>Question ${count}/10:</b>${card.prompt ? `\n<i>${esc(card.prompt)}</i>` : ""}\n${esc(card.question)}\n\n` +
     `💡 <b>Answer:</b>\n${esc(card.answer)}\n\n` +
     `📖 <b>Explanation:</b>\n${esc(expl)}`;
   const reply_markup =
