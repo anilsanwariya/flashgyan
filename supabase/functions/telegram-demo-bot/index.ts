@@ -46,7 +46,7 @@ async function resolveSubject(code: string): Promise<string | null> {
 async function randomCardBySubject(subject: string) {
   const { data, error } = await supabase
     .from("flashcards")
-    .select("id, question, answer, sections")
+    .select("id, prompt, question, answer, sections")
     .eq("subject", subject);
   if (error) throw error;
   if (!data?.length) return null;
@@ -56,7 +56,7 @@ async function randomCardBySubject(subject: string) {
 async function cardById(id: string) {
   const { data, error } = await supabase
     .from("flashcards")
-    .select("id, question, answer, sections")
+    .select("id, prompt, question, answer, sections")
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;
