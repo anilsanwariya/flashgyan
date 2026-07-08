@@ -156,13 +156,14 @@ async function editQuestion(chat_id: number, message_id: number, count: number, 
     await tg("editMessageText", { chat_id, message_id, text: `No cards found for ${esc(subject)}.` });
     return;
   }
+  const displayCount = count <= 5 ? `${count}/5` : `${count}`;
   await tg("editMessageText", {
     chat_id,
     message_id,
-    text: `📝 <b>Question ${count}/10:</b>${card.prompt ? `\n\n<i>${esc(card.prompt)}</i>` : ""}\n\n${esc(card.question)}`,
+    text: `📝 <b>Question ${displayCount}:</b>${card.prompt ? `\n\n<i>${esc(card.prompt)}</i>` : ""}\n\n${esc(card.question)}`,
     parse_mode: "HTML",
     reply_markup: {
-      inline_keyboard: [[{ text: "Reveal Answer", callback_data: `rev_${card.id}_${count}_${subjCode}` }]],
+      inline_keyboard: [[{ text: "👁️ Reveal Answer", callback_data: `rev_${card.id}_${count}_${subjCode}` }]],
     },
   });
 }
@@ -173,14 +174,15 @@ async function editReveal(chat_id: number, message_id: number, cardId: string, c
     await tg("editMessageText", { chat_id, message_id, text: "Card not found." });
     return;
   }
+  const displayCount = count <= 5 ? `${count}/5` : `${count}`;
   const expl = explanationFrom(card.sections);
   const text =
-    `📝 <b>Question ${count}/10:</b>${card.prompt ? `\n<i>${esc(card.prompt)}</i>` : ""}\n${esc(card.question)}\n\n` +
+    `📝 <b>Question ${displayCount}:</b>${card.prompt ? `\n<i>${esc(card.prompt)}</i>` : ""}\n${esc(card.question)}\n\n` +
     `💡 <b>Answer:</b>\n${esc(card.answer)}\n\n` +
     `📖 <b>Explanation:</b>\n${esc(expl)}`;
 
   const reply_markup =
-    count < 10
+    count < 5
       ? { inline_keyboard: [[{ text: "➡️ Next Card", callback_data: `next_${count + 1}_${subjCode}` }]] }
       : {
           inline_keyboard: [
@@ -199,12 +201,13 @@ async function sendMcqPoll(chat_id: number, count: number, subjCode: string, sub
     await tg("sendMessage", { chat_id, text: `No MCQs found for ${subject}.` });
     return;
   }
+  const displayCount = count <= 5 ? `${count}/5` : `${count}`;
   const options = [q.option_1, q.option_2, q.option_3, q.option_4].map((o: string) => truncate(o, 100));
   const answerIdx = Math.max(0, Math.min(3, (q.answer ?? 1) - 1));
   const explText = explanationFrom(q.explanation_sections).replace(/\*/g, "");
 
   const reply_markup =
-    count < 10
+    count < 5
       ? { inline_keyboard: [[{ text: "➡️ Next Question", callback_data: `nextmcq_${count + 1}_${subjCode}` }]] }
       : {
           inline_keyboard: [
@@ -215,7 +218,7 @@ async function sendMcqPoll(chat_id: number, count: number, subjCode: string, sub
 
   await tg("sendPoll", {
     chat_id,
-    question: truncate(`${count}/10: ${q.question}`, 300),
+    question: truncate(`${displayCount}: ${q.question}`, 300),
     options,
     type: "quiz",
     correct_option_id: answerIdx,
