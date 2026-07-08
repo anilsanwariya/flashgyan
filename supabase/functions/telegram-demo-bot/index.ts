@@ -72,7 +72,7 @@ async function cardById(id: string) {
 function explanationFrom(sections: any): string {
   if (!Array.isArray(sections) || !sections.length) return "—";
   return sections
-    .map((s: any) => (s?.title ? `*${s.title}*\n${s.body ?? ""}` : s?.body ?? ""))
+    .map((s: any) => (s?.title ? `*${s.title}*\n${s.body ?? ""}` : (s?.body ?? "")))
     .filter(Boolean)
     .join("\n\n");
 }
@@ -95,10 +95,7 @@ async function resolveMcqSubject(code: string): Promise<string | null> {
 }
 
 async function randomMcqBySubject(subject: string) {
-  const { data: tests, error: tErr } = await supabase
-    .from("mcq_practice_tests")
-    .select("id")
-    .eq("subject", subject);
+  const { data: tests, error: tErr } = await supabase.from("mcq_practice_tests").select("id").eq("subject", subject);
   if (tErr) throw tErr;
   const ids = (tests ?? []).map((t: any) => t.id);
   if (!ids.length) return null;
@@ -118,19 +115,19 @@ async function sendMainMenu(chat_id: number) {
     text: "📚 <b>Welcome to FlashGyan!</b>\nWhat would you like to practice today?",
     parse_mode: "HTML",
     reply_markup: {
-      inline_keyboard: [[
-        { text: "🃏 Flashcards", callback_data: "menu_flashcards" },
-        { text: "📝 MCQ Quiz", callback_data: "menu_mcqs" },
-      ]],
+      inline_keyboard: [
+        [
+          { text: "🃏 Flashcards", callback_data: "menu_flashcards" },
+          { text: "📝 MCQ Quiz", callback_data: "menu_mcqs" },
+        ],
+      ],
     },
   });
 }
 
 async function editFlashcardSubjects(chat_id: number, message_id: number) {
   const subs = await listFlashcardSubjects();
-  const rows = await Promise.all(
-    subs.map(async (s) => [{ text: s, callback_data: `subj_${await sha8(s)}` }]),
-  );
+  const rows = await Promise.all(subs.map(async (s) => [{ text: s, callback_data: `subj_${await sha8(s)}` }]));
   await tg("editMessageText", {
     chat_id,
     message_id,
@@ -142,9 +139,7 @@ async function editFlashcardSubjects(chat_id: number, message_id: number) {
 
 async function editMcqSubjects(chat_id: number, message_id: number) {
   const subs = await listMcqSubjects();
-  const rows = await Promise.all(
-    subs.map(async (s) => [{ text: s, callback_data: `mcqsubj_${await sha8(s)}` }]),
-  );
+  const rows = await Promise.all(subs.map(async (s) => [{ text: s, callback_data: `mcqsubj_${await sha8(s)}` }]));
   await tg("editMessageText", {
     chat_id,
     message_id,
@@ -183,10 +178,17 @@ async function editReveal(chat_id: number, message_id: number, cardId: string, c
     `📝 <b>Question ${count}/10:</b>${card.prompt ? `\n<i>${esc(card.prompt)}</i>` : ""}\n${esc(card.question)}\n\n` +
     `💡 <b>Answer:</b>\n${esc(card.answer)}\n\n` +
     `📖 <b>Explanation:</b>\n${esc(expl)}`;
+
   const reply_markup =
     count < 10
       ? { inline_keyboard: [[{ text: "➡️ Next Card", callback_data: `next_${count + 1}_${subjCode}` }]] }
-      : { inline_keyboard: [[{ text: "📱 Download FlashGyan App to continue!", url: APP_URL }]] };
+      : {
+          inline_keyboard: [
+            [{ text: "➡️ Continue Study", callback_data: `next_${count + 1}_${subjCode}` }],
+            [{ text: "📱 Download FlashGyan App to continue!", url: APP_URL }],
+          ],
+        };
+
   await tg("editMessageText", { chat_id, message_id, text, parse_mode: "HTML", reply_markup });
 }
 
@@ -200,10 +202,17 @@ async function sendMcqPoll(chat_id: number, count: number, subjCode: string, sub
   const options = [q.option_1, q.option_2, q.option_3, q.option_4].map((o: string) => truncate(o, 100));
   const answerIdx = Math.max(0, Math.min(3, (q.answer ?? 1) - 1));
   const explText = explanationFrom(q.explanation_sections).replace(/\*/g, "");
+
   const reply_markup =
     count < 10
       ? { inline_keyboard: [[{ text: "➡️ Next Question", callback_data: `nextmcq_${count + 1}_${subjCode}` }]] }
-      : { inline_keyboard: [[{ text: "📱 Download FlashGyan App for more!", url: APP_URL }]] };
+      : {
+          inline_keyboard: [
+            [{ text: "➡️ Continue Study", callback_data: `nextmcq_${count + 1}_${subjCode}` }],
+            [{ text: "📱 Download FlashGyan App for more!", url: APP_URL }],
+          ],
+        };
+
   await tg("sendPoll", {
     chat_id,
     question: truncate(`${count}/10: ${q.question}`, 300),
