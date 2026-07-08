@@ -1,1 +1,4 @@
-project_id = "mhcgrpandktbuaqrkhph"
+project_id = "ueldzqtaqepehyeivppm"
+
+[functions.telegram-demo-bot]
+verify_jwt = false
