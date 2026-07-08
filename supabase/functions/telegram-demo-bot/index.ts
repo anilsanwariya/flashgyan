@@ -98,7 +98,7 @@ async function editQuestion(chat_id: number, message_id: number, count: number, 
   await tg("editMessageText", {
     chat_id,
     message_id,
-    text: `📝 <b>Question ${count}/10:</b>\n\n${esc(card.question)}`,
+    text: `📝 <b>Question ${count}/10:</b>${card.prompt ? `\n\n<i>${esc(card.prompt)}</i>` : ""}\n\n${esc(card.question)}`,
     parse_mode: "HTML",
     reply_markup: {
       inline_keyboard: [[{ text: "👁️ Reveal Answer", callback_data: `rev_${card.id}_${count}_${subjCode}` }]],
