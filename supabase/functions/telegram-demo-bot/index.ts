@@ -1,4 +1,4 @@
-// Telegram lead-generation bot: preview 10 random flashcards per subject.
+// Telegram lead-generation bot: preview flashcards + MCQ quiz per subject.
 // Public webhook - no JWT verification (Telegram calls it directly).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
@@ -23,7 +23,7 @@ async function tg(method: string, body: unknown) {
   return r;
 }
 
-// Subject codes: keep callback_data <= 64 bytes. We map subject -> short hash.
+// callback_data <= 64 bytes. Map subject -> short hash.
 async function sha8(s: string) {
   const buf = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(s));
   return Array.from(new Uint8Array(buf).slice(0, 4))
@@ -31,14 +31,20 @@ async function sha8(s: string) {
     .join("");
 }
 
-async function listSubjects(): Promise<string[]> {
+function truncate(s: string, n: number) {
+  const str = String(s ?? "");
+  return str.length <= n ? str : str.slice(0, n - 1) + "…";
+}
+
+// ---------- Flashcards ----------
+async function listFlashcardSubjects(): Promise<string[]> {
   const { data, error } = await supabase.from("flashcards").select("subject");
   if (error) throw error;
   return [...new Set((data ?? []).map((r: any) => r.subject).filter(Boolean))].sort();
 }
 
-async function resolveSubject(code: string): Promise<string | null> {
-  const subs = await listSubjects();
+async function resolveFlashcardSubject(code: string): Promise<string | null> {
+  const subs = await listFlashcardSubjects();
   for (const s of subs) if ((await sha8(s)) === code) return s;
   return null;
 }
@@ -72,23 +78,83 @@ function explanationFrom(sections: any): string {
 }
 
 function esc(s: string) {
-  // Escape HTML for parse_mode=HTML
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-async function sendSubjectMenu(chat_id: number) {
-  const subs = await listSubjects();
+// ---------- MCQ ----------
+async function listMcqSubjects(): Promise<string[]> {
+  const { data, error } = await supabase.from("mcq_practice_tests").select("subject");
+  if (error) throw error;
+  return [...new Set((data ?? []).map((r: any) => r.subject).filter(Boolean))].sort();
+}
+
+async function resolveMcqSubject(code: string): Promise<string | null> {
+  const subs = await listMcqSubjects();
+  for (const s of subs) if ((await sha8(s)) === code) return s;
+  return null;
+}
+
+async function randomMcqBySubject(subject: string) {
+  const { data: tests, error: tErr } = await supabase
+    .from("mcq_practice_tests")
+    .select("id")
+    .eq("subject", subject);
+  if (tErr) throw tErr;
+  const ids = (tests ?? []).map((t: any) => t.id);
+  if (!ids.length) return null;
+  const { data, error } = await supabase
+    .from("mcq_practice_questions")
+    .select("id, question, option_1, option_2, option_3, option_4, answer, explanation_sections")
+    .in("test_id", ids);
+  if (error) throw error;
+  if (!data?.length) return null;
+  return data[Math.floor(Math.random() * data.length)];
+}
+
+// ---------- Menus ----------
+async function sendMainMenu(chat_id: number) {
+  await tg("sendMessage", {
+    chat_id,
+    text: "📚 <b>Welcome to FlashGyan!</b>\nWhat would you like to practice today?",
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "🃏 Flashcards", callback_data: "menu_flashcards" },
+        { text: "📝 MCQ Quiz", callback_data: "menu_mcqs" },
+      ]],
+    },
+  });
+}
+
+async function editFlashcardSubjects(chat_id: number, message_id: number) {
+  const subs = await listFlashcardSubjects();
   const rows = await Promise.all(
     subs.map(async (s) => [{ text: s, callback_data: `subj_${await sha8(s)}` }]),
   );
-  await tg("sendMessage", {
+  await tg("editMessageText", {
     chat_id,
-    text: "📚 <b>Welcome to FlashGyan!</b>\nWhat subject would you like to practice today?",
+    message_id,
+    text: "🃏 <b>Flashcards</b>\nPick a subject:",
     parse_mode: "HTML",
     reply_markup: { inline_keyboard: rows.length ? rows : [[{ text: "No subjects yet", callback_data: "noop" }]] },
   });
 }
 
+async function editMcqSubjects(chat_id: number, message_id: number) {
+  const subs = await listMcqSubjects();
+  const rows = await Promise.all(
+    subs.map(async (s) => [{ text: s, callback_data: `mcqsubj_${await sha8(s)}` }]),
+  );
+  await tg("editMessageText", {
+    chat_id,
+    message_id,
+    text: "📝 <b>MCQ Quiz</b>\nPick a subject:",
+    parse_mode: "HTML",
+    reply_markup: { inline_keyboard: rows.length ? rows : [[{ text: "No subjects yet", callback_data: "noop" }]] },
+  });
+}
+
+// ---------- Flashcard flow ----------
 async function editQuestion(chat_id: number, message_id: number, count: number, subjCode: string, subject: string) {
   const card = await randomCardBySubject(subject);
   if (!card) {
@@ -124,6 +190,33 @@ async function editReveal(chat_id: number, message_id: number, cardId: string, c
   await tg("editMessageText", { chat_id, message_id, text, parse_mode: "HTML", reply_markup });
 }
 
+// ---------- MCQ flow ----------
+async function sendMcqPoll(chat_id: number, count: number, subjCode: string, subject: string) {
+  const q = await randomMcqBySubject(subject);
+  if (!q) {
+    await tg("sendMessage", { chat_id, text: `No MCQs found for ${subject}.` });
+    return;
+  }
+  const options = [q.option_1, q.option_2, q.option_3, q.option_4].map((o: string) => truncate(o, 100));
+  const answerIdx = Math.max(0, Math.min(3, (q.answer ?? 1) - 1));
+  const explText = explanationFrom(q.explanation_sections).replace(/\*/g, "");
+  const reply_markup =
+    count < 10
+      ? { inline_keyboard: [[{ text: "➡️ Next Question", callback_data: `nextmcq_${count + 1}_${subjCode}` }]] }
+      : { inline_keyboard: [[{ text: "📱 Download FlashGyan App for more!", url: APP_URL }]] };
+  await tg("sendPoll", {
+    chat_id,
+    question: truncate(`${count}/10: ${q.question}`, 300),
+    options,
+    type: "quiz",
+    correct_option_id: answerIdx,
+    explanation: truncate(explText, 200),
+    is_anonymous: false,
+    reply_markup,
+  });
+}
+
+// ---------- Webhook ----------
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok");
   if (req.method !== "POST") return new Response("ok");
@@ -139,7 +232,7 @@ Deno.serve(async (req) => {
       const text: string = update.message.text.trim();
       const chat_id = update.message.chat.id;
       if (text.startsWith("/start") || text.startsWith("/study")) {
-        await sendSubjectMenu(chat_id);
+        await sendMainMenu(chat_id);
       } else {
         await tg("sendMessage", { chat_id, text: "Send /study to begin." });
       }
@@ -150,16 +243,19 @@ Deno.serve(async (req) => {
       const data: string = cq.data ?? "";
       await tg("answerCallbackQuery", { callback_query_id: cq.id });
 
-      if (data.startsWith("subj_")) {
+      if (data === "menu_flashcards") {
+        await editFlashcardSubjects(chat_id, message_id);
+      } else if (data === "menu_mcqs") {
+        await editMcqSubjects(chat_id, message_id);
+      } else if (data.startsWith("subj_")) {
         const code = data.slice(5);
-        const subject = await resolveSubject(code);
+        const subject = await resolveFlashcardSubject(code);
         if (!subject) {
           await tg("editMessageText", { chat_id, message_id, text: "Subject unavailable." });
         } else {
           await editQuestion(chat_id, message_id, 1, code, subject);
         }
       } else if (data.startsWith("rev_")) {
-        // rev_<uuid>_<count>_<subjCode>
         const rest = data.slice(4);
         const lastUs = rest.lastIndexOf("_");
         const subjCode = rest.slice(lastUs + 1);
@@ -169,16 +265,34 @@ Deno.serve(async (req) => {
         const count = parseInt(midAndId.slice(countUs + 1), 10) || 1;
         await editReveal(chat_id, message_id, cardId, count, subjCode);
       } else if (data.startsWith("next_")) {
-        // next_<count>_<subjCode>
         const rest = data.slice(5);
         const us = rest.indexOf("_");
         const count = parseInt(rest.slice(0, us), 10) || 1;
         const subjCode = rest.slice(us + 1);
-        const subject = await resolveSubject(subjCode);
+        const subject = await resolveFlashcardSubject(subjCode);
         if (!subject) {
           await tg("editMessageText", { chat_id, message_id, text: "Subject unavailable." });
         } else {
           await editQuestion(chat_id, message_id, count, subjCode, subject);
+        }
+      } else if (data.startsWith("mcqsubj_")) {
+        const code = data.slice(8);
+        const subject = await resolveMcqSubject(code);
+        if (!subject) {
+          await tg("sendMessage", { chat_id, text: "Subject unavailable." });
+        } else {
+          await sendMcqPoll(chat_id, 1, code, subject);
+        }
+      } else if (data.startsWith("nextmcq_")) {
+        const rest = data.slice(8);
+        const us = rest.indexOf("_");
+        const count = parseInt(rest.slice(0, us), 10) || 1;
+        const subjCode = rest.slice(us + 1);
+        const subject = await resolveMcqSubject(subjCode);
+        if (!subject) {
+          await tg("sendMessage", { chat_id, text: "Subject unavailable." });
+        } else {
+          await sendMcqPoll(chat_id, count, subjCode, subject);
         }
       }
     }
