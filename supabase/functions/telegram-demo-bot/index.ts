@@ -220,7 +220,7 @@ async function editReveal(
       : {
           inline_keyboard: [
             [{ text: "📱 Download FlashGyan App to continue!", url: APP_URL }]],
-            [{ text: "🔁 Practice Again", callback_data: "menu_mcqs" }],
+            [{ text: "🔁 Practice Again", callback_data: "menu_flashcards" }],
           ],
         };
 
