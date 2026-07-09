@@ -218,7 +218,10 @@ async function editReveal(
     count < QUIZ_LIMIT
       ? { inline_keyboard: [[{ text: "➡️ Next Card", callback_data: `next_${count + 1}_${subjCode}` }]] }
       : {
-          inline_keyboard: [[{ text: "📱 Download FlashGyan App to continue!", url: APP_URL }]],
+          inline_keyboard: [
+            [{ text: "📱 Download FlashGyan App to continue!", url: APP_URL }]],
+            [{ text: "🔁 Practice Again", callback_data: "menu_mcqs" }],
+          ],
         };
 
   await tg("editMessageText", { chat_id, message_id, text, parse_mode: "HTML", reply_markup });
