@@ -107,10 +107,7 @@ async function resolveMcqSubject(code: string) {
   return null;
 }
 async function randomMcqBySubject(subject: string) {
-  const { data: tests, error: tErr } = await supabase
-    .from("bot_mcq_tests")
-    .select("id")
-    .eq("subject", subject);
+  const { data: tests, error: tErr } = await supabase.from("bot_mcq_tests").select("id").eq("subject", subject);
   if (tErr) throw tErr;
   const ids = (tests ?? []).map((t: any) => t.id);
   if (!ids.length) return null;
@@ -142,9 +139,7 @@ async function sendMainMenu(chat_id: number) {
 
 async function editFlashcardSubjects(chat_id: number, message_id: number) {
   const subs = await listFlashcardSubjects();
-  const rows = await Promise.all(
-    subs.map(async (s) => [{ text: s, callback_data: `subj_${await sha8(s)}` }]),
-  );
+  const rows = await Promise.all(subs.map(async (s) => [{ text: s, callback_data: `subj_${await sha8(s)}` }]));
   await tg("editMessageText", {
     chat_id,
     message_id,
@@ -158,9 +153,7 @@ async function editFlashcardSubjects(chat_id: number, message_id: number) {
 
 async function editMcqSubjects(chat_id: number, message_id: number) {
   const subs = await listMcqSubjects();
-  const rows = await Promise.all(
-    subs.map(async (s) => [{ text: s, callback_data: `mcqsubj_${await sha8(s)}` }]),
-  );
+  const rows = await Promise.all(subs.map(async (s) => [{ text: s, callback_data: `mcqsubj_${await sha8(s)}` }]));
   await tg("editMessageText", {
     chat_id,
     message_id,
@@ -173,13 +166,7 @@ async function editMcqSubjects(chat_id: number, message_id: number) {
 }
 
 // ---------- Flashcard flow (unchanged loop with 5-card cap) ----------
-async function editQuestion(
-  chat_id: number,
-  message_id: number,
-  count: number,
-  subjCode: string,
-  subject: string,
-) {
+async function editQuestion(chat_id: number, message_id: number, count: number, subjCode: string, subject: string) {
   const card = await randomCardBySubject(subject);
   if (!card) {
     await tg("editMessageText", { chat_id, message_id, text: `No cards found for ${esc(subject)}.` });
@@ -196,13 +183,7 @@ async function editQuestion(
   });
 }
 
-async function editReveal(
-  chat_id: number,
-  message_id: number,
-  cardId: string,
-  count: number,
-  subjCode: string,
-) {
+async function editReveal(chat_id: number, message_id: number, cardId: string, count: number, subjCode: string) {
   const card = await cardById(cardId);
   if (!card) {
     await tg("editMessageText", { chat_id, message_id, text: "Card not found." });
@@ -219,7 +200,7 @@ async function editReveal(
       ? { inline_keyboard: [[{ text: "➡️ Next Card", callback_data: `next_${count + 1}_${subjCode}` }]] }
       : {
           inline_keyboard: [
-            [{ text: "📱 Download FlashGyan App to continue!", url: APP_URL }]],
+            [{ text: "📱 Download FlashGyan App to continue!", url: APP_URL }],
             [{ text: "🔁 Practice Again", callback_data: "menu_flashcards" }],
           ],
         };
@@ -307,11 +288,7 @@ async function handlePollAnswer(pa: any) {
 
   await trackUser(user, chat_id);
 
-  const { data: sess } = await supabase
-    .from("bot_sessions")
-    .select("*")
-    .eq("chat_id", chat_id)
-    .maybeSingle();
+  const { data: sess } = await supabase.from("bot_sessions").select("*").eq("chat_id", chat_id).maybeSingle();
 
   if (!sess || sess.active_poll_id !== poll_id) return;
 
