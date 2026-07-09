@@ -50,7 +50,7 @@ function BotManagerPage() {
             Broadcast to Telegram users and manage isolated bot content.
           </p>
         </div>
-        <Link to="/_authenticated/admin" className="text-sm underline">
+        <Link to="/admin" className="text-sm underline">
           ← Admin
         </Link>
       </header>
