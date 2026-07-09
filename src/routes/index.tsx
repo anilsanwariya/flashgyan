@@ -61,7 +61,7 @@ function Home() {
 
       <main className="px-5 max-w-2xl md:max-w-4xl lg:max-w-6xl mx-auto pb-12 space-y-7 pt-6">
         {/* Top section: stacked on mobile/tablet, 2-column split on desktop */}
-        <div className="space-y-7 lg:grid lg:grid-cols-2 lg:gap-12 lg:items-center lg:space-y-0">
+        <div className="space-y-7 lg:grid lg:grid-cols-[2fr_1fr] lg:gap-12 lg:items-center lg:space-y-0">
           {/* Left column (desktop): greeting + description */}
           <div className="text-center space-y-1.5 animate-in fade-in slide-in-from-bottom-3 duration-700 lg:text-left lg:col-start-1 lg:row-start-1">
             <h1 className="text-2xl font-bold tracking-tight text-[#910000] drop-shadow-sm">
