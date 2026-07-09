@@ -14,6 +14,197 @@ export type Database = {
   }
   public: {
     Tables: {
+      bot_flashcards: {
+        Row: {
+          answer: string
+          created_at: string
+          id: string
+          image_url: string | null
+          order_index: number
+          prompt: string
+          question: string
+          sections: Json
+          subject: string
+          topic: string
+          updated_at: string
+        }
+        Insert: {
+          answer: string
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          order_index?: number
+          prompt: string
+          question: string
+          sections?: Json
+          subject: string
+          topic: string
+          updated_at?: string
+        }
+        Update: {
+          answer?: string
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          order_index?: number
+          prompt?: string
+          question?: string
+          sections?: Json
+          subject?: string
+          topic?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      bot_mcq_questions: {
+        Row: {
+          answer: number
+          created_at: string
+          explanation_sections: Json
+          id: string
+          image_url: string | null
+          option_1: string
+          option_2: string
+          option_3: string
+          option_4: string
+          order_index: number
+          question: string
+          question_ext: string
+          test_id: string
+          updated_at: string
+        }
+        Insert: {
+          answer: number
+          created_at?: string
+          explanation_sections?: Json
+          id?: string
+          image_url?: string | null
+          option_1: string
+          option_2: string
+          option_3: string
+          option_4: string
+          order_index?: number
+          question: string
+          question_ext?: string
+          test_id: string
+          updated_at?: string
+        }
+        Update: {
+          answer?: number
+          created_at?: string
+          explanation_sections?: Json
+          id?: string
+          image_url?: string | null
+          option_1?: string
+          option_2?: string
+          option_3?: string
+          option_4?: string
+          order_index?: number
+          question?: string
+          question_ext?: string
+          test_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bot_mcq_questions_test_id_fkey"
+            columns: ["test_id"]
+            isOneToOne: false
+            referencedRelation: "bot_mcq_tests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bot_mcq_tests: {
+        Row: {
+          created_at: string
+          description: string
+          id: string
+          name: string
+          order_index: number
+          subject: string
+          topic: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string
+          id?: string
+          name: string
+          order_index?: number
+          subject?: string
+          topic?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          id?: string
+          name?: string
+          order_index?: number
+          subject?: string
+          topic?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      bot_sessions: {
+        Row: {
+          active_poll_id: string | null
+          chat_id: number
+          correct_count: number
+          correct_option_id: number | null
+          current_count: number
+          incorrect_count: number
+          subject: string
+          updated_at: string
+        }
+        Insert: {
+          active_poll_id?: string | null
+          chat_id: number
+          correct_count?: number
+          correct_option_id?: number | null
+          current_count?: number
+          incorrect_count?: number
+          subject: string
+          updated_at?: string
+        }
+        Update: {
+          active_poll_id?: string | null
+          chat_id?: number
+          correct_count?: number
+          correct_option_id?: number | null
+          current_count?: number
+          incorrect_count?: number
+          subject?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      bot_users: {
+        Row: {
+          chat_id: number
+          created_at: string
+          first_name: string | null
+          last_active: string
+          username: string | null
+        }
+        Insert: {
+          chat_id: number
+          created_at?: string
+          first_name?: string | null
+          last_active?: string
+          username?: string | null
+        }
+        Update: {
+          chat_id?: number
+          created_at?: string
+          first_name?: string | null
+          last_active?: string
+          username?: string | null
+        }
+        Relationships: []
+      }
       flashcard_decks: {
         Row: {
           created_at: string
@@ -442,6 +633,13 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
       match_saathi_knowledge: {
         Args: {
           match_count?: number
