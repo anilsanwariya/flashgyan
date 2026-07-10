@@ -23,7 +23,6 @@ import { Route as PracticeDeckIdRouteImport } from './routes/practice.$deckId'
 import { Route as PracticeMcqTestIdRouteImport } from './routes/practice-mcq.$testId'
 import { Route as McqTestIdRouteImport } from './routes/mcq.$testId'
 import { Route as McqResultTestIdRouteImport } from './routes/mcq-result.$testId'
-import { Route as AuthenticatedBotManagerRouteImport } from './routes/_authenticated/bot-manager'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 
 const TermsRoute = TermsRouteImport.update({
@@ -95,11 +94,6 @@ const McqResultTestIdRoute = McqResultTestIdRouteImport.update({
   path: '/mcq-result/$testId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthenticatedBotManagerRoute = AuthenticatedBotManagerRouteImport.update({
-  id: '/bot-manager',
-  path: '/bot-manager',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
 const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -117,7 +111,6 @@ export interface FileRoutesByFullPath {
   '/summary': typeof SummaryRoute
   '/terms': typeof TermsRoute
   '/admin': typeof AuthenticatedAdminRoute
-  '/bot-manager': typeof AuthenticatedBotManagerRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
@@ -134,7 +127,6 @@ export interface FileRoutesByTo {
   '/summary': typeof SummaryRoute
   '/terms': typeof TermsRoute
   '/admin': typeof AuthenticatedAdminRoute
-  '/bot-manager': typeof AuthenticatedBotManagerRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
@@ -153,7 +145,6 @@ export interface FileRoutesById {
   '/summary': typeof SummaryRoute
   '/terms': typeof TermsRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
-  '/_authenticated/bot-manager': typeof AuthenticatedBotManagerRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
@@ -172,7 +163,6 @@ export interface FileRouteTypes {
     | '/summary'
     | '/terms'
     | '/admin'
-    | '/bot-manager'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
@@ -189,7 +179,6 @@ export interface FileRouteTypes {
     | '/summary'
     | '/terms'
     | '/admin'
-    | '/bot-manager'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
@@ -207,7 +196,6 @@ export interface FileRouteTypes {
     | '/summary'
     | '/terms'
     | '/_authenticated/admin'
-    | '/_authenticated/bot-manager'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
@@ -331,13 +319,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof McqResultTestIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authenticated/bot-manager': {
-      id: '/_authenticated/bot-manager'
-      path: '/bot-manager'
-      fullPath: '/bot-manager'
-      preLoaderRoute: typeof AuthenticatedBotManagerRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
     '/_authenticated/admin': {
       id: '/_authenticated/admin'
       path: '/admin'
@@ -350,12 +331,10 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAdminRoute: typeof AuthenticatedAdminRoute
-  AuthenticatedBotManagerRoute: typeof AuthenticatedBotManagerRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAdminRoute: AuthenticatedAdminRoute,
-  AuthenticatedBotManagerRoute: AuthenticatedBotManagerRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
@@ -380,13 +359,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

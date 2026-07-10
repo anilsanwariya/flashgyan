@@ -90,8 +90,10 @@ export const Route = createFileRoute("/_authenticated/admin")({
 
 import { SaathiPanel } from "@/components/saathi-panel";
 import { HomePanel } from "@/components/home-panel";
+import { BotManagerPanel } from "@/components/bot-manager-panel";
 
-type Tab = "home" | "flashcards" | "mcq" | "mcqPractice" | "saathi" | "users";
+type Tab = "home" | "flashcards" | "mcq" | "mcqPractice" | "saathi" | "users" | "bot";
+
 
 
 // ---------- Flashcard Excel parsing ----------
@@ -208,7 +210,7 @@ function Admin() {
     <div className="min-h-dvh bg-background flex flex-col">
       <Header onSignOut={onSignOut} />
       <main className="flex-1 max-w-2xl w-full mx-auto px-5 py-6 space-y-6 pb-24">
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 rounded-xl bg-muted p-1">
+        <div className="grid grid-cols-3 sm:grid-cols-7 gap-2 rounded-xl bg-muted p-1">
           <TabButton active={tab === "home"} onClick={() => setTab("home")}>
             Home
           </TabButton>
@@ -227,6 +229,9 @@ function Admin() {
           <TabButton active={tab === "users"} onClick={() => setTab("users")}>
             Telegram Users
           </TabButton>
+          <TabButton active={tab === "bot"} onClick={() => setTab("bot")}>
+            Bot Manager
+          </TabButton>
         </div>
         {tab === "home" ? (
           <HomePanel />
@@ -238,6 +243,8 @@ function Admin() {
           <McqPracticePanel />
         ) : tab === "users" ? (
           <TelegramUsersPanel />
+        ) : tab === "bot" ? (
+          <BotManagerPanel />
         ) : (
           <SaathiPanel />
         )}
@@ -245,6 +252,7 @@ function Admin() {
     </div>
   );
 }
+
 
 function TabButton({
   active,
