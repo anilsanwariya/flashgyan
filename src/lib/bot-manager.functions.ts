@@ -244,3 +244,14 @@ export const bulkImportBotMcq = createServerFn({ method: "POST" })
     }
     return { inserted };
   });
+
+export const deleteBotMcqTest = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const admin = await assertAdmin(context.userId);
+    const { error } = await admin.from("bot_mcq_tests").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
