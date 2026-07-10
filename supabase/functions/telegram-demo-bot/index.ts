@@ -310,14 +310,17 @@ async function handlePollAnswer(pa: any) {
 
   if (!finished) {
     const code = await subjCodeFor(sess.subject);
+    
+    // Auto-advance logic: Send correct/incorrect message with NO button
     await tg("sendMessage", {
       chat_id,
       text: isCorrect ? "🎯 <b>Correct!</b>" : "❌ <b>Incorrect.</b>",
       parse_mode: "HTML",
-      reply_markup: {
-        inline_keyboard: [[{ text: "➡️ Next Question", callback_data: `nextmcq_${code}` }]],
-      },
     });
+
+    // Automatically send the next MCQ poll
+    await sendMcqPoll(chat_id, code, sess.subject);
+    
   } else {
     const score = correct * 1 + incorrect * (-1 / 3);
     const scoreStr = score.toFixed(2);
