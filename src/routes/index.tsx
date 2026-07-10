@@ -243,7 +243,7 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
       onMouseUp={onMouseUp}
       onMouseLeave={onMouseUp}
     >
-      <div className="relative w-full overflow-hidden rounded-3xl shadow-[0_12px_40px_rgba(0,0,0,0.12)] bg-muted border border-border/50 aspect-[2/1] lg:aspect-video">
+      <div className="relative w-full overflow-hidden rounded-3xl shadow-[0_12px_40px_rgba(0,0,0,0.12)] bg-muted border border-border/50 aspect-[2/1]">
         <div
           className="flex h-full transition-transform duration-700 ease-out"
           style={{ transform: `translateX(-${idx * 100}%)` }}
@@ -253,11 +253,12 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
               key={b.id}
               src={b.url}
               alt=""
-              className="w-full h-full object-cover shrink-0 select-none"
+              className="w-full h-full object-cover lg:object-contain shrink-0 select-none"
               draggable={false}
             />
           ))}
         </div>
+
 
         {/* Pagination Dots (Inside the image track) */}
         {len > 1 && (
