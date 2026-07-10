@@ -82,13 +82,52 @@ export const broadcastBotMessage = createServerFn({ method: "POST" })
 const sectionSchema = z.object({ title: z.string().default(""), body: z.string().default("") });
 const botFcRowSchema = z.object({
   order_index: z.number().int().default(0),
-  prompt: z.string().min(1),
+  prompt: z.string().default(""),
   question: z.string().min(1),
   answer: z.string().min(1),
   sections: z.array(sectionSchema).default([]),
 });
 
+export type BotFcDeckRow = { subject: string; topic: string; count: number };
+
+export const listBotFlashcardDecks = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<BotFcDeckRow[]> => {
+    const admin = await assertAdmin(context.userId);
+    const { data, error } = await admin
+      .from("bot_flashcards")
+      .select("subject, topic");
+    if (error) throw new Error(error.message);
+    const map = new Map<string, BotFcDeckRow>();
+    for (const r of (data ?? []) as { subject: string; topic: string }[]) {
+      const key = `${r.subject}\u0000${r.topic}`;
+      const cur = map.get(key);
+      if (cur) cur.count++;
+      else map.set(key, { subject: r.subject, topic: r.topic, count: 1 });
+    }
+    return Array.from(map.values()).sort((a, b) =>
+      a.subject === b.subject ? a.topic.localeCompare(b.topic) : a.subject.localeCompare(b.subject),
+    );
+  });
+
+export const deleteBotFlashcardDeck = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ subject: z.string().min(1), topic: z.string().min(1) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const admin = await assertAdmin(context.userId);
+    const { error } = await admin
+      .from("bot_flashcards")
+      .delete()
+      .eq("subject", data.subject)
+      .eq("topic", data.topic);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
 export const bulkImportBotFlashcards = createServerFn({ method: "POST" })
+
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
     z
