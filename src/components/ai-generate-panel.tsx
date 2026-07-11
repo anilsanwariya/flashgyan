@@ -209,3 +209,75 @@ export function McqAiPanel({
     />
   );
 }
+
+export function SaathiKnowledgePanel({ subjectFilter }: { subjectFilter: string }) {
+  const parsePdf = useServerFn(parsePdfWithLlama);
+  const createSaathi = useServerFn(createSaathiDoc);
+
+  const [file, setFile] = useState<File | null>(null);
+  const [status, setStatus] = useState<"idle" | "parsing" | "chunking" | "saving">("idle");
+  const busy = status !== "idle";
+
+  async function onRun() {
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) {
+      toast.error("PDF is over 20 MB");
+      return;
+    }
+
+    try {
+      setStatus("parsing");
+      const base64 = await fileToBase64(file);
+      const { markdown } = await parsePdf({ data: { filename: file.name, base64 } });
+
+      setStatus("chunking");
+      await createSaathi({
+        data: {
+          title: file.name,
+          subject: subjectFilter || "Uncategorized",
+          medium: "Bilingual",
+          content: markdown,
+        },
+      });
+
+      toast.success(`Successfully added ${file.name} to SAATHI!`);
+      setFile(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Ingestion failed");
+    } finally {
+      setStatus("idle");
+    }
+  }
+
+  return (
+    <section className="rounded-2xl border border-border bg-card p-5 mt-6">
+      <h3 className="font-semibold flex items-center gap-2">
+        <Sparkles className="h-4 w-4" /> Add to SAATHI Knowledge Base
+      </h3>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Parse a study document via LlamaParse and chunk it into the SAATHI database with semantic embeddings.
+      </p>
+
+      <label className="mt-4 flex items-center justify-center h-24 rounded-xl border-2 border-dashed border-border cursor-pointer hover:bg-accent/40">
+        <div className="text-center px-4">
+          <div className="text-sm font-medium">
+            {file?.name || "Tap to choose a .pdf file (max 20 MB)"}
+          </div>
+        </div>
+        <input
+          type="file"
+          accept="application/pdf,.pdf"
+          className="hidden"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          disabled={busy}
+        />
+      </label>
+
+      <div className="mt-4 flex justify-end">
+        <Button onClick={onRun} disabled={busy || !file} className="h-10">
+          {status === "parsing" ? "Reading PDF…" : status === "chunking" ? "Vectorizing…" : "Upload to SAATHI"}
+        </Button>
+      </div>
+    </section>
+  );
+}
