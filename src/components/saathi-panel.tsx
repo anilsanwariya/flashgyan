@@ -30,6 +30,7 @@ import {
   type SaathiMedium,
 } from "@/lib/saathi.functions";
 import { extractTextFromFile, parseQnAExcel } from "@/lib/saathi-parse";
+import { SaathiKnowledgePanel } from "@/components/ai-generate-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -210,6 +211,8 @@ export function SaathiPanel() {
           createFn={createFn}
         />
       )}
+
+      <SaathiKnowledgePanel subjectFilter={filter === ALL ? "" : filter} />
 
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
