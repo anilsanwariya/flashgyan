@@ -10,12 +10,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { parsePdfWithLlama } from "@/lib/saathi-pdf.functions";
+import { createSaathiDoc } from "@/lib/saathi.functions";
 import {
   generateFlashcardsFromMarkdown,
   generateMcqsFromMarkdown,
   type GeneratedFcRow,
   type GeneratedMcqRow,
 } from "@/lib/ai-generate.functions";
+
 
 async function fileToBase64(file: File): Promise<string> {
   const buf = new Uint8Array(await file.arrayBuffer());

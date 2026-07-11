@@ -24,20 +24,37 @@ const EMBED_MODEL = "google/gemini-embedding-001";
 const EMBED_DIMS = 1536;
 const CHAT_MODEL = "google/gemini-3-flash-preview";
 
+// --- SEMANTIC CHUNKING HELPER ---
+function chunkText(text: string, maxLen = 1500): string[] {
+  const sections = text.split(/(?=^#{1,3} )/m);
+  const chunks: string[] = [];
+  for (const sec of sections) {
+    if (sec.trim().length > maxLen) {
+      const paras = sec.split(/\n\s*\n/);
+      let cur = "";
+      for (const p of paras) {
+        if (cur.length + p.length > maxLen) {
+          if (cur) chunks.push(cur.trim());
+          cur = p;
+        } else {
+          cur += (cur ? "\n\n" : "") + p;
+        }
+      }
+      if (cur) chunks.push(cur.trim());
+    } else if (sec.trim()) {
+      chunks.push(sec.trim());
+    }
+  }
+  return chunks.length ? chunks : [text];
+}
+
 async function embed(text: string): Promise<number[]> {
   const key = process.env.LOVABLE_API_KEY;
   if (!key) throw new Error("LOVABLE_API_KEY is not configured");
   const res = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Lovable-API-Key": key,
-    },
-    body: JSON.stringify({
-      model: EMBED_MODEL,
-      input: text,
-      dimensions: EMBED_DIMS,
-    }),
+    headers: { "Content-Type": "application/json", "Lovable-API-Key": key },
+    body: JSON.stringify({ model: EMBED_MODEL, input: text, dimensions: EMBED_DIMS }),
   });
   if (!res.ok) {
     const body = await res.text();
@@ -65,8 +82,6 @@ async function assertAdmin(userId: string) {
   return admin;
 }
 
-// ---------------- Admin server functions ----------------
-
 export const listSaathiDocs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -82,46 +97,53 @@ export const listSaathiDocs = createServerFn({ method: "GET" })
 export const createSaathiDoc = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
-    z
-      .object({
-        title: z.string().trim().min(1).max(300),
-        subject: z.string().trim().min(1).max(120),
-        medium: z.enum(["Hindi", "English", "Bilingual"]),
-        content: z.string().trim().min(1).max(200_000),
-      })
-      .parse(input),
+    z.object({
+      title: z.string().trim().min(1).max(300),
+      subject: z.string().trim().min(1).max(120),
+      medium: z.enum(["Hindi", "English", "Bilingual"]),
+      content: z.string().trim().min(1).max(200_000),
+    }).parse(input),
   )
   .handler(async ({ data, context }) => {
     const admin = await assertAdmin(context.userId);
-    const embedInput = `${data.title}\n\n${data.content}`.slice(0, 30_000);
-    const embedding = await embed(embedInput);
-    const { data: row, error } = await admin
-      .from("saathi_knowledge")
-      .insert({
-        title: data.title,
-        subject: data.subject,
-        medium: data.medium,
-        content: data.content,
-        embedding: embedding as unknown as string,
-      })
-      .select("id,title,subject,medium,content,created_at")
-      .single();
-    if (error) throw new Error(error.message);
-    return row as SaathiDoc;
+    const chunks = chunkText(data.content, 1500);
+    const rows: SaathiDoc[] = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      const chunkTitle = chunks.length > 1 ? `${data.title} (Part ${i + 1})` : data.title;
+      const embedding = await embed(`${chunkTitle}\n\n${chunk}`);
+
+      const { data: row, error } = await admin
+        .from("saathi_knowledge")
+        .insert({
+          title: chunkTitle,
+          subject: data.subject,
+          medium: data.medium,
+          content: chunk,
+          source_file: data.title,
+          chunk_index: i + 1,
+          embedding: embedding as unknown as string,
+        })
+        .select("id,title,subject,medium,content,created_at")
+        .single();
+
+      if (error) throw new Error(error.message);
+      rows.push(row as SaathiDoc);
+    }
+    return rows[0];
   });
 
 export const updateSaathiDoc = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
-    z
-      .object({
-        id: z.string().uuid(),
-        title: z.string().trim().min(1).max(300),
-        subject: z.string().trim().min(1).max(120),
-        medium: z.enum(["Hindi", "English", "Bilingual"]),
-        content: z.string().trim().min(1).max(200_000),
-      })
-      .parse(input),
+    z.object({
+      id: z.string().uuid(),
+      title: z.string().trim().min(1).max(300),
+      subject: z.string().trim().min(1).max(120),
+      medium: z.enum(["Hindi", "English", "Bilingual"]),
+      content: z.string().trim().min(1).max(200_000),
+    }).parse(input),
   )
   .handler(async ({ data, context }) => {
     const admin = await assertAdmin(context.userId);
@@ -145,17 +167,13 @@ export const updateSaathiDoc = createServerFn({ method: "POST" })
 
 export const deleteSaathiDoc = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
-    z.object({ id: z.string().uuid() }).parse(input),
-  )
+  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const admin = await assertAdmin(context.userId);
     const { error } = await admin.from("saathi_knowledge").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
-
-// ---------------- Public chat server functions ----------------
 
 export const listSaathiSubjects = createServerFn({ method: "GET" }).handler(async () => {
   const admin = await getAdmin();
@@ -166,95 +184,70 @@ export const listSaathiSubjects = createServerFn({ method: "GET" }).handler(asyn
   return Array.from(set).sort();
 });
 
-const FALLBACK = "I don't have information on that subject.";
+const FALLBACK = "I don't have information on that subject in my current study materials.";
 const SYSTEM_PROMPT = `You are SAATHI, an expert study assistant. Answer questions ONLY based on the provided database context. If the answer is not contained in the context, reply exactly with: '${FALLBACK}'
 
-LANGUAGE MATCHING: You must detect the language of the user's question and reply in that EXACT same language (e.g., if asked in Hindi, reply in Hindi; if in English, reply in English).
+LANGUAGE MATCHING: You must detect the language of the user's question and reply in that EXACT same language (e.g., if asked in Hindi, reply in Hindi). Ensure Hindi grammatical structures are preserved.
 
-RICH FORMATTING: Always format your answers using Markdown. Use **bold** for headings, and *italicize* or **bold** important keywords for emphasis. Use bullet points and numbered lists where appropriate.
+SOURCE CITATIONS: Every time you state a fact or provide an explanation based on the context, you MUST append a citation using the exact Source Title provided. Format it at the end of your thought like this: (Source: [Title]).
 
-DIAGRAMS & IMAGES: The provided database context contains embedded diagrams, maps, and illustrations formatted as Markdown image tags (e.g., \`![Description](https://...)\`). When answering a question that relies on or references these visual aids, you MUST preserve the exact image Markdown tag syntax and its absolute URL, embedding it smoothly into your final answer. Never strip out, modify, or omit these image URLs.
+RICH FORMATTING: Always format your answers using Markdown. Use **bold** for headings and keywords. Use bullet points where appropriate.
 
-VISUAL AIDS: When explaining processes, timelines, or comparisons, you MUST use Markdown tables, or generate Mermaid.js code blocks (\`\`\`mermaid) to draw flowcharts/diagrams to make the concepts easier for students to understand.`;
+VISUAL AIDS: When explaining processes, timelines, or comparisons, you MUST use Markdown tables, or generate Mermaid.js code blocks (\`\`\`mermaid) to draw diagrams to make concepts easier for students.`;
 
 export const askSaathi = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
-    z
-      .object({
-        question: z.string().trim().min(1).max(2000),
-        subjects: z.array(z.string().trim().min(1).max(120)).min(1).max(20),
-      })
-      .parse(input),
+    z.object({
+      question: z.string().trim().min(1).max(2000),
+      subjects: z.array(z.string().trim().min(1).max(120)).min(1).max(20),
+    }).parse(input),
   )
   .handler(async ({ data }) => {
     const key = process.env.LOVABLE_API_KEY;
     if (!key) throw new Error("LOVABLE_API_KEY is not configured");
     const admin = await getAdmin();
-
     const queryEmbedding = await embed(data.question);
 
-    // Run one match per subject and merge top results.
     const perSubject = await Promise.all(
       data.subjects.map((subject) =>
-        admin.rpc("match_saathi_knowledge", {
+        admin.rpc("match_saathi_hybrid", {
+          query_text: data.question,
           query_embedding: queryEmbedding as unknown as string,
           match_count: 6,
           subject_filter: subject,
         }),
       ),
     );
+
     const errored = perSubject.find((r) => r.error);
     if (errored?.error) throw new Error(errored.error.message);
+
     const merged = perSubject.flatMap((r) => (r.data ?? []) as Array<{
-      id: string;
-      title: string;
-      subject: string;
-      content: string;
-      similarity: number;
+      id: string; title: string; subject: string; content: string; source_file: string; similarity: number;
     }>);
+
     const seen = new Set<string>();
     const matches = merged
       .filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true)))
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, 8);
 
+    const sources = matches;
 
-    const sources = matches as Array<{
-      id: string;
-      title: string;
-      subject: string;
-      content: string;
-      similarity: number;
-    }>;
-
-    if (sources.length === 0) {
-      return {
-        answer: FALLBACK,
-        sources: [] as SaathiChatSource[],
-      };
-    }
+    if (sources.length === 0) return { answer: FALLBACK, sources: [] as SaathiChatSource[] };
 
     const contextBlock = sources
-      .map(
-        (s, i) =>
-          `[Source ${i + 1}] Title: ${s.title}\nSubject: ${s.subject}\nContent:\n${s.content}`,
-      )
+      .map((s, i) => `[Source ${i + 1}] Title: ${s.title}\nSubject: ${s.subject}\nContent:\n${s.content}`)
       .join("\n\n---\n\n");
 
     const userPrompt = `Context from knowledge base:\n\n${contextBlock}\n\n---\n\nQuestion: ${data.question}`;
 
     const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Lovable-API-Key": key,
-      },
+      headers: { "Content-Type": "application/json", "Lovable-API-Key": key },
       body: JSON.stringify({
         model: CHAT_MODEL,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: userPrompt },
-        ],
+        messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: userPrompt }],
       }),
     });
 
@@ -265,18 +258,11 @@ export const askSaathi = createServerFn({ method: "POST" })
       throw new Error(`AI request failed (${aiRes.status}): ${body}`);
     }
 
-    const aiJson = (await aiRes.json()) as {
-      choices: { message: { content: string } }[];
-    };
+    const aiJson = (await aiRes.json()) as { choices: { message: { content: string } }[] };
     const answer = aiJson.choices?.[0]?.message?.content?.trim() || FALLBACK;
 
     return {
       answer,
-      sources: sources.map((s) => ({
-        id: s.id,
-        title: s.title,
-        subject: s.subject,
-        similarity: s.similarity,
-      })) satisfies SaathiChatSource[],
+      sources: sources.map((s) => ({ id: s.id, title: s.title, subject: s.subject, similarity: s.similarity })) satisfies SaathiChatSource[],
     };
   });
