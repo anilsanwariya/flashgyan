@@ -579,31 +579,40 @@ export type Database = {
       }
       saathi_knowledge: {
         Row: {
+          chunk_index: number | null
           content: string
           created_at: string
           embedding: string | null
+          fts_vector: unknown
           id: string
           medium: string
+          source_file: string | null
           subject: string
           title: string
           updated_at: string
         }
         Insert: {
+          chunk_index?: number | null
           content: string
           created_at?: string
           embedding?: string | null
+          fts_vector?: unknown
           id?: string
           medium?: string
+          source_file?: string | null
           subject: string
           title: string
           updated_at?: string
         }
         Update: {
+          chunk_index?: number | null
           content?: string
           created_at?: string
           embedding?: string | null
+          fts_vector?: unknown
           id?: string
           medium?: string
+          source_file?: string | null
           subject?: string
           title?: string
           updated_at?: string
@@ -639,6 +648,22 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      match_saathi_hybrid: {
+        Args: {
+          match_count?: number
+          query_embedding: string
+          query_text: string
+          subject_filter?: string
+        }
+        Returns: {
+          content: string
+          id: string
+          similarity: number
+          source_file: string
+          subject: string
+          title: string
+        }[]
       }
       match_saathi_knowledge: {
         Args: {
