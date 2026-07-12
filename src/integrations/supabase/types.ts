@@ -586,6 +586,7 @@ export type Database = {
           fts_vector: unknown
           id: string
           medium: string
+          parent_id: string | null
           source_file: string | null
           subject: string
           title: string
@@ -599,6 +600,7 @@ export type Database = {
           fts_vector?: unknown
           id?: string
           medium?: string
+          parent_id?: string | null
           source_file?: string | null
           subject: string
           title: string
@@ -612,12 +614,21 @@ export type Database = {
           fts_vector?: unknown
           id?: string
           medium?: string
+          parent_id?: string | null
           source_file?: string | null
           subject?: string
           title?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "saathi_knowledge_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "saathi_knowledge"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {
