@@ -367,10 +367,14 @@ export const askSaathi = createServerFn({ method: "POST" })
 
     // 2. Knowledge Gap Tracking
     if (answer === FALLBACK || uniqueSources.length === 0) {
-      await admin
-        .rpc("increment_knowledge_gap" as never, { gap_question: data.question } as never)
-        .then(() => null)
-        .catch(() => null);
+      try {
+        await admin.rpc(
+          "increment_knowledge_gap" as never,
+          { gap_question: data.question } as never,
+        );
+      } catch {
+        // best-effort; never block the answer on analytics
+      }
     }
 
     // 3. Save memory to history
