@@ -308,8 +308,9 @@ export const askSaathi = createServerFn({ method: "POST" })
 
     if (sources.length === 0) return { answer: FALLBACK, sources: [] as SaathiChatSource[] };
 
+    // Feed the AI the Parent Deck name (source_file) instead of the chunk title
     const contextBlock = sources
-      .map((s, i) => `[Source ${i + 1}] Title: ${s.title}\nSubject: ${s.subject}\nContent:\n${s.content}`)
+      .map((s, i) => `[Source ${i + 1}] Title: ${s.source_file}\nSubject: ${s.subject}\nContent:\n${s.content}`)
       .join("\n\n---\n\n");
 
     const userPrompt = `Context from knowledge base:\n\n${contextBlock}\n\n---\n\nQuestion: ${data.question}`;
@@ -333,8 +334,25 @@ export const askSaathi = createServerFn({ method: "POST" })
     const aiJson = (await aiRes.json()) as { choices: { message: { content: string } }[] };
     const answer = aiJson.choices?.[0]?.message?.content?.trim() || FALLBACK;
 
+    // Deduplicate the sources by Parent Deck title for the UI
+    const uniqueSources: SaathiChatSource[] = [];
+    const seenTitles = new Set<string>();
+
+    for (const s of sources) {
+      if (!seenTitles.has(s.source_file)) {
+        seenTitles.add(s.source_file);
+        uniqueSources.push({
+          id: s.id,
+          title: s.source_file,
+          subject: s.subject,
+          similarity: s.similarity,
+        });
+      }
+    }
+
     return {
       answer,
-      sources: sources.map((s) => ({ id: s.id, title: s.title, subject: s.subject, similarity: s.similarity })) satisfies SaathiChatSource[],
+      sources: uniqueSources,
     };
   });
+
