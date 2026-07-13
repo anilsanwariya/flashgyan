@@ -6,7 +6,18 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 const TELEGRAM_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY") ?? "";
 const APP_URL = "https://play.google.com/store/apps/details?id=com.flashgyan";
+const QUIZ_LIMIT = 5;
+const EMBED_MODEL = "google/gemini-embedding-001";
+const EMBED_DIMS = 1536;
+const CHAT_MODEL = "google/gemini-3-flash-preview";
+const SAATHI_FALLBACK = "I don't have information on that subject in my current study materials.";
+const SAATHI_SYSTEM_PROMPT = `You are SAATHI, an expert study assistant. Answer questions ONLY based on the provided database context. If the answer is not contained in the context, reply exactly with: '${SAATHI_FALLBACK}'
+
+LANGUAGE MATCHING: Detect the language of the user's question and reply in that exact language.
+SOURCE CITATIONS: Append (Source: [Title]) using the exact Source Title from context.
+RICH FORMATTING: Use Markdown-friendly plain text (bold with *asterisks*, bullets with -).`;
 const QUIZ_LIMIT = 5;
 
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
