@@ -60,7 +60,7 @@ type FormState = {
 
 const empty: FormState = { title: "", subject: "", medium: "English", content: "" };
 
-type Mode = "content" | "qna";
+type Mode = "content" | "qna" | "gaps";
 type EditKind =
   | { kind: "create" }
   | { kind: "edit-parent"; id: string }
