@@ -26,9 +26,11 @@ import {
   appendSaathiDoc,
   createSaathiDoc,
   deleteSaathiDoc,
+  listKnowledgeGaps,
   listSaathiDocs,
   updateSaathiDoc,
   type SaathiDoc,
+  type SaathiKnowledgeGap,
   type SaathiMedium,
 } from "@/lib/saathi.functions";
 import { parsePdfWithLlama } from "@/lib/saathi-pdf.functions";
@@ -58,7 +60,7 @@ type FormState = {
 
 const empty: FormState = { title: "", subject: "", medium: "English", content: "" };
 
-type Mode = "content" | "qna";
+type Mode = "content" | "qna" | "gaps";
 type EditKind =
   | { kind: "create" }
   | { kind: "edit-parent"; id: string }
@@ -274,10 +276,19 @@ export function SaathiPanel() {
           >
             Upload Q&amp;A (Excel)
           </button>
+          <button
+            type="button"
+            onClick={() => setMode("gaps")}
+            className={`px-3 py-1.5 text-sm rounded-md ${
+              mode === "gaps" ? "bg-background shadow-sm font-medium" : "text-muted-foreground"
+            }`}
+          >
+            Knowledge Gaps
+          </button>
         </div>
       )}
 
-      {mode === "content" || isEditing ? (
+      {isEditing || mode === "content" ? (
         <EntryForm
           form={form}
           setForm={setForm}
@@ -287,7 +298,7 @@ export function SaathiPanel() {
           onSubmit={onSave}
           onCancel={cancelEdit}
         />
-      ) : (
+      ) : mode === "qna" ? (
         <QnABulkUpload
           subjects={subjects}
           onDone={() => {
@@ -296,9 +307,12 @@ export function SaathiPanel() {
           }}
           createFn={createFn}
         />
+      ) : (
+        <KnowledgeGapsPanel />
       )}
 
       <SaathiKnowledgePanel subjectFilter={filter === ALL ? "" : filter} />
+
 
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
@@ -929,3 +943,60 @@ function QnABulkUpload({
     </div>
   );
 }
+
+function KnowledgeGapsPanel() {
+  const listGapsFn = useServerFn(listKnowledgeGaps);
+  const gapsQ = useQuery<SaathiKnowledgeGap[]>({
+    queryKey: ["saathiKnowledgeGaps"],
+    queryFn: () => listGapsFn(),
+  });
+
+  const gaps = gapsQ.data ?? [];
+
+  return (
+    <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      <div>
+        <h3 className="font-semibold">Knowledge Gaps</h3>
+        <p className="text-sm text-muted-foreground">
+          Questions students asked that SAATHI couldn't answer. Upload matching study material to close each gap.
+        </p>
+      </div>
+
+      {gapsQ.isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : gapsQ.error ? (
+        <p className="text-sm text-destructive">
+          {gapsQ.error instanceof Error ? gapsQ.error.message : "Failed to load gaps"}
+        </p>
+      ) : gaps.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border p-6 text-center">
+          <p className="text-sm text-muted-foreground">No knowledge gaps yet. 🎉</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2">Question</th>
+                <th className="px-3 py-2 w-24 text-right">Asked</th>
+                <th className="px-3 py-2 w-40">Last asked</th>
+              </tr>
+            </thead>
+            <tbody>
+              {gaps.map((g) => (
+                <tr key={g.id} className="border-t border-border align-top">
+                  <td className="px-3 py-2">{g.question}</td>
+                  <td className="px-3 py-2 text-right font-medium">{g.ask_count}</td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">
+                    {new Date(g.last_asked_at).toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+

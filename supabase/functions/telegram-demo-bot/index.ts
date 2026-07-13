@@ -6,7 +6,18 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 const TELEGRAM_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY") ?? "";
 const APP_URL = "https://play.google.com/store/apps/details?id=com.flashgyan";
+const QUIZ_LIMIT = 5;
+const EMBED_MODEL = "google/gemini-embedding-001";
+const EMBED_DIMS = 1536;
+const CHAT_MODEL = "google/gemini-3-flash-preview";
+const SAATHI_FALLBACK = "I don't have information on that subject in my current study materials.";
+const SAATHI_SYSTEM_PROMPT = `You are SAATHI, an expert study assistant. Answer questions ONLY based on the provided database context. If the answer is not contained in the context, reply exactly with: '${SAATHI_FALLBACK}'
+
+LANGUAGE MATCHING: Detect the language of the user's question and reply in that exact language.
+SOURCE CITATIONS: Append (Source: [Title]) using the exact Source Title from context.
+RICH FORMATTING: Use Markdown-friendly plain text (bold with *asterisks*, bullets with -).`;
 const QUIZ_LIMIT = 5;
 
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
@@ -346,6 +357,134 @@ async function handlePollAnswer(pa: any) {
   }
 }
 
+// ---------- SAATHI /ask ----------
+async function saathiEmbed(text: string): Promise<number[] | null> {
+  if (!LOVABLE_API_KEY) return null;
+  try {
+    const r = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Lovable-API-Key": LOVABLE_API_KEY },
+      body: JSON.stringify({ model: EMBED_MODEL, input: text, dimensions: EMBED_DIMS }),
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j?.data?.[0]?.embedding ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function tgEsc(s: string) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+async function handleSaathiAsk(chat_id: number, user_id: number, question: string) {
+  if (!question) {
+    await tg("sendMessage", { chat_id, text: "Usage: /ask <your question>" });
+    return;
+  }
+  if (!LOVABLE_API_KEY) {
+    await tg("sendMessage", { chat_id, text: "SAATHI is not configured." });
+    return;
+  }
+
+  const userKey = String(user_id);
+
+  // Conversational memory (last 6 turns)
+  let pastMessages: { role: string; content: string }[] = [];
+  const { data: history } = await supabase
+    .from("saathi_chat_history")
+    .select("role,content")
+    .eq("user_id", userKey)
+    .order("created_at", { ascending: false })
+    .limit(6);
+  if (history) pastMessages = (history as any[]).slice().reverse();
+
+  // Subjects
+  const { data: subjRows } = await supabase.from("saathi_knowledge").select("subject");
+  const subjects = [...new Set((subjRows ?? []).map((r: any) => r.subject).filter(Boolean))];
+
+  let answer = SAATHI_FALLBACK;
+  const uniqueSources: { title: string; subject: string }[] = [];
+
+  const queryEmbedding = await saathiEmbed(question);
+  if (queryEmbedding && subjects.length) {
+    const results = await Promise.all(
+      subjects.map((subject: string) =>
+        supabase.rpc("match_saathi_hybrid", {
+          query_text: question,
+          query_embedding: queryEmbedding as any,
+          match_count: 6,
+          subject_filter: subject,
+        }),
+      ),
+    );
+    const merged = results.flatMap((r: any) => (r.data ?? []) as any[]);
+    const seen = new Set<string>();
+    const matches = merged
+      .filter((m: any) => (seen.has(m.id) ? false : (seen.add(m.id), true)))
+      .sort((a: any, b: any) => b.similarity - a.similarity)
+      .slice(0, 8);
+
+    if (matches.length > 0) {
+      const contextBlock = matches
+        .map((s: any, i: number) => `[Source ${i + 1}] Title: ${s.source_file}\nSubject: ${s.subject}\nContent:\n${s.content}`)
+        .join("\n\n---\n\n");
+      const userPrompt = `Context from knowledge base:\n\n${contextBlock}\n\n---\n\nQuestion: ${question}`;
+      const aiMessages = [
+        { role: "system", content: SAATHI_SYSTEM_PROMPT },
+        ...pastMessages,
+        { role: "user", content: userPrompt },
+      ];
+      try {
+        const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Lovable-API-Key": LOVABLE_API_KEY },
+          body: JSON.stringify({ model: CHAT_MODEL, messages: aiMessages }),
+        });
+        if (aiRes.ok) {
+          const aiJson = await aiRes.json();
+          answer = aiJson?.choices?.[0]?.message?.content?.trim() || SAATHI_FALLBACK;
+          const seenTitles = new Set<string>();
+          for (const s of matches as any[]) {
+            if (!seenTitles.has(s.source_file)) {
+              seenTitles.add(s.source_file);
+              uniqueSources.push({ title: s.source_file, subject: s.subject });
+            }
+          }
+        }
+      } catch (e) {
+        console.error("saathi ai error", e);
+      }
+    }
+  }
+
+  // Knowledge gap tracking
+  if (answer === SAATHI_FALLBACK || uniqueSources.length === 0) {
+    try {
+      await supabase.rpc("increment_knowledge_gap", { gap_question: question });
+    } catch (e) {
+      console.error("gap rpc error", e);
+    }
+  }
+
+  // Save memory
+  try {
+    await supabase.from("saathi_chat_history").insert([
+      { user_id: userKey, role: "user", content: question },
+      { user_id: userKey, role: "assistant", content: answer },
+    ]);
+  } catch (e) {
+    console.error("history insert error", e);
+  }
+
+  const srcLine = uniqueSources.length
+    ? `\n\n📚 <i>Sources: ${uniqueSources.map((s) => tgEsc(s.title)).join(", ")}</i>`
+    : "";
+  const body = tgEsc(answer).slice(0, 3800) + srcLine;
+  await tg("sendMessage", { chat_id, text: body, parse_mode: "HTML" });
+}
+
 // ---------- Webhook ----------
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok");
@@ -360,12 +499,26 @@ Deno.serve(async (req) => {
   try {
     if (update.message?.text) {
       const chat_id = update.message.chat.id;
+      const chat_type: string = update.message.chat.type ?? "private";
       await trackUser(update.message.from, chat_id);
       const text: string = update.message.text.trim();
+      const isGroup = chat_type === "group" || chat_type === "supergroup";
+
+      // /ask handler — works in DMs and groups, with conversational memory
+      if (text === "/ask" || text.startsWith("/ask ") || text.startsWith("/ask@")) {
+        const question = text.replace(/^\/ask(@\S+)?\s*/i, "").trim();
+        const user_id = update.message.from?.id ?? chat_id;
+        await handleSaathiAsk(chat_id, user_id, question);
+        return new Response("ok");
+      }
+
+      // In groups, ignore anything else so the bot doesn't interrupt normal chat.
+      if (isGroup) return new Response("ok");
+
       if (text.startsWith("/start") || text.startsWith("/study")) {
         await sendMainMenu(chat_id);
       } else {
-        await tg("sendMessage", { chat_id, text: "Send /study to begin." });
+        await tg("sendMessage", { chat_id, text: "Send /study to begin, or /ask <question> to ask SAATHI." });
       }
     } else if (update.callback_query) {
       const cq = update.callback_query;

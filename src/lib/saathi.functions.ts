@@ -272,14 +272,31 @@ export const askSaathi = createServerFn({ method: "POST" })
     z.object({
       question: z.string().trim().min(1).max(2000),
       subjects: z.array(z.string().trim().min(1).max(120)).min(1).max(20),
+      user_id: z.string().optional(),
     }).parse(input),
   )
   .handler(async ({ data }) => {
     const key = process.env.LOVABLE_API_KEY;
     if (!key) throw new Error("LOVABLE_API_KEY is not configured");
     const admin = await getAdmin();
-    const queryEmbedding = await embed(data.question);
 
+    // 1. Fetch Conversational Memory (last ~6 turns)
+    let pastMessages: { role: string; content: string }[] = [];
+    if (data.user_id) {
+      const { data: history } = await admin
+        .from("saathi_chat_history" as never)
+        .select("role,content")
+        .eq("user_id", data.user_id)
+        .order("created_at", { ascending: false })
+        .limit(6);
+      if (history) {
+        pastMessages = (history as unknown as { role: string; content: string }[])
+          .slice()
+          .reverse();
+      }
+    }
+
+    const queryEmbedding = await embed(data.question);
     const perSubject = await Promise.all(
       data.subjects.map((subject) =>
         admin.rpc("match_saathi_hybrid", {
@@ -304,55 +321,91 @@ export const askSaathi = createServerFn({ method: "POST" })
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, 8);
 
-    const sources = matches;
-
-    if (sources.length === 0) return { answer: FALLBACK, sources: [] as SaathiChatSource[] };
-
-    // Feed the AI the Parent Deck name (source_file) instead of the chunk title
-    const contextBlock = sources
-      .map((s, i) => `[Source ${i + 1}] Title: ${s.source_file}\nSubject: ${s.subject}\nContent:\n${s.content}`)
-      .join("\n\n---\n\n");
-
-    const userPrompt = `Context from knowledge base:\n\n${contextBlock}\n\n---\n\nQuestion: ${data.question}`;
-
-    const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Lovable-API-Key": key },
-      body: JSON.stringify({
-        model: CHAT_MODEL,
-        messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: userPrompt }],
-      }),
-    });
-
-    if (aiRes.status === 429) throw new Error("Rate limit reached. Please try again shortly.");
-    if (aiRes.status === 402) throw new Error("AI credits exhausted. Please add credits.");
-    if (!aiRes.ok) {
-      const body = await aiRes.text();
-      throw new Error(`AI request failed (${aiRes.status}): ${body}`);
-    }
-
-    const aiJson = (await aiRes.json()) as { choices: { message: { content: string } }[] };
-    const answer = aiJson.choices?.[0]?.message?.content?.trim() || FALLBACK;
-
-    // Deduplicate the sources by Parent Deck title for the UI
+    let answer = FALLBACK;
     const uniqueSources: SaathiChatSource[] = [];
-    const seenTitles = new Set<string>();
 
-    for (const s of sources) {
-      if (!seenTitles.has(s.source_file)) {
-        seenTitles.add(s.source_file);
-        uniqueSources.push({
-          id: s.id,
-          title: s.source_file,
-          subject: s.subject,
-          similarity: s.similarity,
-        });
+    if (matches.length > 0) {
+      const contextBlock = matches
+        .map((s, i) => `[Source ${i + 1}] Title: ${s.source_file}\nSubject: ${s.subject}\nContent:\n${s.content}`)
+        .join("\n\n---\n\n");
+
+      const userPrompt = `Context from knowledge base:\n\n${contextBlock}\n\n---\n\nQuestion: ${data.question}`;
+
+      const aiMessages = [
+        { role: "system", content: SYSTEM_PROMPT },
+        ...pastMessages,
+        { role: "user", content: userPrompt },
+      ];
+
+      const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Lovable-API-Key": key },
+        body: JSON.stringify({ model: CHAT_MODEL, messages: aiMessages }),
+      });
+
+      if (aiRes.status === 429) throw new Error("Rate limit reached. Please try again shortly.");
+      if (aiRes.status === 402) throw new Error("AI credits exhausted. Please add credits.");
+
+      if (aiRes.ok) {
+        const aiJson = (await aiRes.json()) as { choices: { message: { content: string } }[] };
+        answer = aiJson.choices?.[0]?.message?.content?.trim() || FALLBACK;
+
+        const seenTitles = new Set<string>();
+        for (const s of matches) {
+          if (!seenTitles.has(s.source_file)) {
+            seenTitles.add(s.source_file);
+            uniqueSources.push({
+              id: s.id,
+              title: s.source_file,
+              subject: s.subject,
+              similarity: s.similarity,
+            });
+          }
+        }
       }
     }
 
-    return {
-      answer,
-      sources: uniqueSources,
-    };
+    // 2. Knowledge Gap Tracking
+    if (answer === FALLBACK || uniqueSources.length === 0) {
+      try {
+        await admin.rpc(
+          "increment_knowledge_gap" as never,
+          { gap_question: data.question } as never,
+        );
+      } catch {
+        // best-effort; never block the answer on analytics
+      }
+    }
+
+    // 3. Save memory to history
+    if (data.user_id) {
+      await admin.from("saathi_chat_history" as never).insert([
+        { user_id: data.user_id, role: "user", content: data.question },
+        { user_id: data.user_id, role: "assistant", content: answer },
+      ] as never);
+    }
+
+    return { answer, sources: uniqueSources };
   });
+
+export type SaathiKnowledgeGap = {
+  id: string;
+  question: string;
+  ask_count: number;
+  last_asked_at: string;
+  created_at: string;
+};
+
+export const listKnowledgeGaps = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<SaathiKnowledgeGap[]> => {
+    const admin = await assertAdmin(context.userId);
+    const { data, error } = await admin
+      .from("saathi_knowledge_gaps" as never)
+      .select("*")
+      .order("last_asked_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []) as unknown as SaathiKnowledgeGap[];
+  });
+
 
