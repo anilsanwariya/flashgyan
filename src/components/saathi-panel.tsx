@@ -26,9 +26,11 @@ import {
   appendSaathiDoc,
   createSaathiDoc,
   deleteSaathiDoc,
+  listKnowledgeGaps,
   listSaathiDocs,
   updateSaathiDoc,
   type SaathiDoc,
+  type SaathiKnowledgeGap,
   type SaathiMedium,
 } from "@/lib/saathi.functions";
 import { parsePdfWithLlama } from "@/lib/saathi-pdf.functions";
