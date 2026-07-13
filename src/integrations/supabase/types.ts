@@ -577,6 +577,30 @@ export type Database = {
         }
         Relationships: []
       }
+      saathi_chat_history: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          role: string
+          user_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          role: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          role?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       saathi_knowledge: {
         Row: {
           chunk_index: number | null
@@ -630,6 +654,30 @@ export type Database = {
           },
         ]
       }
+      saathi_knowledge_gaps: {
+        Row: {
+          ask_count: number
+          created_at: string
+          id: string
+          last_asked_at: string
+          question: string
+        }
+        Insert: {
+          ask_count?: number
+          created_at?: string
+          id?: string
+          last_asked_at?: string
+          question: string
+        }
+        Update: {
+          ask_count?: number
+          created_at?: string
+          id?: string
+          last_asked_at?: string
+          question?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
@@ -659,6 +707,10 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      increment_knowledge_gap: {
+        Args: { gap_question: string }
+        Returns: undefined
       }
       match_saathi_hybrid: {
         Args: {
