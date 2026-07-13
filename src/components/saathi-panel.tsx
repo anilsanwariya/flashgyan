@@ -276,10 +276,19 @@ export function SaathiPanel() {
           >
             Upload Q&amp;A (Excel)
           </button>
+          <button
+            type="button"
+            onClick={() => setMode("gaps")}
+            className={`px-3 py-1.5 text-sm rounded-md ${
+              mode === "gaps" ? "bg-background shadow-sm font-medium" : "text-muted-foreground"
+            }`}
+          >
+            Knowledge Gaps
+          </button>
         </div>
       )}
 
-      {mode === "content" || isEditing ? (
+      {isEditing || mode === "content" ? (
         <EntryForm
           form={form}
           setForm={setForm}
@@ -289,7 +298,7 @@ export function SaathiPanel() {
           onSubmit={onSave}
           onCancel={cancelEdit}
         />
-      ) : (
+      ) : mode === "qna" ? (
         <QnABulkUpload
           subjects={subjects}
           onDone={() => {
@@ -298,9 +307,12 @@ export function SaathiPanel() {
           }}
           createFn={createFn}
         />
+      ) : (
+        <KnowledgeGapsPanel />
       )}
 
       <SaathiKnowledgePanel subjectFilter={filter === ALL ? "" : filter} />
+
 
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
