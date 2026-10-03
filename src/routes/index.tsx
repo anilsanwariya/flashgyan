@@ -2,11 +2,25 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useRef } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { getHomeData, type HomeData } from "@/lib/home.functions";
-import { ChevronRight, ExternalLink, Layers, ListChecks, Lock, Sparkles, Target } from "lucide-react";
+import {
+  ArrowDown,
+  Brain,
+  Check,
+  ChevronRight,
+  ExternalLink,
+  GraduationCap,
+  Layers,
+  ListChecks,
+  Lock,
+  RotateCcw,
+  Sparkles,
+  Target,
+} from "lucide-react";
 import { toast } from "sonner";
 import finalLogo from "@/assets/final-logo.png";
 import tgIcon from "@/assets/tg-icon.svg";
 import { useDisplayName } from "@/hooks/use-auth";
+import { Button } from "@/components/ui/button";
 <script src="https://telegram.org/js/telegram-web-app.js"></script>;
 
 const homeQO = queryOptions({ queryKey: ["homeData"], queryFn: () => getHomeData() });
@@ -20,6 +34,14 @@ export const Route = createFileRoute("/")({
         content:
           "FlashGyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go.",
       },
+      { property: "og:title", content: "Flashgyan: Smart Flashcards for Exam Success" },
+      {
+        property: "og:description",
+        content:
+          "Learn faster with active recall, spaced repetition, exam-focused flashcards, and MCQ practice in English and Hindi.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
     ],
   }),
   loader: ({ context }) => context.queryClient.ensureQueryData(homeQO),
@@ -122,6 +144,18 @@ function Home() {
               />
             )}
 
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => document.getElementById("why-flashgyan")?.scrollIntoView({ behavior: "smooth" })}
+              className={`w-full bg-background/60 backdrop-blur-sm ${
+                home.settings.cta_url.trim() && home.settings.cta_label.trim() ? "mt-3" : ""
+              }`}
+            >
+              Why FlashGyan?
+              <ArrowDown aria-hidden="true" />
+            </Button>
+
             {home.settings.cta_caption.trim() && (
               <p className="mt-3 mb-2 text-center lg:text-left text-[#910000] font-medium text-[14px] opacity-90">
                 {home.settings.cta_caption}
@@ -133,6 +167,8 @@ function Home() {
         <div className="animate-in fade-in slide-in-from-bottom-6 duration-700 delay-300 fill-mode-both">
           <FeaturePicker settings={home.settings} />
         </div>
+
+        <WhyFlashGyan />
       </main>
 
       <footer className="border-t border-border/50 bg-background/40 backdrop-blur-md">
@@ -155,6 +191,223 @@ function Home() {
         </div>
       </footer>
       <TelegramFloatingButton />
+    </div>
+  );
+}
+
+type LandingLanguage = "en" | "hi";
+
+const whyContent = {
+  en: {
+    eyebrow: "WHY FLASHGYAN?",
+    scienceTitle: "The Science of Learning",
+    worksTitle: "How FlashGyan Works",
+    scienceCards: [
+      {
+        title: "Power of Active Recall",
+        description:
+          "Stop passively reading PDFs. FlashGyan forces your brain to actively retrieve information, which is scientifically proven to build stronger neural pathways and lock in facts faster.",
+      },
+      {
+        title: "Smart Spaced Repetition",
+        description:
+          "Our algorithm tracks what you know and what you forget. Hard questions reappear right before you are about to forget them, maximizing retention while minimizing study time.",
+      },
+      {
+        title: "Laser-Focused for Exams",
+        description:
+          "Built specifically for state competitive exams. Master complex Hindi vocabulary, dates, and polity articles with decks tailored for RAS, REET, PSI, and Patwari.",
+      },
+    ],
+    steps: [
+      {
+        title: "Test Yourself",
+        description: "Read the prompt and try to recall the exact answer from memory before flipping.",
+      },
+      {
+        title: "Flip & Review",
+        description: "Tap the card to reveal the answer. Compare your mental response with the exact fact.",
+      },
+      {
+        title: "Swipe & Master",
+        description:
+          "Rate how hard it was to remember. FlashGyan uses this rating to schedule the card's next appearance.",
+      },
+    ],
+    mock: {
+      prompt: "RAJASTHAN POLITY",
+      question: "Which article provides for the establishment of a State Public Service Commission?",
+      reveal: "Tap to reveal",
+      answerLabel: "ANSWER",
+      answer: "Article 315 of the Constitution of India.",
+      hard: "Hard",
+      good: "Good",
+      easy: "Easy",
+    },
+  },
+  hi: {
+    eyebrow: "FLASHGYAN क्यों?",
+    scienceTitle: "सीखने का विज्ञान",
+    worksTitle: "FlashGyan कैसे काम करता है",
+    scienceCards: [
+      {
+        title: "सक्रिय स्मरण (Active Recall)",
+        description:
+          "पीडीएफ को निष्क्रिय रूप से पढ़ना बंद करें। फ्लैशज्ञान आपके मस्तिष्क को सक्रिय रूप से जानकारी याद करने के लिए मजबूर करता है, जिससे चीजें तेजी से और लंबे समय तक याद रहती हैं।",
+      },
+      {
+        title: "स्मार्ट स्पेस रिपीटीशन",
+        description:
+          "हमारा एल्गोरिदम ट्रैक करता है कि आप क्या जानते हैं और क्या भूल रहे हैं। कठिन प्रश्न आपके भूलने से ठीक पहले दोबारा दिखाई देते हैं, जिससे कम समय में बेहतरीन तैयारी होती है।",
+      },
+      {
+        title: "परीक्षाओं के लिए सटीक",
+        description:
+          "राज्य स्तरीय प्रतियोगी परीक्षाओं के लिए विशेष रूप से निर्मित। RAS, REET, PSI और पटवारी के लिए तैयार किए गए डेक के साथ जटिल शब्दावली, तिथियों और राजनीति के अनुच्छेदों में महारत हासिल करें।",
+      },
+    ],
+    steps: [
+      {
+        title: "खुद का परीक्षण करें",
+        description: "प्रश्न पढ़ें और कार्ड पलटने से पहले उत्तर को याद करने का प्रयास करें।",
+      },
+      {
+        title: "पलटें और जांचें",
+        description: "उत्तर देखने के लिए कार्ड पर टैप करें। अपने सोचे गए उत्तर की सही तथ्य से तुलना करें।",
+      },
+      {
+        title: "स्वाइप करें और मास्टर बनें",
+        description:
+          "कार्ड को रेटिंग दें कि इसे याद करना कितना कठिन था। फ्लैशज्ञान इसी आधार पर कार्ड को अगली बार दिखाएगा।",
+      },
+    ],
+    mock: {
+      prompt: "राजस्थान राजव्यवस्था",
+      question: "राज्य लोक सेवा आयोग की स्थापना का प्रावधान किस अनुच्छेद में है?",
+      reveal: "उत्तर देखने के लिए टैप करें",
+      answerLabel: "उत्तर",
+      answer: "भारत के संविधान का अनुच्छेद 315।",
+      hard: "कठिन",
+      good: "अच्छा",
+      easy: "आसान",
+    },
+  },
+} as const;
+
+const scienceIcons = [Brain, RotateCcw, GraduationCap] as const;
+const scienceStyles = ["grad-pink", "grad-lavender", "grad-mint"] as const;
+
+function WhyFlashGyan() {
+  const [lang, setLang] = useState<LandingLanguage>("en");
+  const content = whyContent[lang];
+
+  return (
+    <section
+      id="why-flashgyan"
+      lang={lang === "hi" ? "hi" : "en"}
+      className="scroll-mt-28 border-t border-border/60 pt-10 md:pt-14"
+      aria-labelledby="why-flashgyan-title"
+    >
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase text-primary">{content.eyebrow}</p>
+          <h2 id="why-flashgyan-title" className="mt-2 text-3xl font-bold text-foreground md:text-4xl">
+            {content.scienceTitle}
+          </h2>
+        </div>
+        <div className="inline-flex w-fit rounded-xl border border-border bg-card/80 p-1 shadow-sm backdrop-blur-xl" aria-label="Language">
+          {(["en", "hi"] as const).map((language) => (
+            <Button
+              key={language}
+              type="button"
+              variant={lang === language ? "default" : "ghost"}
+              size="sm"
+              aria-pressed={lang === language}
+              onClick={() => setLang(language)}
+              className="min-w-12 border-b-0 hover:border-b-0 active:translate-y-0"
+            >
+              {language.toUpperCase()}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-7 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {content.scienceCards.map((card, index) => {
+          const Icon = scienceIcons[index];
+          return (
+            <article
+              key={card.title}
+              className={`group rounded-3xl border border-border/50 p-6 shadow-soft transition-transform duration-300 motion-safe:hover:-translate-y-1 ${scienceStyles[index]}`}
+            >
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-card/80 bg-card/70 shadow-sm backdrop-blur-sm">
+                <Icon className="h-6 w-6 text-primary" aria-hidden="true" />
+              </div>
+              <h3 className="mt-5 text-xl font-bold text-foreground">{card.title}</h3>
+              <p className="mt-3 text-sm font-medium leading-6 text-foreground/75">{card.description}</p>
+            </article>
+          );
+        })}
+      </div>
+
+      <div className="mt-12 md:mt-16">
+        <p className="text-xs font-bold uppercase text-primary">03 STEPS</p>
+        <h2 className="mt-2 text-3xl font-bold text-foreground md:text-4xl">{content.worksTitle}</h2>
+
+        <div className="mt-7 grid gap-5 lg:grid-cols-3">
+          {content.steps.map((step, index) => (
+            <article key={step.title} className="rounded-3xl border border-border/70 bg-card/65 p-5 shadow-soft backdrop-blur-xl">
+              <div className="mb-5 flex items-center justify-between">
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
+                  {index + 1}
+                </span>
+                <span className="text-xs font-bold text-muted-foreground">0{index + 1}</span>
+              </div>
+
+              <LearningMockup step={index} content={content.mock} />
+
+              <h3 className="mt-5 text-xl font-bold text-foreground">{step.title}</h3>
+              <p className="mt-2 text-sm font-medium leading-6 text-muted-foreground">{step.description}</p>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function LearningMockup({ step, content }: { step: number; content: (typeof whyContent)[LandingLanguage]["mock"] }) {
+  if (step === 0) {
+    return (
+      <div className="flex min-h-56 flex-col rounded-2xl border border-border bg-background/80 p-5 shadow-sm transition-shadow duration-300 motion-safe:hover:shadow-lg">
+        <span className="text-[11px] font-bold text-primary">{content.prompt}</span>
+        <p className="my-auto py-5 text-center text-base font-bold leading-6 text-foreground">{content.question}</p>
+        <div className="flex items-center justify-center gap-2 text-xs font-semibold text-muted-foreground">
+          <RotateCcw className="h-4 w-4" aria-hidden="true" />
+          {content.reveal}
+        </div>
+      </div>
+    );
+  }
+
+  if (step === 1) {
+    return (
+      <div className="flex min-h-56 flex-col justify-center rounded-2xl border border-primary/25 bg-accent/70 p-5 text-center shadow-md transition-transform duration-300 motion-safe:hover:rotate-1">
+        <span className="text-[11px] font-bold text-primary">{content.answerLabel}</span>
+        <Check className="mx-auto mt-5 h-9 w-9 rounded-full bg-primary p-2 text-primary-foreground" aria-hidden="true" />
+        <p className="mt-4 text-base font-bold leading-6 text-foreground">{content.answer}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-56 flex-col justify-center rounded-2xl border border-border bg-background/80 p-5 shadow-sm">
+      <p className="mb-5 text-center text-sm font-bold leading-6 text-foreground">{content.answer}</p>
+      <div className="grid grid-cols-3 gap-2" aria-label="Recall rating example">
+        <span className="rounded-xl bg-destructive/10 px-2 py-3 text-center text-xs font-bold text-destructive">{content.hard}</span>
+        <span className="rounded-xl bg-warning/20 px-2 py-3 text-center text-xs font-bold text-warning-foreground">{content.good}</span>
+        <span className="rounded-xl bg-success/15 px-2 py-3 text-center text-xs font-bold text-success">{content.easy}</span>
+      </div>
     </div>
   );
 }
