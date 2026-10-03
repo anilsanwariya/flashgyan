@@ -1,43 +1,41 @@
 ## Goal
 
-Restyle Flashgyan to match the reference: soft lavender/cream background, large serif display headlines, and pastel gradient feature cards with circular icon badges and a right arrow.
+Add a bilingual, highly visual “Why FlashGyan?” experience to the homepage without changing the existing feature flows or homepage layout above it.
 
-## Theme tokens (`src/styles.css`)
+## Homepage entry point
 
-- Background: soft lavender-tinted off-white (`oklch(0.97 0.012 290)`).
-- Foreground: deep navy near-black for high-contrast headings.
-- Card: pure white with very soft shadow + larger radius (`--radius: 1.25rem`).
-- Add serif display font for headings via `<link>` in `__root.tsx` (Fraunces or Instrument Serif) and keep Inter for body. Add `--font-serif` token; apply to `h1`/`.display`.
-- Add 4 pastel gradient tokens:
-  - `--grad-pink`: pink → rose
-  - `--grad-lavender`: lilac → periwinkle
-  - `--grad-peach`: peach → blush
-  - `--grad-mint`: mint → sky
-- Add `--shadow-soft` (low, diffuse) for cards.
+- Add a secondary outlined “Why FlashGyan?” button beneath the existing app-download/CTA area.
+- Smooth-scroll that button to a new `#why-flashgyan` section below the four feature cards.
+- Keep the current mobile, tablet, and desktop structure intact; the new button will follow the existing responsive left-column alignment.
 
-## Home page (`src/routes/index.tsx`)
+## Bilingual section
 
-- Header: big serif H1 ("Pick a feature.") with a short body subtitle, matching reference scale (text-5xl serif, tight tracking).
-- Feature cards (Flashcards / MCQ Tests) and deck/test list items restyled to:
-  - rounded-3xl, full-width pastel gradient background (rotating through the 4 gradients), soft shadow, no border.
-  - Left: white circular icon badge (h-12 w-12) with the existing lucide icon in dark navy.
-  - Middle: bold title + small muted subtitle.
-  - Right: simple arrow-right icon.
-- Cycle gradients deterministically by index so lists look like the reference.
+- Add local English/Hindi state, defaulting to English.
+- Place an accessible EN/HI segmented toggle at the top-right of the new section.
+- Switch every new heading, description, step label, and mock-card caption together using the exact supplied English and Hindi copy.
+- Use semantic buttons with clear selected state and update the section language attribute for assistive technology.
 
-## Other surfaces
+## “The Science of Learning” cards
 
-- Practice and MCQ routes: pick up new tokens automatically (background, serif H1, rounded cards). Replace any hard `border` look on the flashcard container with the new soft-shadow white card + larger radius. No logic changes.
-- Admin page: inherits tokens; no structural change.
+- Build a responsive 1-column mobile, 2-column tablet, and 3-column desktop grid.
+- Add three distinct Lucide-led cards for Active Recall, Spaced Repetition, and Exam Focus.
+- Match the homepage’s existing pastel surfaces, icon badges, soft shadows, typography, and theme tokens rather than introducing a separate visual language.
 
-## Out of scope
+## “How FlashGyan Works” walkthrough
 
-- No changes to data, auth, server functions, or the tap-to-reveal fix (still pending separately).
-- No new routes or copy changes beyond what's needed for the visual match.
+- Add three responsive steps: Test Yourself, Flip & Review, and Swipe & Master.
+- Create lightweight visual mockups of the actual learning flow: question card, revealed answer card, and Hard/Good/Easy rating controls.
+- Use subtle CSS hover/lift/flip cues on pointer devices, while keeping all content visible and honoring reduced-motion preferences.
 
-## Files touched
+## Technical details
 
-- `src/styles.css` — tokens, gradients, serif font, radius, shadow.
-- `src/routes/__root.tsx` — `<link>` for serif font.
-- `src/routes/index.tsx` — header typography + card styling + gradient cycling.
-- `src/routes/practice.$deckId.tsx` and `src/routes/mcq.$testId.tsx` — small className tweaks so headings use serif and cards use new radius/shadow.
+- Keep the implementation within `src/routes/index.tsx`, extracting small local components/data maps where useful.
+- Use the existing design-system `Button` for the jump link and language control rather than raw buttons.
+- Use only semantic theme classes and existing tokens; no database, auth, server-function, routing, or global-theme changes.
+- Complete the index route’s social metadata fields while touching the route, preserving its current title and description intent.
+
+## Verification
+
+- Check the homepage at mobile and desktop widths for readable Hindi text, no overflow, and correct placement below all four features.
+- Verify the jump button scrolls to the section, EN/HI switches all content, and interactive mockups do not affect real study data.
+- Confirm the preview builds cleanly and has no new browser errors.
