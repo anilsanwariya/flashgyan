@@ -214,6 +214,7 @@ const whyContent = {
     eyebrow: "WHY FLASHGYAN?",
     scienceTitle: "The Science of Learning",
     worksTitle: "How FlashGyan Works",
+    demoLabel: "5 CARD DEMO",
     scienceCards: [
       {
         title: "Power of Active Recall",
@@ -262,6 +263,7 @@ const whyContent = {
     eyebrow: "FLASHGYAN क्यों?",
     scienceTitle: "सीखने का विज्ञान",
     worksTitle: "FlashGyan कैसे काम करता है",
+    demoLabel: "5 कार्ड डेमो",
     scienceCards: [
       {
         title: "सक्रिय स्मरण (Active Recall)",
@@ -365,7 +367,7 @@ function WhyFlashGyan({ cards }: { cards: Flashcard[] }) {
       </div>
 
       <div className="mt-12 md:mt-16">
-        <p className="text-xs font-bold uppercase text-primary">03 STEPS</p>
+        <p className="text-xs font-bold uppercase text-primary">{content.demoLabel}</p>
         <h2 className="mt-2 text-3xl font-bold text-foreground md:text-4xl">{content.worksTitle}</h2>
 
         <FlashcardDemo cards={cards} content={content.mock} />
@@ -505,7 +507,9 @@ function FlashcardDemo({
   );
 }
 
-function DemoRatingButton({ label, tone, onClick }: { label: string; tone: DemoRating; onClick: () => void }) {
+type DemoTone = "destructive" | "warning" | "success";
+
+function DemoRatingButton({ label, tone, onClick }: { label: string; tone: DemoTone; onClick: () => void }) {
   const classes = tone === "hard"
     ? "border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/20"
     : tone === "medium"
@@ -514,7 +518,7 @@ function DemoRatingButton({ label, tone, onClick }: { label: string; tone: DemoR
   return <Button type="button" variant="outline" onClick={onClick} className={`h-13 rounded-2xl ${classes}`}>{label}</Button>;
 }
 
-function DemoScore({ label, count, tone }: { label: string; count: number; tone: DemoRating }) {
+function DemoScore({ label, count, tone }: { label: string; count: number; tone: DemoTone }) {
   const classes = tone === "hard"
     ? "bg-destructive/10 text-destructive"
     : tone === "medium"
