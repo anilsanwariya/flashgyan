@@ -55,7 +55,7 @@ export const Route = createFileRoute("/practice/$deckId")({
   errorComponent: ({ error }) => (
     <div className="min-h-dvh grid place-items-center p-6 text-center bg-background">
       <div>
-        <p className="text-destructive font-semibold">{error.message}</p>
+        <p className="text-destructive font-semibold">{error instanceof Error ? error.message : "The deck could not be loaded."}</p>
         <Link to="/" className="text-primary mt-2 inline-block font-medium">
           Back to decks
         </Link>
