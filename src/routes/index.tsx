@@ -2,10 +2,11 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useRef } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { getHomeData, type HomeData } from "@/lib/home.functions";
+import { getRandomFlashcards, type Flashcard } from "@/lib/flashcards.functions";
+import { AnimatePresence, motion } from "motion/react";
 import {
   ArrowDown,
   Brain,
-  Check,
   ChevronRight,
   ExternalLink,
   GraduationCap,
@@ -21,9 +22,15 @@ import finalLogo from "@/assets/final-logo.png";
 import tgIcon from "@/assets/tg-icon.svg";
 import { useDisplayName } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 <script src="https://telegram.org/js/telegram-web-app.js"></script>;
 
 const homeQO = queryOptions({ queryKey: ["homeData"], queryFn: () => getHomeData() });
+const demoCardsQO = queryOptions({
+  queryKey: ["homepage-demo-cards"],
+  queryFn: () => getRandomFlashcards(),
+  staleTime: Number.POSITIVE_INFINITY,
+});
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -44,7 +51,11 @@ export const Route = createFileRoute("/")({
       { name: "twitter:card", content: "summary" },
     ],
   }),
-  loader: ({ context }) => context.queryClient.ensureQueryData(homeQO),
+  loader: ({ context }) =>
+    Promise.all([
+      context.queryClient.ensureQueryData(homeQO),
+      context.queryClient.ensureQueryData(demoCardsQO),
+    ]),
   component: Home,
 });
 
@@ -57,6 +68,7 @@ function greetingFor(date: Date) {
 
 function Home() {
   const { data: home } = useSuspenseQuery(homeQO);
+  const { data: demoCards } = useSuspenseQuery(demoCardsQO);
   const displayName = useDisplayName();
   const [greeting, setGreeting] = useState(() => greetingFor(new Date()));
 
@@ -168,7 +180,7 @@ function Home() {
           <FeaturePicker settings={home.settings} />
         </div>
 
-        <WhyFlashGyan />
+        <WhyFlashGyan cards={demoCards} />
       </main>
 
       <footer className="border-t border-border/50 bg-background/40 backdrop-blur-md">
@@ -235,14 +247,15 @@ const whyContent = {
       },
     ],
     mock: {
-      prompt: "RAJASTHAN POLITY",
-      question: "Which article provides for the establishment of a State Public Service Commission?",
-      reveal: "Tap to reveal",
+      progress: "of",
+      reveal: "Reveal Answer",
       answerLabel: "ANSWER",
-      answer: "Article 315 of the Constitution of India.",
       hard: "Hard",
-      good: "Good",
+      medium: "Medium",
       easy: "Easy",
+      completed: "Demo complete",
+      completedDescription: "You rated all five cards.",
+      noCards: "No flashcards are available yet.",
     },
   },
   hi: {
@@ -282,14 +295,15 @@ const whyContent = {
       },
     ],
     mock: {
-      prompt: "राजस्थान राजव्यवस्था",
-      question: "राज्य लोक सेवा आयोग की स्थापना का प्रावधान किस अनुच्छेद में है?",
-      reveal: "उत्तर देखने के लिए टैप करें",
+      progress: "में से",
+      reveal: "उत्तर देखें",
       answerLabel: "उत्तर",
-      answer: "भारत के संविधान का अनुच्छेद 315।",
       hard: "कठिन",
-      good: "अच्छा",
+      medium: "मध्यम",
       easy: "आसान",
+      completed: "डेमो पूरा हुआ",
+      completedDescription: "आपने सभी पाँच कार्डों को रेट किया।",
+      noCards: "अभी कोई फ्लैशकार्ड उपलब्ध नहीं है।",
     },
   },
 } as const;
@@ -297,7 +311,7 @@ const whyContent = {
 const scienceIcons = [Brain, RotateCcw, GraduationCap] as const;
 const scienceStyles = ["grad-pink", "grad-lavender", "grad-mint"] as const;
 
-function WhyFlashGyan() {
+function WhyFlashGyan({ cards }: { cards: Flashcard[] }) {
   const [lang, setLang] = useState<LandingLanguage>("en");
   const content = whyContent[lang];
 
@@ -354,62 +368,159 @@ function WhyFlashGyan() {
         <p className="text-xs font-bold uppercase text-primary">03 STEPS</p>
         <h2 className="mt-2 text-3xl font-bold text-foreground md:text-4xl">{content.worksTitle}</h2>
 
-        <div className="mt-7 grid gap-5 lg:grid-cols-3">
-          {content.steps.map((step, index) => (
-            <article key={step.title} className="rounded-3xl border border-border/70 bg-card/65 p-5 shadow-soft backdrop-blur-xl">
-              <div className="mb-5 flex items-center justify-between">
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
-                  {index + 1}
-                </span>
-                <span className="text-xs font-bold text-muted-foreground">0{index + 1}</span>
-              </div>
-
-              <LearningMockup step={index} content={content.mock} />
-
-              <h3 className="mt-5 text-xl font-bold text-foreground">{step.title}</h3>
-              <p className="mt-2 text-sm font-medium leading-6 text-muted-foreground">{step.description}</p>
-            </article>
-          ))}
-        </div>
+        <FlashcardDemo cards={cards} content={content.mock} />
       </div>
     </section>
   );
 }
 
-function LearningMockup({ step, content }: { step: number; content: (typeof whyContent)[LandingLanguage]["mock"] }) {
-  if (step === 0) {
+type DemoRating = "hard" | "medium" | "easy";
+
+function FlashcardDemo({
+  cards,
+  content,
+}: {
+  cards: Flashcard[];
+  content: (typeof whyContent)[LandingLanguage]["mock"];
+}) {
+  const [index, setIndex] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+  const [ratings, setRatings] = useState<DemoRating[]>([]);
+  const completed = cards.length > 0 && ratings.length === cards.length;
+  const card = cards[index];
+
+  const rate = (rating: DemoRating) => {
+    const nextRatings = [...ratings, rating];
+    setRatings(nextRatings);
+    if (index < cards.length - 1) {
+      setTimeout(() => {
+        setIndex((current) => current + 1);
+        setFlipped(false);
+      }, 300);
+    }
+  };
+
+  if (!card) {
     return (
-      <div className="flex min-h-56 flex-col rounded-2xl border border-border bg-background/80 p-5 shadow-sm transition-shadow duration-300 motion-safe:hover:shadow-lg">
-        <span className="text-[11px] font-bold text-primary">{content.prompt}</span>
-        <p className="my-auto py-5 text-center text-base font-bold leading-6 text-foreground">{content.question}</p>
-        <div className="flex items-center justify-center gap-2 text-xs font-semibold text-muted-foreground">
-          <RotateCcw className="h-4 w-4" aria-hidden="true" />
-          {content.reveal}
+      <div className="mx-auto mt-7 max-w-2xl rounded-3xl border border-dashed border-border bg-muted/30 px-6 py-12 text-center font-medium text-muted-foreground">
+        {content.noCards}
+      </div>
+    );
+  }
+
+  if (completed) {
+    const counts = {
+      hard: ratings.filter((rating) => rating === "hard").length,
+      medium: ratings.filter((rating) => rating === "medium").length,
+      easy: ratings.filter((rating) => rating === "easy").length,
+    };
+    return (
+      <div className="mx-auto mt-7 max-w-2xl rounded-3xl border border-border/70 bg-card/65 p-6 text-center shadow-soft backdrop-blur-xl md:p-8">
+        <h3 className="text-2xl font-bold text-foreground">{content.completed}</h3>
+        <p className="mt-2 text-sm font-medium text-muted-foreground">{content.completedDescription}</p>
+        <div className="mt-6 grid grid-cols-3 gap-3">
+          <DemoScore label={content.hard} count={counts.hard} tone="destructive" />
+          <DemoScore label={content.medium} count={counts.medium} tone="warning" />
+          <DemoScore label={content.easy} count={counts.easy} tone="success" />
         </div>
       </div>
     );
   }
 
-  if (step === 1) {
-    return (
-      <div className="flex min-h-56 flex-col justify-center rounded-2xl border border-primary/25 bg-accent/70 p-5 text-center shadow-md transition-transform duration-300 motion-safe:hover:rotate-1">
-        <span className="text-[11px] font-bold text-primary">{content.answerLabel}</span>
-        <Check className="mx-auto mt-5 h-9 w-9 rounded-full bg-primary p-2 text-primary-foreground" aria-hidden="true" />
-        <p className="mt-4 text-base font-bold leading-6 text-foreground">{content.answer}</p>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex min-h-56 flex-col justify-center rounded-2xl border border-border bg-background/80 p-5 shadow-sm">
-      <p className="mb-5 text-center text-sm font-bold leading-6 text-foreground">{content.answer}</p>
-      <div className="grid grid-cols-3 gap-2" aria-label="Recall rating example">
-        <span className="rounded-xl bg-destructive/10 px-2 py-3 text-center text-xs font-bold text-destructive">{content.hard}</span>
-        <span className="rounded-xl bg-warning/20 px-2 py-3 text-center text-xs font-bold text-warning-foreground">{content.good}</span>
-        <span className="rounded-xl bg-success/15 px-2 py-3 text-center text-xs font-bold text-success">{content.easy}</span>
+    <div className="mx-auto mt-7 max-w-2xl">
+      <div className="mb-3 flex items-center justify-between px-1 text-xs font-bold text-muted-foreground">
+        <span>{card.subject} · {card.topic}</span>
+        <span>{index + 1} {content.progress} {cards.length}</span>
+      </div>
+      <div className="relative h-[28rem] w-full [perspective:1200px] sm:h-[30rem]">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={card.id}
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={{ duration: 0.25 }}
+            className="relative h-full w-full"
+          >
+            <motion.div
+              initial={false}
+              animate={{ rotateY: flipped ? 180 : 0 }}
+              transition={{ duration: 0.5, type: "spring", bounce: 0.2 }}
+              className="relative h-full w-full"
+              style={{ transformStyle: "preserve-3d" }}
+            >
+              <div
+                className="absolute inset-0 flex h-full w-full flex-col overflow-hidden rounded-3xl border border-border/40 bg-card/70 shadow-soft backdrop-blur-3xl"
+                style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden", transform: "translateZ(1px)" }}
+              >
+                <ScrollArea className="h-full flex-1">
+                  <div className="flex min-h-full flex-col justify-center p-7 md:p-9">
+                    <p className="text-center text-[11px] font-bold uppercase text-primary">{card.prompt}</p>
+                    <p className="mt-7 text-center text-xl font-semibold leading-snug text-foreground md:text-2xl">{card.question}</p>
+                    {card.image_url && <img src={card.image_url} alt="" className="mt-6 aspect-[2/1] w-full rounded-2xl border border-border/30 object-cover" />}
+                  </div>
+                </ScrollArea>
+              </div>
+              <div
+                className="absolute inset-0 flex h-full w-full flex-col overflow-hidden rounded-3xl border border-primary/25 bg-card/75 shadow-soft backdrop-blur-3xl"
+                style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden", transform: "rotateY(180deg) translateZ(1px)" }}
+              >
+                <ScrollArea className="h-full flex-1">
+                  <div className="p-7 md:p-9">
+                    <p className="text-[11px] font-bold uppercase text-primary">{card.prompt}</p>
+                    <p className="mt-2 text-sm font-medium leading-relaxed text-muted-foreground">{card.question}</p>
+                    <div className="my-6 border-t border-border/30" />
+                    <p className="text-[11px] font-bold uppercase text-success">{content.answerLabel}</p>
+                    <p className="mt-2 text-xl font-semibold leading-snug text-foreground md:text-2xl">{card.answer}</p>
+                    {card.image_url && <img src={card.image_url} alt="" className="mt-6 aspect-[2/1] w-full rounded-2xl border border-border/30 object-cover" />}
+                    {card.sections.map((section, sectionIndex) => (
+                      <div key={`${section.title}-${sectionIndex}`} className="mt-6 border-t border-border/30 pt-6">
+                        <p className="text-[11px] font-bold uppercase text-primary">{section.title}</p>
+                        <p className="mt-2 whitespace-pre-wrap text-sm font-medium leading-relaxed text-foreground/75">{section.body}</p>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </div>
+            </motion.div>
+          </motion.div>
+        </AnimatePresence>
+      </div>
+      <div className="mt-4">
+        {flipped ? (
+          <div className="grid grid-cols-3 gap-3">
+            <DemoRatingButton label={content.hard} tone="destructive" onClick={() => rate("hard")} />
+            <DemoRatingButton label={content.medium} tone="warning" onClick={() => rate("medium")} />
+            <DemoRatingButton label={content.easy} tone="success" onClick={() => rate("easy")} />
+          </div>
+        ) : (
+          <Button type="button" onClick={() => setFlipped(true)} className="h-14 w-full rounded-2xl text-base">
+            <RotateCcw className="h-4 w-4" aria-hidden="true" />
+            {content.reveal}
+          </Button>
+        )}
       </div>
     </div>
   );
+}
+
+function DemoRatingButton({ label, tone, onClick }: { label: string; tone: DemoRating; onClick: () => void }) {
+  const classes = tone === "hard"
+    ? "border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/20"
+    : tone === "medium"
+      ? "border-warning/30 bg-warning/15 text-warning hover:bg-warning/25"
+      : "border-success/30 bg-success/10 text-success hover:bg-success/20";
+  return <Button type="button" variant="outline" onClick={onClick} className={`h-13 rounded-2xl ${classes}`}>{label}</Button>;
+}
+
+function DemoScore({ label, count, tone }: { label: string; count: number; tone: DemoRating }) {
+  const classes = tone === "hard"
+    ? "bg-destructive/10 text-destructive"
+    : tone === "medium"
+      ? "bg-warning/15 text-warning"
+      : "bg-success/10 text-success";
+  return <div className={`rounded-2xl px-3 py-4 ${classes}`}><strong className="block text-2xl">{count}</strong><span className="text-xs font-bold">{label}</span></div>;
 }
 
 function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {

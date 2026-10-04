@@ -125,6 +125,43 @@ export const getDeckCards = createServerFn({ method: "GET" })
     return res.cards;
   });
 
+export const getRandomFlashcards = createServerFn({ method: "GET" }).handler(
+  async (): Promise<Flashcard[]> => {
+    const supabase = publicClient();
+    const { count, error: countError } = await supabase
+      .from("flashcards")
+      .select("id", { count: "exact", head: true });
+    if (countError) throw new Error(countError.message);
+
+    const total = count ?? 0;
+    if (total === 0) return [];
+
+    const selectedIndexes = new Set<number>();
+    const desiredCount = Math.min(5, total);
+    while (selectedIndexes.size < desiredCount) {
+      selectedIndexes.add(Math.floor(Math.random() * total));
+    }
+
+    const rows = await Promise.all(
+      Array.from(selectedIndexes).map(async (offset) => {
+        const { data, error } = await supabase
+          .from("flashcards")
+          .select("id, deck_id, subject, topic, order_index, prompt, question, answer, image_url, sections")
+          .order("id", { ascending: true })
+          .range(offset, offset)
+          .single();
+        if (error) throw new Error(error.message);
+        return {
+          ...data,
+          sections: Array.isArray(data.sections) ? (data.sections as unknown as CardSection[]) : [],
+        };
+      }),
+    );
+
+    return (await signMany(rows)) as Flashcard[];
+  },
+);
+
 // ---------- Admin ----------
 
 async function assertAdmin(userId: string) {
