@@ -9,59 +9,25 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
-import { Route as AuthRouteImport } from './routes/auth'
-import { Route as FlashcardsRouteImport } from './routes/flashcards'
-import { Route as McqPracticeRouteImport } from './routes/mcq-practice'
-import { Route as McqTestsRouteImport } from './routes/mcq-tests'
-import { Route as PrivacyPolicyRouteImport } from './routes/privacy-policy'
-import { Route as SaathiRouteImport } from './routes/saathi'
-import { Route as SummaryRouteImport } from './routes/summary'
 import { Route as TermsRouteImport } from './routes/terms'
-import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
-import { Route as McqResultTestIdRouteImport } from './routes/mcq-result.$testId'
-import { Route as McqTestIdRouteImport } from './routes/mcq.$testId'
-import { Route as PracticeMcqTestIdRouteImport } from './routes/practice-mcq.$testId'
+import { Route as SummaryRouteImport } from './routes/summary'
+import { Route as SaathiRouteImport } from './routes/saathi'
+import { Route as PrivacyPolicyRouteImport } from './routes/privacy-policy'
+import { Route as McqTestsRouteImport } from './routes/mcq-tests'
+import { Route as McqPracticeRouteImport } from './routes/mcq-practice'
+import { Route as FlashcardsRouteImport } from './routes/flashcards'
+import { Route as AuthRouteImport } from './routes/auth'
+import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as PracticeDeckIdRouteImport } from './routes/practice.$deckId'
+import { Route as PracticeMcqTestIdRouteImport } from './routes/practice-mcq.$testId'
+import { Route as McqTestIdRouteImport } from './routes/mcq.$testId'
+import { Route as McqResultTestIdRouteImport } from './routes/mcq-result.$testId'
+import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
-  id: '/_authenticated',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthRoute = AuthRouteImport.update({
-  id: '/auth',
-  path: '/auth',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const FlashcardsRoute = FlashcardsRouteImport.update({
-  id: '/flashcards',
-  path: '/flashcards',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const McqPracticeRoute = McqPracticeRouteImport.update({
-  id: '/mcq-practice',
-  path: '/mcq-practice',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const McqTestsRoute = McqTestsRouteImport.update({
-  id: '/mcq-tests',
-  path: '/mcq-tests',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PrivacyPolicyRoute = PrivacyPolicyRouteImport.update({
-  id: '/privacy-policy',
-  path: '/privacy-policy',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SaathiRoute = SaathiRouteImport.update({
-  id: '/saathi',
-  path: '/saathi',
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SummaryRoute = SummaryRouteImport.update({
@@ -69,24 +35,48 @@ const SummaryRoute = SummaryRouteImport.update({
   path: '/summary',
   getParentRoute: () => rootRouteImport,
 } as any)
-const TermsRoute = TermsRouteImport.update({
-  id: '/terms',
-  path: '/terms',
+const SaathiRoute = SaathiRouteImport.update({
+  id: '/saathi',
+  path: '/saathi',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
-  id: '/admin',
-  path: '/admin',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const McqResultTestIdRoute = McqResultTestIdRouteImport.update({
-  id: '/mcq-result/$testId',
-  path: '/mcq-result/$testId',
+const PrivacyPolicyRoute = PrivacyPolicyRouteImport.update({
+  id: '/privacy-policy',
+  path: '/privacy-policy',
   getParentRoute: () => rootRouteImport,
 } as any)
-const McqTestIdRoute = McqTestIdRouteImport.update({
-  id: '/mcq/$testId',
-  path: '/mcq/$testId',
+const McqTestsRoute = McqTestsRouteImport.update({
+  id: '/mcq-tests',
+  path: '/mcq-tests',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McqPracticeRoute = McqPracticeRouteImport.update({
+  id: '/mcq-practice',
+  path: '/mcq-practice',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FlashcardsRoute = FlashcardsRouteImport.update({
+  id: '/flashcards',
+  path: '/flashcards',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
+  id: '/_authenticated',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PracticeDeckIdRoute = PracticeDeckIdRouteImport.update({
+  id: '/practice/$deckId',
+  path: '/practice/$deckId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PracticeMcqTestIdRoute = PracticeMcqTestIdRouteImport.update({
@@ -94,10 +84,20 @@ const PracticeMcqTestIdRoute = PracticeMcqTestIdRouteImport.update({
   path: '/practice-mcq/$testId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const PracticeDeckIdRoute = PracticeDeckIdRouteImport.update({
-  id: '/practice/$deckId',
-  path: '/practice/$deckId',
+const McqTestIdRoute = McqTestIdRouteImport.update({
+  id: '/mcq/$testId',
+  path: '/mcq/$testId',
   getParentRoute: () => rootRouteImport,
+} as any)
+const McqResultTestIdRoute = McqResultTestIdRouteImport.update({
+  id: '/mcq-result/$testId',
+  path: '/mcq-result/$testId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -221,60 +221,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_authenticated': {
-      id: '/_authenticated'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof AuthenticatedRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/auth': {
-      id: '/auth'
-      path: '/auth'
-      fullPath: '/auth'
-      preLoaderRoute: typeof AuthRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/flashcards': {
-      id: '/flashcards'
-      path: '/flashcards'
-      fullPath: '/flashcards'
-      preLoaderRoute: typeof FlashcardsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mcq-practice': {
-      id: '/mcq-practice'
-      path: '/mcq-practice'
-      fullPath: '/mcq-practice'
-      preLoaderRoute: typeof McqPracticeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mcq-tests': {
-      id: '/mcq-tests'
-      path: '/mcq-tests'
-      fullPath: '/mcq-tests'
-      preLoaderRoute: typeof McqTestsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/privacy-policy': {
-      id: '/privacy-policy'
-      path: '/privacy-policy'
-      fullPath: '/privacy-policy'
-      preLoaderRoute: typeof PrivacyPolicyRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/saathi': {
-      id: '/saathi'
-      path: '/saathi'
-      fullPath: '/saathi'
-      preLoaderRoute: typeof SaathiRouteImport
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/summary': {
@@ -284,32 +235,67 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SummaryRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/terms': {
-      id: '/terms'
-      path: '/terms'
-      fullPath: '/terms'
-      preLoaderRoute: typeof TermsRouteImport
+    '/saathi': {
+      id: '/saathi'
+      path: '/saathi'
+      fullPath: '/saathi'
+      preLoaderRoute: typeof SaathiRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authenticated/admin': {
-      id: '/_authenticated/admin'
-      path: '/admin'
-      fullPath: '/admin'
-      preLoaderRoute: typeof AuthenticatedAdminRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/mcq-result/$testId': {
-      id: '/mcq-result/$testId'
-      path: '/mcq-result/$testId'
-      fullPath: '/mcq-result/$testId'
-      preLoaderRoute: typeof McqResultTestIdRouteImport
+    '/privacy-policy': {
+      id: '/privacy-policy'
+      path: '/privacy-policy'
+      fullPath: '/privacy-policy'
+      preLoaderRoute: typeof PrivacyPolicyRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/mcq/$testId': {
-      id: '/mcq/$testId'
-      path: '/mcq/$testId'
-      fullPath: '/mcq/$testId'
-      preLoaderRoute: typeof McqTestIdRouteImport
+    '/mcq-tests': {
+      id: '/mcq-tests'
+      path: '/mcq-tests'
+      fullPath: '/mcq-tests'
+      preLoaderRoute: typeof McqTestsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcq-practice': {
+      id: '/mcq-practice'
+      path: '/mcq-practice'
+      fullPath: '/mcq-practice'
+      preLoaderRoute: typeof McqPracticeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/flashcards': {
+      id: '/flashcards'
+      path: '/flashcards'
+      fullPath: '/flashcards'
+      preLoaderRoute: typeof FlashcardsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/practice/$deckId': {
+      id: '/practice/$deckId'
+      path: '/practice/$deckId'
+      fullPath: '/practice/$deckId'
+      preLoaderRoute: typeof PracticeDeckIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/practice-mcq/$testId': {
@@ -319,12 +305,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PracticeMcqTestIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/practice/$deckId': {
-      id: '/practice/$deckId'
-      path: '/practice/$deckId'
-      fullPath: '/practice/$deckId'
-      preLoaderRoute: typeof PracticeDeckIdRouteImport
+    '/mcq/$testId': {
+      id: '/mcq/$testId'
+      path: '/mcq/$testId'
+      fullPath: '/mcq/$testId'
+      preLoaderRoute: typeof McqTestIdRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/mcq-result/$testId': {
+      id: '/mcq-result/$testId'
+      path: '/mcq-result/$testId'
+      fullPath: '/mcq-result/$testId'
+      preLoaderRoute: typeof McqResultTestIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/admin': {
+      id: '/_authenticated/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AuthenticatedAdminRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
   }
 }
