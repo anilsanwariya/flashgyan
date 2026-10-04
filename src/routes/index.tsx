@@ -257,6 +257,7 @@ const whyContent = {
       completed: "Demo complete",
       completedDescription: "You rated all five cards.",
       noCards: "No flashcards are available yet.",
+      loading: "Loading flashcards…",
     },
   },
   hi: {
@@ -306,6 +307,7 @@ const whyContent = {
       completed: "डेमो पूरा हुआ",
       completedDescription: "आपने सभी पाँच कार्डों को रेट किया।",
       noCards: "अभी कोई फ्लैशकार्ड उपलब्ध नहीं है।",
+      loading: "फ्लैशकार्ड लोड हो रहे हैं…",
     },
   },
 } as const;
@@ -388,8 +390,11 @@ function FlashcardDemo({
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [ratings, setRatings] = useState<DemoRating[]>([]);
+  const [mounted, setMounted] = useState(false);
   const completed = cards.length > 0 && ratings.length === cards.length;
   const card = cards[index];
+
+  useEffect(() => setMounted(true), []);
 
   const rate = (rating: DemoRating) => {
     const nextRatings = [...ratings, rating];
@@ -401,6 +406,14 @@ function FlashcardDemo({
       }, 300);
     }
   };
+
+  if (!mounted) {
+    return (
+      <div className="mx-auto mt-7 flex h-[28rem] max-w-2xl items-center justify-center rounded-3xl border border-border/40 bg-card/70 font-medium text-muted-foreground shadow-soft backdrop-blur-3xl sm:h-[30rem]">
+        {content.loading}
+      </div>
+    );
+  }
 
   if (!card) {
     return (
