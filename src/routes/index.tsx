@@ -510,18 +510,18 @@ function FlashcardDemo({
 type DemoTone = "destructive" | "warning" | "success";
 
 function DemoRatingButton({ label, tone, onClick }: { label: string; tone: DemoTone; onClick: () => void }) {
-  const classes = tone === "hard"
+  const classes = tone === "destructive"
     ? "border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/20"
-    : tone === "medium"
+    : tone === "warning"
       ? "border-warning/30 bg-warning/15 text-warning hover:bg-warning/25"
       : "border-success/30 bg-success/10 text-success hover:bg-success/20";
   return <Button type="button" variant="outline" onClick={onClick} className={`h-13 rounded-2xl ${classes}`}>{label}</Button>;
 }
 
 function DemoScore({ label, count, tone }: { label: string; count: number; tone: DemoTone }) {
-  const classes = tone === "hard"
+  const classes = tone === "destructive"
     ? "bg-destructive/10 text-destructive"
-    : tone === "medium"
+    : tone === "warning"
       ? "bg-warning/15 text-warning"
       : "bg-success/10 text-success";
   return <div className={`rounded-2xl px-3 py-4 ${classes}`}><strong className="block text-2xl">{count}</strong><span className="text-xs font-bold">{label}</span></div>;
