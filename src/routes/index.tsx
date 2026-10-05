@@ -256,6 +256,7 @@ const whyContent = {
       easy: "Easy",
       completed: "Demo complete",
       completedDescription: "You rated all five cards.",
+      practiceMore: "Practice More",
       noCards: "No flashcards are available yet.",
       loading: "Loading flashcards…",
     },
@@ -306,6 +307,7 @@ const whyContent = {
       easy: "आसान",
       completed: "डेमो पूरा हुआ",
       completedDescription: "आपने सभी पाँच कार्डों को रेट किया।",
+      practiceMore: "और अभ्यास करें",
       noCards: "अभी कोई फ्लैशकार्ड उपलब्ध नहीं है।",
       loading: "फ्लैशकार्ड लोड हो रहे हैं…",
     },
@@ -387,6 +389,7 @@ function FlashcardDemo({
   cards: Flashcard[];
   content: (typeof whyContent)[LandingLanguage]["mock"];
 }) {
+  const navigate = useNavigate();
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [ratings, setRatings] = useState<DemoRating[]>([]);
@@ -438,6 +441,14 @@ function FlashcardDemo({
           <DemoScore label={content.medium} count={counts.medium} tone="warning" />
           <DemoScore label={content.easy} count={counts.easy} tone="success" />
         </div>
+        <Button
+          type="button"
+          onClick={() => navigate({ to: "/flashcards" })}
+          className="mt-6 h-14 w-full rounded-2xl text-base"
+        >
+          {content.practiceMore}
+          <ChevronRight className="h-4 w-4" aria-hidden="true" />
+        </Button>
       </div>
     );
   }
