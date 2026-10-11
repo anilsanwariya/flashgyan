@@ -25,6 +25,10 @@ export type HomeSettings = {
   lock_cta: boolean;
   hide_app_store: boolean;
   hide_google_play: boolean;
+  hide_flashcards: boolean;
+  hide_mcq_practice: boolean;
+  hide_mcq: boolean;
+  hide_saathi: boolean;
 };
 
 export type HomeData = {
@@ -75,6 +79,10 @@ const DEFAULT_SETTINGS: HomeSettings = {
   lock_cta: false,
   hide_app_store: false,
   hide_google_play: false,
+  hide_flashcards: false,
+  hide_mcq_practice: false,
+  hide_mcq: false,
+  hide_saathi: false,
 };
 
 export const getHomeData = createServerFn({ method: "GET" }).handler(
@@ -88,7 +96,7 @@ export const getHomeData = createServerFn({ method: "GET" }).handler(
         .order("created_at", { ascending: true }),
       supabase
         .from("home_settings")
-        .select("cta_label, cta_subtitle, cta_url, cta_caption, lock_flashcards, lock_mcq, lock_mcq_practice, lock_saathi, lock_cta, hide_app_store, hide_google_play")
+        .select("cta_label, cta_subtitle, cta_url, cta_caption, lock_flashcards, lock_mcq, lock_mcq_practice, lock_saathi, lock_cta, hide_app_store, hide_google_play, hide_flashcards, hide_mcq_practice, hide_mcq, hide_saathi")
         .eq("id", 1)
         .maybeSingle(),
     ]);
@@ -192,6 +200,10 @@ export const updateHomeSettings = createServerFn({ method: "POST" })
         lock_cta: z.boolean(),
         hide_app_store: z.boolean(),
         hide_google_play: z.boolean(),
+        hide_flashcards: z.boolean().optional(),
+        hide_mcq_practice: z.boolean().optional(),
+        hide_mcq: z.boolean().optional(),
+        hide_saathi: z.boolean().optional(),
       })
       .parse(d),
   )
@@ -211,6 +223,10 @@ export const updateHomeSettings = createServerFn({ method: "POST" })
         lock_cta: data.lock_cta,
         hide_app_store: data.hide_app_store,
         hide_google_play: data.hide_google_play,
+        hide_flashcards: data.hide_flashcards,
+        hide_mcq_practice: data.hide_mcq_practice,
+        hide_mcq: data.hide_mcq,
+        hide_saathi: data.hide_saathi,
         updated_at: new Date().toISOString(),
       })
       .eq("id", 1);

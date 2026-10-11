@@ -235,6 +235,30 @@ export function HomePanel() {
       {/* Feature locks */}
       {settings && (
         <section className="rounded-2xl border border-border bg-card p-4 space-y-3">
+          <h2 className="font-semibold">Homepage Feature Visibility</h2>
+          {([
+            ["Flashcards", "hide_flashcards"],
+            ["MCQ Practice", "hide_mcq_practice"],
+            ["MCQ Tests", "hide_mcq"],
+            ["SAATHI", "hide_saathi"],
+          ] as const).map(([label, key]) => (
+            <div key={key} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-background p-3">
+              <Label htmlFor={key} className="text-sm font-medium">{label}</Label>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">{settings[key] ? "Hidden" : "Shown"}</span>
+                <Switch
+                  id={key}
+                  aria-label={`Hide ${label} from homepage`}
+                  checked={settings[key]}
+                  onCheckedChange={(hidden) => setSettings({ ...settings, [key]: hidden })}
+                />
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
+      {settings && (
+        <section className="rounded-2xl border border-border bg-card p-4 space-y-3">
           <div>
             <h2 className="font-semibold">Feature Locks</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
