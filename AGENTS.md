@@ -10,3 +10,4 @@
 <!-- LOVABLE:END -->
 
 - Keep the homepage flashcard demo read-only and source its randomized cards through a public server function, because demo ratings must never alter study history.
+- Store homepage feature visibility independently from feature locks in home_settings; hiding changes homepage discovery only and preserves existing access behavior.

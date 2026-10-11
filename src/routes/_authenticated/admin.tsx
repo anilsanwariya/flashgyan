@@ -84,7 +84,14 @@ import { exportFlashcardsToXlsx, exportMcqToXlsx } from "@/lib/deck-export";
 
 export const Route = createFileRoute("/_authenticated/admin")({
   ssr: false,
-  head: () => ({ meta: [{ title: "Admin — Flashgyan web" }] }),
+  head: () => ({ meta: [
+    { title: "Admin — FlashGyan" },
+    { name: "description", content: "Manage FlashGyan learning content and homepage settings." },
+    { property: "og:title", content: "Admin — FlashGyan" },
+    { property: "og:description", content: "Manage FlashGyan learning content and homepage settings." },
+    { property: "og:type", content: "website" },
+    { name: "twitter:card", content: "summary" },
+  ] }),
   component: Admin,
 });
 

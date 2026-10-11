@@ -678,40 +678,41 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
 
 function FeaturePicker({ settings }: { settings: HomeData["settings"] }) {
   const navigate = useNavigate();
+  if (settings.hide_flashcards && settings.hide_mcq_practice && settings.hide_mcq && settings.hide_saathi) return null;
   return (
     <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      <FeatureCard
+      {!settings.hide_flashcards && <FeatureCard
         title="Flashcards"
         subtitle="Flip cards and rate recall."
         icon={<Layers className="h-6 w-6 text-pink-600" />}
         gradient="bg-gradient-to-br from-pink-100 to-pink-50 border-pink-200"
         locked={settings.lock_flashcards}
         onClick={() => navigate({ to: "/flashcards" })}
-      />
-      <FeatureCard
+      />}
+      {!settings.hide_mcq_practice && <FeatureCard
         title="MCQ Practice"
         subtitle="Q&A with instant feedback."
         icon={<Target className="h-6 w-6 text-emerald-600" />}
         gradient="bg-gradient-to-br from-emerald-100 to-emerald-50 border-emerald-200"
         locked={settings.lock_mcq_practice}
         onClick={() => navigate({ to: "/mcq-practice" })}
-      />
-      <FeatureCard
+      />}
+      {!settings.hide_mcq && <FeatureCard
         title="MCQ Tests"
         subtitle="Timed multiple choice tests."
         icon={<ListChecks className="h-6 w-6 text-violet-600" />}
         gradient="bg-gradient-to-br from-violet-100 to-violet-50 border-violet-200"
         locked={settings.lock_mcq}
         onClick={() => navigate({ to: "/mcq-tests" })}
-      />
-      <FeatureCard
+      />}
+      {!settings.hide_saathi && <FeatureCard
         title="SAATHI"
         subtitle="Ask the AI study assistant."
         icon={<Sparkles className="h-6 w-6 text-amber-600" />}
         gradient="bg-gradient-to-br from-amber-100 to-amber-50 border-amber-200"
         locked={settings.lock_saathi}
         onClick={() => navigate({ to: "/saathi" })}
-      />
+      />}
     </section>
   );
 }
