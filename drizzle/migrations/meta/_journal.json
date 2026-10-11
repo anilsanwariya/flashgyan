@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1791748194942,
+      "tag": "0000_homepage_feature_visibility",
+      "breakpoints": true
+    }
+  ]
+}

@@ -319,7 +319,11 @@ export type Database = {
           cta_subtitle: string
           cta_url: string
           hide_app_store: boolean
+          hide_flashcards: boolean
           hide_google_play: boolean
+          hide_mcq: boolean
+          hide_mcq_practice: boolean
+          hide_saathi: boolean
           id: number
           lock_cta: boolean
           lock_flashcards: boolean
@@ -334,7 +338,11 @@ export type Database = {
           cta_subtitle?: string
           cta_url?: string
           hide_app_store?: boolean
+          hide_flashcards?: boolean
           hide_google_play?: boolean
+          hide_mcq?: boolean
+          hide_mcq_practice?: boolean
+          hide_saathi?: boolean
           id?: number
           lock_cta?: boolean
           lock_flashcards?: boolean
@@ -349,7 +357,11 @@ export type Database = {
           cta_subtitle?: string
           cta_url?: string
           hide_app_store?: boolean
+          hide_flashcards?: boolean
           hide_google_play?: boolean
+          hide_mcq?: boolean
+          hide_mcq_practice?: boolean
+          hide_saathi?: boolean
           id?: number
           lock_cta?: boolean
           lock_flashcards?: boolean
