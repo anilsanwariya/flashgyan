@@ -23,6 +23,7 @@ import tgIcon from "@/assets/tg-icon.svg";
 import { useDisplayName } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { AppDownloadPopup } from "@/components/app-download-popup";
 <script src="https://telegram.org/js/telegram-web-app.js"></script>;
 
 const homeQO = queryOptions({ queryKey: ["homeData"], queryFn: () => getHomeData() });
@@ -256,7 +257,11 @@ const whyContent = {
       easy: "Easy",
       completed: "Demo complete",
       completedDescription: "You rated all five cards.",
-      practiceMore: "Practice More",
+      practiceMore: "Study 5 More Cards",
+      downloadTitle: "Loved Flashgyan?",
+      downloadDescription: "Download our official app to study more efficiently, get offline access, and ace your exams!",
+      downloadLabel: "Download Official App",
+      loadError: "Couldn't load more cards. Please try again.",
       noCards: "No flashcards are available yet.",
       loading: "Loading flashcards…",
     },
@@ -307,7 +312,11 @@ const whyContent = {
       easy: "आसान",
       completed: "डेमो पूरा हुआ",
       completedDescription: "आपने सभी पाँच कार्डों को रेट किया।",
-      practiceMore: "और अभ्यास करें",
+      practiceMore: "5 और कार्ड पढ़ें",
+      downloadTitle: "Flashgyan पसंद आया?",
+      downloadDescription: "बेहतर पढ़ाई, ऑफलाइन एक्सेस और परीक्षा की तैयारी के लिए हमारा आधिकारिक ऐप डाउनलोड करें!",
+      downloadLabel: "आधिकारिक ऐप डाउनलोड करें",
+      loadError: "और कार्ड लोड नहीं हो सके। कृपया फिर से कोशिश करें।",
       noCards: "अभी कोई फ्लैशकार्ड उपलब्ध नहीं है।",
       loading: "फ्लैशकार्ड लोड हो रहे हैं…",
     },
@@ -383,13 +392,17 @@ function WhyFlashGyan({ cards }: { cards: Flashcard[] }) {
 type DemoRating = "hard" | "medium" | "easy";
 
 function FlashcardDemo({
-  cards,
+  cards: initialCards,
   content,
 }: {
   cards: Flashcard[];
   content: (typeof whyContent)[LandingLanguage]["mock"];
 }) {
-  const navigate = useNavigate();
+  const [cards, setCards] = useState(initialCards);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const ratingPending = useRef(false);
+  const loadingPending = useRef(false);
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [ratings, setRatings] = useState<DemoRating[]>([]);
@@ -400,13 +413,42 @@ function FlashcardDemo({
   useEffect(() => setMounted(true), []);
 
   const rate = (rating: DemoRating) => {
+    if (ratingPending.current || completed) return;
+    ratingPending.current = true;
     const nextRatings = [...ratings, rating];
     setRatings(nextRatings);
     if (index < cards.length - 1) {
       setTimeout(() => {
         setIndex((current) => current + 1);
         setFlipped(false);
+        ratingPending.current = false;
       }, 300);
+    } else {
+      setDownloadOpen(true);
+    }
+  };
+
+  const studyMore = async () => {
+    if (loadingPending.current) return;
+    loadingPending.current = true;
+    setLoadingMore(true);
+    try {
+      const nextCards = await getRandomFlashcards();
+      if (nextCards.length === 0) {
+        toast.info(content.noCards);
+        return;
+      }
+      setCards(nextCards);
+      setIndex(0);
+      setFlipped(false);
+      setRatings([]);
+      ratingPending.current = false;
+      setDownloadOpen(false);
+    } catch {
+      toast.error(content.loadError);
+    } finally {
+      loadingPending.current = false;
+      setLoadingMore(false);
     }
   };
 
@@ -433,6 +475,7 @@ function FlashcardDemo({
       easy: ratings.filter((rating) => rating === "easy").length,
     };
     return (
+      <>
       <div className="mx-auto mt-7 max-w-2xl rounded-3xl border border-border/70 bg-card/65 p-6 text-center shadow-soft backdrop-blur-xl md:p-8">
         <h3 className="text-2xl font-bold text-foreground">{content.completed}</h3>
         <p className="mt-2 text-sm font-medium text-muted-foreground">{content.completedDescription}</p>
@@ -443,13 +486,25 @@ function FlashcardDemo({
         </div>
         <Button
           type="button"
-          onClick={() => navigate({ to: "/flashcards" })}
+          onClick={() => void studyMore()}
+          disabled={loadingMore}
           className="mt-6 h-14 w-full rounded-2xl text-base"
         >
-          {content.practiceMore}
+          {loadingMore ? content.loading : content.practiceMore}
           <ChevronRight className="h-4 w-4" aria-hidden="true" />
         </Button>
       </div>
+      <AppDownloadPopup
+        isOpen={downloadOpen}
+        onClose={() => setDownloadOpen(false)}
+        onContinue={() => void studyMore()}
+        title={content.downloadTitle}
+        description={content.downloadDescription}
+        downloadLabel={content.downloadLabel}
+        continueLabel={loadingMore ? content.loading : content.practiceMore}
+        continueDisabled={loadingMore}
+      />
+      </>
     );
   }
 
