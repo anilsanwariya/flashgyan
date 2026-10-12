@@ -31,13 +31,14 @@ function TelegramExpander() {
 
       const forceRepaint = () => {
         // Force iOS WKWebView to re-composite the page after resume.
-        // Toggling a transform on the root element is more reliable than scroll jolts.
+        // Opacity preserves viewport positioning for portaled fixed dialogs.
         const root = document.documentElement;
-        root.style.transform = "translateZ(0)";
+        const previousOpacity = root.style.opacity;
+        root.style.opacity = "0.999";
         // Read a layout property to flush styles
         void root.offsetHeight;
         requestAnimationFrame(() => {
-          root.style.transform = "";
+          root.style.opacity = previousOpacity;
           try {
             tg?.expand();
           } catch {
