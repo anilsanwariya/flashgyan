@@ -14,6 +14,11 @@ interface AppDownloadPopupProps {
   onClose: () => void;
   onContinue: () => void;
   appLink?: string;
+  title?: string;
+  description?: string;
+  downloadLabel?: string;
+  continueLabel?: string;
+  continueDisabled?: boolean;
 }
 
 export function AppDownloadPopup({
@@ -21,6 +26,11 @@ export function AppDownloadPopup({
   onClose,
   onContinue,
   appLink = "https://play.google.com/store/apps/details?id=com.flashgyan",
+  title = "Loved Flashgyan?",
+  description = "Download our official app to study more efficiently, get offline access, and ace your exams!",
+  downloadLabel = "Download Official App",
+  continueLabel,
+  continueDisabled = false,
 }: AppDownloadPopupProps) {
   return (
     <AlertDialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -28,10 +38,10 @@ export function AppDownloadPopup({
       <AlertDialogContent className="rounded-[32px] backdrop-blur-3xl bg-white/80 dark:bg-black/80 border border-white/20 shadow-2xl p-5 sm:max-w-sm">
         <AlertDialogHeader>
           <AlertDialogTitle className="text-xl font-bold text-foreground text-center tracking-tight">
-            Loved Flashgyan?
+            {title}
           </AlertDialogTitle>
           <AlertDialogDescription className="text-[14px] text-center text-muted-foreground mt-1.5 leading-snug">
-            Download our official app to study more efficiently, get offline access, and ace your exams!
+            {description}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -43,17 +53,25 @@ export function AppDownloadPopup({
               window.open(appLink, "_blank");
             }}
           >
-            Download Official App
+            {downloadLabel}
           </Button>
         </div>
 
         <AlertDialogFooter className="flex-col gap-2 sm:space-x-0">
-          <AlertDialogCancel
+          {continueLabel ? (
+            <Button
+              onClick={onContinue}
+              disabled={continueDisabled}
+              className="w-full h-[48px] m-0 rounded-[20px] font-semibold bg-success/15 text-success border border-success/20 hover:bg-success/25 active:scale-[0.98] transition-all"
+            >
+              {continueLabel}
+            </Button>
+          ) : <AlertDialogCancel
             onClick={onContinue}
             className="w-full h-[48px] m-0 rounded-[20px] font-semibold bg-success/15 text-success border border-success/20 hover:bg-success/25 active:scale-[0.98] transition-all"
           >
             Skip to Summary
-          </AlertDialogCancel>
+          </AlertDialogCancel>}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
