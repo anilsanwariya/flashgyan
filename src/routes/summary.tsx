@@ -1,10 +1,11 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { z } from "zod";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
-import { Trophy, Clock, Layers, Check, X, ChevronDown, ArrowLeft } from "lucide-react";
+import { Trophy, Clock, Layers, Check, X, ChevronDown, ArrowLeft, Share2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { loadSession, type SessionDetail, type Rating, type SessionCardResult } from "@/lib/session-store";
 import finalLogo from "@/assets/final-logo.png";
+import { shareScore } from "@/lib/app-promo";
 
 const summarySchema = z.object({
   deckId: fallback(z.string(), "").default(""),
@@ -70,6 +71,15 @@ function Summary() {
 
   const featureLink = deckId ? "/flashcards" : practiceId ? "/mcq-practice" : "/";
   const featureName = deckId ? "Flashcards" : practiceId ? "MCQ Practice" : "Home";
+  const subjectLabel = detail?.subject ? ` ${detail.subject}` : "";
+
+  const share = () =>
+    shareScore(
+      isPractice
+        ? `I got ${correct}/${total}${subjectLabel} MCQs right on FlashGyan! Can you beat me?`
+        : `I just revised ${total}${subjectLabel} flashcards on FlashGyan and nailed ${easy} of them!`,
+      isPractice ? "practice_summary" : "flashcard_summary",
+    );
 
   return (
     <div className="min-h-dvh bg-gradient-to-br from-primary/10 via-background to-secondary/10 relative selection:bg-primary/20">
@@ -244,7 +254,15 @@ function Summary() {
           </section>
         )}
 
-        <div className="mt-12 grid grid-cols-2 gap-4">
+        <button
+          type="button"
+          onClick={share}
+          className="mt-12 w-full h-14 rounded-[24px] inline-flex items-center justify-center gap-2 font-semibold text-[15px] text-success bg-success/10 border border-success/25 backdrop-blur-xl hover:bg-success/20 active:scale-[0.98] transition-all"
+        >
+          <Share2 className="h-5 w-5" /> Share my progress
+        </button>
+
+        <div className="mt-4 grid grid-cols-2 gap-4">
           <Link
             to="/"
             className="h-14 rounded-[24px] flex items-center justify-center font-semibold text-[15px] text-foreground/80 bg-white/50 dark:bg-black/40 border border-border/40 backdrop-blur-xl active:scale-[0.98] transition-all"

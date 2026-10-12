@@ -13,3 +13,4 @@
 - Store homepage feature visibility independently from feature locks in home_settings; hiding changes homepage discovery only and preserves existing access behavior.
 - Reuse AppDownloadPopup with optional copy and continuation props for the homepage demo; preserve existing feature defaults so their completion flows stay unchanged.
 - Keep Telegram repaint workarounds free of transforms on html/body; transformed portal ancestors break viewport positioning for fixed dialogs.
+- Route every Play Store link through src/lib/app-promo.ts (playStoreUrl/openPlayStore) so installs keep their referrer tags and open correctly inside Telegram; gate download popups with shouldShowAppPrompt so they appear at most once a day.

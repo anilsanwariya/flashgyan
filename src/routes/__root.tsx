@@ -8,6 +8,8 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/hooks/use-auth";
 import { isTelegramMiniApp, getTelegramWebApp } from "@/lib/telegram-env";
+import { analyticsHeadScripts } from "@/lib/analytics";
+import { detectInstalledApp } from "@/lib/app-promo";
 
 // Telegram Expander: Forces the mini-app to take up the full screen height
 function TelegramExpander() {
@@ -135,43 +137,39 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       {
         name: "description",
         content:
-          "Flashgyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go.",
+          "FlashGyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go.",
       },
       { property: "og:title", content: "Flashgyan: Smart Flashcards for Exam Success" },
       {
         property: "og:description",
         content:
-          "Flashgyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go.",
+          "FlashGyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go.",
       },
       { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
+      { property: "og:site_name", content: "FlashGyan" },
+      { name: "twitter:card", content: "summary_large_image" },
       { name: "theme-color", content: "#f7f5ed" },
       { name: "twitter:title", content: "Flashgyan: Smart Flashcards for Exam Success" },
       {
         name: "twitter:description",
         content:
-          "Flashgyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go.",
+          "FlashGyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go.",
       },
       {
         property: "og:image",
         content:
-          "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/d41aadb9-a809-4d28-a7cb-615634015c40",
+          "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/ab39d20b-0ba5-4e3e-a17e-c84d41522181",
       },
       {
         name: "twitter:image",
         content:
-          "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/d41aadb9-a809-4d28-a7cb-615634015c40",
+          "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/ab39d20b-0ba5-4e3e-a17e-c84d41522181",
       },
-      { name: "description", content: "FlashGyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go." },
-      { property: "og:description", content: "FlashGyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go." },
-      { name: "twitter:description", content: "FlashGyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go." },
-      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/ab39d20b-0ba5-4e3e-a17e-c84d41522181" },
-      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/ab39d20b-0ba5-4e3e-a17e-c84d41522181" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
       { rel: "icon", type: "image/png", sizes: "96x96", href: "/favicon-96x96.png" },
-      { rel: "manifest", href: "/manifest.json?v=2" },
+      { rel: "manifest", href: "/manifest.json?v=3" },
       { rel: "apple-touch-icon", href: "/icons/icon-192x192.png?v=2" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
@@ -183,6 +181,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     scripts: [
       // REMOVED async: true to ensure Telegram SDK loads synchronously before React checks for it
       { src: "https://telegram.org/js/telegram-web-app.js" },
+      ...analyticsHeadScripts(),
     ],
   }),
   shellComponent: RootShell,
@@ -208,6 +207,10 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const router = useRouter();
+
+  useEffect(() => {
+    void detectInstalledApp();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

@@ -2,8 +2,9 @@
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import type { McqAttempt } from "./mcq.$testId";
-import { ArrowLeft, CheckCircle2, XCircle, MinusCircle, Trophy, ChevronDown } from "lucide-react";
+import { ArrowLeft, CheckCircle2, XCircle, MinusCircle, Trophy, ChevronDown, Share2 } from "lucide-react";
 import { AppDownloadPopup } from "@/components/app-download-popup";
+import { shareScore, shouldShowAppPrompt } from "@/lib/app-promo";
 import finalLogo from "@/assets/final-logo.png";
 
 const STORAGE_KEY = (id: string) => `mcq-attempt:${id}`;
@@ -51,23 +52,20 @@ function Result() {
     router.navigate({ to: "/" });
   };
 
+  const handleFinish = () => {
+    if (shouldShowAppPrompt()) setShowDownloadPopup(true);
+    else handleGoHome();
+  };
+
   if (!attempt || !stats) {
     return (
       <div className="min-h-dvh grid place-items-center p-6 text-center bg-gradient-to-br from-primary/10 via-background to-secondary/10">
         <div>
           <p className="text-muted-foreground font-medium text-lg">No result found for this test.</p>
-          <button
-            onClick={() => setShowDownloadPopup(true)}
-            className="mt-4 inline-block font-bold text-primary hover:underline"
-          >
+          <Link to="/" className="mt-4 inline-block font-bold text-primary hover:underline">
             Back home
-          </button>
+          </Link>
         </div>
-        <AppDownloadPopup
-          isOpen={showDownloadPopup}
-          onClose={() => setShowDownloadPopup(false)}
-          onContinue={handleGoHome}
-        />
       </div>
     );
   }
@@ -273,9 +271,20 @@ function Result() {
           </ul>
         </section>
 
-        <div className="pt-6">
+        <div className="pt-6 space-y-3">
           <button
-            onClick={() => setShowDownloadPopup(true)}
+            onClick={() =>
+              shareScore(
+                `I scored ${stats.score.toFixed(2)}/${stats.total} in "${attempt.testName}" on FlashGyan! Can you beat me?`,
+                "mcq_result",
+              )
+            }
+            className="w-full h-14 rounded-[24px] inline-flex items-center justify-center gap-2 font-semibold text-[17px] text-success bg-success/10 border border-success/25 backdrop-blur-xl hover:bg-success/20 active:scale-[0.98] transition-all"
+          >
+            <Share2 className="h-5 w-5" /> Share my score
+          </button>
+          <button
+            onClick={handleFinish}
             className="w-full h-14 rounded-[24px] bg-primary/10 text-primary font-semibold text-[17px] border border-primary/20 backdrop-blur-xl hover:bg-primary/20 active:scale-[0.98] transition-all shadow-[0_4px_24px_rgba(var(--primary),0.1)]"
           >
             Finish & Return Home
@@ -287,6 +296,7 @@ function Result() {
         isOpen={showDownloadPopup}
         onClose={() => setShowDownloadPopup(false)}
         onContinue={handleGoHome}
+        placement="mcq_result"
       />
     </div>
   );
