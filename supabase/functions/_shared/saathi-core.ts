@@ -296,7 +296,7 @@ const FORMAT_RULES: Record<SaathiChannel, string> = {
   web: `FORMAT: Use Markdown. Start with a one-line direct answer, then use **bold** key terms and short bullet points. Use a Markdown table for comparisons, timelines or lists of facts.
 
 DIAGRAMS: Only when a step-by-step process is genuinely clearer as a picture, you may add one small \`\`\`mermaid block using "flowchart TD" with short, double-quoted node labels. Otherwise do not draw diagrams.`,
-  telegram: `FORMAT: Plain text for a Telegram chat. Start with a one-line direct answer, then use short "-" bullet points. No Markdown tables, headings, code blocks or diagrams.`,
+  telegram: `FORMAT: Well-formatted study notes for a Telegram chat. Start with a one-line direct answer in **bold**. Then give short "- " bullet points (or "1. " numbered steps for processes). Use **bold** for key terms, names, dates, articles and numbers, and *italic* for translations, book titles or side notes. Separate groups of points with a blank line. You may use one short heading line written in **bold** if it helps. No Markdown tables, # headings, code blocks or diagrams.`,
 };
 
 export function saathiSystemPrompt(channel: SaathiChannel): string {
