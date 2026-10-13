@@ -8,6 +8,27 @@
       "when": 1791748194942,
       "tag": "0000_homepage_feature_visibility",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791875211295,
+      "tag": "0001_restrict_home_settings_and_unused_image_reads",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791875301513,
+      "tag": "0002_scope_public_catalog_and_banners",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791875333757,
+      "tag": "0003_scope_questions_to_public_parent_catalog",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,6 @@
+ALTER POLICY "Flashcards are publicly readable" ON public.flashcards TO anon, authenticated USING (EXISTS (SELECT 1 FROM public.flashcard_decks d WHERE d.id = flashcards.deck_id AND d.is_public));
+ALTER POLICY "MCQ questions are publicly readable" ON public.mcq_questions TO anon, authenticated USING (EXISTS (SELECT 1 FROM public.mcq_tests t WHERE t.id = mcq_questions.test_id AND t.is_public));
+ALTER POLICY "Anyone can view practice questions" ON public.mcq_practice_questions TO anon, authenticated USING (EXISTS (SELECT 1 FROM public.mcq_practice_tests t WHERE t.id = mcq_practice_questions.test_id AND t.is_public));
+CREATE POLICY "Admins read all flashcards" ON public.flashcards FOR SELECT TO authenticated USING (private.has_role(auth.uid(), 'admin'::public.app_role));
+CREATE POLICY "Admins read all MCQ questions" ON public.mcq_questions FOR SELECT TO authenticated USING (private.has_role(auth.uid(), 'admin'::public.app_role));
+CREATE POLICY "Admins read all practice questions" ON public.mcq_practice_questions FOR SELECT TO authenticated USING (private.has_role(auth.uid(), 'admin'::public.app_role));

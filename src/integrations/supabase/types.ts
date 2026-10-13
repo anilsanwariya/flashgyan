@@ -210,6 +210,7 @@ export type Database = {
           created_at: string
           description: string
           id: string
+          is_public: boolean
           name: string
           order_index: number
           subject: string
@@ -220,6 +221,7 @@ export type Database = {
           created_at?: string
           description?: string
           id?: string
+          is_public?: boolean
           name: string
           order_index?: number
           subject: string
@@ -230,6 +232,7 @@ export type Database = {
           created_at?: string
           description?: string
           id?: string
+          is_public?: boolean
           name?: string
           order_index?: number
           subject?: string
@@ -295,18 +298,21 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          is_public: boolean
           order_index: number
           storage_path: string
         }
         Insert: {
           created_at?: string
           id?: string
+          is_public?: boolean
           order_index?: number
           storage_path: string
         }
         Update: {
           created_at?: string
           id?: string
+          is_public?: boolean
           order_index?: number
           storage_path?: string
         }
@@ -436,6 +442,7 @@ export type Database = {
           created_at: string
           description: string
           id: string
+          is_public: boolean
           name: string
           order_index: number
           subject: string
@@ -446,6 +453,7 @@ export type Database = {
           created_at?: string
           description?: string
           id?: string
+          is_public?: boolean
           name: string
           order_index?: number
           subject?: string
@@ -456,6 +464,7 @@ export type Database = {
           created_at?: string
           description?: string
           id?: string
+          is_public?: boolean
           name?: string
           order_index?: number
           subject?: string
@@ -529,6 +538,7 @@ export type Database = {
           description: string
           duration_seconds: number
           id: string
+          is_public: boolean
           name: string
           order_index: number
           updated_at: string
@@ -538,6 +548,7 @@ export type Database = {
           description?: string
           duration_seconds?: number
           id?: string
+          is_public?: boolean
           name: string
           order_index?: number
           updated_at?: string
@@ -547,6 +558,7 @@ export type Database = {
           description?: string
           duration_seconds?: number
           id?: string
+          is_public?: boolean
           name?: string
           order_index?: number
           updated_at?: string
@@ -617,6 +629,7 @@ export type Database = {
         Row: {
           chunk_index: number | null
           content: string
+          content_hash: string | null
           created_at: string
           embedding: string | null
           fts_vector: unknown
@@ -624,13 +637,16 @@ export type Database = {
           medium: string
           parent_id: string | null
           source_file: string | null
+          source_markdown: string | null
           subject: string
           title: string
+          topic: string | null
           updated_at: string
         }
         Insert: {
           chunk_index?: number | null
           content: string
+          content_hash?: string | null
           created_at?: string
           embedding?: string | null
           fts_vector?: unknown
@@ -638,13 +654,16 @@ export type Database = {
           medium?: string
           parent_id?: string | null
           source_file?: string | null
+          source_markdown?: string | null
           subject: string
           title: string
+          topic?: string | null
           updated_at?: string
         }
         Update: {
           chunk_index?: number | null
           content?: string
+          content_hash?: string | null
           created_at?: string
           embedding?: string | null
           fts_vector?: unknown
@@ -652,8 +671,10 @@ export type Database = {
           medium?: string
           parent_id?: string | null
           source_file?: string | null
+          source_markdown?: string | null
           subject?: string
           title?: string
+          topic?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -724,6 +745,26 @@ export type Database = {
         Args: { gap_question: string }
         Returns: undefined
       }
+      match_saathi_chunks: {
+        Args: {
+          match_count?: number
+          query_embedding: string
+          query_text: string
+          subject_filters?: string[]
+        }
+        Returns: {
+          content: string
+          id: string
+          keyword_score: number
+          medium: string
+          similarity: number
+          source_file: string
+          subject: string
+          title: string
+          topic: string
+          vector_score: number
+        }[]
+      }
       match_saathi_hybrid: {
         Args: {
           match_count?: number
@@ -752,6 +793,34 @@ export type Database = {
           similarity: number
           subject: string
           title: string
+        }[]
+      }
+      saathi_find_duplicate_chunks: {
+        Args: { contents: string[]; exclude_parent?: string }
+        Returns: {
+          matches: number
+          parent_id: string
+          title: string
+        }[]
+      }
+      saathi_health: {
+        Args: never
+        Returns: {
+          avg_chars: number
+          chunk_count: number
+          created_at: string
+          duplicate_chunks: number
+          has_source: boolean
+          id: string
+          is_legacy: boolean
+          max_chars: number
+          medium: string
+          missing_embeddings: number
+          oversized_chunks: number
+          subject: string
+          tiny_chunks: number
+          title: string
+          topic: string
         }[]
       }
     }
