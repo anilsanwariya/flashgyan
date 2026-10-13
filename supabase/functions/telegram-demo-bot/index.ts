@@ -373,6 +373,30 @@ function tgEsc(s: string) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// Converts the model's light Markdown into Telegram-safe HTML.
+function mdToTelegramHtml(md: string): string {
+  const lines = tgEsc(md.replace(/\r/g, "")).split("\n").map((line) => {
+    let l = line.replace(/^\s*#{1,6}\s+(.+)$/, "**$1**");
+    l = l.replace(/^(\s*)[-*•]\s+/, "$1• ");
+    return l;
+  });
+  let s = lines.join("\n").replace(/\n{3,}/g, "\n\n");
+  s = s.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  s = s.replace(/\*\*([^*\n]+?)\*\*/g, "<b>$1</b>");
+  s = s.replace(/__([^_\n]+?)__/g, "<b>$1</b>");
+  s = s.replace(/(^|[^*\w])\*([^*\n]+?)\*(?!\w)/g, "$1<i>$2</i>");
+  s = s.replace(/(^|[^_\w])_([^_\n]+?)_(?!\w)/g, "$1<i>$2</i>");
+  return s.replace(/\*\*/g, "").trim();
+}
+
+// Trims to Telegram's limit on a line boundary so tags are never cut mid-way.
+function clipHtml(html: string, max: number): string {
+  if (html.length <= max) return html;
+  const cut = html.slice(0, max);
+  const nl = cut.lastIndexOf("\n");
+  return (nl > max * 0.5 ? cut.slice(0, nl) : cut.replace(/<[^>]*$/, "")) + "\n…";
+}
+
 async function handleSaathiAsk(chat_id: number, user_id: number, question: string) {
   if (!question) {
     await tg("sendMessage", { chat_id, text: "Usage: /ask <your question>" });
@@ -440,8 +464,12 @@ async function handleSaathiAsk(chat_id: number, user_id: number, question: strin
   const srcLine = sourceTitles.length
     ? `\n\n📚 <i>Sources: ${sourceTitles.map(tgEsc).join(", ")}</i>`
     : "";
-  const body = tgEsc(answer).slice(0, 3800) + srcLine;
-  await tg("sendMessage", { chat_id, text: body, parse_mode: "HTML" });
+  const body = clipHtml(mdToTelegramHtml(answer), 3800) + srcLine;
+  const res = await tg("sendMessage", { chat_id, text: body, parse_mode: "HTML" });
+  if (!res.ok) {
+    // Fallback if Telegram rejects the markup: send safely escaped plain text.
+    await tg("sendMessage", { chat_id, text: tgEsc(answer).slice(0, 3800) + srcLine, parse_mode: "HTML" });
+  }
 }
 
 // ---------- Webhook ----------
