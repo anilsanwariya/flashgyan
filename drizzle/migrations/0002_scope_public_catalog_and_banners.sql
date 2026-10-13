@@ -1,0 +1,11 @@
+ALTER TABLE public.flashcard_decks ADD COLUMN is_public boolean NOT NULL DEFAULT true;
+ALTER TABLE public.mcq_tests ADD COLUMN is_public boolean NOT NULL DEFAULT true;
+ALTER TABLE public.mcq_practice_tests ADD COLUMN is_public boolean NOT NULL DEFAULT true;
+ALTER TABLE public.home_banners ADD COLUMN is_public boolean NOT NULL DEFAULT true;
+ALTER POLICY "Flashcard decks are publicly readable" ON public.flashcard_decks TO anon, authenticated USING (is_public);
+ALTER POLICY "MCQ tests are publicly readable" ON public.mcq_tests TO anon, authenticated USING (is_public);
+ALTER POLICY "Anyone can view practice tests" ON public.mcq_practice_tests TO anon, authenticated USING (is_public);
+ALTER POLICY "home_banners public read" ON public.home_banners TO anon, authenticated USING (is_public);
+CREATE POLICY "Admins read all flashcard decks" ON public.flashcard_decks FOR SELECT TO authenticated USING (private.has_role(auth.uid(), 'admin'::public.app_role));
+CREATE POLICY "Admins read all MCQ tests" ON public.mcq_tests FOR SELECT TO authenticated USING (private.has_role(auth.uid(), 'admin'::public.app_role));
+CREATE POLICY "Admins read all practice tests" ON public.mcq_practice_tests FOR SELECT TO authenticated USING (private.has_role(auth.uid(), 'admin'::public.app_role));

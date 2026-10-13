@@ -210,6 +210,7 @@ export type Database = {
           created_at: string
           description: string
           id: string
+          is_public: boolean
           name: string
           order_index: number
           subject: string
@@ -220,6 +221,7 @@ export type Database = {
           created_at?: string
           description?: string
           id?: string
+          is_public?: boolean
           name: string
           order_index?: number
           subject: string
@@ -230,6 +232,7 @@ export type Database = {
           created_at?: string
           description?: string
           id?: string
+          is_public?: boolean
           name?: string
           order_index?: number
           subject?: string
@@ -295,18 +298,21 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          is_public: boolean
           order_index: number
           storage_path: string
         }
         Insert: {
           created_at?: string
           id?: string
+          is_public?: boolean
           order_index?: number
           storage_path: string
         }
         Update: {
           created_at?: string
           id?: string
+          is_public?: boolean
           order_index?: number
           storage_path?: string
         }
@@ -436,6 +442,7 @@ export type Database = {
           created_at: string
           description: string
           id: string
+          is_public: boolean
           name: string
           order_index: number
           subject: string
@@ -446,6 +453,7 @@ export type Database = {
           created_at?: string
           description?: string
           id?: string
+          is_public?: boolean
           name: string
           order_index?: number
           subject?: string
@@ -456,6 +464,7 @@ export type Database = {
           created_at?: string
           description?: string
           id?: string
+          is_public?: boolean
           name?: string
           order_index?: number
           subject?: string
@@ -529,6 +538,7 @@ export type Database = {
           description: string
           duration_seconds: number
           id: string
+          is_public: boolean
           name: string
           order_index: number
           updated_at: string
@@ -538,6 +548,7 @@ export type Database = {
           description?: string
           duration_seconds?: number
           id?: string
+          is_public?: boolean
           name: string
           order_index?: number
           updated_at?: string
@@ -547,6 +558,7 @@ export type Database = {
           description?: string
           duration_seconds?: number
           id?: string
+          is_public?: boolean
           name?: string
           order_index?: number
           updated_at?: string
