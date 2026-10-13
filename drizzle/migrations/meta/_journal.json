@@ -22,6 +22,13 @@
       "when": 1791875301513,
       "tag": "0002_scope_public_catalog_and_banners",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791875333757,
+      "tag": "0003_scope_questions_to_public_parent_catalog",
+      "breakpoints": true
     }
   ]
 }
