@@ -465,8 +465,8 @@ async function handleSaathiAsk(chat_id: number, user_id: number, question: strin
     ? `\n\n📚 <i>Sources: ${sourceTitles.map(tgEsc).join(", ")}</i>`
     : "";
   const body = clipHtml(mdToTelegramHtml(answer), 3800) + srcLine;
-  const res: any = await tg("sendMessage", { chat_id, text: body, parse_mode: "HTML" });
-  if (res && res.ok === false) {
+  const res = await tg("sendMessage", { chat_id, text: body, parse_mode: "HTML" });
+  if (!res.ok) {
     // Fallback if Telegram rejects the markup: send safely escaped plain text.
     await tg("sendMessage", { chat_id, text: tgEsc(answer).slice(0, 3800) + srcLine, parse_mode: "HTML" });
   }
