@@ -24,6 +24,17 @@ import { useDisplayName } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AppDownloadPopup } from "@/components/app-download-popup";
+import { AndroidInstallBar } from "@/components/android-install-bar";
+import playStoreQr from "@/assets/play-store-qr.svg";
+import {
+  PLAY_STORE_URL,
+  SITE_URL,
+  openPlayStore,
+  playStoreUrl,
+  shouldShowAppPrompt,
+  useAndroidInstallBar,
+  usePlatform,
+} from "@/lib/app-promo";
 <script src="https://telegram.org/js/telegram-web-app.js"></script>;
 
 const homeQO = queryOptions({ queryKey: ["homeData"], queryFn: () => getHomeData() });
@@ -36,21 +47,38 @@ const demoCardsQO = queryOptions({
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Flashgyan: Smart Flashcards for Exam Success" },
+      { title: "FlashGyan: Flashcards & MCQs for RAS, REET, PSI & Patwari" },
       {
         name: "description",
         content:
-          "FlashGyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go.",
+          "FlashGyan uses active recall & spaced repetition to boost memory! Practise free flashcards and MCQs for RAS, REET, PSI and Patwari in English and Hindi, or get the Android app.",
       },
-      { property: "og:title", content: "Flashgyan: Smart Flashcards for Exam Success" },
+      { property: "og:title", content: "FlashGyan: Flashcards & MCQs for RAS, REET, PSI & Patwari" },
+      { name: "twitter:title", content: "FlashGyan: Flashcards & MCQs for RAS, REET, PSI & Patwari" },
       {
         property: "og:description",
         content:
           "Learn faster with active recall, spaced repetition, exam-focused flashcards, and MCQ practice in English and Hindi.",
       },
       { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
+      { name: "twitter:card", content: "summary_large_image" },
+      {
+        "script:ld+json": {
+          "@context": "https://schema.org",
+          "@type": "MobileApplication",
+          name: "FlashGyan",
+          operatingSystem: "ANDROID",
+          applicationCategory: "EducationalApplication",
+          description:
+            "Flashcards and MCQ practice with active recall and spaced repetition for RAS, REET, PSI and Patwari exams.",
+          installUrl: PLAY_STORE_URL,
+          url: SITE_URL,
+          offers: { "@type": "Offer", price: "0", priceCurrency: "INR" },
+          publisher: { "@type": "Organization", name: "FlashGyan EdTech LLP" },
+        },
+      },
     ],
+    links: [{ rel: "canonical", href: `${SITE_URL}/` }],
   }),
   loader: ({ context }) =>
     Promise.all([
@@ -72,6 +100,10 @@ function Home() {
   const { data: demoCards } = useSuspenseQuery(demoCardsQO);
   const displayName = useDisplayName();
   const [greeting, setGreeting] = useState(() => greetingFor(new Date()));
+  const platform = usePlatform();
+  const installBar = useAndroidInstallBar();
+  const showAppStore = !home.settings.hide_app_store && platform !== "android";
+  const showGooglePlay = !home.settings.hide_google_play && platform !== "ios";
 
   useEffect(() => {
     const t = setInterval(() => setGreeting(greetingFor(new Date())), 60_000);
@@ -99,12 +131,15 @@ function Home() {
         <div className="space-y-7 lg:grid lg:grid-cols-[2fr_1fr] lg:gap-12 lg:items-center lg:space-y-0">
           {/* Left column (desktop): greeting + description */}
           <div className="text-center space-y-1.5 animate-in fade-in slide-in-from-bottom-3 duration-700 lg:text-left lg:col-start-1 lg:row-start-1">
-            <h1 className="text-2xl font-bold tracking-tight text-[#910000] drop-shadow-sm">
+            <p className="text-[15px] font-bold tracking-tight text-[#910000]">
               {greeting}
               {displayName ? `, ${displayName}` : ""}!
+            </p>
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground drop-shadow-sm">
+              Smart flashcards &amp; MCQs for RAS, REET, PSI &amp; Patwari
             </h1>
             <p className="text-foreground/80 font-medium text-[15px] leading-relaxed max-w-md mx-auto lg:mx-0">
-              Welcome to Flashgyan. Let's make your exam preparation smarter and faster today.
+              Practise free right here, or get the FlashGyan Android app to study faster with offline access.
             </p>
           </div>
 
@@ -114,35 +149,50 @@ function Home() {
           </div>
 
           {/* Left column (desktop): app store badges */}
-          <div className="flex justify-center gap-4 items-center w-full max-w-sm mx-auto lg:mx-0 lg:justify-start animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both lg:col-start-1 lg:row-start-2">
-            {!home.settings.hide_app_store && (
-              <button
-                onClick={() => toast.info("iOS app is coming soon!")}
-                className="transition-all hover:scale-105 hover:-translate-y-1 active:scale-95 block drop-shadow-md"
-                aria-label="Download on the App Store (Coming Soon)"
-              >
-                <img
-                  src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images/Download_on_the_App_Store_Badge_US-UK_RGB_blk_092917.svg"
-                  alt="Download on the App Store"
-                  className="h-[48px] w-auto object-contain"
-                />
-              </button>
-            )}
+          <div className="flex flex-col items-center gap-4 w-full max-w-sm mx-auto lg:mx-0 lg:items-start animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both lg:col-start-1 lg:row-start-2">
+            <div className="flex justify-center gap-4 items-center w-full lg:justify-start">
+              {showAppStore && (
+                <button
+                  onClick={() => toast.info("iOS app is coming soon!")}
+                  className="transition-all hover:scale-105 hover:-translate-y-1 active:scale-95 block drop-shadow-md"
+                  aria-label="Download on the App Store (Coming Soon)"
+                >
+                  <img
+                    src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images/Download_on_the_App_Store_Badge_US-UK_RGB_blk_092917.svg"
+                    alt="Download on the App Store"
+                    className="h-[48px] w-auto object-contain"
+                  />
+                </button>
+              )}
 
-            {!home.settings.hide_google_play && (
-              <a
-                href="https://play.google.com/store/apps/details?id=com.flashgyan"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="transition-all hover:scale-105 hover:-translate-y-1 active:scale-95 block drop-shadow-md"
-                aria-label="Get it on Google Play"
-              >
-                <img
-                  src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images/GetItOnGooglePlay_Badge_Web_color_English.svg"
-                  alt="Get it on Google Play"
-                  className="h-[48px] w-auto object-contain"
-                />
-              </a>
+              {showGooglePlay && (
+                <a
+                  href={playStoreUrl("home_badge", "website")}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    openPlayStore("home_badge");
+                  }}
+                  className="transition-all hover:scale-105 hover:-translate-y-1 active:scale-95 block drop-shadow-md"
+                  aria-label="Get it on Google Play"
+                >
+                  <img
+                    src="https://ueldzqtaqepehyeivppm.supabase.co/storage/v1/object/public/my-images/GetItOnGooglePlay_Badge_Web_color_English.svg"
+                    alt="Get it on Google Play"
+                    className="h-[48px] w-auto object-contain"
+                  />
+                </a>
+              )}
+            </div>
+            {platform === "desktop" && showGooglePlay && (
+              <div className="flex items-center gap-3 rounded-2xl border border-border/50 bg-white p-2 pr-4 shadow-sm">
+                <img src={playStoreQr} alt="QR code for FlashGyan on Google Play" className="h-20 w-20 shrink-0" />
+                <p className="text-[13px] font-semibold leading-snug text-neutral-700">
+                  Scan with your Android phone
+                  <span className="block font-medium text-neutral-500">to install the FlashGyan app</span>
+                </p>
+              </div>
             )}
           </div>
 
@@ -184,7 +234,7 @@ function Home() {
         <WhyFlashGyan cards={demoCards} />
       </main>
 
-      <footer className="border-t border-border/50 bg-background/40 backdrop-blur-md">
+      <footer className={`border-t border-border/50 bg-background/40 backdrop-blur-md ${installBar.visible ? "pb-20" : ""}`}>
         <div className="max-w-6xl mx-auto px-5 py-8 flex flex-col items-center justify-center text-center gap-4 text-xs text-muted-foreground">
           <p className="uppercase tracking-widest font-semibold opacity-70">
             <span className="block">© 2026 FLASHGYAN EDTECH LLP.</span>
@@ -203,7 +253,8 @@ function Home() {
           </nav>
         </div>
       </footer>
-      <TelegramFloatingButton />
+      <TelegramFloatingButton raised={installBar.visible} />
+      {installBar.visible && <AndroidInstallBar onDismiss={installBar.dismiss} />}
     </div>
   );
 }
@@ -407,6 +458,7 @@ function FlashcardDemo({
   const [flipped, setFlipped] = useState(false);
   const [ratings, setRatings] = useState<DemoRating[]>([]);
   const [mounted, setMounted] = useState(false);
+  const platform = usePlatform();
   const completed = cards.length > 0 && ratings.length === cards.length;
   const card = cards[index];
 
@@ -423,7 +475,7 @@ function FlashcardDemo({
         setFlipped(false);
         ratingPending.current = false;
       }, 300);
-    } else {
+    } else if (shouldShowAppPrompt()) {
       setDownloadOpen(true);
     }
   };
@@ -493,6 +545,16 @@ function FlashcardDemo({
           {loadingMore ? content.loading : content.practiceMore}
           <ChevronRight className="h-4 w-4" aria-hidden="true" />
         </Button>
+        {platform !== "ios" && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => openPlayStore("home_demo")}
+            className="mt-3 h-12 w-full rounded-2xl text-base"
+          >
+            {content.downloadLabel}
+          </Button>
+        )}
       </div>
       <AppDownloadPopup
         isOpen={downloadOpen}
@@ -503,6 +565,7 @@ function FlashcardDemo({
         downloadLabel={content.downloadLabel}
         continueLabel={loadingMore ? content.loading : content.practiceMore}
         continueDisabled={loadingMore}
+        placement="home_demo"
       />
       </>
     );
@@ -862,10 +925,10 @@ function FeatureCard({
   );
 }
 
-function TelegramFloatingButton() {
+function TelegramFloatingButton({ raised = false }: { raised?: boolean }) {
   return (
     <div
-      className="fixed right-6 bottom-6 z-50 pointer-events-none"
+      className={`fixed right-6 z-50 pointer-events-none transition-[bottom] duration-300 ${raised ? "bottom-28" : "bottom-6"}`}
       style={{ animation: "float-bob 3s ease-in-out infinite" }}
     >
       {/* The style block injects the keyframes safely into React. 

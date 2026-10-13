@@ -16,5 +16,13 @@
       "sizes": "512x512",
       "type": "image/png"
     }
-  ]
+  ],
+  "related_applications": [
+    {
+      "platform": "play",
+      "url": "https://play.google.com/store/apps/details?id=com.flashgyan",
+      "id": "com.flashgyan"
+    }
+  ],
+  "prefer_related_applications": true
 }

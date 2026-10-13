@@ -1,2 +1,8 @@
 User-agent: *
 Allow: /
+Disallow: /admin
+Disallow: /auth
+Disallow: /summary
+Disallow: /mcq-result/
+
+Sitemap: https://www.flashgyan.com/sitemap.xml

@@ -27,6 +27,7 @@ import {
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
 import { AppDownloadPopup } from "@/components/app-download-popup";
+import { shouldShowAppPrompt } from "@/lib/app-promo";
 
 const deckQO = (deckId: string) =>
   queryOptions({
@@ -177,7 +178,7 @@ function Practice() {
     for (const r of results) state[r.id] = r.rating;
     saveReview(deckId, state);
 
-    setNavData({
+    const summarySearch = {
       deckId,
       total: results.length,
       hard: counts.hard,
@@ -185,8 +186,13 @@ function Practice() {
       easy: counts.easy,
       seconds,
       sessionId,
-    });
-    setShowDownloadPopup(true);
+    };
+    setNavData(summarySearch);
+    if (shouldShowAppPrompt()) {
+      setShowDownloadPopup(true);
+    } else {
+      navigate({ to: "/summary", search: summarySearch });
+    }
   }
 
   function handleContinueToSummary() {
@@ -459,6 +465,7 @@ function Practice() {
         isOpen={showDownloadPopup}
         onClose={() => setShowDownloadPopup(false)}
         onContinue={handleContinueToSummary}
+        placement="flashcard_complete"
       />
     </div>
   );

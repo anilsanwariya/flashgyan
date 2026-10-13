@@ -30,6 +30,7 @@ import {
   type SessionCardResult,
 } from "@/lib/session-store";
 import { AppDownloadPopup } from "@/components/app-download-popup";
+import { shouldShowAppPrompt } from "@/lib/app-promo";
 
 const testQO = (id: string) =>
   queryOptions({
@@ -208,7 +209,7 @@ function PracticeMcq() {
       results,
     });
 
-    setNavData({
+    const summarySearch = {
       deckId: "",
       practiceId: testId,
       total: results.length,
@@ -217,8 +218,13 @@ function PracticeMcq() {
       easy: counts.easy,
       seconds,
       sessionId,
-    });
-    setShowDownloadPopup(true);
+    };
+    setNavData(summarySearch);
+    if (shouldShowAppPrompt()) {
+      setShowDownloadPopup(true);
+    } else {
+      navigate({ to: "/summary", search: summarySearch });
+    }
   }
 
   function handleContinueToSummary() {
@@ -490,6 +496,7 @@ function PracticeMcq() {
         isOpen={showDownloadPopup}
         onClose={() => setShowDownloadPopup(false)}
         onContinue={handleContinueToSummary}
+        placement="mcq_practice_complete"
       />
     </div>
   );

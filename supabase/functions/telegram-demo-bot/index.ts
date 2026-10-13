@@ -7,7 +7,10 @@ const TELEGRAM_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY") ?? "";
-const APP_URL = "https://play.google.com/store/apps/details?id=com.flashgyan";
+const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.flashgyan";
+// Tags installs with utm_source=telegram_bot so Play Console can attribute them.
+const appUrl = (medium: string) =>
+  `${PLAY_STORE_URL}&referrer=${encodeURIComponent(`utm_source=telegram_bot&utm_medium=${medium}&utm_campaign=web_to_app`)}`;
 const QUIZ_LIMIT = 5;
 const EMBED_MODEL = "google/gemini-embedding-001";
 const EMBED_DIMS = 1536;
@@ -18,7 +21,6 @@ const SAATHI_SYSTEM_PROMPT = `You are SAATHI, an expert study assistant. Answer 
 LANGUAGE MATCHING: Detect the language of the user's question and reply in that exact language.
 SOURCE CITATIONS: Append (Source: [Title]) using the exact Source Title from context.
 RICH FORMATTING: Use Markdown-friendly plain text (bold with *asterisks*, bullets with -).`;
-const QUIZ_LIMIT = 5;
 
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -211,7 +213,7 @@ async function editReveal(chat_id: number, message_id: number, cardId: string, c
       ? { inline_keyboard: [[{ text: "➡️ Next Card", callback_data: `next_${count + 1}_${subjCode}` }]] }
       : {
           inline_keyboard: [
-            [{ text: "📱 Download FlashGyan App to continue!", url: APP_URL }],
+            [{ text: "📱 Download FlashGyan App to continue!", url: appUrl("flashcards_complete") }],
             [{ text: "🔁 Practice Again", callback_data: "menu_flashcards" }],
           ],
         };
@@ -348,7 +350,7 @@ async function handlePollAnswer(pa: any) {
       parse_mode: "HTML",
       reply_markup: {
         inline_keyboard: [
-          [{ text: "📱 Download FlashGyan App", url: APP_URL }],
+          [{ text: "📱 Download FlashGyan App", url: appUrl("mcq_complete") }],
           [{ text: "🔁 Practice Again", callback_data: "menu_mcqs" }],
         ],
       },

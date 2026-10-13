@@ -27,6 +27,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { AppDownloadPopup } from "@/components/app-download-popup";
+import { shouldShowAppPrompt } from "@/lib/app-promo";
 import { triggerHaptic } from "@/lib/haptics";
 
 const testQO = (id: string) =>
@@ -153,7 +154,7 @@ function TakeTest() {
     });
 
     sessionStorage.setItem(`mcq-attempt:${testId}`, JSON.stringify(attempt));
-    if (auto) {
+    if (auto || !shouldShowAppPrompt()) {
       navigate({ to: "/mcq-result/$testId", params: { testId } });
       return;
     }
@@ -422,6 +423,7 @@ function TakeTest() {
         isOpen={showDownloadPopup}
         onClose={() => setShowDownloadPopup(false)}
         onContinue={handleContinueToResult}
+        placement="mcq_test_complete"
       />
     </div>
   );

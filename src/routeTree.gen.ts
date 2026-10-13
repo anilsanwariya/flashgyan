@@ -17,9 +17,11 @@ import { Route as McqPracticeRouteImport } from './routes/mcq-practice'
 import { Route as McqTestsRouteImport } from './routes/mcq-tests'
 import { Route as PrivacyPolicyRouteImport } from './routes/privacy-policy'
 import { Route as SaathiRouteImport } from './routes/saathi'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as SummaryRouteImport } from './routes/summary'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
+import { Route as DecksDeckIdRouteImport } from './routes/decks.$deckId'
 import { Route as McqResultTestIdRouteImport } from './routes/mcq-result.$testId'
 import { Route as McqTestIdRouteImport } from './routes/mcq.$testId'
 import { Route as PracticeMcqTestIdRouteImport } from './routes/practice-mcq.$testId'
@@ -64,6 +66,11 @@ const SaathiRoute = SaathiRouteImport.update({
   path: '/saathi',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SummaryRoute = SummaryRouteImport.update({
   id: '/summary',
   path: '/summary',
@@ -78,6 +85,11 @@ const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
   getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const DecksDeckIdRoute = DecksDeckIdRouteImport.update({
+  id: '/decks/$deckId',
+  path: '/decks/$deckId',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const McqResultTestIdRoute = McqResultTestIdRouteImport.update({
   id: '/mcq-result/$testId',
@@ -108,9 +120,11 @@ export interface FileRoutesByFullPath {
   '/mcq-tests': typeof McqTestsRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
   '/saathi': typeof SaathiRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/summary': typeof SummaryRoute
   '/terms': typeof TermsRoute
   '/admin': typeof AuthenticatedAdminRoute
+  '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
@@ -124,9 +138,11 @@ export interface FileRoutesByTo {
   '/mcq-tests': typeof McqTestsRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
   '/saathi': typeof SaathiRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/summary': typeof SummaryRoute
   '/terms': typeof TermsRoute
   '/admin': typeof AuthenticatedAdminRoute
+  '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
@@ -142,9 +158,11 @@ export interface FileRoutesById {
   '/mcq-tests': typeof McqTestsRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
   '/saathi': typeof SaathiRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/summary': typeof SummaryRoute
   '/terms': typeof TermsRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
+  '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
@@ -160,9 +178,11 @@ export interface FileRouteTypes {
     | '/mcq-tests'
     | '/privacy-policy'
     | '/saathi'
+    | '/sitemap.xml'
     | '/summary'
     | '/terms'
     | '/admin'
+    | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
@@ -176,9 +196,11 @@ export interface FileRouteTypes {
     | '/mcq-tests'
     | '/privacy-policy'
     | '/saathi'
+    | '/sitemap.xml'
     | '/summary'
     | '/terms'
     | '/admin'
+    | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
@@ -193,9 +215,11 @@ export interface FileRouteTypes {
     | '/mcq-tests'
     | '/privacy-policy'
     | '/saathi'
+    | '/sitemap.xml'
     | '/summary'
     | '/terms'
     | '/_authenticated/admin'
+    | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
@@ -211,8 +235,10 @@ export interface RootRouteChildren {
   McqTestsRoute: typeof McqTestsRoute
   PrivacyPolicyRoute: typeof PrivacyPolicyRoute
   SaathiRoute: typeof SaathiRoute
+  SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   SummaryRoute: typeof SummaryRoute
   TermsRoute: typeof TermsRoute
+  DecksDeckIdRoute: typeof DecksDeckIdRoute
   McqResultTestIdRoute: typeof McqResultTestIdRoute
   McqTestIdRoute: typeof McqTestIdRoute
   PracticeMcqTestIdRoute: typeof PracticeMcqTestIdRoute
@@ -277,6 +303,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SaathiRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/summary': {
       id: '/summary'
       path: '/summary'
@@ -297,6 +330,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin'
       preLoaderRoute: typeof AuthenticatedAdminRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/decks/$deckId': {
+      id: '/decks/$deckId'
+      path: '/decks/$deckId'
+      fullPath: '/decks/$deckId'
+      preLoaderRoute: typeof DecksDeckIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/mcq-result/$testId': {
       id: '/mcq-result/$testId'
@@ -349,8 +389,10 @@ const rootRouteChildren: RootRouteChildren = {
   McqTestsRoute: McqTestsRoute,
   PrivacyPolicyRoute: PrivacyPolicyRoute,
   SaathiRoute: SaathiRoute,
+  SitemapDotxmlRoute: SitemapDotxmlRoute,
   SummaryRoute: SummaryRoute,
   TermsRoute: TermsRoute,
+  DecksDeckIdRoute: DecksDeckIdRoute,
   McqResultTestIdRoute: McqResultTestIdRoute,
   McqTestIdRoute: McqTestIdRoute,
   PracticeMcqTestIdRoute: PracticeMcqTestIdRoute,
