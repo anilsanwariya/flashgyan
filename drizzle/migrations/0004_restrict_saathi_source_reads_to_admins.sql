@@ -1,0 +1,1 @@
+ALTER POLICY "Authenticated can read saathi_knowledge" ON public.saathi_knowledge TO authenticated USING (private.has_role(auth.uid(), 'admin'::public.app_role));
