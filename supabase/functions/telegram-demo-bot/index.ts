@@ -2,6 +2,21 @@
 // Reads content EXCLUSIVELY from bot_* tables. Tracks users in bot_users
 // and quiz state in bot_sessions. Public webhook (Telegram calls it directly).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import {
+  SaathiAiError,
+  cleanHistory,
+  collectSources,
+  relevantMatches,
+  saathiComplete,
+  saathiEmbed,
+  saathiMessages,
+  saathiNoMaterialReply,
+  saathiSearch,
+  saathiStandaloneQuestion,
+  stripNoAnswer,
+  type SaathiRpc,
+  type SaathiTurn,
+} from "../_shared/saathi-core.ts";
 
 const TELEGRAM_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -12,15 +27,6 @@ const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.flashg
 const appUrl = (medium: string) =>
   `${PLAY_STORE_URL}&referrer=${encodeURIComponent(`utm_source=telegram_bot&utm_medium=${medium}&utm_campaign=web_to_app`)}`;
 const QUIZ_LIMIT = 5;
-const EMBED_MODEL = "google/gemini-embedding-001";
-const EMBED_DIMS = 1536;
-const CHAT_MODEL = "google/gemini-3-flash-preview";
-const SAATHI_FALLBACK = "I don't have information on that subject in my current study materials.";
-const SAATHI_SYSTEM_PROMPT = `You are SAATHI, an expert study assistant. Answer questions ONLY based on the provided database context. If the answer is not contained in the context, reply exactly with: '${SAATHI_FALLBACK}'
-
-LANGUAGE MATCHING: Detect the language of the user's question and reply in that exact language.
-SOURCE CITATIONS: Append (Source: [Title]) using the exact Source Title from context.
-RICH FORMATTING: Use Markdown-friendly plain text (bold with *asterisks*, bullets with -).`;
 
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -360,21 +366,8 @@ async function handlePollAnswer(pa: any) {
 }
 
 // ---------- SAATHI /ask ----------
-async function saathiEmbed(text: string): Promise<number[] | null> {
-  if (!LOVABLE_API_KEY) return null;
-  try {
-    const r = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Lovable-API-Key": LOVABLE_API_KEY },
-      body: JSON.stringify({ model: EMBED_MODEL, input: text, dimensions: EMBED_DIMS }),
-    });
-    if (!r.ok) return null;
-    const j = await r.json();
-    return j?.data?.[0]?.embedding ?? null;
-  } catch {
-    return null;
-  }
-}
+// Question answering lives in ../_shared/saathi-core.ts, shared with the website.
+const saathiRpc: SaathiRpc = (fn, args) => supabase.rpc(fn, args);
 
 function tgEsc(s: string) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -389,99 +382,63 @@ async function handleSaathiAsk(chat_id: number, user_id: number, question: strin
     await tg("sendMessage", { chat_id, text: "SAATHI is not configured." });
     return;
   }
-
+  question = question.slice(0, 2000);
   const userKey = String(user_id);
 
-  // Conversational memory (last 6 turns)
-  let pastMessages: { role: string; content: string }[] = [];
-  const { data: history } = await supabase
+  // Conversational memory: the most recent turns, oldest first.
+  const { data: rows } = await supabase
     .from("saathi_chat_history")
     .select("role,content")
     .eq("user_id", userKey)
     .order("created_at", { ascending: false })
     .limit(6);
-  if (history) pastMessages = (history as any[]).slice().reverse();
+  const history = cleanHistory(((rows ?? []) as SaathiTurn[]).slice().reverse());
 
-  // Subjects
-  const { data: subjRows } = await supabase.from("saathi_knowledge").select("subject");
-  const subjects = [...new Set((subjRows ?? []).map((r: any) => r.subject).filter(Boolean))];
-
-  let answer = SAATHI_FALLBACK;
-  const uniqueSources: { title: string; subject: string }[] = [];
-
-  const queryEmbedding = await saathiEmbed(question);
-  if (queryEmbedding && subjects.length) {
-    const results = await Promise.all(
-      subjects.map((subject: string) =>
-        supabase.rpc("match_saathi_hybrid", {
-          query_text: question,
-          query_embedding: queryEmbedding as any,
-          match_count: 6,
-          subject_filter: subject,
-        }),
-      ),
-    );
-    const merged = results.flatMap((r: any) => (r.data ?? []) as any[]);
-    const seen = new Set<string>();
-    const matches = merged
-      .filter((m: any) => (seen.has(m.id) ? false : (seen.add(m.id), true)))
-      .sort((a: any, b: any) => b.similarity - a.similarity)
-      .slice(0, 8);
-
-    if (matches.length > 0) {
-      const contextBlock = matches
-        .map((s: any, i: number) => `[Source ${i + 1}] Title: ${s.source_file}\nSubject: ${s.subject}\nContent:\n${s.content}`)
-        .join("\n\n---\n\n");
-      const userPrompt = `Context from knowledge base:\n\n${contextBlock}\n\n---\n\nQuestion: ${question}`;
-      const aiMessages = [
-        { role: "system", content: SAATHI_SYSTEM_PROMPT },
-        ...pastMessages,
-        { role: "user", content: userPrompt },
-      ];
-      try {
-        const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Lovable-API-Key": LOVABLE_API_KEY },
-          body: JSON.stringify({ model: CHAT_MODEL, messages: aiMessages }),
-        });
-        if (aiRes.ok) {
-          const aiJson = await aiRes.json();
-          answer = aiJson?.choices?.[0]?.message?.content?.trim() || SAATHI_FALLBACK;
-          const seenTitles = new Set<string>();
-          for (const s of matches as any[]) {
-            if (!seenTitles.has(s.source_file)) {
-              seenTitles.add(s.source_file);
-              uniqueSources.push({ title: s.source_file, subject: s.subject });
-            }
-          }
-        }
-      } catch (e) {
-        console.error("saathi ai error", e);
-      }
-    }
-  }
-
-  // Knowledge gap tracking
-  if (answer === SAATHI_FALLBACK || uniqueSources.length === 0) {
-    try {
-      await supabase.rpc("increment_knowledge_gap", { gap_question: question });
-    } catch (e) {
-      console.error("gap rpc error", e);
-    }
-  }
-
-  // Save memory
+  let answer: string;
+  let noAnswer = true;
+  let sourceTitles: string[] = [];
   try {
-    await supabase.from("saathi_chat_history").insert([
+    const standalone = await saathiStandaloneQuestion(LOVABLE_API_KEY, history, question);
+    const embedding = await saathiEmbed(LOVABLE_API_KEY, standalone);
+    const matches = relevantMatches(await saathiSearch(saathiRpc, standalone, embedding, null));
+    if (matches.length === 0) {
+      answer = saathiNoMaterialReply(question);
+    } else {
+      const raw = await saathiComplete(
+        LOVABLE_API_KEY,
+        saathiMessages({ channel: "telegram", history, question, matches }),
+      );
+      const parsed = stripNoAnswer(raw);
+      noAnswer = parsed.noAnswer || !parsed.text;
+      answer = parsed.text || saathiNoMaterialReply(question);
+      if (!noAnswer) sourceTitles = collectSources(matches).map((s) => s.title);
+    }
+    if (noAnswer) {
+      const { error } = await supabase.rpc("increment_knowledge_gap", { gap_question: standalone });
+      if (error) console.error("gap rpc error", error.message);
+    }
+  } catch (e) {
+    // AI or database failures are not knowledge gaps and are not remembered.
+    console.error("saathi error", e);
+    const busy = e instanceof SaathiAiError && (e.status === 429 || e.status === 402);
+    await tg("sendMessage", {
+      chat_id,
+      text: busy ? e.message : "SAATHI is having trouble right now. Please try again in a moment.",
+    });
+    return;
+  }
+
+  // Only real answers become memory, so follow-ups build on useful context.
+  if (!noAnswer) {
+    const { error } = await supabase.from("saathi_chat_history").insert([
       { user_id: userKey, role: "user", content: question },
       { user_id: userKey, role: "assistant", content: answer },
     ]);
-  } catch (e) {
-    console.error("history insert error", e);
+    if (error) console.error("history insert error", error.message);
   }
 
-  const srcLine = uniqueSources.length
-    ? `\n\n📚 <i>Sources: ${uniqueSources.map((s) => tgEsc(s.title)).join(", ")}</i>`
+  const srcLine = sourceTitles.length
+    ? `\n\n📚 <i>Sources: ${sourceTitles.map(tgEsc).join(", ")}</i>`
     : "";
   const body = tgEsc(answer).slice(0, 3800) + srcLine;
   await tg("sendMessage", { chat_id, text: body, parse_mode: "HTML" });
