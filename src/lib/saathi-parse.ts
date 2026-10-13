@@ -218,3 +218,21 @@ export async function parseQnAExcel(file: File): Promise<QnARow[]> {
   }
   return out;
 }
+
+// File types the SAATHI deck form accepts.
+export const SAATHI_ACCEPT = ".pdf,.docx,.xlsx,.xls,.txt,.md";
+
+// Adds a file's text under a heading named after the file, pushing the file's own
+// headings one level down so they nest beneath it.
+export function textBlockForFile(fileName: string, text: string): string {
+  const name = fileName.replace(/\.[^.]+$/, "");
+  let inFence = false;
+  const body = text
+    .split("\n")
+    .map((line) => {
+      if (/^\s*(```|~~~)/.test(line)) inFence = !inFence;
+      return !inFence && /^#{1,5}\s/.test(line) ? `#${line}` : line;
+    })
+    .join("\n");
+  return `# ${name}\n\n${body}`;
+}
