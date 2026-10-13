@@ -45,8 +45,8 @@ import {
   type SaathiRetrievalHit,
   type SaathiMedium,
 } from "@/lib/saathi.functions";
-import { parsePdfWithLlama } from "@/lib/saathi-pdf.functions";
-import { extractTextFromFile, parseQnAExcel } from "@/lib/saathi-parse";
+import { SAATHI_ACCEPT, parseQnAExcel, textBlockForFile } from "@/lib/saathi-parse";
+import { FileDropZone, FileQueueList, useFileQueue } from "@/components/saathi-file-queue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -79,16 +79,6 @@ type EditKind =
   | { kind: "edit-chunk"; id: string; parentTitle: string }
   | { kind: "append"; parentId: string; parentTitle: string }
   | { kind: "replace"; parentId: string; parentTitle: string };
-
-async function fileToBase64(file: File): Promise<string> {
-  const buf = new Uint8Array(await file.arrayBuffer());
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < buf.length; i += chunk) {
-    binary += String.fromCharCode(...buf.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}
 
 export function SaathiPanel() {
   const qc = useQueryClient();
@@ -622,11 +612,7 @@ function EntryForm({
   onCancel: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const pdfRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
-  const [extracting, setExtracting] = useState(false);
-  const [parsingPdf, setParsingPdf] = useState(false);
-  const parsePdf = useServerFn(parsePdfWithLlama);
 
   const isChunk = editKind.kind === "edit-chunk";
   const isAppend = editKind.kind === "append";
@@ -664,55 +650,26 @@ function EntryForm({
           ? "Saving…"
           : "Save to SAATHI";
 
-  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setExtracting(true);
-    try {
-      const text = await extractTextFromFile(file, form.medium);
-      if (!text) {
-        toast.error("No text found in file");
-        return;
-      }
+  // Each file's text is appended as soon as it is read, in the order added.
+  const queue = useFileQueue({
+    medium: form.medium,
+    resetKey: editKind,
+    onText: (file, text) => {
+      const block = isChunk ? text : textBlockForFile(file.name, text);
       setForm((prev) => ({
         ...prev,
         title: prev.title || file.name.replace(/\.[^.]+$/, ""),
-        content: prev.content ? prev.content + "\n\n" + text : text,
+        content: prev.content.trim() ? `${prev.content.trimEnd()}\n\n${block}` : block,
       }));
-      toast.success(`Extracted ${text.length.toLocaleString()} characters`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not parse file");
-    } finally {
-      setExtracting(false);
-    }
-  }
+    },
+  });
+  const maxChars = isChunk ? 200_000 : 500_000;
+  const tooLong = form.content.length > maxChars;
 
-  async function onPdfLlama(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!file) return;
-    if (!/\.pdf$/i.test(file.name)) {
-      toast.error("Please select a PDF file");
-      return;
-    }
-    setParsingPdf(true);
-    try {
-      const base64 = await fileToBase64(file);
-      const { markdown } = await parsePdf({
-        data: { filename: file.name, base64, medium: form.medium },
-      });
-      setForm((prev) => ({
-        ...prev,
-        title: prev.title || file.name.replace(/\.pdf$/i, ""),
-        content: prev.content ? prev.content + "\n\n" + markdown : markdown,
-      }));
-      toast.success(`Parsed ${markdown.length.toLocaleString()} characters via LlamaParse`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "PDF parse failed");
-    } finally {
-      setParsingPdf(false);
-    }
+    queue.add(files);
   }
 
   function wrap(before: string, after = before, placeholder = "text") {
@@ -753,7 +710,14 @@ function EntryForm({
 
   return (
     <form
-      onSubmit={onSubmit}
+      onSubmit={(e) => {
+        if (queue.busy || tooLong) {
+          e.preventDefault();
+          toast.error(queue.busy ? "Wait until all files are read" : "Content is too long");
+          return;
+        }
+        onSubmit(e);
+      }}
       className="rounded-2xl bg-card border border-border p-4 space-y-3"
     >
       <div className="flex items-center justify-between">
@@ -839,45 +803,25 @@ function EntryForm({
             </Label>
             <div className="flex gap-2">
               <input
-                ref={pdfRef}
+                ref={fileRef}
                 type="file"
-                accept=".pdf"
+                accept={SAATHI_ACCEPT}
+                multiple={!isChunk}
                 className="hidden"
-                onChange={onPdfLlama}
+                onChange={onPick}
               />
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => pdfRef.current?.click()}
-                disabled={parsingPdf || extracting}
+                onClick={() => fileRef.current?.click()}
               >
                 <FileUp className="h-4 w-4" />
-                {parsingPdf ? "Parsing PDF…" : "PDF via LlamaParse"}
+                {isChunk ? "Import a file" : "Add PDFs / files"}
               </Button>
-              {!isChunk && (
-                <>
-                  <input
-                    ref={fileRef}
-                    type="file"
-                    accept=".docx,.xlsx,.xls,.txt,.md"
-                    className="hidden"
-                    onChange={onFile}
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => fileRef.current?.click()}
-                    disabled={extracting || parsingPdf}
-                  >
-                    <FileUp className="h-4 w-4" />
-                    {extracting ? "Extracting…" : "Import DOCX / XLSX"}
-                  </Button>
-                </>
-              )}
             </div>
           </div>
+          <FileQueueList queue={queue} />
           <div className="flex flex-wrap items-center gap-1 mb-2">
             <button type="button" className={toolbarBtn} title="Heading 1" onClick={() => prefixLine("# ")}>
               <Heading1 className="h-4 w-4" />
@@ -903,6 +847,7 @@ function EntryForm({
               <List className="h-4 w-4" />
             </button>
           </div>
+          <FileDropZone onFiles={(files) => queue.add(isChunk ? files.slice(0, 1) : files)}>
           <Textarea
             id="s-content"
             ref={taRef}
@@ -914,10 +859,22 @@ function EntryForm({
                 ? "Paste content or upload a PDF to add new chunks to this deck."
                 : isReplace
                   ? "Paste the new content or upload a PDF. It replaces all of this deck's chunks."
-                : "Use the toolbar above for **bold**, *italic*, # headings, or <mark>highlight</mark>. You can also import a file."
+                : "Paste text, drop PDFs here, or use the toolbar for **bold**, *italic*, # headings and <mark>highlight</mark>."
             }
             className="font-mono text-sm"
           />
+          </FileDropZone>
+          <div className="mt-1 flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
+            <span>
+              {isChunk
+                ? "Drag a file onto the box to import it."
+                : "Drag PDFs, DOCX, XLSX or TXT files onto the box. Several files are read one by one and added in order, each under its own heading."}
+            </span>
+            <span className={tooLong ? "font-medium text-destructive" : ""}>
+              {form.content.length.toLocaleString()} / {maxChars.toLocaleString()} characters
+              {tooLong ? " — too long, split into two decks" : ""}
+            </span>
+          </div>
         </div>
       )}
 
@@ -927,8 +884,8 @@ function EntryForm({
             Cancel
           </Button>
         )}
-        <Button type="submit" disabled={saving || extracting || parsingPdf}>
-          <Plus className="h-4 w-4" /> {submitLabel}
+        <Button type="submit" disabled={saving || queue.busy || tooLong}>
+          <Plus className="h-4 w-4" /> {queue.busy ? "Reading files…" : submitLabel}
         </Button>
       </div>
     </form>
