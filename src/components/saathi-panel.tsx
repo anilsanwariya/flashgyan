@@ -18,6 +18,9 @@ import {
   ChevronRight,
   FileSpreadsheet,
   FilePlus,
+  FileText,
+  RefreshCw,
+  Search,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -28,18 +31,22 @@ import {
   deleteKnowledgeGap,
   deleteSaathiDoc,
   deleteSaathiFeedback,
+  getSaathiHealth,
   listKnowledgeGaps,
   listSaathiFeedback,
+  replaceSaathiDoc,
+  testSaathiRetrieval,
   listSaathiDocs,
   updateSaathiDoc,
   type SaathiDoc,
   type SaathiFeedback,
+  type SaathiHealthRow,
   type SaathiKnowledgeGap,
+  type SaathiRetrievalHit,
   type SaathiMedium,
 } from "@/lib/saathi.functions";
 import { parsePdfWithLlama } from "@/lib/saathi-pdf.functions";
 import { extractTextFromFile, parseQnAExcel } from "@/lib/saathi-parse";
-import { SaathiKnowledgePanel } from "@/components/ai-generate-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -58,18 +65,20 @@ const ALL = "__all__";
 type FormState = {
   title: string;
   subject: string;
+  topic: string;
   medium: SaathiMedium;
   content: string;
 };
 
-const empty: FormState = { title: "", subject: "", medium: "English", content: "" };
+const empty: FormState = { title: "", subject: "", topic: "", medium: "English", content: "" };
 
-type Mode = "content" | "qna" | "gaps";
+type Mode = "content" | "qna" | "gaps" | "test" | "health";
 type EditKind =
   | { kind: "create" }
   | { kind: "edit-parent"; id: string }
   | { kind: "edit-chunk"; id: string; parentTitle: string }
-  | { kind: "append"; parentId: string; parentTitle: string };
+  | { kind: "append"; parentId: string; parentTitle: string }
+  | { kind: "replace"; parentId: string; parentTitle: string };
 
 async function fileToBase64(file: File): Promise<string> {
   const buf = new Uint8Array(await file.arrayBuffer());
@@ -88,6 +97,8 @@ export function SaathiPanel() {
   const updateFn = useServerFn(updateSaathiDoc);
   const appendFn = useServerFn(appendSaathiDoc);
   const deleteFn = useServerFn(deleteSaathiDoc);
+  const replaceFn = useServerFn(replaceSaathiDoc);
+  const [rebuilding, setRebuilding] = useState<string | null>(null);
 
   const docsQ = useQuery<SaathiDoc[]>({
     queryKey: ["saathiDocs"],
@@ -141,8 +152,35 @@ export function SaathiPanel() {
   function startEditParent(d: SaathiDoc) {
     setMode("content");
     setEditKind({ kind: "edit-parent", id: d.id });
-    setForm({ title: d.title, subject: d.subject, medium: d.medium, content: "" });
+    setForm({ title: d.title, subject: d.subject, topic: d.topic ?? "", medium: d.medium, content: "" });
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function startReplace(d: SaathiDoc) {
+    setMode("content");
+    setEditKind({ kind: "replace", parentId: d.id, parentTitle: d.title });
+    setForm({ title: d.title, subject: d.subject, topic: d.topic ?? "", medium: d.medium, content: "" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function rebuild(d: SaathiDoc) {
+    if (
+      !confirm(
+        `Rebuild "${d.title}" with the new chunking? Its chunks are re-split and re-embedded (uses AI credits). Documents uploaded after this update are rebuilt from their original text, so edits to single chunks are lost.`,
+      )
+    )
+      return;
+    setRebuilding(d.id);
+    try {
+      const res = await replaceFn({ data: { id: d.id } });
+      toast.success(`Rebuilt: ${res.before} → ${res.after} chunks`);
+      qc.invalidateQueries({ queryKey: ["saathiDocs"] });
+      qc.invalidateQueries({ queryKey: ["saathiHealth"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Rebuild failed");
+    } finally {
+      setRebuilding(null);
+    }
   }
 
   function startEditChunk(chunk: SaathiDoc, parentTitle: string) {
@@ -151,6 +189,7 @@ export function SaathiPanel() {
     setForm({
       title: chunk.title,
       subject: chunk.subject,
+      topic: chunk.topic ?? "",
       medium: chunk.medium,
       content: chunk.content,
     });
@@ -160,7 +199,13 @@ export function SaathiPanel() {
   function startAppend(parent: SaathiDoc) {
     setMode("content");
     setEditKind({ kind: "append", parentId: parent.id, parentTitle: parent.title });
-    setForm({ title: parent.title, subject: parent.subject, medium: parent.medium, content: "" });
+    setForm({
+      title: parent.title,
+      subject: parent.subject,
+      topic: parent.topic ?? "",
+      medium: parent.medium,
+      content: "",
+    });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -183,6 +228,7 @@ export function SaathiPanel() {
             id: editKind.id,
             title: form.title.trim(),
             subject: form.subject.trim() || "-",
+            topic: form.topic.trim() || null,
             medium: form.medium,
             content: form.content.trim(),
             is_chunk: true,
@@ -199,39 +245,54 @@ export function SaathiPanel() {
             id: editKind.id,
             title: form.title.trim(),
             subject: form.subject.trim(),
+            topic: form.topic.trim() || null,
             medium: form.medium,
             content: "-",
             is_chunk: false,
           },
         });
         toast.success("Deck updated");
+      } else if (editKind.kind === "replace") {
+        if (!form.content.trim()) {
+          toast.error("Add the new content");
+          return;
+        }
+        const res = await replaceFn({
+          data: { id: editKind.parentId, content: form.content.trim() },
+        });
+        toast.success(`Content replaced (${res.after} chunks)`);
       } else if (editKind.kind === "append") {
         if (!form.content.trim()) {
           toast.error("Add content to append");
           return;
         }
-        await appendFn({
+        const res = await appendFn({
           data: { parent_id: editKind.parentId, content: form.content.trim() },
         });
-        toast.success("Appended to deck");
+        toast.success(`Appended ${res.added} chunk${res.added === 1 ? "" : "s"}`);
       } else {
         if (!form.title.trim() || !form.subject.trim() || !form.content.trim()) {
           toast.error("Title, subject, and content are required");
           return;
         }
-        await createFn({
+        const res = await createFn({
           data: {
             title: form.title.trim(),
             subject: form.subject.trim(),
+            topic: form.topic.trim() || null,
             medium: form.medium,
             content: form.content.trim(),
           },
         });
-        toast.success("Deck created");
+        toast.success(
+          res.subject !== form.subject.trim()
+            ? `Saved ${res.chunks} chunks under existing subject "${res.subject}"`
+            : `Saved ${res.chunks} chunks`,
+        );
       }
       cancelEdit();
       qc.invalidateQueries({ queryKey: ["saathiDocs"] });
-      qc.invalidateQueries({ queryKey: ["saathiSubjects"] });
+      qc.invalidateQueries({ queryKey: ["saathiHealth"] });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -289,6 +350,24 @@ export function SaathiPanel() {
           >
             Knowledge Gaps
           </button>
+          <button
+            type="button"
+            onClick={() => setMode("test")}
+            className={`px-3 py-1.5 text-sm rounded-md ${
+              mode === "test" ? "bg-background shadow-sm font-medium" : "text-muted-foreground"
+            }`}
+          >
+            Test a question
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("health")}
+            className={`px-3 py-1.5 text-sm rounded-md ${
+              mode === "health" ? "bg-background shadow-sm font-medium" : "text-muted-foreground"
+            }`}
+          >
+            Health
+          </button>
         </div>
       )}
 
@@ -307,15 +386,17 @@ export function SaathiPanel() {
           subjects={subjects}
           onDone={() => {
             qc.invalidateQueries({ queryKey: ["saathiDocs"] });
-            qc.invalidateQueries({ queryKey: ["saathiSubjects"] });
+            qc.invalidateQueries({ queryKey: ["saathiHealth"] });
           }}
           createFn={createFn}
         />
+      ) : mode === "test" ? (
+        <RetrievalTester subjects={subjects} />
+      ) : mode === "health" ? (
+        <HealthPanel onRebuilt={() => qc.invalidateQueries({ queryKey: ["saathiDocs"] })} />
       ) : (
         <KnowledgeGapsPanel />
       )}
-
-      <SaathiKnowledgePanel subjectFilter={filter === ALL ? "" : filter} />
 
 
       <section className="space-y-3">
@@ -383,8 +464,32 @@ export function SaathiPanel() {
                     >
                       <div className="font-medium text-sm truncate">{d.title}</div>
                       <div className="text-[11px] uppercase tracking-wide text-muted-foreground truncate">
-                        {d.subject} · {d.medium} · {chunks.length} chunk{chunks.length === 1 ? "" : "s"}
+                        {d.subject}
+                        {d.topic ? ` › ${d.topic}` : ""} · {d.medium} · {chunks.length} chunk
+                        {chunks.length === 1 ? "" : "s"}
                       </div>
+                      {d.content.trim() && (
+                        <div className="text-[11px] font-medium text-destructive">
+                          Old format — not searchable until rebuilt
+                        </div>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => rebuild(d)}
+                      disabled={rebuilding !== null}
+                      className="h-8 w-8 grid place-items-center rounded-md text-foreground hover:bg-muted shrink-0 disabled:opacity-40"
+                      title="Rebuild chunks"
+                      aria-label="Rebuild chunks"
+                    >
+                      <RefreshCw className={`h-4 w-4 ${rebuilding === d.id ? "animate-spin" : ""}`} />
+                    </button>
+                    <button
+                      onClick={() => startReplace(d)}
+                      className="h-8 w-8 grid place-items-center rounded-md text-foreground hover:bg-muted shrink-0"
+                      title="Replace content"
+                      aria-label="Replace content"
+                    >
+                      <FileText className="h-4 w-4" />
                     </button>
                     <button
                       onClick={() => startAppend(d)}
@@ -525,6 +630,7 @@ function EntryForm({
 
   const isChunk = editKind.kind === "edit-chunk";
   const isAppend = editKind.kind === "append";
+  const isReplace = editKind.kind === "replace";
   const isEditParent = editKind.kind === "edit-parent";
   const isCreate = editKind.kind === "create";
 
@@ -532,6 +638,8 @@ function EntryForm({
     ? `Edit chunk`
     : isAppend
       ? `Append to "${editKind.parentTitle}"`
+      : isReplace
+        ? `Replace content of "${editKind.parentTitle}"`
       : isEditParent
         ? "Edit deck metadata"
         : "New deck";
@@ -544,6 +652,10 @@ function EntryForm({
       ? saving
         ? "Appending…"
         : "Append to Deck"
+      : isReplace
+        ? saving
+          ? "Replacing…"
+          : "Replace Content"
       : isEditParent
         ? saving
           ? "Saving…"
@@ -558,7 +670,7 @@ function EntryForm({
     if (!file) return;
     setExtracting(true);
     try {
-      const text = await extractTextFromFile(file);
+      const text = await extractTextFromFile(file, form.medium);
       if (!text) {
         toast.error("No text found in file");
         return;
@@ -587,9 +699,12 @@ function EntryForm({
     setParsingPdf(true);
     try {
       const base64 = await fileToBase64(file);
-      const { markdown } = await parsePdf({ data: { filename: file.name, base64 } });
+      const { markdown } = await parsePdf({
+        data: { filename: file.name, base64, medium: form.medium },
+      });
       setForm((prev) => ({
         ...prev,
+        title: prev.title || file.name.replace(/\.pdf$/i, ""),
         content: prev.content ? prev.content + "\n\n" + markdown : markdown,
       }));
       toast.success(`Parsed ${markdown.length.toLocaleString()} characters via LlamaParse`);
@@ -697,7 +812,23 @@ function EntryForm({
               </SelectContent>
             </Select>
           </div>
+          <div className="col-span-2">
+            <Label htmlFor="s-topic">Topic (optional)</Label>
+            <Input
+              id="s-topic"
+              value={form.topic}
+              onChange={(e) => setForm((p) => ({ ...p, topic: e.target.value }))}
+              placeholder="e.g. Fundamental Rights — use the same topic as the matching flashcard deck"
+            />
+          </div>
         </div>
+      )}
+
+      {showMetaFields && (
+        <p className="text-xs text-muted-foreground">
+          Pick the medium before parsing a PDF: Hindi and Bilingual use Hindi text recognition for
+          scanned pages.
+        </p>
       )}
 
       {showContent && (
@@ -781,6 +912,8 @@ function EntryForm({
             placeholder={
               isAppend
                 ? "Paste content or upload a PDF to add new chunks to this deck."
+                : isReplace
+                  ? "Paste the new content or upload a PDF. It replaces all of this deck's chunks."
                 : "Use the toolbar above for **bold**, *italic*, # headings, or <mark>highlight</mark>. You can also import a file."
             }
             className="font-mono text-sm"
@@ -809,12 +942,19 @@ function QnABulkUpload({
 }: {
   subjects: string[];
   createFn: (args: {
-    data: { title: string; subject: string; medium: SaathiMedium; content: string };
+    data: {
+      title: string;
+      subject: string;
+      topic: string | null;
+      medium: SaathiMedium;
+      content: string;
+    };
   }) => Promise<unknown>;
   onDone: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [subject, setSubject] = useState("");
+  const [topic, setTopic] = useState("");
   const [medium, setMedium] = useState<SaathiMedium>("English");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -846,6 +986,7 @@ function QnABulkUpload({
               data: {
                 title: title.slice(0, 300),
                 subject: subject.trim(),
+                topic: topic.trim() || null,
                 medium,
                 content,
               },
@@ -882,7 +1023,8 @@ function QnABulkUpload({
         <code className="font-mono">answer</code>, then one column per
         explanation section (the header text becomes the section title). One
         Excel file = one SAATHI entry; the file name becomes the entry title.
-        You can pick multiple files at once.
+        Each row is saved as its own chunk, so explanations stay with their
+        question. You can pick multiple files at once.
       </p>
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -917,6 +1059,15 @@ function QnABulkUpload({
               ))}
             </SelectContent>
           </Select>
+        </div>
+        <div className="col-span-2">
+          <Label htmlFor="qna-topic">Topic (optional)</Label>
+          <Input
+            id="qna-topic"
+            value={topic}
+            onChange={(e) => setTopic(e.target.value)}
+            placeholder="e.g. Fundamental Rights"
+          />
         </div>
       </div>
       <input
@@ -1107,6 +1258,239 @@ function FeedbackPanel() {
               )}
             </details>
           ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RetrievalTester({ subjects }: { subjects: string[] }) {
+  const testFn = useServerFn(testSaathiRetrieval);
+  const [question, setQuestion] = useState("");
+  const [subject, setSubject] = useState<string>(ALL);
+  const [busy, setBusy] = useState(false);
+  const [hits, setHits] = useState<SaathiRetrievalHit[] | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+
+  async function run(e: React.FormEvent) {
+    e.preventDefault();
+    if (!question.trim()) return;
+    setBusy(true);
+    try {
+      setHits(
+        await testFn({
+          data: { question: question.trim(), subjects: subject === ALL ? [] : [subject] },
+        }),
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Test failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const usable = hits?.filter((h) => h.relevant).length ?? 0;
+
+  return (
+    <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      <div>
+        <h3 className="font-semibold">Test a question</h3>
+        <p className="text-sm text-muted-foreground">
+          See which chunks SAATHI would read for a question, and how well each one matches. Chunks
+          below the cut-off are never sent to the AI.
+        </p>
+      </div>
+      <form onSubmit={run} className="flex flex-col gap-2 sm:flex-row">
+        <Input
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          placeholder="e.g. What does Article 21 guarantee?"
+          className="flex-1"
+        />
+        <div className="sm:w-44">
+          <Select value={subject} onValueChange={setSubject}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All subjects</SelectItem>
+              {subjects.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button type="submit" disabled={busy || !question.trim()}>
+          <Search className="h-4 w-4" />
+          {busy ? "Searching…" : "Test"}
+        </Button>
+      </form>
+
+      {hits &&
+        (hits.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Nothing matched. SAATHI would say this topic isn't in the study material.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-sm">
+              {usable === 0
+                ? "No chunk passes the cut-off, so SAATHI would answer that it has no material on this."
+                : `${usable} of ${hits.length} chunks pass the cut-off and would be sent to the AI.`}
+            </p>
+            {hits.map((h, i) => (
+              <div
+                key={h.id}
+                className={`rounded-lg border p-3 text-sm ${
+                  h.relevant ? "border-border" : "border-dashed border-border opacity-60"
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => setOpen(open === h.id ? null : h.id)}
+                  className="flex w-full items-start justify-between gap-3 text-left"
+                >
+                  <span className="min-w-0">
+                    <span className="mr-1 text-muted-foreground">#{i + 1}</span>
+                    <span className="font-medium">{h.title}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {h.subject}
+                      {h.topic ? ` › ${h.topic}` : ""}
+                      {h.medium ? ` · ${h.medium}` : ""}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-right font-mono text-xs">
+                    <span className="block">meaning {h.vector_score.toFixed(3)}</span>
+                    <span className="block">keywords {h.keyword_score.toFixed(3)}</span>
+                    <span className="block font-semibold">
+                      {h.relevant ? "✓ used" : "✗ below cut-off"}
+                    </span>
+                  </span>
+                </button>
+                {open === h.id ? (
+                  <div className="prose prose-sm mt-2 max-w-none border-t border-border pt-2">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{h.content}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{h.content}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        ))}
+    </section>
+  );
+}
+
+function HealthPanel({ onRebuilt }: { onRebuilt: () => void }) {
+  const qc = useQueryClient();
+  const healthFn = useServerFn(getSaathiHealth);
+  const replaceFn = useServerFn(replaceSaathiDoc);
+  const healthQ = useQuery({ queryKey: ["saathiHealth"], queryFn: () => healthFn() });
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+
+  const rows = healthQ.data ?? [];
+  // Documents saved before the new chunker have no stored original text.
+  const outdated = rows.filter((r) => r.is_legacy || !r.has_source);
+  const issues = (r: SaathiHealthRow) => {
+    const list: string[] = [];
+    if (r.is_legacy) list.push("old format, not searchable");
+    else if (!r.has_source) list.push("old chunking");
+    if (r.chunk_count === 0 && !r.is_legacy) list.push("no chunks");
+    if (r.missing_embeddings) list.push(`${r.missing_embeddings} without embedding`);
+    if (r.oversized_chunks) list.push(`${r.oversized_chunks} oversized`);
+    if (r.tiny_chunks > 0 && r.tiny_chunks >= r.chunk_count / 3) list.push(`${r.tiny_chunks} tiny`);
+    if (r.duplicate_chunks) list.push(`${r.duplicate_chunks} duplicated in other documents`);
+    return list;
+  };
+  const withIssues = rows.filter((r) => issues(r).length > 0);
+  const totalChunks = rows.reduce((n, r) => n + Number(r.chunk_count), 0);
+
+  async function upgradeAll() {
+    if (
+      !confirm(
+        `Rebuild ${outdated.length} document(s) with the new chunking? Each one is re-split and re-embedded, which uses AI credits.`,
+      )
+    )
+      return;
+    let failed = 0;
+    setProgress({ done: 0, total: outdated.length });
+    for (const [i, r] of outdated.entries()) {
+      try {
+        await replaceFn({ data: { id: r.id } });
+      } catch (err) {
+        failed += 1;
+        toast.error(`${r.title}: ${err instanceof Error ? err.message : "failed"}`);
+      }
+      setProgress({ done: i + 1, total: outdated.length });
+    }
+    setProgress(null);
+    toast.success(
+      failed ? `Rebuilt ${outdated.length - failed}, ${failed} failed` : "All documents rebuilt",
+    );
+    qc.invalidateQueries({ queryKey: ["saathiHealth"] });
+    onRebuilt();
+  }
+
+  return (
+    <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="font-semibold">Knowledge base health</h3>
+          <p className="text-sm text-muted-foreground">
+            {rows.length} documents · {totalChunks} chunks
+          </p>
+        </div>
+        {outdated.length > 0 && (
+          <Button onClick={upgradeAll} disabled={progress !== null}>
+            <RefreshCw className={`h-4 w-4 ${progress ? "animate-spin" : ""}`} />
+            {progress
+              ? `Rebuilding ${progress.done} / ${progress.total}…`
+              : `Rebuild ${outdated.length} outdated document${outdated.length === 1 ? "" : "s"}`}
+          </Button>
+        )}
+      </div>
+
+      {healthQ.isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : healthQ.error ? (
+        <p className="text-sm text-destructive">
+          {healthQ.error instanceof Error ? healthQ.error.message : "Failed to load health"}
+        </p>
+      ) : withIssues.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border p-6 text-center">
+          <p className="text-sm text-muted-foreground">No problems found. 🎉</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2">Document</th>
+                <th className="px-3 py-2 text-right">Chunks</th>
+                <th className="px-3 py-2 text-right">Avg size</th>
+                <th className="px-3 py-2">Issues</th>
+              </tr>
+            </thead>
+            <tbody>
+              {withIssues.map((r) => (
+                <tr key={r.id} className="border-t border-border align-top">
+                  <td className="px-3 py-2">
+                    <div className="font-medium">{r.title}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {r.subject}
+                      {r.topic ? ` › ${r.topic}` : ""} · {r.medium}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-right">{r.chunk_count}</td>
+                  <td className="px-3 py-2 text-right">{r.avg_chars}</td>
+                  <td className="px-3 py-2 text-xs">{issues(r).join(" · ")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </section>

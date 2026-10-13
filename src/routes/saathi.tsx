@@ -21,6 +21,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { listSaathiTopics, submitSaathiFeedback, type SaathiTopic } from "@/lib/saathi.functions";
 import { getHomeData } from "@/lib/home.functions";
+import { listDecks, type DeckSummary } from "@/lib/flashcards.functions";
 import type {
   SaathiSource,
   SaathiStreamEvent,
@@ -52,6 +53,19 @@ const MAX_STORED = 40;
 const HISTORY_TURNS = 6;
 
 const homeQO = queryOptions({ queryKey: ["homeData"], queryFn: () => getHomeData() });
+// Same key as the flashcards page, so the list is shared once loaded.
+const decksQO = queryOptions({ queryKey: ["decks"], queryFn: () => listDecks() });
+
+const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+
+// The flashcard deck for an answer's main source: same subject and topic, else the
+// first deck in the subject.
+function deckFor(decks: DeckSummary[], source: SaathiSource): DeckSummary | undefined {
+  const inSubject = decks.filter((d) => norm(d.subject) === norm(source.subject) && d.count > 0);
+  return (
+    (source.topic && inSubject.find((d) => norm(d.topic) === norm(source.topic))) || inSubject[0]
+  );
+}
 
 function readStored<T>(key: string, fallback: T): T {
   try {
@@ -541,6 +555,9 @@ function markdownComponents(streaming: boolean): Components {
 
 function MessageBubble({ msg, onRate }: { msg: Msg; onRate: (rating: 1 | -1) => void }) {
   const feedbackFn = useServerFn(submitSaathiFeedback);
+  const hasSources = msg.status === "done" && !msg.noAnswer && (msg.sources?.length ?? 0) > 0;
+  const decksQ = useQuery({ ...decksQO, enabled: hasSources, staleTime: 10 * 60_000 });
+  const deck = hasSources && decksQ.data ? deckFor(decksQ.data, msg.sources![0]) : undefined;
   const [openSource, setOpenSource] = useState<SaathiSource | null>(null);
 
   if (msg.role === "user") {
@@ -643,11 +660,13 @@ function MessageBubble({ msg, onRate }: { msg: Msg; onRate: (rating: 1 | -1) => 
 
         {answered && msg.sources && msg.sources.length > 0 && (
           <Link
-            to="/flashcards"
+            {...(deck
+              ? { to: "/decks/$deckId" as const, params: { deckId: deck.id } }
+              : { to: "/flashcards" as const })}
             className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
           >
             <Layers className="h-3.5 w-3.5" />
-            Practise this with flashcards
+            {deck ? `Practise “${deck.name}” flashcards` : "Practise this with flashcards"}
           </Link>
         )}
 
