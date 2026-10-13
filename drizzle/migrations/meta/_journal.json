@@ -29,6 +29,13 @@
       "when": 1791875333757,
       "tag": "0003_scope_questions_to_public_parent_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791875421452,
+      "tag": "0004_restrict_saathi_source_reads_to_admins",
+      "breakpoints": true
     }
   ]
 }
