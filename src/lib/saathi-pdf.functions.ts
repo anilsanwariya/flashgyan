@@ -24,6 +24,8 @@ export const parsePdfWithLlama = createServerFn({ method: "POST" })
         filename: z.string().trim().min(1).max(300),
         // base64-encoded PDF bytes (no data: prefix)
         base64: z.string().min(1),
+        // Document medium; picks the OCR language for scanned pages.
+        medium: z.enum(["Hindi", "English", "Bilingual"]).optional(),
       })
       .parse(input),
   )
@@ -44,7 +46,8 @@ export const parsePdfWithLlama = createServerFn({ method: "POST" })
       new Blob([bytes as unknown as BlobPart], { type: "application/pdf" }),
       data.filename.endsWith(".pdf") ? data.filename : `${data.filename}.pdf`,
     );
-    form.append("language", "en");
+    // Devanagari OCR also reads Latin text, so Bilingual material uses it too.
+    form.append("language", data.medium && data.medium !== "English" ? "hi" : "en");
     form.append("result_type", "markdown");
 
     const uploadRes = await fetch(`${LLAMA_BASE}/upload`, {

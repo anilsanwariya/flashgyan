@@ -1,7 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { saathiEmbed } from "../../supabase/functions/_shared/saathi-core.ts";
+import {
+  relevantMatches,
+  saathiEmbed,
+  saathiSearch,
+  type SaathiRpc,
+} from "../../supabase/functions/_shared/saathi-core.ts";
 
 export type SaathiMedium = "Hindi" | "English" | "Bilingual";
 
@@ -10,41 +15,21 @@ export type SaathiDoc = {
   title: string;
   subject: string;
   medium: SaathiMedium;
+  topic: string | null;
   content: string;
   created_at: string;
   parent_id: string | null;
   chunk_index: number | null;
 };
 
-// --- SEMANTIC CHUNKING HELPER ---
-function chunkText(text: string, maxLen = 1500): string[] {
-  const sections = text.split(/(?=^#{1,3} )/m);
-  const chunks: string[] = [];
-  for (const sec of sections) {
-    if (sec.trim().length > maxLen) {
-      const paras = sec.split(/\n\s*\n/);
-      let cur = "";
-      for (const p of paras) {
-        if (cur.length + p.length > maxLen) {
-          if (cur) chunks.push(cur.trim());
-          cur = p;
-        } else {
-          cur += (cur ? "\n\n" : "") + p;
-        }
-      }
-      if (cur) chunks.push(cur.trim());
-    } else if (sec.trim()) {
-      chunks.push(sec.trim());
-    }
-  }
-  return chunks.length ? chunks : [text];
-}
-
-// Must use the same model as question embeddings, so it goes through the shared core.
 async function embed(text: string): Promise<number[]> {
   const key = process.env.LOVABLE_API_KEY;
   if (!key) throw new Error("LOVABLE_API_KEY is not configured");
   return saathiEmbed(key, text);
+}
+
+async function ingest() {
+  return import("@/lib/saathi-ingest.server");
 }
 
 async function getAdmin() {
@@ -65,7 +50,7 @@ async function assertAdmin(userId: string) {
   return admin;
 }
 
-const DOC_COLS = "id,title,subject,medium,content,created_at,parent_id,chunk_index";
+const DOC_COLS = "id,title,subject,medium,topic,content,created_at,parent_id,chunk_index";
 
 export const listSaathiDocs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -79,52 +64,25 @@ export const listSaathiDocs = createServerFn({ method: "GET" })
     return (data ?? []) as unknown as SaathiDoc[];
   });
 
+const docMeta = {
+  title: z.string().trim().min(1).max(300),
+  subject: z.string().trim().min(1).max(120),
+  topic: z.string().trim().max(120).nullish(),
+  medium: z.enum(["Hindi", "English", "Bilingual"]),
+};
+
 export const createSaathiDoc = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
-    z.object({
-      title: z.string().trim().min(1).max(300),
-      subject: z.string().trim().min(1).max(120),
-      medium: z.enum(["Hindi", "English", "Bilingual"]),
-      content: z.string().trim().min(1).max(500_000),
-    }).parse(input),
+    z.object({ ...docMeta, content: z.string().trim().min(1).max(500_000) }).parse(input),
   )
   .handler(async ({ data, context }) => {
-    const admin = await assertAdmin(context.userId);
-
-    // Create Parent (No embedding)
-    const { data: parent, error: pErr } = await admin
-      .from("saathi_knowledge")
-      .insert({
-        title: data.title,
-        subject: data.subject,
-        medium: data.medium,
-        content: "",
-        source_file: data.title,
-      })
-      .select(DOC_COLS)
-      .single();
-    if (pErr) throw new Error(pErr.message);
-    const parentRow = parent as unknown as SaathiDoc;
-
-    // Create Chunks
-    const chunks = chunkText(data.content, 1500);
-    for (let i = 0; i < chunks.length; i++) {
-      const chunkTitle = chunks.length > 1 ? `${data.title} (Part ${i + 1})` : data.title;
-      const embedding = await embed(`${chunkTitle}\n\n${chunks[i]}`);
-      const { error: cErr } = await admin.from("saathi_knowledge").insert({
-        parent_id: parentRow.id,
-        title: chunkTitle,
-        subject: data.subject,
-        medium: data.medium,
-        content: chunks[i],
-        source_file: data.title,
-        chunk_index: i + 1,
-        embedding: embedding as unknown as string,
-      });
-      if (cErr) throw new Error(cErr.message);
-    }
-    return parentRow;
+    await assertAdmin(context.userId);
+    const { createDocument } = await ingest();
+    return createDocument(
+      { title: data.title, subject: data.subject, topic: data.topic || null, medium: data.medium },
+      data.content,
+    );
   });
 
 export const updateSaathiDoc = createServerFn({ method: "POST" })
@@ -132,18 +90,35 @@ export const updateSaathiDoc = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z.object({
       id: z.string().uuid(),
-      title: z.string().trim().min(1).max(300),
-      subject: z.string().trim().min(1).max(120),
-      medium: z.enum(["Hindi", "English", "Bilingual"]),
+      ...docMeta,
       content: z.string().trim().min(1).max(200_000),
       is_chunk: z.boolean().default(false),
     }).parse(input),
   )
   .handler(async ({ data, context }) => {
     const admin = await assertAdmin(context.userId);
+    const { canonicalSubject, chunkTitle, embeddingText } = await ingest();
 
     if (data.is_chunk) {
-      const embedding = await embed(`${data.title}\n\n${data.content}`);
+      const { data: chunk, error: cErr } = await admin
+        .from("saathi_knowledge")
+        .select("subject,topic,medium,source_file,title")
+        .eq("id", data.id)
+        .single();
+      if (cErr) throw new Error(cErr.message);
+      const c = chunk as unknown as {
+        subject: string;
+        topic: string | null;
+        medium: string;
+        source_file: string | null;
+        title: string;
+      };
+      const embedding = await embed(
+        embeddingText(
+          { title: c.source_file || c.title, subject: c.subject, topic: c.topic, medium: c.medium },
+          data.content,
+        ),
+      );
       const { data: row, error } = await admin
         .from("saathi_knowledge")
         .update({
@@ -156,34 +131,33 @@ export const updateSaathiDoc = createServerFn({ method: "POST" })
         .single();
       if (error) throw new Error(error.message);
       return row as unknown as SaathiDoc;
-    } else {
-      const { data: row, error } = await admin
-        .from("saathi_knowledge")
-        .update({
-          title: data.title,
-          subject: data.subject,
-          medium: data.medium,
-        })
-        .eq("id", data.id)
-        .select(DOC_COLS)
-        .single();
-      if (error) throw new Error(error.message);
-
-      // Search reads the chunks, so they must carry the parent's subject, medium and title.
-      const { data: chunks, error: chunkErr } = await admin
-        .from("saathi_knowledge")
-        .update({ subject: data.subject, medium: data.medium, source_file: data.title })
-        .eq("parent_id", data.id)
-        .select("id,chunk_index");
-      if (chunkErr) throw new Error(chunkErr.message);
-      const parts = chunks ?? [];
-      for (const c of parts) {
-        const title = parts.length > 1 ? `${data.title} (Part ${c.chunk_index})` : data.title;
-        const { error: tErr } = await admin.from("saathi_knowledge").update({ title }).eq("id", c.id);
-        if (tErr) throw new Error(tErr.message);
-      }
-      return row as unknown as SaathiDoc;
     }
+
+    const subject = await canonicalSubject(data.subject);
+    const topic = data.topic || null;
+    const { data: row, error } = await admin
+      .from("saathi_knowledge")
+      .update({ title: data.title, subject, topic, medium: data.medium } as never)
+      .eq("id", data.id)
+      .select(DOC_COLS)
+      .single();
+    if (error) throw new Error(error.message);
+
+    // Search reads the chunks, so they must carry the parent's metadata and title.
+    // Embeddings are not refreshed here; use Rebuild to re-embed with the new labels.
+    const { data: chunks, error: chunkErr } = await admin
+      .from("saathi_knowledge")
+      .update({ subject, topic, medium: data.medium, source_file: data.title } as never)
+      .eq("parent_id", data.id)
+      .select("id,chunk_index");
+    if (chunkErr) throw new Error(chunkErr.message);
+    const parts = chunks ?? [];
+    for (const c of parts) {
+      const title = chunkTitle(data.title, c.chunk_index ?? 1, parts.length);
+      const { error: tErr } = await admin.from("saathi_knowledge").update({ title }).eq("id", c.id);
+      if (tErr) throw new Error(tErr.message);
+    }
+    return row as unknown as SaathiDoc;
   });
 
 export const appendSaathiDoc = createServerFn({ method: "POST" })
@@ -195,41 +169,96 @@ export const appendSaathiDoc = createServerFn({ method: "POST" })
     }).parse(input),
   )
   .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    const { appendToDocument } = await ingest();
+    return appendToDocument(data.parent_id, data.content);
+  });
+
+// Replaces a document's text (content given) or rebuilds its chunks from the saved
+// original with the current splitter (content omitted).
+export const replaceSaathiDoc = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z.object({
+      id: z.string().uuid(),
+      content: z.string().trim().min(1).max(500_000).optional(),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    const { replaceDocument } = await ingest();
+    return replaceDocument(data.id, data.content ?? null);
+  });
+
+export type SaathiHealthRow = {
+  id: string;
+  title: string;
+  subject: string;
+  topic: string | null;
+  medium: string;
+  created_at: string;
+  is_legacy: boolean;
+  has_source: boolean;
+  chunk_count: number;
+  avg_chars: number;
+  max_chars: number;
+  tiny_chunks: number;
+  oversized_chunks: number;
+  missing_embeddings: number;
+  duplicate_chunks: number;
+};
+
+export const getSaathiHealth = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<SaathiHealthRow[]> => {
     const admin = await assertAdmin(context.userId);
+    const { data, error } = await admin.rpc("saathi_health" as never);
+    if (error) throw new Error(error.message);
+    return (data ?? []) as unknown as SaathiHealthRow[];
+  });
 
-    const { data: parent, error: pErr } = await admin
-      .from("saathi_knowledge")
-      .select("*")
-      .eq("id", data.parent_id)
-      .single();
-    if (pErr) throw new Error(pErr.message);
+export type SaathiRetrievalHit = {
+  id: string;
+  title: string;
+  document: string;
+  subject: string;
+  topic: string | null;
+  medium: string | null;
+  content: string;
+  vector_score: number;
+  keyword_score: number;
+  similarity: number;
+  relevant: boolean;
+};
 
-    const { data: existingChunks } = await admin
-      .from("saathi_knowledge")
-      .select("chunk_index")
-      .eq("parent_id", data.parent_id)
-      .order("chunk_index", { ascending: false })
-      .limit(1);
-    const startIndex = ((existingChunks?.[0]?.chunk_index as number | null) || 0) + 1;
-
-    const chunks = chunkText(data.content, 1500);
-    for (let i = 0; i < chunks.length; i++) {
-      const idx = startIndex + i;
-      const chunkTitle = `${parent.title} (Part ${idx})`;
-      const embedding = await embed(`${chunkTitle}\n\n${chunks[i]}`);
-      const { error: cErr } = await admin.from("saathi_knowledge").insert({
-        parent_id: parent.id,
-        title: chunkTitle,
-        subject: parent.subject,
-        medium: parent.medium,
-        content: chunks[i],
-        source_file: parent.title,
-        chunk_index: idx,
-        embedding: embedding as unknown as string,
-      });
-      if (cErr) throw new Error(cErr.message);
-    }
-    return { ok: true, added: chunks.length };
+// Admin tool: shows exactly which chunks SAATHI would read for a question.
+export const testSaathiRetrieval = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z.object({
+      question: z.string().trim().min(1).max(2000),
+      subjects: z.array(z.string().trim().min(1).max(120)).max(50).default([]),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }): Promise<SaathiRetrievalHit[]> => {
+    const admin = await assertAdmin(context.userId);
+    const embedding = await embed(data.question);
+    const rpc: SaathiRpc = (fn, args) => admin.rpc(fn as never, args as never);
+    const matches = await saathiSearch(rpc, data.question, embedding, data.subjects);
+    const relevant = new Set(relevantMatches(matches).map((m) => m.id));
+    return matches.map((m) => ({
+      id: m.id,
+      title: m.title,
+      document: m.source_file || m.title,
+      subject: m.subject,
+      topic: m.topic ?? null,
+      medium: m.medium ?? null,
+      content: m.content,
+      vector_score: m.vector_score,
+      keyword_score: m.keyword_score,
+      similarity: m.similarity,
+      relevant: relevant.has(m.id),
+    }));
   });
 
 export const deleteSaathiDoc = createServerFn({ method: "POST" })
@@ -253,6 +282,8 @@ export const listSaathiTopics = createServerFn({ method: "GET" }).handler(
       .from("saathi_knowledge")
       .select("subject,title")
       .is("parent_id", null)
+      // Old single-row documents aren't searchable until rebuilt, so don't suggest them.
+      .eq("content", "")
       .order("created_at", { ascending: false })
       .limit(1000);
     if (error) throw new Error(error.message);

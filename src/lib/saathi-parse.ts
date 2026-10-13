@@ -3,29 +3,119 @@ import * as XLSX from "xlsx";
 import mammoth from "mammoth";
 import { parsePdfWithLlama } from "@/lib/saathi-pdf.functions";
 
-export async function extractTextFromFile(file: File): Promise<string> {
+export async function extractTextFromFile(
+  file: File,
+  medium?: "Hindi" | "English" | "Bilingual",
+): Promise<string> {
   const name = file.name.toLowerCase();
-  if (name.endsWith(".pdf")) return extractPdf(file);
+  if (name.endsWith(".pdf")) return extractPdf(file, medium);
   if (name.endsWith(".docx")) return extractDocx(file);
   if (name.endsWith(".xlsx") || name.endsWith(".xls")) return extractXlsx(file);
   if (name.endsWith(".txt") || name.endsWith(".md")) return file.text();
   throw new Error("Unsupported file type. Use .pdf, .docx, or .xlsx");
 }
 
+// Converts via HTML so headings, lists and tables survive; SAATHI's chunker
+// uses the headings to keep each chunk's context.
 async function extractDocx(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
-  const res = await mammoth.extractRawText({ arrayBuffer: buf });
-  return res.value.trim();
+  const res = await mammoth.convertToHtml({ arrayBuffer: buf });
+  return htmlToMarkdown(res.value);
 }
 
+export function htmlToMarkdown(html: string): string {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const inline = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+    if (!(node instanceof HTMLElement)) return "";
+    const inner = Array.from(node.childNodes).map(inline).join("");
+    switch (node.tagName) {
+      case "STRONG":
+      case "B":
+        return inner.trim() ? `**${inner.trim()}**` : "";
+      case "EM":
+      case "I":
+        return inner.trim() ? `*${inner.trim()}*` : "";
+      case "BR":
+        return "\n";
+      default:
+        return inner;
+    }
+  };
+  const cell = (el: Element) => inline(el).replace(/\s+/g, " ").replace(/\|/g, "/").trim();
+  const isList = (n: Node) => n instanceof Element && (n.tagName === "UL" || n.tagName === "OL");
+  const list = (el: Element, depth: number): string =>
+    Array.from(el.children)
+      .filter((li) => li.tagName === "LI")
+      .map((li, i) => {
+        const text = Array.from(li.childNodes)
+          .filter((n) => !isList(n))
+          .map(inline)
+          .join("")
+          .replace(/\s+/g, " ")
+          .trim();
+        const marker = el.tagName === "OL" ? `${i + 1}.` : "-";
+        const nested = Array.from(li.children).filter(isList);
+        return [
+          `${"  ".repeat(depth)}${marker} ${text}`,
+          ...nested.map((n) => list(n, depth + 1)),
+        ].join("\n");
+      })
+      .join("\n");
+  const blocks: string[] = [];
+  const walk = (el: Element) => {
+    for (const child of Array.from(el.children)) {
+      const tag = child.tagName;
+      if (/^H[1-6]$/.test(tag)) {
+        const text = cell(child);
+        if (text) blocks.push(`${"#".repeat(Number(tag[1]))} ${text}`);
+      } else if (tag === "P") {
+        const text = inline(child).trim();
+        if (text) blocks.push(text);
+      } else if (tag === "UL" || tag === "OL") {
+        const text = list(child, 0);
+        if (text) blocks.push(text);
+      } else if (tag === "TABLE") {
+        const rows = Array.from(child.querySelectorAll("tr")).map((tr) =>
+          Array.from(tr.children).map(cell),
+        );
+        if (rows.length) {
+          const width = Math.max(...rows.map((r) => r.length));
+          const pad = (r: string[]) => [...r, ...Array(width - r.length).fill("")];
+          const line = (r: string[]) => `| ${pad(r).join(" | ")} |`;
+          blocks.push(
+            [line(rows[0]), `|${" --- |".repeat(width)}`, ...rows.slice(1).map(line)].join("\n"),
+          );
+        }
+      } else {
+        walk(child);
+      }
+    }
+  };
+  walk(doc.body);
+  return blocks.join("\n\n").trim();
+}
+
+// Each row becomes "**Header:** value" lines, which search far better than CSV.
 async function extractXlsx(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array" });
   const parts: string[] = [];
   for (const sheetName of wb.SheetNames) {
-    const sheet = wb.Sheets[sheetName];
-    const csv = XLSX.utils.sheet_to_csv(sheet);
-    if (csv.trim()) parts.push(`# ${sheetName}\n${csv}`);
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[sheetName], {
+      defval: "",
+      raw: false,
+    });
+    const blocks = rows
+      .map((r) =>
+        Object.entries(r)
+          .map(([k, v]) => [k.trim(), String(v ?? "").trim()] as const)
+          .filter(([k, v]) => v && !/^__EMPTY/.test(k))
+          .map(([k, v]) => `**${k}:** ${v}`)
+          .join("\n"),
+      )
+      .filter(Boolean);
+    if (blocks.length) parts.push(`# ${sheetName}\n\n${blocks.join("\n\n")}`);
   }
   return parts.join("\n\n").trim();
 }
@@ -42,10 +132,10 @@ async function fileToBase64(file: File): Promise<string> {
 }
 
 // Sends the PDF to our TanStack server fn which calls LlamaParse.
-async function extractPdf(file: File): Promise<string> {
+async function extractPdf(file: File, medium?: "Hindi" | "English" | "Bilingual"): Promise<string> {
   const base64 = await fileToBase64(file);
   const { markdown } = await parsePdfWithLlama({
-    data: { filename: file.name, base64 },
+    data: { filename: file.name, base64, medium },
   });
   if (!markdown) throw new Error("No markdown returned from parser");
   return markdown;
@@ -82,8 +172,7 @@ export async function parseQnAExcel(file: File): Promise<QnARow[]> {
     if (rows.length === 0) continue;
     const headers = Object.keys(rows[0]);
     const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, "_");
-    const findKey = (want: string) =>
-      headers.find((h) => norm(h) === want) ?? null;
+    const findKey = (want: string) => headers.find((h) => norm(h) === want) ?? null;
     const qKey = findKey("question");
     const aKey = findKey("answer");
     if (!qKey || !aKey) {

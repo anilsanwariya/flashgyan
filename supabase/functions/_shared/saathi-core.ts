@@ -27,6 +27,8 @@ export type SaathiMatch = {
   id: string;
   title: string;
   subject: string;
+  topic?: string | null;
+  medium?: string | null;
   content: string;
   source_file: string | null;
   vector_score: number;
@@ -37,6 +39,7 @@ export type SaathiMatch = {
 export type SaathiSource = {
   title: string;
   subject: string;
+  topic: string | null;
   passages: string[];
 };
 
@@ -77,6 +80,48 @@ export async function saathiEmbed(apiKey: string, text: string): Promise<number[
   if (!res.ok) throw gatewayError(res.status, await res.text());
   const json = (await res.json()) as { data: { embedding: number[] }[] };
   return json.data[0].embedding;
+}
+
+const EMBED_BATCH = 64;
+
+// Embeds many texts with one request per batch, keeping input order. If the gateway
+// rejects batched input, falls back to a few single requests at a time.
+export async function saathiEmbedMany(apiKey: string, texts: string[]): Promise<number[][]> {
+  const out: number[][] = [];
+  for (let i = 0; i < texts.length; i += EMBED_BATCH) {
+    const batch = texts.slice(i, i + EMBED_BATCH);
+    out.push(...(await embedBatch(apiKey, batch)));
+  }
+  return out;
+}
+
+async function embedBatch(apiKey: string, batch: string[]): Promise<number[][]> {
+  const res = await fetch(`${SAATHI_AI_GATEWAY}/embeddings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Lovable-API-Key": apiKey },
+    body: JSON.stringify({
+      model: SAATHI_EMBED_MODEL,
+      input: batch,
+      dimensions: SAATHI_EMBED_DIMS,
+    }),
+  });
+  if (res.status === 429 || res.status === 402) throw gatewayError(res.status, await res.text());
+  if (res.ok) {
+    const json = (await res.json()) as { data?: { embedding: number[]; index?: number }[] };
+    const data = json.data ?? [];
+    if (data.length === batch.length) {
+      return data
+        .map((d, i) => ({ i: d.index ?? i, e: d.embedding }))
+        .sort((a, b) => a.i - b.i)
+        .map((d) => d.e);
+    }
+  }
+  const single: number[][] = new Array(batch.length);
+  for (let i = 0; i < batch.length; i += 4) {
+    const part = await Promise.all(batch.slice(i, i + 4).map((t) => saathiEmbed(apiKey, t)));
+    part.forEach((e, j) => (single[i + j] = e));
+  }
+  return single;
 }
 
 export async function saathiComplete(apiKey: string, messages: ChatMessage[]): Promise<string> {
@@ -185,7 +230,7 @@ export async function saathiSearch(
     match_count: SAATHI_MATCH_COUNT,
     subject_filters: subjects && subjects.length ? subjects : null,
   });
-  if (!res.error) return (res.data ?? []) as SaathiMatch[];
+  if (!res.error) return preferQuestionLanguage((res.data ?? []) as SaathiMatch[], query);
   if (res.error.code !== "PGRST202") throw new Error(res.error.message);
 
   const perSubject = await Promise.all(
@@ -209,6 +254,23 @@ export async function saathiSearch(
     .slice(0, SAATHI_MATCH_COUNT);
 }
 
+const DEVANAGARI = /[\u0900-\u097F]/;
+const LANGUAGE_BONUS = 0.03;
+
+// Nudges chunks written in the question's language (by the document's medium) ahead
+// of equally relevant chunks in the other language. Relevance cut-offs still use
+// the raw scores.
+function preferQuestionLanguage(matches: SaathiMatch[], query: string): SaathiMatch[] {
+  const wanted = DEVANAGARI.test(query) ? "Hindi" : "English";
+  return matches
+    .map((m) => ({
+      ...m,
+      similarity:
+        m.similarity + (m.medium === wanted || m.medium === "Bilingual" ? LANGUAGE_BONUS : 0),
+    }))
+    .sort((a, b) => b.similarity - a.similarity);
+}
+
 export function relevantMatches(matches: SaathiMatch[]): SaathiMatch[] {
   return matches.filter((m) => m.keyword_score > 0 || m.vector_score >= SAATHI_MIN_VECTOR_SCORE);
 }
@@ -219,7 +281,13 @@ export function collectSources(matches: SaathiMatch[]): SaathiSource[] {
     const title = m.source_file || m.title;
     const existing = byTitle.get(title);
     if (existing) existing.passages.push(m.content);
-    else byTitle.set(title, { title, subject: m.subject, passages: [m.content] });
+    else
+      byTitle.set(title, {
+        title,
+        subject: m.subject,
+        topic: m.topic ?? null,
+        passages: [m.content],
+      });
   }
   return [...byTitle.values()];
 }
@@ -250,7 +318,10 @@ export function saathiMessages(opts: {
   matches: SaathiMatch[];
 }): ChatMessage[] {
   const material = opts.matches
-    .map((m, i) => `[Material ${i + 1}] ${m.source_file || m.title} (${m.subject})\n${m.content}`)
+    .map(
+      (m, i) =>
+        `[Material ${i + 1}] ${m.source_file || m.title} (${[m.subject, m.topic].filter(Boolean).join(" › ")})\n${m.content}`,
+    )
     .join("\n\n---\n\n");
   return [
     { role: "system", content: saathiSystemPrompt(opts.channel) },
@@ -261,8 +332,6 @@ export function saathiMessages(opts: {
     },
   ];
 }
-
-const DEVANAGARI = /[ऀ-ॿ]/;
 
 // Shown when nothing relevant was found, so no model call is made.
 export function saathiNoMaterialReply(question: string): string {
