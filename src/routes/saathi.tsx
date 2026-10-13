@@ -735,10 +735,72 @@ function loadMermaid(): Promise<Mermaid> {
       startOnLoad: false,
       theme: dark ? "dark" : "default",
       securityLevel: "strict",
+      // Otherwise Mermaid injects its own "Syntax error in text" graphic into the page.
+      suppressErrorRendering: true,
     });
     return mermaid;
   });
   return mermaidLoader;
+}
+
+const MERMAID_SHAPES: [string, string][] = [
+  ["[[", "]]"],
+  ["((", "))"],
+  ["[", "]"],
+  ["(", ")"],
+  ["{", "}"],
+];
+
+// Where a node shape opened at `start` closes, allowing nested brackets in the label.
+function closingIndex(line: string, start: number, open: string, close: string): number {
+  if (open.length > 1) return line.indexOf(close, start + open.length);
+  let depth = 0;
+  for (let i = start; i < line.length; i++) {
+    if (line[i] === open) depth += 1;
+    else if (line[i] === close && --depth === 0) return i;
+  }
+  return -1;
+}
+
+// AI-written diagrams often leave labels containing brackets, commas, colons or
+// Hindi punctuation unquoted, which Mermaid rejects. Wrap node labels in quotes.
+function quoteMermaidLabels(chart: string): string {
+  return chart
+    .split("\n")
+    .map((line) => {
+      let out = "";
+      let i = 0;
+      while (i < line.length) {
+        const id = /^[\w-]+/.exec(line.slice(i));
+        if (id && (i === 0 || !/[\w-]/.test(line[i - 1]))) {
+          const after = i + id[0].length;
+          const shape = MERMAID_SHAPES.find(([open]) => line.startsWith(open, after));
+          const end = shape ? closingIndex(line, after, shape[0], shape[1]) : -1;
+          if (shape && end > after + shape[0].length) {
+            const label = line.slice(after + shape[0].length, end).trim();
+            const quoted = label.startsWith('"') ? label : `"${label.replace(/"/g, "'")}"`;
+            out += `${id[0]}${shape[0]}${quoted}${shape[1]}`;
+            i = end + shape[1].length;
+          } else {
+            out += id[0];
+            i = after;
+          }
+        } else {
+          out += line[i];
+          i += 1;
+        }
+      }
+      return out;
+    })
+    .join("\n");
+}
+
+// Returns a version of the chart Mermaid can draw, or null if none parses.
+async function drawableChart(mermaid: Mermaid, chart: string): Promise<string | null> {
+  for (const candidate of [chart, quoteMermaidLabels(chart)]) {
+    if (await mermaid.parse(candidate, { suppressErrors: true })) return candidate;
+  }
+  return null;
 }
 
 function MermaidBlock({ chart }: { chart: string }) {
@@ -751,12 +813,17 @@ function MermaidBlock({ chart }: { chart: string }) {
     (async () => {
       try {
         const mermaid = await loadMermaid();
-        const { svg } = await mermaid.render(`m-${id}`, chart);
+        const drawable = await drawableChart(mermaid, chart);
+        if (!drawable) throw new Error("Invalid diagram");
+        const { svg } = await mermaid.render(`m-${id}`, drawable);
         if (!cancelled && ref.current) {
           ref.current.innerHTML = svg;
           setFailed(false);
         }
       } catch {
+        // Remove anything Mermaid left behind while trying to render.
+        document.getElementById(`m-${id}`)?.remove();
+        document.getElementById(`dm-${id}`)?.remove();
         if (!cancelled) setFailed(true);
       }
     })();
