@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { saathiEmbed } from "../../supabase/functions/_shared/saathi-core.ts";
 
 export type SaathiMedium = "Hindi" | "English" | "Bilingual";
 
@@ -14,17 +15,6 @@ export type SaathiDoc = {
   parent_id: string | null;
   chunk_index: number | null;
 };
-
-export type SaathiChatSource = {
-  id: string;
-  title: string;
-  subject: string;
-  similarity: number;
-};
-
-const EMBED_MODEL = "google/gemini-embedding-001";
-const EMBED_DIMS = 1536;
-const CHAT_MODEL = "google/gemini-3-flash-preview";
 
 // --- SEMANTIC CHUNKING HELPER ---
 function chunkText(text: string, maxLen = 1500): string[] {
@@ -50,20 +40,11 @@ function chunkText(text: string, maxLen = 1500): string[] {
   return chunks.length ? chunks : [text];
 }
 
+// Must use the same model as question embeddings, so it goes through the shared core.
 async function embed(text: string): Promise<number[]> {
   const key = process.env.LOVABLE_API_KEY;
   if (!key) throw new Error("LOVABLE_API_KEY is not configured");
-  const res = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Lovable-API-Key": key },
-    body: JSON.stringify({ model: EMBED_MODEL, input: text, dimensions: EMBED_DIMS }),
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Embedding failed (${res.status}): ${body}`);
-  }
-  const json = (await res.json()) as { data: { embedding: number[] }[] };
-  return json.data[0].embedding;
+  return saathiEmbed(key, text);
 }
 
 async function getAdmin() {
@@ -187,6 +168,20 @@ export const updateSaathiDoc = createServerFn({ method: "POST" })
         .select(DOC_COLS)
         .single();
       if (error) throw new Error(error.message);
+
+      // Search reads the chunks, so they must carry the parent's subject, medium and title.
+      const { data: chunks, error: chunkErr } = await admin
+        .from("saathi_knowledge")
+        .update({ subject: data.subject, medium: data.medium, source_file: data.title })
+        .eq("parent_id", data.id)
+        .select("id,chunk_index");
+      if (chunkErr) throw new Error(chunkErr.message);
+      const parts = chunks ?? [];
+      for (const c of parts) {
+        const title = parts.length > 1 ? `${data.title} (Part ${c.chunk_index})` : data.title;
+        const { error: tErr } = await admin.from("saathi_knowledge").update({ title }).eq("id", c.id);
+        if (tErr) throw new Error(tErr.message);
+      }
       return row as unknown as SaathiDoc;
     }
   });
@@ -247,145 +242,50 @@ export const deleteSaathiDoc = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-export const listSaathiSubjects = createServerFn({ method: "GET" }).handler(async () => {
-  const admin = await getAdmin();
-  const { data, error } = await admin.from("saathi_knowledge").select("subject");
-  if (error) throw new Error(error.message);
-  const set = new Set<string>();
-  for (const row of data ?? []) if (row.subject) set.add(row.subject);
-  return Array.from(set).sort();
-});
+export type SaathiTopic = { subject: string; title: string };
 
-const FALLBACK = "I don't have information on that subject in my current study materials.";
-const SYSTEM_PROMPT = `You are SAATHI, an expert study assistant. Answer questions ONLY based on the provided database context. If the answer is not contained in the context, reply exactly with: '${FALLBACK}'
+// Subjects and document titles for the public SAATHI page (subject picker and
+// starter questions). Only parent rows are read, never chunk content.
+export const listSaathiTopics = createServerFn({ method: "GET" }).handler(
+  async (): Promise<{ subjects: string[]; topics: SaathiTopic[] }> => {
+    const admin = await getAdmin();
+    const { data, error } = await admin
+      .from("saathi_knowledge")
+      .select("subject,title")
+      .is("parent_id", null)
+      .order("created_at", { ascending: false })
+      .limit(1000);
+    if (error) throw new Error(error.message);
+    const topics = (data ?? []).filter((r) => r.subject && r.title) as SaathiTopic[];
+    const subjects = Array.from(new Set(topics.map((t) => t.subject))).sort();
+    return { subjects, topics };
+  },
+);
 
-LANGUAGE MATCHING: You must detect the language of the user's question and reply in that EXACT same language (e.g., if asked in Hindi, reply in Hindi). Ensure Hindi grammatical structures are preserved.
-
-SOURCE CITATIONS: Every time you state a fact or provide an explanation based on the context, you MUST append a citation using the exact Source Title provided. Format it at the end of your thought like this: (Source: [Title]).
-
-RICH FORMATTING: Always format your answers using Markdown. Use **bold** for headings and keywords. Use bullet points where appropriate.
-
-VISUAL AIDS: When explaining processes, timelines, or comparisons, you MUST use Markdown tables, or generate Mermaid.js code blocks (\`\`\`mermaid) to draw diagrams to make concepts easier for students.`;
-
-export const askSaathi = createServerFn({ method: "POST" })
+export const submitSaathiFeedback = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z.object({
       question: z.string().trim().min(1).max(2000),
-      subjects: z.array(z.string().trim().min(1).max(120)).min(1).max(20),
-      user_id: z.string().optional(),
+      answer: z.string().trim().min(1).max(20_000),
+      rating: z.union([z.literal(1), z.literal(-1)]),
+      sources: z.array(z.string().max(300)).max(20).default([]),
     }).parse(input),
   )
   .handler(async ({ data }) => {
-    const key = process.env.LOVABLE_API_KEY;
-    if (!key) throw new Error("LOVABLE_API_KEY is not configured");
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const { consumeSaathiRateLimit } = await import("@/lib/saathi-ask.server");
+    if (!(await consumeSaathiRateLimit(getRequest(), "feedback"))) {
+      throw new Error("Too many requests. Please try again later.");
+    }
     const admin = await getAdmin();
-
-    // 1. Fetch Conversational Memory (last ~6 turns)
-    let pastMessages: { role: string; content: string }[] = [];
-    if (data.user_id) {
-      const { data: history } = await admin
-        .from("saathi_chat_history" as never)
-        .select("role,content")
-        .eq("user_id", data.user_id)
-        .order("created_at", { ascending: false })
-        .limit(6);
-      if (history) {
-        pastMessages = (history as unknown as { role: string; content: string }[])
-          .slice()
-          .reverse();
-      }
-    }
-
-    const queryEmbedding = await embed(data.question);
-    const perSubject = await Promise.all(
-      data.subjects.map((subject) =>
-        admin.rpc("match_saathi_hybrid", {
-          query_text: data.question,
-          query_embedding: queryEmbedding as unknown as string,
-          match_count: 6,
-          subject_filter: subject,
-        }),
-      ),
-    );
-
-    const errored = perSubject.find((r) => r.error);
-    if (errored?.error) throw new Error(errored.error.message);
-
-    const merged = perSubject.flatMap((r) => (r.data ?? []) as Array<{
-      id: string; title: string; subject: string; content: string; source_file: string; similarity: number;
-    }>);
-
-    const seen = new Set<string>();
-    const matches = merged
-      .filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true)))
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, 8);
-
-    let answer = FALLBACK;
-    const uniqueSources: SaathiChatSource[] = [];
-
-    if (matches.length > 0) {
-      const contextBlock = matches
-        .map((s, i) => `[Source ${i + 1}] Title: ${s.source_file}\nSubject: ${s.subject}\nContent:\n${s.content}`)
-        .join("\n\n---\n\n");
-
-      const userPrompt = `Context from knowledge base:\n\n${contextBlock}\n\n---\n\nQuestion: ${data.question}`;
-
-      const aiMessages = [
-        { role: "system", content: SYSTEM_PROMPT },
-        ...pastMessages,
-        { role: "user", content: userPrompt },
-      ];
-
-      const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Lovable-API-Key": key },
-        body: JSON.stringify({ model: CHAT_MODEL, messages: aiMessages }),
-      });
-
-      if (aiRes.status === 429) throw new Error("Rate limit reached. Please try again shortly.");
-      if (aiRes.status === 402) throw new Error("AI credits exhausted. Please add credits.");
-
-      if (aiRes.ok) {
-        const aiJson = (await aiRes.json()) as { choices: { message: { content: string } }[] };
-        answer = aiJson.choices?.[0]?.message?.content?.trim() || FALLBACK;
-
-        const seenTitles = new Set<string>();
-        for (const s of matches) {
-          if (!seenTitles.has(s.source_file)) {
-            seenTitles.add(s.source_file);
-            uniqueSources.push({
-              id: s.id,
-              title: s.source_file,
-              subject: s.subject,
-              similarity: s.similarity,
-            });
-          }
-        }
-      }
-    }
-
-    // 2. Knowledge Gap Tracking
-    if (answer === FALLBACK || uniqueSources.length === 0) {
-      try {
-        await admin.rpc(
-          "increment_knowledge_gap" as never,
-          { gap_question: data.question } as never,
-        );
-      } catch {
-        // best-effort; never block the answer on analytics
-      }
-    }
-
-    // 3. Save memory to history
-    if (data.user_id) {
-      await admin.from("saathi_chat_history" as never).insert([
-        { user_id: data.user_id, role: "user", content: data.question },
-        { user_id: data.user_id, role: "assistant", content: answer },
-      ] as never);
-    }
-
-    return { answer, sources: uniqueSources };
+    const { error } = await admin.from("saathi_feedback" as never).insert({
+      question: data.question,
+      answer: data.answer,
+      rating: data.rating,
+      sources: data.sources,
+    } as never);
+    if (error) throw new Error(error.message);
+    return { ok: true };
   });
 
 export type SaathiKnowledgeGap = {
@@ -408,4 +308,58 @@ export const listKnowledgeGaps = createServerFn({ method: "GET" })
     return (data ?? []) as unknown as SaathiKnowledgeGap[];
   });
 
+export const deleteKnowledgeGap = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const admin = await assertAdmin(context.userId);
+    const { error } = await admin
+      .from("saathi_knowledge_gaps" as never)
+      .delete()
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
 
+export type SaathiFeedback = {
+  id: string;
+  question: string;
+  answer: string;
+  rating: 1 | -1;
+  sources: string[];
+  created_at: string;
+};
+
+export const listSaathiFeedback = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<{ up: number; down: number; recentDown: SaathiFeedback[] }> => {
+    const admin = await assertAdmin(context.userId);
+    const table = "saathi_feedback" as never;
+    const [up, down, recent] = await Promise.all([
+      admin.from(table).select("id", { count: "exact", head: true }).eq("rating", 1),
+      admin.from(table).select("id", { count: "exact", head: true }).eq("rating", -1),
+      admin
+        .from(table)
+        .select("id,question,answer,rating,sources,created_at")
+        .eq("rating", -1)
+        .order("created_at", { ascending: false })
+        .limit(50),
+    ]);
+    const failed = [up, down, recent].find((r) => r.error);
+    if (failed?.error) throw new Error(failed.error.message);
+    return {
+      up: up.count ?? 0,
+      down: down.count ?? 0,
+      recentDown: (recent.data ?? []) as unknown as SaathiFeedback[],
+    };
+  });
+
+export const deleteSaathiFeedback = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const admin = await assertAdmin(context.userId);
+    const { error } = await admin.from("saathi_feedback" as never).delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });

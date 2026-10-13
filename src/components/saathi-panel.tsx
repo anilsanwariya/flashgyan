@@ -25,11 +25,15 @@ import rehypeRaw from "rehype-raw";
 import {
   appendSaathiDoc,
   createSaathiDoc,
+  deleteKnowledgeGap,
   deleteSaathiDoc,
+  deleteSaathiFeedback,
   listKnowledgeGaps,
+  listSaathiFeedback,
   listSaathiDocs,
   updateSaathiDoc,
   type SaathiDoc,
+  type SaathiFeedback,
   type SaathiKnowledgeGap,
   type SaathiMedium,
 } from "@/lib/saathi.functions";
@@ -945,7 +949,9 @@ function QnABulkUpload({
 }
 
 function KnowledgeGapsPanel() {
+  const qc = useQueryClient();
   const listGapsFn = useServerFn(listKnowledgeGaps);
+  const deleteGapFn = useServerFn(deleteKnowledgeGap);
   const gapsQ = useQuery<SaathiKnowledgeGap[]>({
     queryKey: ["saathiKnowledgeGaps"],
     queryFn: () => listGapsFn(),
@@ -953,50 +959,156 @@ function KnowledgeGapsPanel() {
 
   const gaps = gapsQ.data ?? [];
 
+  async function dismiss(id: string) {
+    try {
+      await deleteGapFn({ data: { id } });
+      qc.setQueryData<SaathiKnowledgeGap[]>(["saathiKnowledgeGaps"], (cur) =>
+        (cur ?? []).filter((g) => g.id !== id),
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't dismiss");
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+        <div>
+          <h3 className="font-semibold">Knowledge Gaps</h3>
+          <p className="text-sm text-muted-foreground">
+            Questions students asked that SAATHI couldn't answer. Upload matching study material, then dismiss the gap.
+          </p>
+        </div>
+
+        {gapsQ.isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : gapsQ.error ? (
+          <p className="text-sm text-destructive">
+            {gapsQ.error instanceof Error ? gapsQ.error.message : "Failed to load gaps"}
+          </p>
+        ) : gaps.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border p-6 text-center">
+            <p className="text-sm text-muted-foreground">No knowledge gaps yet. 🎉</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2">Question</th>
+                  <th className="px-3 py-2 w-24 text-right">Asked</th>
+                  <th className="px-3 py-2 w-40">Last asked</th>
+                  <th className="px-3 py-2 w-12" />
+                </tr>
+              </thead>
+              <tbody>
+                {gaps.map((g) => (
+                  <tr key={g.id} className="border-t border-border align-top">
+                    <td className="px-3 py-2">{g.question}</td>
+                    <td className="px-3 py-2 text-right font-medium">{g.ask_count}</td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {new Date(g.last_asked_at).toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        aria-label="Dismiss gap"
+                        title="Dismiss"
+                        onClick={() => dismiss(g.id)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <FeedbackPanel />
+    </div>
+  );
+}
+
+function FeedbackPanel() {
+  const qc = useQueryClient();
+  const listFn = useServerFn(listSaathiFeedback);
+  const deleteFn = useServerFn(deleteSaathiFeedback);
+  const feedbackQ = useQuery({ queryKey: ["saathiFeedback"], queryFn: () => listFn() });
+  const data = feedbackQ.data;
+
+  async function dismiss(id: string) {
+    try {
+      await deleteFn({ data: { id } });
+      qc.invalidateQueries({ queryKey: ["saathiFeedback"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't dismiss");
+    }
+  }
+
   return (
     <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
-      <div>
-        <h3 className="font-semibold">Knowledge Gaps</h3>
-        <p className="text-sm text-muted-foreground">
-          Questions students asked that SAATHI couldn't answer. Upload matching study material to close each gap.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="font-semibold">Answer Feedback</h3>
+          <p className="text-sm text-muted-foreground">
+            Answers students marked as not helpful. Fix or add the material behind them.
+          </p>
+        </div>
+        {data && (
+          <div className="shrink-0 text-sm text-muted-foreground">
+            👍 {data.up} · 👎 {data.down}
+          </div>
+        )}
       </div>
 
-      {gapsQ.isLoading ? (
+      {feedbackQ.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : gapsQ.error ? (
+      ) : feedbackQ.error ? (
         <p className="text-sm text-destructive">
-          {gapsQ.error instanceof Error ? gapsQ.error.message : "Failed to load gaps"}
+          {feedbackQ.error instanceof Error ? feedbackQ.error.message : "Failed to load feedback"}
         </p>
-      ) : gaps.length === 0 ? (
+      ) : !data || data.recentDown.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-6 text-center">
-          <p className="text-sm text-muted-foreground">No knowledge gaps yet. 🎉</p>
+          <p className="text-sm text-muted-foreground">No negative feedback yet.</p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2">Question</th>
-                <th className="px-3 py-2 w-24 text-right">Asked</th>
-                <th className="px-3 py-2 w-40">Last asked</th>
-              </tr>
-            </thead>
-            <tbody>
-              {gaps.map((g) => (
-                <tr key={g.id} className="border-t border-border align-top">
-                  <td className="px-3 py-2">{g.question}</td>
-                  <td className="px-3 py-2 text-right font-medium">{g.ask_count}</td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">
-                    {new Date(g.last_asked_at).toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-2">
+          {data.recentDown.map((f: SaathiFeedback) => (
+            <details key={f.id} className="rounded-lg border border-border p-3">
+              <summary className="flex cursor-pointer items-start justify-between gap-3 text-sm">
+                <span className="font-medium">{f.question}</span>
+                <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                  {new Date(f.created_at).toLocaleDateString()}
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7"
+                    aria-label="Dismiss feedback"
+                    title="Dismiss"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      dismiss(f.id);
+                    }}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </span>
+              </summary>
+              <div className="prose prose-sm mt-2 max-w-none border-t border-border pt-2">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{f.answer}</ReactMarkdown>
+              </div>
+              {f.sources.length > 0 && (
+                <p className="mt-2 text-xs text-muted-foreground">Sources: {f.sources.join(", ")}</p>
+              )}
+            </details>
+          ))}
         </div>
       )}
     </section>
   );
 }
-

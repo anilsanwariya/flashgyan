@@ -29,11 +29,22 @@ export const Route = createFileRoute("/sitemap.xml")({
             auth: { storage: undefined, persistSession: false, autoRefreshToken: false },
           },
         );
-        const { data: decks, error } = await supabase.from("flashcard_decks").select("id");
+        const [{ data: decks, error }, { data: settings }] = await Promise.all([
+          supabase.from("flashcard_decks").select("id"),
+          supabase
+            .from("home_settings")
+            .select("lock_saathi, hide_saathi")
+            .eq("id", 1)
+            .maybeSingle(),
+        ]);
         if (error) console.error("sitemap: could not list decks", error.message);
 
+        // Don't advertise SAATHI to search engines while it is locked or hidden.
+        const saathiOff = Boolean(settings?.lock_saathi || settings?.hide_saathi);
         const entries = [
-          ...STATIC_PATHS.map((p) => urlEntry(`${SITE_URL}${p.path}`, p.priority, p.changefreq)),
+          ...STATIC_PATHS.filter((p) => !(saathiOff && p.path === "/saathi")).map((p) =>
+            urlEntry(`${SITE_URL}${p.path}`, p.priority, p.changefreq),
+          ),
           ...(decks ?? []).map((d) => urlEntry(`${SITE_URL}/decks/${d.id}`, "0.7", "weekly")),
         ];
         const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries.join("\n")}\n</urlset>\n`;
