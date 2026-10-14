@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -51,7 +51,12 @@ import {
   type SaathiMedium,
 } from "@/lib/saathi.functions";
 import { SAATHI_ACCEPT, parseQnAExcel, textBlockForFile } from "@/lib/saathi-parse";
-import { FileDropZone, FileQueueList, useFileQueue } from "@/components/saathi-file-queue";
+import {
+  FileDropZone,
+  FileQueueList,
+  useFileQueue,
+  type QueueItem,
+} from "@/components/saathi-file-queue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -66,6 +71,7 @@ import {
 
 const MEDIUMS: SaathiMedium[] = ["Hindi", "English", "Bilingual"];
 const ALL = "__all__";
+const CLEANUP_KEY = "saathi.pdfCleanup.v1";
 
 type FormState = {
   title: string;
@@ -685,19 +691,62 @@ function EntryForm({
             ? "Saving…"
             : "Save to SAATHI";
 
+  // PDF cleanup settings are remembered in this browser.
+  const [cleanup, setCleanup] = useState<{ enabled: boolean; phrases: string }>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CLEANUP_KEY) ?? "null");
+      if (saved && typeof saved.enabled === "boolean") return saved;
+    } catch {
+      // storage unavailable
+    }
+    return { enabled: true, phrases: "" };
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(CLEANUP_KEY, JSON.stringify(cleanup));
+    } catch {
+      // storage unavailable
+    }
+  }, [cleanup]);
+
+  const blockFor = (file: File, text: string) =>
+    isChunk ? text : textBlockForFile(file.name, text);
+
   // Each file's text is appended as soon as it is read, in the order added.
   const queue = useFileQueue({
     medium: form.medium,
     resetKey: editKind,
+    cleanup: {
+      enabled: cleanup.enabled,
+      phrases: cleanup.phrases
+        .split(",")
+        .map((p) => p.trim())
+        .filter(Boolean),
+    },
     onText: (file, text) => {
-      const block = isChunk ? text : textBlockForFile(file.name, text);
+      const block = blockFor(file, text);
       setForm((prev) => ({
         ...prev,
         title: prev.title || file.name.replace(/\.[^.]+$/, ""),
         content: prev.content.trim() ? `${prev.content.trimEnd()}\n\n${block}` : block,
       }));
+      return block;
     },
   });
+
+  // Puts the uncleaned text back in place of the cleaned block, if that block
+  // hasn't been edited since it was added.
+  function undoCleanup(item: QueueItem) {
+    if (!item.block || !item.raw) return;
+    if (!form.content.includes(item.block)) {
+      toast.error("This file's text was edited, so the cleanup can't be undone automatically.");
+      return;
+    }
+    const rawBlock = blockFor(item.file, item.raw);
+    setForm((prev) => ({ ...prev, content: prev.content.replace(item.block!, rawBlock) }));
+    queue.patch(item.id, { cleanupUndone: true, block: rawBlock });
+    toast.success("Original text restored");
+  }
   const maxChars = isChunk ? 200_000 : 500_000;
   const tooLong = form.content.length > maxChars;
 
@@ -826,7 +875,9 @@ function EntryForm({
       {showMetaFields && (
         <p className="text-xs text-muted-foreground">
           Pick the medium before parsing a PDF: Hindi and Bilingual use Hindi text recognition for
-          scanned pages.
+          scanned pages. Adding the same material in both languages? Choose Bilingual and drop both
+          PDFs here; SAATHI tags each part by language and answers from the one matching the
+          student's question.
         </p>
       )}
 
@@ -856,7 +907,27 @@ function EntryForm({
               </Button>
             </div>
           </div>
-          <FileQueueList queue={queue} />
+          {!isChunk && (
+            <div className="mb-2 space-y-1.5 rounded-xl border border-border bg-muted/20 p-2 text-xs">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={cleanup.enabled}
+                  onChange={(e) => setCleanup((c) => ({ ...c, enabled: e.target.checked }))}
+                />
+                Clean PDFs: remove running headers, footers, page numbers and watermarks
+              </label>
+              {cleanup.enabled && (
+                <Input
+                  value={cleanup.phrases}
+                  onChange={(e) => setCleanup((c) => ({ ...c, phrases: e.target.value }))}
+                  placeholder="Also remove lines containing… (comma-separated, e.g. Downloaded from, www.example.com)"
+                  className="h-8 text-xs"
+                />
+              )}
+            </div>
+          )}
+          <FileQueueList queue={queue} onUndoCleanup={undoCleanup} />
           <div className="flex flex-wrap items-center gap-1 mb-2">
             <button
               type="button"
@@ -1502,6 +1573,14 @@ function HealthPanel({ onRebuilt }: { onRebuilt: () => void }) {
                     <div className="text-xs text-muted-foreground">
                       {r.subject}
                       {r.topic ? ` › ${r.topic}` : ""} · {r.medium}
+                      {r.hindi_chunks || r.english_chunks
+                        ? ` · ${[
+                            r.hindi_chunks ? `${r.hindi_chunks} Hindi` : "",
+                            r.english_chunks ? `${r.english_chunks} English` : "",
+                          ]
+                            .filter(Boolean)
+                            .join(", ")}`
+                        : ""}
                     </div>
                   </td>
                   <td className="px-3 py-2 text-right">{r.chunk_count}</td>
