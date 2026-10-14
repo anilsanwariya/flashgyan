@@ -333,6 +333,7 @@ const BUILTINS: Record<NonNullable<BotCommandRow["builtin"]>, string> = {
   flashcards: "Flashcard subjects",
   mcq: "MCQ quiz subjects",
   ask: "Ask SAATHI (text after the command)",
+  answer: "SAATHI writes a Mains answer (marks, then the question)",
   help: "List all commands",
 };
 

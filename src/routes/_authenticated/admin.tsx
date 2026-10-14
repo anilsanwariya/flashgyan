@@ -100,6 +100,7 @@ export const Route = createFileRoute("/_authenticated/admin")({
 });
 
 import { SaathiPanel } from "@/components/saathi-panel";
+import { SaathiAnswersPanel } from "@/components/saathi-answers-panel";
 import { HomePanel } from "@/components/home-panel";
 import { BotManagerPanel, type BotSection } from "@/components/bot-manager-panel";
 import { AdminShell, isAdminSection, type AdminSectionId } from "@/components/admin-shell";
@@ -234,6 +235,8 @@ function Admin() {
         <McqPracticePanel />
       ) : section === "saathi" ? (
         <SaathiPanel />
+      ) : section === "saathiAnswers" ? (
+        <SaathiAnswersPanel />
       ) : section === "users" ? (
         <TelegramUsersPanel />
       ) : (

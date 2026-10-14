@@ -15,6 +15,14 @@ import {
   type SaathiSource,
   type SaathiStreamEvent,
 } from "../../supabase/functions/_shared/saathi-core.ts";
+import {
+  mainsInfo,
+  mainsMessages,
+  mainsNoMaterialReply,
+  saathiMainsPlan,
+  type MainsInfo,
+  type MainsPlan,
+} from "../../supabase/functions/_shared/saathi-mains.ts";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 const askSchema = z.object({
@@ -24,6 +32,9 @@ const askSchema = z.object({
     .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(20_000) }))
     .max(40)
     .default([]),
+  // "mains" writes a descriptive exam answer for the given marks.
+  mode: z.enum(["chat", "mains"]).default("chat"),
+  marks: z.number().int().min(1).max(50).nullish(),
 });
 
 // Per-IP limits for the public endpoint, plus a site-wide ceiling as a backstop
@@ -42,13 +53,18 @@ type CachedAnswer = {
   sources: SaathiSource[];
   followups: string[];
   english_query: string | null;
+  meta?: { mains?: MainsInfo } | null;
 };
 
 // Cached answers are keyed by the standalone question and subjects, and are only
 // served while the knowledge base is unchanged. Cache problems never block an answer.
-async function cacheGet(question: string, subjects: string[]): Promise<CachedAnswer | null> {
+async function cacheGet(
+  channel: string,
+  question: string,
+  subjects: string[],
+): Promise<CachedAnswer | null> {
   const { data, error } = await rpc("saathi_cache_get", {
-    p_channel: "web",
+    p_channel: channel,
     p_question: question,
     p_subjects: subjects,
   });
@@ -60,18 +76,22 @@ async function cacheGet(question: string, subjects: string[]): Promise<CachedAns
 }
 
 async function cachePut(
+  channel: string,
   query: SaathiQuery,
   subjects: string[],
   value: Omit<CachedAnswer, "english_query">,
 ) {
   const { error } = await rpc("saathi_cache_put", {
-    p_channel: "web",
+    p_channel: channel,
     p_question: query.standalone,
     p_subjects: subjects,
     p_answer: value.answer,
     p_sources: value.sources,
     p_followups: value.followups,
     p_english_query: query.english,
+    // Only sent when there is something to store, so databases without the
+    // answer-writing migration keep working for chat answers.
+    ...(value.meta ? { p_meta: value.meta } : {}),
   });
   if (error && error.code !== "PGRST202") console.error("saathi cache put:", error.message);
 }
@@ -147,12 +167,13 @@ export async function handleSaathiAsk(request: Request): Promise<Response> {
 
   const history = cleanHistory(input.history);
   const subjects = [...input.subjects].sort();
+  if (input.mode === "mains") return handleMains(request, apiKey, input, history, subjects);
 
   let query: SaathiQuery;
   let matches;
   try {
     query = await saathiPrepareQuery(apiKey, history, input.question);
-    const cached = await cacheGet(query.standalone, subjects);
+    const cached = await cacheGet("web", query.standalone, subjects);
     if (cached) {
       const hit = cached;
       const q = query;
@@ -228,7 +249,7 @@ export async function handleSaathiAsk(request: Request): Promise<Response> {
     const sources = noAnswer ? [] : collectSources(used);
     const followups = noAnswer ? [] : nextFilter.questions;
     if (!noAnswer && !request.signal.aborted) {
-      await cachePut(q, subjects, { answer: answer.trimEnd(), sources, followups });
+      await cachePut("web", q, subjects, { answer: answer.trimEnd(), sources, followups });
     }
     emit({
       type: "done",
@@ -237,6 +258,118 @@ export async function handleSaathiAsk(request: Request): Promise<Response> {
       followups,
       searchQuery: q.standalone,
       englishQuery: q.english,
+    });
+  });
+}
+
+// Descriptive (RAS Mains) answers: the same search with more material, plus the
+// blueprint and example answers for the question's marks and type.
+async function handleMains(
+  request: Request,
+  apiKey: string,
+  input: z.infer<typeof askSchema>,
+  history: ReturnType<typeof cleanHistory>,
+  subjects: string[],
+): Promise<Response> {
+  let plan: MainsPlan;
+  let channel: string;
+  try {
+    const query = await saathiPrepareQuery(apiKey, history, input.question);
+    // Marks are part of the cache key: the same question at 5 and 10 marks
+    // needs different answers.
+    const requested = input.marks ?? null;
+    channel = `web:mains:${requested ?? "auto"}`;
+    const cached = await cacheGet(channel, query.standalone, subjects);
+    if (cached) {
+      const hit = cached;
+      return ndjson(async (emit) => {
+        emit({ type: "delta", text: hit.answer });
+        emit({
+          type: "done",
+          noAnswer: false,
+          sources: hit.sources,
+          followups: [],
+          searchQuery: query.standalone,
+          englishQuery: query.english,
+          mains: hit.meta?.mains,
+        });
+      });
+    }
+    plan = await saathiMainsPlan({
+      apiKey,
+      rpc,
+      history,
+      question: input.question,
+      subjects,
+      marks: requested,
+      query,
+    });
+  } catch (e) {
+    console.error("saathi mains plan:", e);
+    if (e instanceof SaathiAiError && (e.status === 429 || e.status === 402)) {
+      return jsonError(e.message, 503);
+    }
+    return jsonError("SAATHI is having trouble right now. Please try again.", 502);
+  }
+
+  if (plan.matches.length === 0) {
+    await recordKnowledgeGap(plan.query.standalone);
+    const info = mainsInfo(plan);
+    return ndjson(async (emit) => {
+      emit({ type: "delta", text: mainsNoMaterialReply(input.question) });
+      emit({ type: "done", noAnswer: true, sources: [], mains: info });
+    });
+  }
+
+  let deltas: AsyncGenerator<string>;
+  try {
+    deltas = await saathiCompleteStream(
+      apiKey,
+      mainsMessages({ channel: "web", history, question: input.question, plan }),
+      request.signal,
+    );
+  } catch (e) {
+    console.error("saathi mains chat:", e);
+    if (e instanceof SaathiAiError && (e.status === 429 || e.status === 402)) {
+      return jsonError(e.message, 503);
+    }
+    return jsonError("SAATHI is having trouble right now. Please try again.", 502);
+  }
+
+  const p = plan;
+  const cacheChannel = channel;
+  return ndjson(async (emit) => {
+    const noAnswerFilter = new NoAnswerFilter();
+    let answer = "";
+    const write = (text: string) => {
+      if (!text) return;
+      answer += text;
+      emit({ type: "delta", text });
+    };
+    for await (const delta of deltas) write(noAnswerFilter.push(delta));
+    write(noAnswerFilter.finish());
+
+    const noAnswer = noAnswerFilter.noAnswer || !answer.trim();
+    if (!answer.trim()) emit({ type: "delta", text: mainsNoMaterialReply(input.question) });
+    if (noAnswer) await recordKnowledgeGap(p.query.standalone);
+    const sources = noAnswer ? [] : collectSources(p.matches);
+    const info = mainsInfo(p, noAnswer ? undefined : answer);
+    if (!noAnswer && !request.signal.aborted) {
+      await cachePut(cacheChannel, p.query, subjects, {
+        answer: answer.trimEnd(),
+        sources,
+        followups: [],
+        meta: { mains: info },
+      });
+    }
+    emit({
+      type: "done",
+      noAnswer,
+      sources,
+      followups: [],
+      searchQuery: p.query.standalone,
+      englishQuery: p.query.english,
+      mains: info,
     });
   });
 }

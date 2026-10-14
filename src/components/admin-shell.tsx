@@ -16,6 +16,7 @@ import {
   Megaphone,
   Menu,
   MessageSquareText,
+  NotebookPen,
   PlugZap,
   Sparkles,
   SquarePen,
@@ -33,6 +34,7 @@ export type AdminSectionId =
   | "mcq"
   | "mcqPractice"
   | "saathi"
+  | "saathiAnswers"
   | "bot.broadcast"
   | "bot.commands"
   | "bot.replies"
@@ -90,6 +92,12 @@ export const ADMIN_GROUPS: { label: string; sections: SectionDef[] }[] = [
         icon: Sparkles,
         description:
           "Study material SAATHI answers from. SAATHI only answers from what you save here.",
+      },
+      {
+        id: "saathiAnswers",
+        label: "Answer writing",
+        icon: NotebookPen,
+        description: "RAS Mains model answers, and the answer blueprints SAATHI learns from them.",
       },
     ],
   },
