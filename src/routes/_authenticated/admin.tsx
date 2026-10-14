@@ -92,14 +92,17 @@ export const Route = createFileRoute("/_authenticated/admin")({
     { property: "og:type", content: "website" },
     { name: "twitter:card", content: "summary" },
   ] }),
+  // The open section lives in the URL (?section=bot.commands), so refresh,
+  // links and the Back button keep your place.
+  validateSearch: (search: Record<string, unknown>): { section?: AdminSectionId } =>
+    isAdminSection(search.section) ? { section: search.section } : {},
   component: Admin,
 });
 
 import { SaathiPanel } from "@/components/saathi-panel";
 import { HomePanel } from "@/components/home-panel";
-import { BotManagerPanel } from "@/components/bot-manager-panel";
-
-type Tab = "home" | "flashcards" | "mcq" | "mcqPractice" | "saathi" | "users" | "bot";
+import { BotManagerPanel, type BotSection } from "@/components/bot-manager-panel";
+import { AdminShell, isAdminSection, type AdminSectionId } from "@/components/admin-shell";
 
 
 
@@ -180,7 +183,13 @@ function Admin() {
   const qc = useQueryClient();
   const checkIsAdminFn = useServerFn(checkIsAdmin);
   const adminQ = useQuery({ queryKey: ["isAdmin"], queryFn: () => checkIsAdminFn() });
-  const [tab, setTab] = useState<Tab>("home");
+  const search = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const section: AdminSectionId = search.section ?? "home";
+  const openSection = (id: AdminSectionId) => {
+    navigate({ search: { section: id } });
+    window.scrollTo({ top: 0 });
+  };
 
   async function onSignOut() {
     await qc.cancelQueries();
@@ -214,72 +223,23 @@ function Admin() {
   }
 
   return (
-    <div className="min-h-dvh bg-background flex flex-col">
-      <Header onSignOut={onSignOut} />
-      <main className="flex-1 max-w-2xl w-full mx-auto px-5 py-6 space-y-6 pb-24">
-        <div className="grid grid-cols-3 sm:grid-cols-7 gap-2 rounded-xl bg-muted p-1">
-          <TabButton active={tab === "home"} onClick={() => setTab("home")}>
-            Home
-          </TabButton>
-          <TabButton active={tab === "flashcards"} onClick={() => setTab("flashcards")}>
-            Flashcards
-          </TabButton>
-          <TabButton active={tab === "mcq"} onClick={() => setTab("mcq")}>
-            MCQ Tests
-          </TabButton>
-          <TabButton active={tab === "mcqPractice"} onClick={() => setTab("mcqPractice")}>
-            MCQ Practice
-          </TabButton>
-          <TabButton active={tab === "saathi"} onClick={() => setTab("saathi")}>
-            SAATHI KB
-          </TabButton>
-          <TabButton active={tab === "users"} onClick={() => setTab("users")}>
-            Telegram Users
-          </TabButton>
-          <TabButton active={tab === "bot"} onClick={() => setTab("bot")}>
-            Bot Manager
-          </TabButton>
-        </div>
-        {tab === "home" ? (
-          <HomePanel />
-        ) : tab === "flashcards" ? (
-          <FlashcardsPanel />
-        ) : tab === "mcq" ? (
-          <McqPanel />
-        ) : tab === "mcqPractice" ? (
-          <McqPracticePanel />
-        ) : tab === "users" ? (
-          <TelegramUsersPanel />
-        ) : tab === "bot" ? (
-          <BotManagerPanel />
-        ) : (
-          <SaathiPanel />
-        )}
-      </main>
-    </div>
-  );
-}
-
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={
-        "h-9 rounded-lg text-sm font-medium transition-colors " +
-        (active ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground")
-      }
-    >
-      {children}
-    </button>
+    <AdminShell section={section} onNavigate={openSection} onSignOut={onSignOut}>
+      {section === "home" ? (
+        <HomePanel />
+      ) : section === "flashcards" ? (
+        <FlashcardsPanel />
+      ) : section === "mcq" ? (
+        <McqPanel />
+      ) : section === "mcqPractice" ? (
+        <McqPracticePanel />
+      ) : section === "saathi" ? (
+        <SaathiPanel />
+      ) : section === "users" ? (
+        <TelegramUsersPanel />
+      ) : (
+        <BotManagerPanel section={section.slice(4) as BotSection} />
+      )}
+    </AdminShell>
   );
 }
 

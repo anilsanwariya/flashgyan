@@ -3,12 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
-import { Send, Upload, Users, Loader2, Trash2 } from "lucide-react";
+import { Upload, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -18,7 +16,6 @@ import {
 } from "@/components/ui/select";
 import { parseMcqWorkbook } from "@/lib/mcq-parse";
 import {
-  broadcastBotMessage,
   bulkImportBotFlashcards,
   bulkImportBotMcq,
   createBotMcqTest,
@@ -26,8 +23,16 @@ import {
   deleteBotMcqTest,
   listBotFlashcardDecks,
   listBotMcqTests,
-  listBotUsers,
 } from "@/lib/bot-manager.functions";
+import {
+  BotAutoRepliesPanel,
+  BotBroadcastPanel,
+  BotCommandsPanel,
+  BotMessagesPanel,
+  BotStatsPanel,
+  BotUsersPanel,
+  BotWebhookPanel,
+} from "@/components/bot-admin-panels";
 
 // ---------- Flashcard XLSX parser (same shape as admin flashcard parser) ----------
 type Section = { title: string; body: string };
@@ -94,81 +99,39 @@ function parseFcWorkbook(file: ArrayBuffer) {
   return { rows, invalid, missingCols: [] };
 }
 
-export function BotManagerPanel() {
-  return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">🤖 Telegram Bot Manager</h2>
-        <p className="text-sm text-muted-foreground">
-          Broadcast to Telegram users and manage isolated bot content.
-        </p>
-      </div>
-      <Tabs defaultValue="broadcast">
-        <TabsList>
-          <TabsTrigger value="broadcast">📢 Broadcast</TabsTrigger>
-          <TabsTrigger value="flashcards">🃏 Bot Flashcards</TabsTrigger>
-          <TabsTrigger value="mcq">📝 Bot MCQs</TabsTrigger>
-        </TabsList>
-        <TabsContent value="broadcast" className="mt-4">
-          <BroadcastPanel />
-        </TabsContent>
-        <TabsContent value="flashcards" className="mt-4">
-          <FlashcardUploadPanel />
-        </TabsContent>
-        <TabsContent value="mcq" className="mt-4">
-          <McqUploadPanel />
-        </TabsContent>
-      </Tabs>
-    </div>
-  );
-}
+export type BotSection =
+  | "broadcast"
+  | "commands"
+  | "replies"
+  | "messages"
+  | "stats"
+  | "users"
+  | "connection"
+  | "flashcards"
+  | "mcq";
 
-function BroadcastPanel() {
-  const list = useServerFn(listBotUsers);
-  const broadcast = useServerFn(broadcastBotMessage);
-  const { data: users } = useQuery({ queryKey: ["bot-users"], queryFn: () => list() });
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function onSend() {
-    if (!text.trim()) return;
-    setBusy(true);
-    try {
-      const res = await broadcast({ data: { text: text.trim() } });
-      toast.success(`Sent to ${res.sent}/${res.total} (${res.failed} failed)`);
-      setText("");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Broadcast failed");
-    } finally {
-      setBusy(false);
-    }
+// One bot page at a time; the admin sidebar chooses which.
+export function BotManagerPanel({ section }: { section: BotSection }) {
+  switch (section) {
+    case "commands":
+      return <BotCommandsPanel />;
+    case "replies":
+      return <BotAutoRepliesPanel />;
+    case "messages":
+      return <BotMessagesPanel />;
+    case "stats":
+      return <BotStatsPanel />;
+    case "users":
+      return <BotUsersPanel />;
+    case "connection":
+      return <BotWebhookPanel />;
+    case "flashcards":
+      return <FlashcardUploadPanel />;
+    case "mcq":
+      return <McqUploadPanel />;
+    default:
+      return <BotBroadcastPanel />;
   }
-
-  return (
-    <section className="rounded-2xl border border-border bg-card p-5 space-y-4">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Users className="h-4 w-4" />
-        {users?.length ?? 0} bot users tracked
-      </div>
-      <div>
-        <Label htmlFor="broadcast-text" className="text-xs">
-          Message (HTML allowed: &lt;b&gt;, &lt;i&gt;, &lt;a href&gt;)
-        </Label>
-        <Textarea
-          id="broadcast-text"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={6}
-          placeholder="🎯 Daily reminder: 5 new questions await you! Send /study to begin."
-          disabled={busy}
-        />
-      </div>
-      <Button onClick={onSend} disabled={busy || !text.trim()}>
-        {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
-        Send to All
-      </Button>
-    </section>
-  );
 }
 
 // ---------- Bot Flashcards ----------
