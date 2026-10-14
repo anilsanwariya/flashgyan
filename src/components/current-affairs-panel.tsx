@@ -875,6 +875,7 @@ function ItemCard({
       });
     });
   const unverified = item.facts.filter((f) => !f.verified).length;
+  const inVisual = new Set(c?.visual ? (c.visual_covers ?? []) : []);
 
   return (
     <article
@@ -995,7 +996,15 @@ function ItemCard({
             <p>{c.summary.hi}</p>
             <ul className="mt-1 list-disc pl-5">
               {c.points.map((p, i) => (
-                <li key={i}>{p.hi}</li>
+                <li
+                  key={i}
+                  className={inVisual.has(i) ? "opacity-40" : undefined}
+                  title={
+                    inVisual.has(i) ? "Shown in the visual, so not printed as a point" : undefined
+                  }
+                >
+                  {p.hi}
+                </li>
               ))}
             </ul>
           </div>
@@ -1003,7 +1012,15 @@ function ItemCard({
             <p>{c.summary.en}</p>
             <ul className="mt-1 list-disc pl-5">
               {c.points.map((p, i) => (
-                <li key={i}>{p.en}</li>
+                <li
+                  key={i}
+                  className={inVisual.has(i) ? "opacity-40" : undefined}
+                  title={
+                    inVisual.has(i) ? "Shown in the visual, so not printed as a point" : undefined
+                  }
+                >
+                  {p.en}
+                </li>
               ))}
             </ul>
           </div>
@@ -1151,6 +1168,11 @@ function VisualBox({
           <BarChart3 className="h-3.5 w-3.5" />
           {v ? `Visual · ${VISUAL_LABELS[v.type]}` : "No visual"}
         </span>
+        {v && (content.visual_covers?.length ?? 0) > 0 && (
+          <span className="text-xs text-muted-foreground">
+            Shows {content.visual_covers!.length} fact(s), left out of the points
+          </span>
+        )}
         {!v && (
           <span className="text-xs text-muted-foreground">
             SAATHI found no visual whose numbers all match the facts.

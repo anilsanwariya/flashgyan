@@ -134,8 +134,9 @@ export function visualMessages(opts: {
 - "table": compares 2-4 things across features, or lists a scheme's key features (columns like "Feature" / "Details"); 2-4 columns, 2-6 rows. {"type":"table","title":{...},"columns":[{...}],"rows":[[{...},{...}]]}
 - "mindmap": a concept, scheme or event with 4-6 key aspects (aims, features, significance). {"type":"mindmap","title":{...},"center":{...},"branches":[{...}]}
 STRICT RULES: Use only the numbered facts. Every number you write (in values, labels, dates and in both languages) must appear in the facts exactly as written there: no totals, differences, percentages, conversions (no lakh/crore/हजार conversions) or rounding of your own. Never number the steps or branches yourself. Keep every label short (at most 8 words; table cells at most 12). Hindi is natural standard Hindi as used in RPSC exams; use the same digits as English. If the facts are too thin for a useful visual, use null.
+The visual replaces text: the story's written points leave out every fact the visual shows completely, so prefer a visual that carries as many facts as possible. List those facts in "covers": the numbers of facts whose every figure, name and date is in the visual.
 "oneliner" is the single most exam-worthy line of the story, at most 20 words, for a last-minute revision page.
-Reply with JSON only: {"visual": {...} or null, "oneliner": {"en": "...", "hi": "..."}}`,
+Reply with JSON only: {"visual": {...} or null, "covers": [fact numbers], "oneliner": {"en": "...", "hi": "..."}}`,
     },
     {
       role: "user",
@@ -241,26 +242,51 @@ export function cleanVisual(v: unknown): { visual: Visual | null; problem: strin
   }
 }
 
-// Reads SAATHI's reply: the visual (only if all its numbers are in the facts)
-// and the revision line.
+// The facts (0-based) the visual shows, as SAATHI listed them (1-based). A
+// fact only counts when every number in it is also in the visual, so a
+// figure is never hidden from the text without being shown.
+export function coveredFacts(v: Visual, listed: unknown, facts: CaFact[]): number[] {
+  const shown = new Set(visualTexts(v).flatMap(numbersIn));
+  const out = new Set<number>();
+  for (const x of list(listed)) {
+    const i = Number(x) - 1;
+    if (!Number.isInteger(i) || i < 0 || i >= facts.length) continue;
+    if (numbersIn(facts[i].text).every((n) => shown.has(n))) out.add(i);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+// Reads SAATHI's reply: the visual (only if all its numbers are in the facts),
+// the facts it shows and the revision line.
 export function parseVisual(
   raw: string,
   facts: CaFact[],
   headline = "",
-): { visual: Visual | null; oneliner: Bi | null; problem: string | null } {
+): { visual: Visual | null; covers: number[]; oneliner: Bi | null; problem: string | null } {
   const o = (parseJson(raw) ?? {}) as Record<string, unknown>;
   const oneliner = bi(o.oneliner, 300);
   const { visual, problem } = cleanVisual(o.visual);
-  if (!visual) return { visual: null, oneliner, problem };
+  if (!visual) return { visual: null, covers: [], oneliner, problem };
   const bad = unverifiedNumbers(visual, facts, headline);
   if (bad.length) {
     return {
       visual: null,
+      covers: [],
       oneliner,
       problem: `These numbers are not in the facts: ${bad.join(", ")}.`,
     };
   }
-  return { visual, oneliner, problem: null };
+  return { visual, covers: coveredFacts(visual, o.covers, facts), oneliner, problem: null };
+}
+
+// The written points to print: those the visual doesn't already show.
+export function pointsToShow<T>(content: {
+  points: T[];
+  visual?: Visual | null;
+  visual_covers?: number[];
+}): T[] {
+  const hidden = new Set(content.visual ? (content.visual_covers ?? []) : []);
+  return content.points.filter((_, i) => !hidden.has(i));
 }
 
 // ---------- Rendering ----------
