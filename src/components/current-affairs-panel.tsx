@@ -1582,11 +1582,14 @@ function SettingsPanel() {
           {!s.pdf_ready && (
             <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted-foreground">
               <li>
-                In the Cloudflare dashboard, copy your Account ID (Workers &amp; Pages → Overview).
+                Copy your Account ID: it's the 32-character code in the address bar after
+                dash.cloudflare.com/ (also shown under Workers &amp; Pages).
               </li>
               <li>
-                Create an API token (My Profile → API Tokens) with the permission “Account · Browser
-                Rendering · Edit”.
+                Profile icon → My Profile → API Tokens → Create Token → Create Custom Token. Under
+                Permissions choose Account → “Browser Run” (called “Browser Rendering” on older
+                dashboards; type “Browser” in the search box) → Edit. Under Account Resources
+                include your account.
               </li>
               <li>
                 Add both to the project's secrets as CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN.

@@ -686,12 +686,13 @@ export async function renderPdf(html: string, settings: MagazineSettings): Promi
   const token = process.env.CLOUDFLARE_API_TOKEN;
   if (!account || !token) {
     throw new Error(
-      "PDF rendering is not set up: add CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN to the project's secrets.",
+      "PDF making is not set up: add CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN to the project's secrets.",
     );
   }
-  const res = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${account}/browser-rendering/pdf`,
-    {
+  // The product was renamed from Browser Rendering to Browser Run; try the
+  // newer path if the older one is ever retired.
+  const call = (path: string) =>
+    fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/${path}/pdf`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -706,11 +707,18 @@ export async function renderPdf(html: string, settings: MagazineSettings): Promi
           footerTemplate: footerTemplate(settings),
         },
       }),
-    },
-  );
+    });
+  let res = await call("browser-rendering");
+  if (res.status === 404) res = await call("browser-run");
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Cloudflare PDF rendering failed (${res.status}): ${body.slice(0, 300)}`);
+    const hint =
+      res.status === 401 || res.status === 403
+        ? " Check that the API token has the Account → Browser Run (Browser Rendering) → Edit permission and belongs to this account."
+        : res.status === 429
+          ? " Cloudflare's usage limit was reached; try again later or upgrade the Workers plan."
+          : "";
+    throw new Error(`Cloudflare PDF making failed (${res.status}).${hint} ${body.slice(0, 200)}`);
   }
   return new Uint8Array(await res.arrayBuffer());
 }
