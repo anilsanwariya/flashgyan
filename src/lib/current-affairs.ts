@@ -83,7 +83,12 @@ export type CaContent = {
   background: Bi | null;
   mcq: CaMcq | null;
   mains: Bi | null;
+  // "Did you know?" facts from trusted websites (missing on older items).
+  dyk?: DykFact[];
 };
+
+// A fact from the web, with the page it came from and the exact passage.
+export type DykFact = Bi & { url: string; site: string; quote: string };
 
 export type RawItem = {
   headline: string;
@@ -506,7 +511,28 @@ export type MagazineSettings = {
   test_chat_id: string;
   // Add approved issues to SAATHI's knowledge base.
   add_to_knowledge_base: boolean;
+  // "Did you know?" facts searched on the web (Tavily), from these sites only.
+  do_you_know: boolean;
+  trusted_domains: string[];
 };
+
+// Official and reference sites the "Did you know?" search may use. Subdomains
+// are included (gov.in covers pib.gov.in, rajasthan.gov.in, …).
+export const DEFAULT_TRUSTED_DOMAINS = [
+  "gov.in",
+  "nic.in",
+  "rbi.org.in",
+  "isro.gov.in",
+  "sansad.in",
+  "eci.gov.in",
+  "un.org",
+  "who.int",
+  "worldbank.org",
+  "imf.org",
+  "wto.org",
+  "unesco.org",
+  "britannica.com",
+];
 
 export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   channel: "",
@@ -519,6 +545,8 @@ export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   logo_partner_url: "",
   test_chat_id: "",
   add_to_knowledge_base: true,
+  do_you_know: true,
+  trusted_domains: DEFAULT_TRUSTED_DOMAINS,
 };
 
 export function categoryLabel(id: string): { en: string; hi: string } {
@@ -536,4 +564,72 @@ export function captionFor(
     return `📚 <b>${esc(settings.title_hi.replace("दैनिक", "मासिक"))} | Monthly Current Affairs</b>\n🗓 ${formatDate(period, "hi", false)} / ${formatDate(period, "en", false)}\n📰 ${count} topics for RAS Prelims & Mains\n\n${esc(settings.brand_line)}`;
   }
   return `📰 <b>${esc(settings.title_hi)} | ${esc(settings.title_en)}</b>\n🗓 ${formatDate(period, "hi")} / ${formatDate(period, "en")}\n✅ ${count} important news items for RAS, bilingual\n\n${esc(settings.brand_line)}`;
+}
+
+// ---------- "Did you know?" from trusted websites ----------
+
+export type WebPage = { title: string; url: string; content: string };
+
+export function siteName(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+export function dykMessages(opts: {
+  headline: string;
+  facts: CaFact[];
+  pages: WebPage[];
+}): ChatMessage[] {
+  const pages = opts.pages
+    .map((p, i) => `[W${i + 1}] ${p.title} (${siteName(p.url)})\n${p.content.slice(0, 4000)}`)
+    .join("\n\n");
+  return [
+    {
+      role: "system",
+      content: `You add a "Did you know?" box to a current affairs news item for RAS exam aspirants. Using ONLY the web pages given, write up to 3 short, interesting facts related to the news that are useful for the exam: background, records, firsts, origin, related places, institutions or numbers. Do not repeat the news facts. Skip anything the pages don't state clearly, and anything that may be outdated. Each fact must quote the page word for word.
+Reply with JSON only: [{"en": one sentence in English, "hi": the same in standard exam Hindi, "page": "W1", "quote": the exact words from that page that state it (8 to 40 words, copied character for character)}]. Reply [] if the pages have nothing suitable.`,
+    },
+    {
+      role: "user",
+      content: `News: ${opts.headline}\nNews facts (do not repeat): ${opts.facts.map((f) => f.text).join("; ")}\n\nWeb pages:\n\n${pages}`,
+    },
+  ];
+}
+
+// Keeps only facts whose quote is found on the page they cite.
+export function parseDyk(raw: string, pages: WebPage[]): DykFact[] {
+  const list = parseJson<unknown[]>(raw);
+  if (!Array.isArray(list)) return [];
+  const out: DykFact[] = [];
+  for (const x of list) {
+    const o = (x ?? {}) as Record<string, unknown>;
+    const page = pages[Number(String(o.page ?? "").replace(/\D/g, "")) - 1];
+    const en = str(o.en, 400);
+    const hi = str(o.hi, 400);
+    const quote = str(o.quote, 600);
+    if (!page || !en || !quote || !quoteInSource(quote, page.content)) continue;
+    out.push({ en, hi, quote, url: page.url, site: siteName(page.url) });
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
+export function cleanDomains(list: string[]): string[] {
+  return [
+    ...new Set(
+      list
+        .map((d) =>
+          d
+            .trim()
+            .toLowerCase()
+            .replace(/^https?:\/\//, "")
+            .replace(/^www\./, "")
+            .replace(/\/.*$/, ""),
+        )
+        .filter((d) => /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)),
+    ),
+  ].slice(0, 50);
 }

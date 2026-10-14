@@ -61,6 +61,14 @@ function itemHtml(item: MagazineItem, number: number, showDate: boolean): string
     c.why.en || c.why.hi
       ? `<div class="box why"><div class="box-title">RAS हेतु महत्व · Why it matters</div>${biBlock(c.why)}</div>`
       : "";
+  const dyk = c.dyk?.length
+    ? `<div class="box dyk"><div class="box-title">क्या आप जानते हैं? · Did you know?</div><ul>${c.dyk
+        .map(
+          (d) =>
+            `<li><span lang="hi">${esc(d.hi)}</span><br/><span class="en">${esc(d.en)}</span> <span class="site">(${esc(d.site)})</span></li>`,
+        )
+        .join("")}</ul></div>`
+    : "";
   return `<article class="item">
   <div class="item-head"><span class="num">${number}</span><div class="heads"><h3 lang="hi">${esc(c.headline.hi)}</h3><h4 lang="en">${esc(c.headline.en)}</h4></div></div>
   ${tags ? `<div class="tags">${tags}</div>` : ""}
@@ -68,6 +76,7 @@ function itemHtml(item: MagazineItem, number: number, showDate: boolean): string
   ${points}
   ${why}
   ${background}
+  ${dyk}
   ${item.source_names.length ? `<div class="src">Source: ${esc(item.source_names.join(", "))}</div>` : ""}
 </article>`;
 }
@@ -125,6 +134,12 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .why .box-title { color: ${accent}; }
 .context { background: #ecfdf5; border: 1px solid #a7f3d0; }
 .context .box-title { color: #047857; }
+.dyk { background: #f0f9ff; border: 1px dashed #7dd3fc; }
+.dyk .box-title { color: #0369a1; }
+.dyk ul { margin: 1mm 0 0; padding-left: 4.5mm; }
+.dyk li { margin-bottom: 1mm; break-inside: avoid; }
+.dyk .en { color: #475569; }
+.dyk .site { color: #94a3b8; font-size: 8pt; }
 .part { font-size: 11pt; color: ${accent}; margin: 5mm 0 3mm; break-after: avoid; }
 .mains-list li { margin-bottom: 2.5mm; break-inside: avoid; }
 .mains-list .en, .answers .en { color: #64748b; }

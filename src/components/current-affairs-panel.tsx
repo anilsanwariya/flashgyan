@@ -1008,6 +1008,51 @@ function ItemCard({
               <p className="text-muted-foreground">{c.background.en}</p>
             </div>
           )}
+          {c.dyk && c.dyk.length > 0 && (
+            <div className="rounded-xl bg-sky-500/5 p-2 sm:col-span-2">
+              <span className="text-xs font-semibold text-sky-700 dark:text-sky-400">
+                क्या आप जानते हैं? · Did you know? (from the web)
+              </span>
+              <ul className="mt-1 space-y-1.5">
+                {c.dyk.map((d, i) => (
+                  <li key={d.url + i} className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p lang="hi">{d.hi}</p>
+                      <p className="text-muted-foreground">{d.en}</p>
+                      <a
+                        href={d.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-primary hover:underline"
+                        title={`“${d.quote}”`}
+                      >
+                        {d.site}
+                      </a>
+                    </div>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      disabled={busy}
+                      aria-label="Remove this fact"
+                      onClick={() =>
+                        act(() =>
+                          updateFn({
+                            data: {
+                              id: item.id,
+                              content: { ...c, dyk: c.dyk!.filter((_, j) => j !== i) },
+                            },
+                          }),
+                        )
+                      }
+                    >
+                      <XCircle className="h-4 w-4" />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 
@@ -1363,7 +1408,9 @@ function SettingsPanel() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (q.data && !form) setForm({ ...q.data });
+    if (q.data && !form) {
+      setForm({ ...q.data, trusted_domains: q.data.trusted_domains.join("\n") });
+    }
   }, [q.data, form]);
 
   if (q.isLoading || !form) return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -1386,6 +1433,10 @@ function SettingsPanel() {
           accent: text("accent"),
           test_chat_id: text("test_chat_id"),
           add_to_knowledge_base: Boolean(form!.add_to_knowledge_base),
+          do_you_know: Boolean(form!.do_you_know),
+          trusted_domains: text("trusted_domains")
+            .split(/[\s,]+/)
+            .filter(Boolean),
         },
       });
       toast.success("Saved");
@@ -1542,6 +1593,45 @@ function SettingsPanel() {
               </li>
             </ol>
           )}
+        </div>
+      </section>
+
+      <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+        <h3 className="font-semibold">“Did you know?” facts from the web</h3>
+        <label className="flex items-start gap-3">
+          <Switch
+            checked={Boolean(form.do_you_know)}
+            onCheckedChange={(v) => set("do_you_know", v)}
+          />
+          <span className="text-sm">
+            <span className="font-medium">Add a “क्या आप जानते हैं? / Did you know?” box</span>
+            <span className="block text-muted-foreground">
+              For each news item SAATHI searches the trusted websites below (Tavily) and adds up to
+              3 related facts, each quoted word for word from its page and credited to the site.
+              Facts whose quote isn't found on the page are dropped. Review them like everything
+              else.
+            </span>
+          </span>
+        </label>
+        <div className="text-sm">
+          Web search (Tavily):{" "}
+          {s.web_search_ready ? (
+            <Badge tone="good">Ready</Badge>
+          ) : (
+            <Badge tone="warn">Add TAVILY_API_KEY to the project's secrets</Badge>
+          )}
+        </div>
+        <div className="space-y-1">
+          <Label>Trusted websites (one per line; subdomains included)</Label>
+          <Textarea
+            rows={6}
+            value={text("trusted_domains")}
+            onChange={(e) => set("trusted_domains", e.target.value)}
+            className="font-mono text-xs"
+          />
+          <p className="text-xs text-muted-foreground">
+            gov.in also covers pib.gov.in, rajasthan.gov.in and other government sites.
+          </p>
         </div>
       </section>
 

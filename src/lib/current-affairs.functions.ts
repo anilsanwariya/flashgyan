@@ -2,7 +2,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { CATEGORIES, UPLOAD_SECTIONS, type MagazineSettings } from "@/lib/current-affairs";
+import {
+  CATEGORIES,
+  UPLOAD_SECTIONS,
+  cleanDomains,
+  type MagazineSettings,
+} from "@/lib/current-affairs";
 import type {
   CaCorrection,
   CaIssue,
@@ -49,20 +54,35 @@ const contentSchema = z.object({
     })
     .nullable(),
   mains: bi.nullable(),
+  dyk: z
+    .array(
+      bi.extend({
+        url: z.string().url().max(2000),
+        site: z.string().max(200),
+        quote: z.string().max(1000),
+      }),
+    )
+    .max(5)
+    .optional(),
 });
 
 // ---------- Settings ----------
 
 export const getMagazineSettings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<MagazineSettings & { pdf_ready: boolean }> => {
-    await assertAdmin(context.userId);
-    const settings = await (await server()).getMagazineSettings();
-    return {
-      ...settings,
-      pdf_ready: Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN),
-    };
-  });
+  .handler(
+    async ({
+      context,
+    }): Promise<MagazineSettings & { pdf_ready: boolean; web_search_ready: boolean }> => {
+      await assertAdmin(context.userId);
+      const settings = await (await server()).getMagazineSettings();
+      return {
+        ...settings,
+        pdf_ready: Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN),
+        web_search_ready: Boolean(process.env.TAVILY_API_KEY),
+      };
+    },
+  );
 
 export const saveMagazineSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -77,12 +97,17 @@ export const saveMagazineSettings = createServerFn({ method: "POST" })
         accent: z.string().regex(/^#[0-9a-fA-F]{6}$/, "Use a colour like #6d28d9"),
         test_chat_id: z.string().trim().max(40),
         add_to_knowledge_base: z.boolean(),
+        do_you_know: z.boolean(),
+        trusted_domains: z.array(z.string().max(200)).max(100),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    return (await server()).saveMagazineSettings(data);
+    return (await server()).saveMagazineSettings({
+      ...data,
+      trusted_domains: cleanDomains(data.trusted_domains),
+    });
   });
 
 export const uploadMagazineLogo = createServerFn({ method: "POST" })

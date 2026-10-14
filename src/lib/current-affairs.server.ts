@@ -15,6 +15,10 @@ import {
   categoryLabel,
   changeCheckMessages,
   dailyPostTime,
+  dykMessages,
+  parseDyk,
+  type DykFact,
+  type WebPage,
   enrichMessages,
   extractMessages,
   formatDate,
@@ -388,8 +392,9 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
       ...new Set(parsed.backgroundFrom.map((i) => kb[i]?.title).filter(Boolean) as string[]),
     ].map((title) => ({ title }));
 
+    const dyk = await findDidYouKnow(parsed.content.headline.en || item.headline, item.facts);
     const update = {
-      content: parsed.content,
+      content: { ...parsed.content, dyk },
       context_sources: contextSources,
       syllabus_topic_id: syllabusId,
       unit: syllabusId ? t!.unit_id : null,
@@ -411,6 +416,48 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
       .update({ enrich_error: e instanceof Error ? e.message : String(e) } as never)
       .eq("id", itemId);
     throw e;
+  }
+}
+
+// ---------- "Did you know?" from trusted websites ----------
+
+// Searches the trusted sites with Tavily and keeps only facts quoted from the
+// pages. Never fails the item: without a key or results the box is left out.
+export async function findDidYouKnow(headline: string, facts: CaFact[]): Promise<DykFact[]> {
+  const key = process.env.TAVILY_API_KEY;
+  const settings = await getMagazineSettings();
+  if (!key || !settings.do_you_know || !settings.trusted_domains.length) return [];
+  try {
+    const res = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        query: headline.slice(0, 380),
+        search_depth: "basic",
+        max_results: 3,
+        include_domains: settings.trusted_domains,
+        include_raw_content: true,
+      }),
+    });
+    if (!res.ok) {
+      console.error("tavily:", res.status, (await res.text()).slice(0, 200));
+      return [];
+    }
+    const json = (await res.json()) as {
+      results?: { title?: string; url?: string; content?: string; raw_content?: string | null }[];
+    };
+    const pages: WebPage[] = (json.results ?? [])
+      .filter((r) => r.url && (r.raw_content || r.content))
+      .map((r) => ({
+        title: r.title ?? "",
+        url: r.url!,
+        content: (r.raw_content || r.content || "").slice(0, 12_000),
+      }));
+    if (!pages.length) return [];
+    return parseDyk(await saathiComplete(apiKey(), dykMessages({ headline, facts, pages })), pages);
+  } catch (e) {
+    console.error("did you know:", e);
+    return [];
   }
 }
 
