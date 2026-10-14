@@ -5,6 +5,7 @@ import { Link } from "@tanstack/react-router";
 import {
   BarChart3,
   BookOpenCheck,
+  CalendarRange,
   Bot,
   ExternalLink,
   FileQuestion,
@@ -15,9 +16,11 @@ import {
   LogOut,
   Megaphone,
   Menu,
+  Newspaper,
   MessageSquareText,
   NotebookPen,
   PlugZap,
+  Settings2,
   Sparkles,
   SquarePen,
   Target,
@@ -35,6 +38,9 @@ export type AdminSectionId =
   | "mcqPractice"
   | "saathi"
   | "saathiAnswers"
+  | "ca.daily"
+  | "ca.monthly"
+  | "ca.settings"
   | "bot.broadcast"
   | "bot.commands"
   | "bot.replies"
@@ -98,6 +104,30 @@ export const ADMIN_GROUPS: { label: string; sections: SectionDef[] }[] = [
         label: "Answer writing",
         icon: NotebookPen,
         description: "RAS Mains model answers, and the answer blueprints SAATHI learns from them.",
+      },
+    ],
+  },
+  {
+    label: "Current affairs",
+    sections: [
+      {
+        id: "ca.daily",
+        label: "Daily magazine",
+        icon: Newspaper,
+        description:
+          "Upload the day's sources, review the news items and approve the bilingual magazine for the channel.",
+      },
+      {
+        id: "ca.monthly",
+        label: "Monthly magazine",
+        icon: CalendarRange,
+        description: "The whole month in one magazine, with later corrections applied.",
+      },
+      {
+        id: "ca.settings",
+        label: "Magazine settings",
+        icon: Settings2,
+        description: "Channel, posting time, logos and PDF set-up.",
       },
     ],
   },
