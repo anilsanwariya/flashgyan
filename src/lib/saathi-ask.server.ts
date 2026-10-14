@@ -1,17 +1,18 @@
 import { z } from "zod";
 import {
+  NextQuestionsFilter,
   NoAnswerFilter,
   SaathiAiError,
   cleanHistory,
   collectSources,
-  relevantMatches,
   saathiCompleteStream,
-  saathiEmbed,
   saathiMessages,
   saathiNoMaterialReply,
-  saathiSearch,
-  saathiStandaloneQuestion,
+  saathiPrepareQuery,
+  saathiRetrieve,
+  type SaathiQuery,
   type SaathiRpc,
+  type SaathiSource,
   type SaathiStreamEvent,
 } from "../../supabase/functions/_shared/saathi-core.ts";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
@@ -33,7 +34,47 @@ const LIMITS = [
   { scope: "global", suffix: "min", windowSeconds: 60, maxHits: 400 },
 ] as const;
 
-const rpc: SaathiRpc = (fn, args) => supabaseAdmin.rpc(fn as never, args as never);
+export const saathiRpc: SaathiRpc = (fn, args) => supabaseAdmin.rpc(fn as never, args as never);
+const rpc = saathiRpc;
+
+type CachedAnswer = {
+  answer: string;
+  sources: SaathiSource[];
+  followups: string[];
+  english_query: string | null;
+};
+
+// Cached answers are keyed by the standalone question and subjects, and are only
+// served while the knowledge base is unchanged. Cache problems never block an answer.
+async function cacheGet(question: string, subjects: string[]): Promise<CachedAnswer | null> {
+  const { data, error } = await rpc("saathi_cache_get", {
+    p_channel: "web",
+    p_question: question,
+    p_subjects: subjects,
+  });
+  if (error) {
+    if (error.code !== "PGRST202") console.error("saathi cache get:", error.message);
+    return null;
+  }
+  return ((data ?? []) as CachedAnswer[])[0] ?? null;
+}
+
+async function cachePut(
+  query: SaathiQuery,
+  subjects: string[],
+  value: Omit<CachedAnswer, "english_query">,
+) {
+  const { error } = await rpc("saathi_cache_put", {
+    p_channel: "web",
+    p_question: query.standalone,
+    p_subjects: subjects,
+    p_answer: value.answer,
+    p_sources: value.sources,
+    p_followups: value.followups,
+    p_english_query: query.english,
+  });
+  if (error && error.code !== "PGRST202") console.error("saathi cache put:", error.message);
+}
 
 export function clientIp(request: Request): string | null {
   const h = request.headers;
@@ -105,12 +146,36 @@ export async function handleSaathiAsk(request: Request): Promise<Response> {
   if (!apiKey) return jsonError("SAATHI is not configured.", 500);
 
   const history = cleanHistory(input.history);
-  const standalone = await saathiStandaloneQuestion(apiKey, history, input.question);
+  const subjects = [...input.subjects].sort();
 
+  let query: SaathiQuery;
   let matches;
   try {
-    const embedding = await saathiEmbed(apiKey, standalone);
-    matches = relevantMatches(await saathiSearch(rpc, standalone, embedding, input.subjects));
+    query = await saathiPrepareQuery(apiKey, history, input.question);
+    const cached = await cacheGet(query.standalone, subjects);
+    if (cached) {
+      const hit = cached;
+      const q = query;
+      return ndjson(async (emit) => {
+        emit({ type: "delta", text: hit.answer });
+        emit({
+          type: "done",
+          noAnswer: false,
+          sources: hit.sources,
+          followups: hit.followups,
+          searchQuery: q.standalone,
+          englishQuery: q.english,
+        });
+      });
+    }
+    ({ matches } = await saathiRetrieve({
+      apiKey,
+      rpc,
+      history,
+      question: input.question,
+      subjects,
+      query,
+    }));
   } catch (e) {
     console.error("saathi search:", e);
     if (e instanceof SaathiAiError && (e.status === 429 || e.status === 402)) {
@@ -120,7 +185,7 @@ export async function handleSaathiAsk(request: Request): Promise<Response> {
   }
 
   if (matches.length === 0) {
-    await recordKnowledgeGap(standalone);
+    await recordKnowledgeGap(query.standalone);
     return ndjson(async (emit) => {
       emit({ type: "delta", text: saathiNoMaterialReply(input.question) });
       emit({ type: "done", noAnswer: true, sources: [] });
@@ -142,25 +207,37 @@ export async function handleSaathiAsk(request: Request): Promise<Response> {
     return jsonError("SAATHI is having trouble right now. Please try again.", 502);
   }
 
+  const used = matches;
+  const q = query;
   return ndjson(async (emit) => {
-    const filter = new NoAnswerFilter();
-    let wrote = false;
-    for await (const delta of deltas) {
-      const text = filter.push(delta);
-      if (text) {
-        wrote = true;
-        emit({ type: "delta", text });
-      }
+    const noAnswerFilter = new NoAnswerFilter();
+    const nextFilter = new NextQuestionsFilter();
+    let answer = "";
+    const write = (text: string) => {
+      if (!text) return;
+      answer += text;
+      emit({ type: "delta", text });
+    };
+    for await (const delta of deltas) write(nextFilter.push(noAnswerFilter.push(delta)));
+    write(nextFilter.push(noAnswerFilter.finish()));
+    write(nextFilter.finish());
+
+    const noAnswer = noAnswerFilter.noAnswer || !answer.trim();
+    if (!answer.trim()) emit({ type: "delta", text: saathiNoMaterialReply(input.question) });
+    if (noAnswer) await recordKnowledgeGap(q.standalone);
+    const sources = noAnswer ? [] : collectSources(used);
+    const followups = noAnswer ? [] : nextFilter.questions;
+    if (!noAnswer && !request.signal.aborted) {
+      await cachePut(q, subjects, { answer: answer.trimEnd(), sources, followups });
     }
-    const tail = filter.finish();
-    if (tail) {
-      wrote = true;
-      emit({ type: "delta", text: tail });
-    }
-    const noAnswer = filter.noAnswer || !wrote;
-    if (!wrote) emit({ type: "delta", text: saathiNoMaterialReply(input.question) });
-    if (noAnswer) await recordKnowledgeGap(standalone);
-    emit({ type: "done", noAnswer, sources: noAnswer ? [] : collectSources(matches) });
+    emit({
+      type: "done",
+      noAnswer,
+      sources,
+      followups,
+      searchQuery: q.standalone,
+      englishQuery: q.english,
+    });
   });
 }
 
