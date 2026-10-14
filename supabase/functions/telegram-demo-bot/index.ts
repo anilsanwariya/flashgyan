@@ -6,13 +6,12 @@ import {
   SaathiAiError,
   cleanHistory,
   collectSources,
-  relevantMatches,
   saathiComplete,
-  saathiEmbed,
   saathiMessages,
   saathiNoMaterialReply,
-  saathiSearch,
-  saathiStandaloneQuestion,
+  saathiPrepareQuery,
+  saathiRetrieve,
+  splitNextQuestions,
   stripNoAnswer,
   type SaathiRpc,
   type SaathiTurn,
@@ -397,6 +396,16 @@ function clipHtml(html: string, max: number): string {
   return (nl > max * 0.5 ? cut.slice(0, nl) : cut.replace(/<[^>]*$/, "")) + "\n…";
 }
 
+// Keeps Telegram's "typing…" indicator on while SAATHI works (it lasts ~5 seconds).
+function keepTyping(chat_id: number): () => void {
+  const send = () => tg("sendChatAction", { chat_id, action: "typing" }).catch(() => {});
+  send();
+  const timer = setInterval(send, 4500);
+  return () => clearInterval(timer);
+}
+
+type CachedAnswer = { answer: string; sources: { title: string }[]; followups: string[] };
+
 async function handleSaathiAsk(chat_id: number, user_id: number, question: string) {
   if (!question) {
     await tg("sendMessage", { chat_id, text: "Usage: /ask <your question>" });
@@ -408,42 +417,82 @@ async function handleSaathiAsk(chat_id: number, user_id: number, question: strin
   }
   question = question.slice(0, 2000);
   const userKey = String(user_id);
-
-  // Conversational memory: the most recent turns, oldest first.
-  const { data: rows } = await supabase
-    .from("saathi_chat_history")
-    .select("role,content")
-    .eq("user_id", userKey)
-    .order("created_at", { ascending: false })
-    .limit(6);
-  const history = cleanHistory(((rows ?? []) as SaathiTurn[]).slice().reverse());
+  const stopTyping = keepTyping(chat_id);
 
   let answer: string;
   let noAnswer = true;
   let sourceTitles: string[] = [];
+  let followups: string[] = [];
   try {
-    const standalone = await saathiStandaloneQuestion(LOVABLE_API_KEY, history, question);
-    const embedding = await saathiEmbed(LOVABLE_API_KEY, standalone);
-    const matches = relevantMatches(await saathiSearch(saathiRpc, standalone, embedding, null));
-    if (matches.length === 0) {
-      answer = saathiNoMaterialReply(question);
+    // Conversational memory: the most recent turns, oldest first.
+    const { data: rows } = await supabase
+      .from("saathi_chat_history")
+      .select("role,content")
+      .eq("user_id", userKey)
+      .order("created_at", { ascending: false })
+      .limit(6);
+    const history = cleanHistory(((rows ?? []) as SaathiTurn[]).slice().reverse());
+
+    const query = await saathiPrepareQuery(LOVABLE_API_KEY, history, question);
+    const { data: cachedRows } = await supabase.rpc("saathi_cache_get", {
+      p_channel: "telegram",
+      p_question: query.standalone,
+      p_subjects: [],
+    });
+    const cached = ((cachedRows ?? []) as CachedAnswer[])[0];
+
+    if (cached) {
+      answer = cached.answer;
+      noAnswer = false;
+      sourceTitles = cached.sources.map((s) => s.title);
+      followups = cached.followups ?? [];
     } else {
-      const raw = await saathiComplete(
-        LOVABLE_API_KEY,
-        saathiMessages({ channel: "telegram", history, question, matches }),
-      );
-      const parsed = stripNoAnswer(raw);
-      noAnswer = parsed.noAnswer || !parsed.text;
-      answer = parsed.text || saathiNoMaterialReply(question);
-      if (!noAnswer) sourceTitles = collectSources(matches).map((s) => s.title);
-    }
-    if (noAnswer) {
-      const { error } = await supabase.rpc("increment_knowledge_gap", { gap_question: standalone });
-      if (error) console.error("gap rpc error", error.message);
+      const { matches } = await saathiRetrieve({
+        apiKey: LOVABLE_API_KEY,
+        rpc: saathiRpc,
+        history,
+        question,
+        subjects: null,
+        query,
+      });
+      if (matches.length === 0) {
+        answer = saathiNoMaterialReply(question);
+      } else {
+        const raw = await saathiComplete(
+          LOVABLE_API_KEY,
+          saathiMessages({ channel: "telegram", history, question, matches }),
+        );
+        const parsed = stripNoAnswer(raw);
+        const split = splitNextQuestions(parsed.text);
+        noAnswer = parsed.noAnswer || !split.text;
+        answer = split.text || saathiNoMaterialReply(question);
+        if (!noAnswer) {
+          const sources = collectSources(matches);
+          sourceTitles = sources.map((s) => s.title);
+          followups = split.next;
+          const { error } = await supabase.rpc("saathi_cache_put", {
+            p_channel: "telegram",
+            p_question: query.standalone,
+            p_subjects: [],
+            p_answer: answer,
+            p_sources: sources,
+            p_followups: followups,
+            p_english_query: query.english,
+          });
+          if (error && error.code !== "PGRST202") console.error("cache put error", error.message);
+        }
+      }
+      if (noAnswer) {
+        const { error } = await supabase.rpc("increment_knowledge_gap", {
+          gap_question: query.standalone,
+        });
+        if (error) console.error("gap rpc error", error.message);
+      }
     }
   } catch (e) {
     // AI or database failures are not knowledge gaps and are not remembered.
     console.error("saathi error", e);
+    stopTyping();
     const busy = e instanceof SaathiAiError && (e.status === 429 || e.status === 402);
     await tg("sendMessage", {
       chat_id,
@@ -451,6 +500,7 @@ async function handleSaathiAsk(chat_id: number, user_id: number, question: strin
     });
     return;
   }
+  stopTyping();
 
   // Only real answers become memory, so follow-ups build on useful context.
   if (!noAnswer) {
@@ -464,11 +514,19 @@ async function handleSaathiAsk(chat_id: number, user_id: number, question: strin
   const srcLine = sourceTitles.length
     ? `\n\n📚 <i>Sources: ${sourceTitles.map(tgEsc).join(", ")}</i>`
     : "";
-  const body = clipHtml(mdToTelegramHtml(answer), 3800) + srcLine;
+  const nextLine = followups.length
+    ? `\n\n💡 <i>You could also ask:</i>\n${followups.map((q) => `/ask ${tgEsc(q)}`).join("\n")}`
+    : "";
+  const extras = srcLine + nextLine;
+  const body = clipHtml(mdToTelegramHtml(answer), 3900 - extras.length) + extras;
   const res = await tg("sendMessage", { chat_id, text: body, parse_mode: "HTML" });
   if (!res.ok) {
     // Fallback if Telegram rejects the markup: send safely escaped plain text.
-    await tg("sendMessage", { chat_id, text: tgEsc(answer).slice(0, 3800) + srcLine, parse_mode: "HTML" });
+    await tg("sendMessage", {
+      chat_id,
+      text: tgEsc(answer).slice(0, 3900 - extras.length) + extras,
+      parse_mode: "HTML",
+    });
   }
 }
 

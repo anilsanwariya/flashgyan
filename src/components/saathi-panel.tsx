@@ -37,12 +37,17 @@ import {
   replaceSaathiDoc,
   testSaathiRetrieval,
   listSaathiDocs,
+  listSaathiEvals,
+  addSaathiEval,
+  deleteSaathiEval,
+  runSaathiEval,
+  type SaathiEvalQuestion,
+  type SaathiRetrievalResult,
   updateSaathiDoc,
   type SaathiDoc,
   type SaathiFeedback,
   type SaathiHealthRow,
   type SaathiKnowledgeGap,
-  type SaathiRetrievalHit,
   type SaathiMedium,
 } from "@/lib/saathi.functions";
 import { SAATHI_ACCEPT, parseQnAExcel, textBlockForFile } from "@/lib/saathi-parse";
@@ -72,7 +77,7 @@ type FormState = {
 
 const empty: FormState = { title: "", subject: "", topic: "", medium: "English", content: "" };
 
-type Mode = "content" | "qna" | "gaps" | "test" | "health";
+type Mode = "content" | "qna" | "gaps" | "test" | "evals" | "health";
 type EditKind =
   | { kind: "create" }
   | { kind: "edit-parent"; id: string }
@@ -142,14 +147,26 @@ export function SaathiPanel() {
   function startEditParent(d: SaathiDoc) {
     setMode("content");
     setEditKind({ kind: "edit-parent", id: d.id });
-    setForm({ title: d.title, subject: d.subject, topic: d.topic ?? "", medium: d.medium, content: "" });
+    setForm({
+      title: d.title,
+      subject: d.subject,
+      topic: d.topic ?? "",
+      medium: d.medium,
+      content: "",
+    });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function startReplace(d: SaathiDoc) {
     setMode("content");
     setEditKind({ kind: "replace", parentId: d.id, parentTitle: d.title });
-    setForm({ title: d.title, subject: d.subject, topic: d.topic ?? "", medium: d.medium, content: "" });
+    setForm({
+      title: d.title,
+      subject: d.subject,
+      topic: d.topic ?? "",
+      medium: d.medium,
+      content: "",
+    });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -291,7 +308,12 @@ export function SaathiPanel() {
   }
 
   async function onDelete(doc: SaathiDoc, label: string) {
-    if (!confirm(`Delete ${label} "${doc.title}"?${doc.parent_id == null ? " All its chunks will be deleted." : ""}`)) return;
+    if (
+      !confirm(
+        `Delete ${label} "${doc.title}"?${doc.parent_id == null ? " All its chunks will be deleted." : ""}`,
+      )
+    )
+      return;
     try {
       await deleteFn({ data: { id: doc.id } });
       toast.success("Deleted");
@@ -351,6 +373,15 @@ export function SaathiPanel() {
           </button>
           <button
             type="button"
+            onClick={() => setMode("evals")}
+            className={`px-3 py-1.5 text-sm rounded-md ${
+              mode === "evals" ? "bg-background shadow-sm font-medium" : "text-muted-foreground"
+            }`}
+          >
+            Test set
+          </button>
+          <button
+            type="button"
             onClick={() => setMode("health")}
             className={`px-3 py-1.5 text-sm rounded-md ${
               mode === "health" ? "bg-background shadow-sm font-medium" : "text-muted-foreground"
@@ -382,12 +413,13 @@ export function SaathiPanel() {
         />
       ) : mode === "test" ? (
         <RetrievalTester subjects={subjects} />
+      ) : mode === "evals" ? (
+        <EvalSetPanel documents={parents.map((d) => d.title)} />
       ) : mode === "health" ? (
         <HealthPanel onRebuilt={() => qc.invalidateQueries({ queryKey: ["saathiDocs"] })} />
       ) : (
         <KnowledgeGapsPanel />
       )}
-
 
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
@@ -430,10 +462,7 @@ export function SaathiPanel() {
               const isOpen = expanded.has(d.id);
               const chunks = childrenByParent.get(d.id) ?? [];
               return (
-                <li
-                  key={d.id}
-                  className="rounded-lg bg-card border border-border overflow-hidden"
-                >
+                <li key={d.id} className="rounded-lg bg-card border border-border overflow-hidden">
                   <div className="flex items-center gap-2 p-2">
                     <button
                       type="button"
@@ -471,7 +500,9 @@ export function SaathiPanel() {
                       title="Rebuild chunks"
                       aria-label="Rebuild chunks"
                     >
-                      <RefreshCw className={`h-4 w-4 ${rebuilding === d.id ? "animate-spin" : ""}`} />
+                      <RefreshCw
+                        className={`h-4 w-4 ${rebuilding === d.id ? "animate-spin" : ""}`}
+                      />
                     </button>
                     <button
                       onClick={() => startReplace(d)}
@@ -552,7 +583,11 @@ function ChunkRow({
           className="h-6 w-6 grid place-items-center rounded hover:bg-muted shrink-0"
           aria-label={open ? "Collapse" : "Expand"}
         >
-          {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5" />
+          )}
         </button>
         <button
           type="button"
@@ -626,9 +661,9 @@ function EntryForm({
       ? `Append to "${editKind.parentTitle}"`
       : isReplace
         ? `Replace content of "${editKind.parentTitle}"`
-      : isEditParent
-        ? "Edit deck metadata"
-        : "New deck";
+        : isEditParent
+          ? "Edit deck metadata"
+          : "New deck";
 
   const submitLabel = isChunk
     ? saving
@@ -642,13 +677,13 @@ function EntryForm({
         ? saving
           ? "Replacing…"
           : "Replace Content"
-      : isEditParent
-        ? saving
-          ? "Saving…"
-          : "Update Deck"
-        : saving
-          ? "Saving…"
-          : "Save to SAATHI";
+        : isEditParent
+          ? saving
+            ? "Saving…"
+            : "Update Deck"
+          : saving
+            ? "Saving…"
+            : "Save to SAATHI";
 
   // Each file's text is appended as soon as it is read, in the order added.
   const queue = useFileQueue({
@@ -823,10 +858,20 @@ function EntryForm({
           </div>
           <FileQueueList queue={queue} />
           <div className="flex flex-wrap items-center gap-1 mb-2">
-            <button type="button" className={toolbarBtn} title="Heading 1" onClick={() => prefixLine("# ")}>
+            <button
+              type="button"
+              className={toolbarBtn}
+              title="Heading 1"
+              onClick={() => prefixLine("# ")}
+            >
               <Heading1 className="h-4 w-4" />
             </button>
-            <button type="button" className={toolbarBtn} title="Heading 2" onClick={() => prefixLine("## ")}>
+            <button
+              type="button"
+              className={toolbarBtn}
+              title="Heading 2"
+              onClick={() => prefixLine("## ")}
+            >
               <Heading2 className="h-4 w-4" />
             </button>
             <button type="button" className={toolbarBtn} title="Bold" onClick={() => wrap("**")}>
@@ -843,26 +888,31 @@ function EntryForm({
             >
               <Highlighter className="h-4 w-4" />
             </button>
-            <button type="button" className={toolbarBtn} title="Bullet list" onClick={() => prefixLine("- ")}>
+            <button
+              type="button"
+              className={toolbarBtn}
+              title="Bullet list"
+              onClick={() => prefixLine("- ")}
+            >
               <List className="h-4 w-4" />
             </button>
           </div>
           <FileDropZone onFiles={(files) => queue.add(isChunk ? files.slice(0, 1) : files)}>
-          <Textarea
-            id="s-content"
-            ref={taRef}
-            value={form.content}
-            onChange={(e) => setForm((p) => ({ ...p, content: e.target.value }))}
-            rows={12}
-            placeholder={
-              isAppend
-                ? "Paste content or upload a PDF to add new chunks to this deck."
-                : isReplace
-                  ? "Paste the new content or upload a PDF. It replaces all of this deck's chunks."
-                : "Paste text, drop PDFs here, or use the toolbar for **bold**, *italic*, # headings and <mark>highlight</mark>."
-            }
-            className="font-mono text-sm"
-          />
+            <Textarea
+              id="s-content"
+              ref={taRef}
+              value={form.content}
+              onChange={(e) => setForm((p) => ({ ...p, content: e.target.value }))}
+              rows={12}
+              placeholder={
+                isAppend
+                  ? "Paste content or upload a PDF to add new chunks to this deck."
+                  : isReplace
+                    ? "Paste the new content or upload a PDF. It replaces all of this deck's chunks."
+                    : "Paste text, drop PDFs here, or use the toolbar for **bold**, *italic*, # headings and <mark>highlight</mark>."
+              }
+              className="font-mono text-sm"
+            />
           </FileDropZone>
           <div className="mt-1 flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
             <span>
@@ -976,12 +1026,10 @@ function QnABulkUpload({
       <div className="font-semibold">Bulk Q&amp;A upload</div>
       <p className="text-xs text-muted-foreground">
         Excel columns: <code className="font-mono">order</code>,{" "}
-        <code className="font-mono">question</code>,{" "}
-        <code className="font-mono">answer</code>, then one column per
-        explanation section (the header text becomes the section title). One
-        Excel file = one SAATHI entry; the file name becomes the entry title.
-        Each row is saved as its own chunk, so explanations stay with their
-        question. You can pick multiple files at once.
+        <code className="font-mono">question</code>, <code className="font-mono">answer</code>, then
+        one column per explanation section (the header text becomes the section title). One Excel
+        file = one SAATHI entry; the file name becomes the entry title. Each row is saved as its own
+        chunk, so explanations stay with their question. You can pick multiple files at once.
       </p>
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -1001,10 +1049,7 @@ function QnABulkUpload({
         </div>
         <div>
           <Label>Medium</Label>
-          <Select
-            value={medium}
-            onValueChange={(v) => setMedium(v as SaathiMedium)}
-          >
+          <Select value={medium} onValueChange={(v) => setMedium(v as SaathiMedium)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -1084,7 +1129,8 @@ function KnowledgeGapsPanel() {
         <div>
           <h3 className="font-semibold">Knowledge Gaps</h3>
           <p className="text-sm text-muted-foreground">
-            Questions students asked that SAATHI couldn't answer. Upload matching study material, then dismiss the gap.
+            Questions students asked that SAATHI couldn't answer. Upload matching study material,
+            then dismiss the gap.
           </p>
         </div>
 
@@ -1211,7 +1257,9 @@ function FeedbackPanel() {
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{f.answer}</ReactMarkdown>
               </div>
               {f.sources.length > 0 && (
-                <p className="mt-2 text-xs text-muted-foreground">Sources: {f.sources.join(", ")}</p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Sources: {f.sources.join(", ")}
+                </p>
               )}
             </details>
           ))}
@@ -1226,7 +1274,8 @@ function RetrievalTester({ subjects }: { subjects: string[] }) {
   const [question, setQuestion] = useState("");
   const [subject, setSubject] = useState<string>(ALL);
   const [busy, setBusy] = useState(false);
-  const [hits, setHits] = useState<SaathiRetrievalHit[] | null>(null);
+  const [result, setResult] = useState<SaathiRetrievalResult | null>(null);
+  const hits = result?.hits ?? null;
   const [open, setOpen] = useState<string | null>(null);
 
   async function run(e: React.FormEvent) {
@@ -1234,7 +1283,7 @@ function RetrievalTester({ subjects }: { subjects: string[] }) {
     if (!question.trim()) return;
     setBusy(true);
     try {
-      setHits(
+      setResult(
         await testFn({
           data: { question: question.trim(), subjects: subject === ALL ? [] : [subject] },
         }),
@@ -1246,15 +1295,15 @@ function RetrievalTester({ subjects }: { subjects: string[] }) {
     }
   }
 
-  const usable = hits?.filter((h) => h.relevant).length ?? 0;
+  const used = hits?.filter((h) => h.used_rank !== null).length ?? 0;
 
   return (
     <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
       <div>
         <h3 className="font-semibold">Test a question</h3>
         <p className="text-sm text-muted-foreground">
-          See which chunks SAATHI would read for a question, and how well each one matches. Chunks
-          below the cut-off are never sent to the AI.
+          Runs the same search students get. Hindi and Hinglish questions are also searched in
+          English, then the AI picks the best chunks. Chunks below the cut-off are never used.
         </p>
       </div>
       <form onSubmit={run} className="flex flex-col gap-2 sm:flex-row">
@@ -1292,16 +1341,26 @@ function RetrievalTester({ subjects }: { subjects: string[] }) {
           </p>
         ) : (
           <div className="space-y-2">
+            {result && (result.english || result.standalone !== question.trim()) && (
+              <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs">
+                {result.standalone !== question.trim() && (
+                  <span className="block">Searched as: {result.standalone}</span>
+                )}
+                {result.english && (
+                  <span className="block">Also searched in English: {result.english}</span>
+                )}
+              </p>
+            )}
             <p className="text-sm">
-              {usable === 0
+              {used === 0
                 ? "No chunk passes the cut-off, so SAATHI would answer that it has no material on this."
-                : `${usable} of ${hits.length} chunks pass the cut-off and would be sent to the AI.`}
+                : `${used} of ${hits.length} chunks would be sent to the AI, in this order.`}
             </p>
             {hits.map((h, i) => (
               <div
                 key={h.id}
                 className={`rounded-lg border p-3 text-sm ${
-                  h.relevant ? "border-border" : "border-dashed border-border opacity-60"
+                  h.used_rank !== null ? "border-border" : "border-dashed border-border opacity-60"
                 }`}
               >
                 <button
@@ -1310,7 +1369,7 @@ function RetrievalTester({ subjects }: { subjects: string[] }) {
                   className="flex w-full items-start justify-between gap-3 text-left"
                 >
                   <span className="min-w-0">
-                    <span className="mr-1 text-muted-foreground">#{i + 1}</span>
+                    <span className="mr-1 text-muted-foreground">{i + 1}.</span>
                     <span className="font-medium">{h.title}</span>
                     <span className="block text-xs text-muted-foreground">
                       {h.subject}
@@ -1322,7 +1381,11 @@ function RetrievalTester({ subjects }: { subjects: string[] }) {
                     <span className="block">meaning {h.vector_score.toFixed(3)}</span>
                     <span className="block">keywords {h.keyword_score.toFixed(3)}</span>
                     <span className="block font-semibold">
-                      {h.relevant ? "✓ used" : "✗ below cut-off"}
+                      {h.used_rank !== null
+                        ? `✓ used #${h.used_rank}`
+                        : h.relevant
+                          ? "– not picked"
+                          : "✗ below cut-off"}
                     </span>
                   </span>
                 </button>
@@ -1444,6 +1507,197 @@ function HealthPanel({ onRebuilt }: { onRebuilt: () => void }) {
                   <td className="px-3 py-2 text-right">{r.chunk_count}</td>
                   <td className="px-3 py-2 text-right">{r.avg_chars}</td>
                   <td className="px-3 py-2 text-xs">{issues(r).join(" · ")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function EvalSetPanel({ documents }: { documents: string[] }) {
+  const qc = useQueryClient();
+  const listFn = useServerFn(listSaathiEvals);
+  const addFn = useServerFn(addSaathiEval);
+  const deleteFn = useServerFn(deleteSaathiEval);
+  const runFn = useServerFn(runSaathiEval);
+  const listGapsFn = useServerFn(listKnowledgeGaps);
+  const listFeedbackFn = useServerFn(listSaathiFeedback);
+  const evalsQ = useQuery({ queryKey: ["saathiEvals"], queryFn: () => listFn() });
+  // Unanswered and down-voted questions make good test questions.
+  const gapsQ = useQuery({ queryKey: ["saathiKnowledgeGaps"], queryFn: () => listGapsFn() });
+  const feedbackQ = useQuery({ queryKey: ["saathiFeedback"], queryFn: () => listFeedbackFn() });
+  const suggestions = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...(feedbackQ.data?.recentDown ?? []).map((f) => f.question),
+          ...(gapsQ.data ?? []).map((g) => g.question),
+        ]),
+      ).slice(0, 50),
+    [gapsQ.data, feedbackQ.data],
+  );
+
+  const [question, setQuestion] = useState("");
+  const [expected, setExpected] = useState("");
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+
+  const rows = evalsQ.data ?? [];
+  const ran = rows.filter((r) => r.last_passed !== null);
+  const passed = ran.filter((r) => r.last_passed).length;
+
+  const setRow = (row: SaathiEvalQuestion) =>
+    qc.setQueryData<SaathiEvalQuestion[]>(["saathiEvals"], (cur) =>
+      (cur ?? []).map((r) => (r.id === row.id ? row : r)),
+    );
+
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    if (!question.trim() || !expected) return;
+    try {
+      await addFn({ data: { question: question.trim(), expected_document: expected } });
+      setQuestion("");
+      qc.invalidateQueries({ queryKey: ["saathiEvals"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't add");
+    }
+  }
+
+  async function runAll() {
+    if (!confirm(`Run ${rows.length} test question(s)? Each one uses a few AI calls.`)) return;
+    setProgress({ done: 0, total: rows.length });
+    for (const [i, r] of rows.entries()) {
+      try {
+        setRow(await runFn({ data: { id: r.id } }));
+      } catch (err) {
+        toast.error(`${r.question.slice(0, 40)}: ${err instanceof Error ? err.message : "failed"}`);
+      }
+      setProgress({ done: i + 1, total: rows.length });
+    }
+    setProgress(null);
+  }
+
+  async function remove(id: string) {
+    try {
+      await deleteFn({ data: { id } });
+      qc.setQueryData<SaathiEvalQuestion[]>(["saathiEvals"], (cur) =>
+        (cur ?? []).filter((r) => r.id !== id),
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't delete");
+    }
+  }
+
+  return (
+    <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="font-semibold">Test set</h3>
+          <p className="text-sm text-muted-foreground">
+            Save real questions (English, Hindi and Hinglish) with the document that should answer
+            them, then run them after any change to see if search got better or worse.
+          </p>
+        </div>
+        {rows.length > 0 && (
+          <Button onClick={runAll} disabled={progress !== null}>
+            <RefreshCw className={`h-4 w-4 ${progress ? "animate-spin" : ""}`} />
+            {progress ? `Running ${progress.done} / ${progress.total}…` : "Run all"}
+          </Button>
+        )}
+      </div>
+
+      {ran.length > 0 && (
+        <p className="text-sm font-medium">
+          {passed} of {ran.length} passed ({Math.round((passed / ran.length) * 100)}%)
+        </p>
+      )}
+
+      <form onSubmit={add} className="grid gap-2 sm:grid-cols-[1fr_14rem_auto]">
+        <Input
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          placeholder="Question a student would ask"
+          list="saathi-eval-suggestions"
+        />
+        <datalist id="saathi-eval-suggestions">
+          {suggestions.map((q) => (
+            <option key={q} value={q} />
+          ))}
+        </datalist>
+        <Select value={expected} onValueChange={setExpected}>
+          <SelectTrigger>
+            <SelectValue placeholder="Document that answers it" />
+          </SelectTrigger>
+          <SelectContent>
+            {Array.from(new Set(documents))
+              .sort()
+              .map((d) => (
+                <SelectItem key={d} value={d}>
+                  {d}
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
+        <Button type="submit" disabled={!question.trim() || !expected}>
+          <Plus className="h-4 w-4" /> Add
+        </Button>
+      </form>
+
+      {evalsQ.isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : evalsQ.error ? (
+        <p className="text-sm text-destructive">
+          {evalsQ.error instanceof Error ? evalsQ.error.message : "Failed to load"}
+        </p>
+      ) : rows.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border p-6 text-center">
+          <p className="text-sm text-muted-foreground">
+            No test questions yet. Unanswered and down-voted questions are suggested as you type.
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2">Question</th>
+                <th className="px-3 py-2">Expected document</th>
+                <th className="px-3 py-2">Result</th>
+                <th className="px-3 py-2 w-10" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className="border-t border-border align-top">
+                  <td className="px-3 py-2">
+                    {r.question}
+                    {r.last_english_query && (
+                      <div className="text-xs text-muted-foreground">
+                        English search: {r.last_english_query}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-xs">{r.expected_document}</td>
+                  <td className="px-3 py-2 text-xs whitespace-nowrap">
+                    {r.last_passed === null
+                      ? "Not run"
+                      : r.last_passed
+                        ? `✓ found (#${r.last_rank})`
+                        : "✗ not found"}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      aria-label="Delete test question"
+                      onClick={() => remove(r.id)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </td>
                 </tr>
               ))}
             </tbody>

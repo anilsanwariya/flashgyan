@@ -9,6 +9,8 @@ export const SAATHI_CHAT_MODEL = "google/gemini-3-flash-preview";
 
 // The model starts its reply with this token when the material can't answer the question.
 export const SAATHI_NO_ANSWER_MARKER = "[[NO_ANSWER]]";
+// The model ends an answer with this token followed by suggested follow-up questions.
+export const SAATHI_NEXT_MARKER = "[[NEXT]]";
 
 // Chunks with no keyword hit need at least this cosine similarity to reach the model.
 // Kept low because Hindi questions about English material score lower; the model
@@ -17,6 +19,9 @@ export const SAATHI_NO_ANSWER_MARKER = "[[NO_ANSWER]]";
 export const SAATHI_MIN_VECTOR_SCORE = 0.5;
 
 export const SAATHI_MATCH_COUNT = 8;
+// Candidates fetched per search query, and how many the re-ranker keeps for the answer.
+export const SAATHI_CANDIDATES = 16;
+export const SAATHI_CONTEXT_CHUNKS = 6;
 export const SAATHI_HISTORY_TURNS = 6;
 
 export type SaathiChannel = "web" | "telegram";
@@ -44,10 +49,26 @@ export type SaathiSource = {
 };
 
 // Newline-delimited JSON events streamed by the website's /api/saathi/ask route.
+// searchQuery/englishQuery are what the knowledge base was searched with; "Quiz me"
+// sends them back so the quiz is built from the same material.
 export type SaathiStreamEvent =
   | { type: "delta"; text: string }
-  | { type: "done"; noAnswer: boolean; sources: SaathiSource[] }
+  | {
+      type: "done";
+      noAnswer: boolean;
+      sources: SaathiSource[];
+      followups?: string[];
+      searchQuery?: string;
+      englishQuery?: string | null;
+    }
   | { type: "error"; message: string };
+
+export type SaathiQuizItem = {
+  question: string;
+  options: string[];
+  answer: number;
+  explanation: string;
+};
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
@@ -189,30 +210,71 @@ export function cleanHistory(history: SaathiTurn[]): SaathiTurn[] {
     .map((t) => ({ role: t.role, content: t.content.slice(0, 3000) }));
 }
 
-// Follow-ups like "explain more" search badly on their own, so rewrite them into a
-// standalone question using the conversation. Falls back to the original on failure.
-export async function saathiStandaloneQuestion(
+const HINGLISH_WORDS =
+  /\b(kya|kyaa|hai|hain|ka|ki|ke|ko|kaun|kab|kaise|kahan|kitne|kitna|kyun|kyon|mein|aur|batao|samjhao|matlab|wala|wali|tha|thi)\b/i;
+
+// True when the text is likely Hindi written in Latin letters.
+export function looksHinglish(text: string): boolean {
+  return !DEVANAGARI.test(text) && (text.match(new RegExp(HINGLISH_WORDS, "gi"))?.length ?? 0) >= 2;
+}
+
+export type SaathiQuery = {
+  // The question rewritten to stand on its own, in the student's language.
+  standalone: string;
+  // An English version for searching English material; null when not needed.
+  english: string | null;
+};
+
+function parseJsonLoose<T>(raw: string): T | null {
+  const text = raw.replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const m = /[[{][\s\S]*[\]}]/.exec(text);
+    if (!m) return null;
+    try {
+      return JSON.parse(m[0]) as T;
+    } catch {
+      return null;
+    }
+  }
+}
+
+// Turns the latest message into search queries: follow-ups like "explain more" are
+// rewritten into a standalone question, and Hindi or Hinglish questions also get an
+// English version so English material is found by both meaning and keywords.
+// Plain English first questions need no model call.
+export async function saathiPrepareQuery(
   apiKey: string,
   history: SaathiTurn[],
   question: string,
-): Promise<string> {
-  if (history.length === 0) return question;
+): Promise<SaathiQuery> {
+  const translate = DEVANAGARI.test(question) || looksHinglish(question);
+  if (history.length === 0 && !translate) return { standalone: question, english: null };
   const transcript = history
     .map((t) => `${t.role === "user" ? "Student" : "SAATHI"}: ${t.content.slice(0, 1200)}`)
     .join("\n");
   try {
-    const rewritten = await saathiComplete(apiKey, [
+    const raw = await saathiComplete(apiKey, [
       {
         role: "system",
         content:
-          "Rewrite the student's latest message as one standalone question that can be understood without the conversation. Keep the same language and script. If it is already standalone, return it unchanged. Output only the question.",
+          'You prepare search queries for a study assistant. Reply with JSON only: {"question": string, "english": string}. "question": the student\'s latest message rewritten as one standalone question that can be understood without the conversation, in the same language and script as the student wrote it (unchanged if already standalone). "english": the same question in clear English, keeping names, article numbers, dates and technical terms.',
       },
-      { role: "user", content: `Conversation:\n${transcript}\n\nLatest message: ${question}` },
+      {
+        role: "user",
+        content: `${transcript ? `Conversation:\n${transcript}\n\n` : ""}Latest message: ${question}`,
+      },
     ]);
-    const clean = rewritten.replace(/^["'\s]+|["'\s]+$/g, "");
-    return clean && clean.length <= 1000 ? clean : question;
+    const parsed = parseJsonLoose<{ question?: string; english?: string }>(raw);
+    const standalone = parsed?.question?.trim().slice(0, 1000) || question;
+    const english = parsed?.english?.trim().slice(0, 1000) || null;
+    return {
+      standalone,
+      english: english && english.toLowerCase() !== standalone.toLowerCase() ? english : null,
+    };
   } catch {
-    return question;
+    return { standalone: question, english: null };
   }
 }
 
@@ -223,14 +285,17 @@ export async function saathiSearch(
   query: string,
   embedding: number[],
   subjects: string[] | null,
+  matchCount = SAATHI_MATCH_COUNT,
+  // Text whose language decides which chunks get the language bonus.
+  languageOf = query,
 ): Promise<SaathiMatch[]> {
   const res = await rpc("match_saathi_chunks", {
     query_text: query,
     query_embedding: embedding,
-    match_count: SAATHI_MATCH_COUNT,
+    match_count: matchCount,
     subject_filters: subjects && subjects.length ? subjects : null,
   });
-  if (!res.error) return preferQuestionLanguage((res.data ?? []) as SaathiMatch[], query);
+  if (!res.error) return preferQuestionLanguage((res.data ?? []) as SaathiMatch[], languageOf);
   if (res.error.code !== "PGRST202") throw new Error(res.error.message);
 
   const perSubject = await Promise.all(
@@ -238,7 +303,7 @@ export async function saathiSearch(
       rpc("match_saathi_hybrid", {
         query_text: query,
         query_embedding: embedding,
-        match_count: SAATHI_MATCH_COUNT,
+        match_count: matchCount,
         subject_filter: subject,
       }),
     ),
@@ -251,7 +316,110 @@ export async function saathiSearch(
     .filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true)))
     .map((m) => ({ ...m, vector_score: m.similarity, keyword_score: 0 }))
     .sort((a, b) => b.similarity - a.similarity)
-    .slice(0, SAATHI_MATCH_COUNT);
+    .slice(0, matchCount);
+}
+
+// Searches with the standalone question and, when present, its English version,
+// keeping each chunk's best scores from either search.
+export async function saathiSearchQuery(
+  apiKey: string,
+  rpc: SaathiRpc,
+  query: SaathiQuery,
+  subjects: string[] | null,
+  matchCount = SAATHI_CANDIDATES,
+): Promise<SaathiMatch[]> {
+  const texts = query.english ? [query.standalone, query.english] : [query.standalone];
+  const embeddings =
+    texts.length === 1
+      ? [await saathiEmbed(apiKey, texts[0])]
+      : await saathiEmbedMany(apiKey, texts);
+  const results = await Promise.all(
+    texts.map((t, i) =>
+      saathiSearch(rpc, t, embeddings[i], subjects, matchCount, query.standalone),
+    ),
+  );
+  const best = new Map<string, SaathiMatch>();
+  for (const m of results.flat()) {
+    const prev = best.get(m.id);
+    best.set(
+      m.id,
+      prev
+        ? {
+            ...prev,
+            vector_score: Math.max(prev.vector_score, m.vector_score),
+            keyword_score: Math.max(prev.keyword_score, m.keyword_score),
+            similarity: Math.max(prev.similarity, m.similarity),
+          }
+        : m,
+    );
+  }
+  return [...best.values()].sort((a, b) => b.similarity - a.similarity);
+}
+
+// Asks the model which candidate chunks best answer the question, best first.
+// Keeps the search order if there are few candidates or the model's reply is unusable.
+export async function saathiRerank(
+  apiKey: string,
+  question: string,
+  matches: SaathiMatch[],
+  keep = SAATHI_CONTEXT_CHUNKS,
+): Promise<SaathiMatch[]> {
+  if (matches.length <= keep) return matches;
+  const list = matches
+    .map((m, i) => `[${i + 1}] ${m.source_file || m.title}\n${m.content.slice(0, 700)}`)
+    .join("\n\n");
+  try {
+    const raw = await saathiComplete(apiKey, [
+      {
+        role: "system",
+        content: `You rank study material for answering a student's question. Reply with a JSON array of the numbers of the passages that help answer it, most useful first, at most ${keep} numbers. Use [] if none help.`,
+      },
+      { role: "user", content: `Question: ${question}\n\nPassages:\n\n${list}` },
+    ]);
+    const picked = parseJsonLoose<unknown[]>(raw);
+    if (!Array.isArray(picked)) return matches.slice(0, keep);
+    const seen = new Set<number>();
+    const out = picked
+      .map((n) => Number(n) - 1)
+      .filter(
+        (i) =>
+          Number.isInteger(i) &&
+          i >= 0 &&
+          i < matches.length &&
+          !seen.has(i) &&
+          (seen.add(i), true),
+      )
+      .slice(0, keep)
+      .map((i) => matches[i]);
+    // An empty pick from the model is not trusted over the search scores.
+    return out.length ? out : matches.slice(0, keep);
+  } catch {
+    return matches.slice(0, keep);
+  }
+}
+
+export type SaathiRetrieval = {
+  query: SaathiQuery;
+  // Everything the searches returned, with scores (for the admin test tools).
+  candidates: SaathiMatch[];
+  // The chunks given to the model, best first. Empty means "no material".
+  matches: SaathiMatch[];
+};
+
+// The full search pipeline shared by the website, the Telegram bot and admin tools.
+export async function saathiRetrieve(opts: {
+  apiKey: string;
+  rpc: SaathiRpc;
+  history: SaathiTurn[];
+  question: string;
+  subjects: string[] | null;
+  query?: SaathiQuery;
+}): Promise<SaathiRetrieval> {
+  const query = opts.query ?? (await saathiPrepareQuery(opts.apiKey, opts.history, opts.question));
+  const candidates = await saathiSearchQuery(opts.apiKey, opts.rpc, query, opts.subjects);
+  const relevant = relevantMatches(candidates);
+  const matches = await saathiRerank(opts.apiKey, query.english ?? query.standalone, relevant);
+  return { query, candidates, matches };
 }
 
 const DEVANAGARI = /[\u0900-\u097F]/;
@@ -304,11 +472,13 @@ export function saathiSystemPrompt(channel: SaathiChannel): string {
 
 GROUNDING: Answer ONLY from the study material provided with the question. Do not use outside knowledge and do not guess. If the material does not contain the answer, begin your reply with the exact token ${SAATHI_NO_ANSWER_MARKER} and then, in one or two short sentences, say that this topic isn't in the study material yet; if the material covers a closely related topic, suggest it. If the material answers only part of the question, answer that part, say clearly what is not covered, and do not use the token.
 
-LANGUAGE: Reply in the same language and script as the student's latest message: Hindi in Devanagari gets Hindi in Devanagari, Hinglish (Hindi in Latin letters) gets Hinglish, English gets English. Keep names and technical terms as they appear in the material.
+LANGUAGE: Reply in the same language and script as the student's latest message: Hindi in Devanagari gets Hindi in Devanagari, Hinglish (Hindi in Latin letters) gets Hinglish, English gets English. This applies even when the material is in another language: translate it faithfully. In Hindi or Hinglish answers, use the standard Hindi terms used in Indian competitive exams (for example मौलिक अधिकार, नीति निदेशक तत्व, संसद) and give the English term in brackets the first time each appears, e.g. मौलिक अधिकार (Fundamental Rights). Keep names, article numbers, dates and figures exactly as in the material.
 
 ${FORMAT_RULES[channel]}
 
-Do not add source citations; the app shows the sources separately.`;
+Do not add source citations; the app shows the sources separately.
+
+NEXT QUESTIONS: When you have answered (not when you used ${SAATHI_NO_ANSWER_MARKER}), end with one final line that starts with ${SAATHI_NEXT_MARKER} followed by 2 or 3 short follow-up questions the student could ask next, in the student's language, separated by " || ". Only suggest questions the study material can answer.`;
 }
 
 export function saathiMessages(opts: {
@@ -379,4 +549,112 @@ export function stripNoAnswer(text: string): { noAnswer: boolean; text: string }
   const filter = new NoAnswerFilter();
   const out = filter.push(text) + filter.finish();
   return { noAnswer: filter.noAnswer, text: out };
+}
+
+function parseNextQuestions(tail: string): string[] {
+  return tail
+    .split(/\|\||\n/)
+    .map((q) =>
+      q
+        .trim()
+        .replace(/^[-*•\d.)\s]+/, "")
+        .replace(/^["'“]+|["'”]+$/g, "")
+        .trim(),
+    )
+    .filter((q) => q.length >= 3 && q.length <= 200)
+    .slice(0, 3);
+}
+
+// Cuts the follow-up questions line off the end of a (possibly streamed) answer.
+// Text that might be the start of the marker is held back until it is clear.
+export class NextQuestionsFilter {
+  private pending = "";
+  private tail: string | null = null;
+  questions: string[] = [];
+
+  push(delta: string): string {
+    if (this.tail !== null) {
+      this.tail += delta;
+      return "";
+    }
+    this.pending += delta;
+    const at = this.pending.indexOf(SAATHI_NEXT_MARKER);
+    if (at >= 0) {
+      const out = this.pending.slice(0, at).trimEnd();
+      this.tail = this.pending.slice(at + SAATHI_NEXT_MARKER.length);
+      this.pending = "";
+      return out;
+    }
+    let hold = 0;
+    for (let k = Math.min(this.pending.length, SAATHI_NEXT_MARKER.length - 1); k > 0; k--) {
+      if (SAATHI_NEXT_MARKER.startsWith(this.pending.slice(-k))) {
+        hold = k;
+        break;
+      }
+    }
+    const out = this.pending.slice(0, this.pending.length - hold);
+    this.pending = this.pending.slice(this.pending.length - hold);
+    return out;
+  }
+
+  finish(): string {
+    if (this.tail !== null) {
+      this.questions = parseNextQuestions(this.tail);
+      return "";
+    }
+    const out = this.pending;
+    this.pending = "";
+    return out;
+  }
+}
+
+export function splitNextQuestions(text: string): { text: string; next: string[] } {
+  const f = new NextQuestionsFilter();
+  const out = f.push(text) + f.finish();
+  return { text: out.trimEnd(), next: f.questions };
+}
+
+// ---------- "Quiz me" ----------
+
+export function saathiQuizMessages(question: string, matches: SaathiMatch[]): ChatMessage[] {
+  const material = matches
+    .map((m, i) => `[Material ${i + 1}] ${m.source_file || m.title}\n${m.content}`)
+    .join("\n\n---\n\n");
+  return [
+    {
+      role: "system",
+      content: `You write practice multiple-choice questions for exam students, using ONLY facts stated in the study material. Write 3 questions about the topic of the student's question, in the same language and script as the student's question (use standard exam Hindi terms for Hindi). Each has exactly 4 options and one correct answer. Reply with JSON only: [{"question": string, "options": [string, string, string, string], "answer": index 0-3 of the correct option, "explanation": one short sentence}].`,
+    },
+    {
+      role: "user",
+      content: `Study material:\n\n${material}\n\n---\n\nStudent's question: ${question}`,
+    },
+  ];
+}
+
+export function parseQuiz(raw: string): SaathiQuizItem[] {
+  const items = parseJsonLoose<unknown[]>(raw);
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((it) => {
+      const o = (it ?? {}) as Record<string, unknown>;
+      const options = Array.isArray(o.options) ? o.options.map((x) => String(x).trim()) : [];
+      const answer = Number(o.answer);
+      return {
+        question: String(o.question ?? "").trim(),
+        options,
+        answer,
+        explanation: String(o.explanation ?? "").trim(),
+      };
+    })
+    .filter(
+      (q) =>
+        q.question &&
+        q.options.length === 4 &&
+        q.options.every(Boolean) &&
+        Number.isInteger(q.answer) &&
+        q.answer >= 0 &&
+        q.answer < 4,
+    )
+    .slice(0, 3);
 }

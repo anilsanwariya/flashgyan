@@ -7,6 +7,7 @@ import {
   Check,
   ChevronDown,
   Copy,
+  GraduationCap,
   Layers,
   Lock,
   Send,
@@ -19,10 +20,16 @@ import {
 import { toast } from "sonner";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { listSaathiTopics, submitSaathiFeedback, type SaathiTopic } from "@/lib/saathi.functions";
+import {
+  listSaathiTopics,
+  saathiQuiz,
+  submitSaathiFeedback,
+  type SaathiTopic,
+} from "@/lib/saathi.functions";
 import { getHomeData } from "@/lib/home.functions";
 import { listDecks, type DeckSummary } from "@/lib/flashcards.functions";
 import type {
+  SaathiQuizItem,
   SaathiSource,
   SaathiStreamEvent,
 } from "../../supabase/functions/_shared/saathi-core.ts";
@@ -45,6 +52,14 @@ type Msg = {
   sources?: SaathiSource[];
   question?: string;
   rating?: 1 | -1;
+  // Suggested next questions, shown as chips under the answer.
+  followups?: string[];
+  // What the answer was searched with, reused by "Quiz me".
+  searchQuery?: string;
+  englishQuery?: string | null;
+  subjects?: string[];
+  quiz?: SaathiQuizItem[];
+  quizPicks?: (number | null)[];
 };
 
 const CHAT_KEY = "saathi.chat.v1";
@@ -198,7 +213,14 @@ function SaathiChat() {
     setMessages((m) => [
       ...m,
       { id: crypto.randomUUID(), role: "user", content: text, status: "done" },
-      { id: answerId, role: "assistant", content: "", status: "streaming", question: text },
+      {
+        id: answerId,
+        role: "assistant",
+        content: "",
+        status: "streaming",
+        question: text,
+        subjects: selected,
+      },
     ]);
     setInput("");
     setSending(true);
@@ -239,6 +261,9 @@ function SaathiChat() {
               status: "done",
               noAnswer: event.noAnswer,
               sources: event.sources,
+              followups: event.followups,
+              searchQuery: event.searchQuery,
+              englishQuery: event.englishQuery,
             });
           } else if (event.type === "error") {
             throw new Error(event.message);
@@ -369,7 +394,13 @@ function SaathiChat() {
           )}
 
           {messages.map((m) => (
-            <MessageBubble key={m.id} msg={m} onRate={(rating) => patchMessage(m.id, { rating })} />
+            <MessageBubble
+              key={m.id}
+              msg={m}
+              busy={sending}
+              onPatch={(patch) => patchMessage(m.id, patch)}
+              onAsk={(q) => send(q)}
+            />
           ))}
         </div>
       </div>
@@ -553,8 +584,20 @@ function markdownComponents(streaming: boolean): Components {
   };
 }
 
-function MessageBubble({ msg, onRate }: { msg: Msg; onRate: (rating: 1 | -1) => void }) {
+function MessageBubble({
+  msg,
+  busy,
+  onPatch,
+  onAsk,
+}: {
+  msg: Msg;
+  busy: boolean;
+  onPatch: (patch: Partial<Msg>) => void;
+  onAsk: (question: string) => void;
+}) {
   const feedbackFn = useServerFn(submitSaathiFeedback);
+  const quizFn = useServerFn(saathiQuiz);
+  const [quizLoading, setQuizLoading] = useState(false);
   const hasSources = msg.status === "done" && !msg.noAnswer && (msg.sources?.length ?? 0) > 0;
   const decksQ = useQuery({ ...decksQO, enabled: hasSources, staleTime: 10 * 60_000 });
   const deck = hasSources && decksQ.data ? deckFor(decksQ.data, msg.sources![0]) : undefined;
@@ -584,7 +627,7 @@ function MessageBubble({ msg, onRate }: { msg: Msg; onRate: (rating: 1 | -1) => 
 
   async function rate(rating: 1 | -1) {
     if (msg.rating || !msg.question) return;
-    onRate(rating);
+    onPatch({ rating });
     try {
       await feedbackFn({
         data: {
@@ -599,6 +642,25 @@ function MessageBubble({ msg, onRate }: { msg: Msg; onRate: (rating: 1 | -1) => 
       );
     } catch {
       // feedback is best-effort
+    }
+  }
+
+  async function startQuiz() {
+    if (!msg.searchQuery || quizLoading) return;
+    setQuizLoading(true);
+    try {
+      const quiz = await quizFn({
+        data: {
+          searchQuery: msg.searchQuery,
+          englishQuery: msg.englishQuery ?? null,
+          subjects: msg.subjects ?? [],
+        },
+      });
+      onPatch({ quiz, quizPicks: quiz.map(() => null) });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't make a quiz");
+    } finally {
+      setQuizLoading(false);
     }
   }
 
@@ -659,15 +721,64 @@ function MessageBubble({ msg, onRate }: { msg: Msg; onRate: (rating: 1 | -1) => 
         )}
 
         {answered && msg.sources && msg.sources.length > 0 && (
-          <Link
-            {...(deck
-              ? { to: "/decks/$deckId" as const, params: { deckId: deck.id } }
-              : { to: "/flashcards" as const })}
-            className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
-          >
-            <Layers className="h-3.5 w-3.5" />
-            {deck ? `Practise “${deck.name}” flashcards` : "Practise this with flashcards"}
-          </Link>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+            {msg.searchQuery && !msg.quiz && (
+              <button
+                type="button"
+                onClick={startQuiz}
+                disabled={quizLoading}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline disabled:opacity-60"
+              >
+                <GraduationCap className="h-3.5 w-3.5" />
+                {quizLoading ? "Making your quiz…" : "Quiz me on this"}
+              </button>
+            )}
+            <Link
+              {...(deck
+                ? { to: "/decks/$deckId" as const, params: { deckId: deck.id } }
+                : { to: "/flashcards" as const })}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+            >
+              <Layers className="h-3.5 w-3.5" />
+              {deck ? `Practise “${deck.name}” flashcards` : "Practise this with flashcards"}
+            </Link>
+          </div>
+        )}
+
+        {msg.quiz && msg.quiz.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {msg.quiz.map((item, i) => (
+              <QuizCard
+                key={i}
+                index={i}
+                item={item}
+                pick={msg.quizPicks?.[i] ?? null}
+                onPick={(choice) =>
+                  onPatch({
+                    quizPicks: (msg.quizPicks ?? msg.quiz!.map(() => null)).map((p, j) =>
+                      j === i ? choice : p,
+                    ),
+                  })
+                }
+              />
+            ))}
+          </div>
+        )}
+
+        {answered && msg.followups && msg.followups.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {msg.followups.map((q) => (
+              <button
+                key={q}
+                type="button"
+                disabled={busy}
+                onClick={() => onAsk(q)}
+                className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-left text-xs text-foreground hover:bg-primary/10 disabled:opacity-50 transition-colors"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
         )}
 
         <Dialog open={!!openSource} onOpenChange={(o) => !o && setOpenSource(null)}>
@@ -689,6 +800,60 @@ function MessageBubble({ msg, onRate }: { msg: Msg; onRate: (rating: 1 | -1) => 
           </DialogContent>
         </Dialog>
       </div>
+    </div>
+  );
+}
+
+function QuizCard({
+  index,
+  item,
+  pick,
+  onPick,
+}: {
+  index: number;
+  item: SaathiQuizItem;
+  pick: number | null;
+  onPick: (choice: number) => void;
+}) {
+  const answered = pick !== null;
+  return (
+    <div className="rounded-2xl border border-border/40 bg-white/60 dark:bg-black/30 backdrop-blur-xl p-3 text-sm">
+      <p className="font-medium">
+        Q{index + 1}. {item.question}
+      </p>
+      <div className="mt-2 grid gap-1.5">
+        {item.options.map((opt, i) => {
+          const correct = i === item.answer;
+          const chosen = i === pick;
+          const tone = !answered
+            ? "border-border/50 hover:bg-muted/60"
+            : correct
+              ? "border-emerald-500 bg-emerald-500/10"
+              : chosen
+                ? "border-destructive bg-destructive/10"
+                : "border-border/40 opacity-70";
+          return (
+            <button
+              key={i}
+              type="button"
+              disabled={answered}
+              onClick={() => onPick(i)}
+              className={`rounded-xl border px-3 py-2 text-left transition-colors ${tone}`}
+            >
+              <span className="mr-1.5 font-semibold">{String.fromCharCode(65 + i)}.</span>
+              {opt}
+              {answered && correct && " ✓"}
+              {answered && chosen && !correct && " ✗"}
+            </button>
+          );
+        })}
+      </div>
+      {answered && item.explanation && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {pick === item.answer ? "Correct! " : "Not quite. "}
+          {item.explanation}
+        </p>
+      )}
     </div>
   );
 }
