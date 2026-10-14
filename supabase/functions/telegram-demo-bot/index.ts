@@ -810,6 +810,61 @@ async function queueMainsAnswer(chat_id: number, user_id: number, args: string) 
   }));
 }
 
+// ---------- Current affairs magazine ----------
+// Posts approved magazine issues (PDF) to the channel when they are due.
+// Runs with every broadcast tick.
+type MagazineIssue = {
+  id: string;
+  pdf_path: string;
+  caption: string | null;
+};
+
+async function runMagazineTick() {
+  const { data: claimed, error } = await supabase.rpc("ca_claim_due_issue");
+  if (error) {
+    if (!isMissingTable(error) && error.code !== "PGRST202") console.error("magazine claim", error.message);
+    return;
+  }
+  const issue = ((claimed ?? []) as MagazineIssue[])[0];
+  if (!issue) return;
+  try {
+    const { data: setting } = await supabase
+      .from("bot_settings")
+      .select("value")
+      .eq("key", "ca_magazine")
+      .maybeSingle();
+    const channel = String((setting?.value as { channel?: string } | null)?.channel ?? "").trim();
+    if (!channel) throw new Error("No channel set in Magazine settings");
+    const { data: file, error: dErr } = await supabase.storage.from("ca-magazines").download(issue.pdf_path);
+    if (dErr || !file) throw new Error(dErr?.message ?? "PDF not found");
+    const form = new FormData();
+    form.append("chat_id", channel);
+    form.append("document", file, issue.pdf_path.split("/").pop() ?? "magazine.pdf");
+    if (issue.caption) {
+      form.append("caption", issue.caption);
+      form.append("parse_mode", "HTML");
+    }
+    const res = await fetch(`${TG}/sendDocument`, { method: "POST", body: form });
+    const json = await res.json().catch(() => ({}));
+    if (!json.ok) throw new Error(json.description ?? `Telegram error ${res.status}`);
+    await supabase
+      .from("ca_issues")
+      .update({
+        status: "posted",
+        posted_at: new Date().toISOString(),
+        telegram_message_id: json.result?.message_id ?? null,
+        error: null,
+      })
+      .eq("id", issue.id);
+  } catch (e) {
+    console.error("magazine post", e);
+    await supabase
+      .from("ca_issues")
+      .update({ status: "failed", error: e instanceof Error ? e.message : String(e) })
+      .eq("id", issue.id);
+  }
+}
+
 // ---------- Broadcasts ----------
 // Sends due broadcasts in batches. Runs when the admin panel asks for it, on a
 // schedule (optional cron), and opportunistically while the bot is in use.
@@ -1043,6 +1098,7 @@ Deno.serve(async (req) => {
     // safe to trigger from cron or the admin panel without credentials. Replies
     // at once; sending continues in the background.
     continueInBackground(runBroadcastTick());
+    continueInBackground(runMagazineTick());
     return Response.json({ started: true });
   }
   if (req.method === "OPTIONS") return new Response("ok");
@@ -1060,6 +1116,7 @@ Deno.serve(async (req) => {
   if (botAdminReady && Date.now() - lastTickAt > 60_000) {
     lastTickAt = Date.now();
     continueInBackground(runBroadcastTick());
+    continueInBackground(runMagazineTick());
   }
 
   try {
