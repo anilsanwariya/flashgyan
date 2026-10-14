@@ -572,6 +572,9 @@ function mainsHeader(info: MainsInfo): string {
     tgEsc(DIRECTIVE_LABELS[info.directive]),
   ];
   const lines = [parts.join(" · ")];
+  if (info.syllabus) {
+    lines.push(`📘 <i>Paper ${tgEsc(info.syllabus.paper)} · ${tgEsc(info.syllabus.unit)}</i>`);
+  }
   if (info.pyq) {
     const when = [info.pyq.year ? `RAS ${info.pyq.year}` : "a previous year", info.pyq.paper ? `Paper ${tgEsc(info.pyq.paper)}` : null]
       .filter(Boolean)
@@ -592,7 +595,7 @@ async function handleSaathiAsk(
     await tg("sendMessage", {
       chat_id,
       text: mains
-        ? "Usage: /answer 10 <your question>\n(the number is the marks: 2, 5, 10 or 20)"
+        ? "Usage: /answer 10 <your question>\n(the number is the marks: 5 or 10)"
         : "Usage: /ask <your question>",
     });
     return;

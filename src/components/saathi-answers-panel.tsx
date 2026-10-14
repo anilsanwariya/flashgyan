@@ -25,6 +25,7 @@ import {
   deleteAnswerFormat,
   deleteModelAnswer,
   editBlueprintGuide,
+  getSyllabusCoverage,
   listBlueprintScores,
   listBlueprints,
   listModelAnswers,
@@ -41,6 +42,7 @@ import {
   type BlueprintWithScore,
   type ModelAnswer,
   type RebuildResult,
+  type SyllabusCoverage,
   type WrittenAnswer,
 } from "@/lib/saathi-mains.functions";
 import {
@@ -51,6 +53,11 @@ import {
   type BlueprintDirective,
   type MainsDirective,
 } from "../../supabase/functions/_shared/saathi-mains.ts";
+import {
+  RAS_SYLLABUS,
+  syllabusTopics,
+  syllabusUnit,
+} from "../../supabase/functions/_shared/ras-syllabus.ts";
 import {
   MODEL_ANSWER_TEMPLATE,
   parseModelAnswers,
@@ -76,11 +83,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-type Tab = "answers" | "blueprints" | "try" | "scores" | "limits";
+type Tab = "answers" | "blueprints" | "syllabus" | "try" | "scores" | "limits";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "answers", label: "Model answers" },
   { id: "blueprints", label: "Blueprints" },
+  { id: "syllabus", label: "Syllabus" },
   { id: "try", label: "Try a question" },
   { id: "scores", label: "Scores" },
   { id: "limits", label: "Word limits" },
@@ -93,7 +101,22 @@ const ALL = "__all__";
 const preferredMarks = (formats: AnswerFormat[]) =>
   String(formats.find((f) => f.marks === 10)?.marks ?? formats[0]?.marks ?? 10);
 
+const TOPICS = syllabusTopics();
+const topicText = (id: string | null | undefined) => TOPICS.find((t) => t.id === id)?.topic ?? null;
+
 const errorText = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
+
+// "Paper I · Unit II" for a syllabus unit id.
+function unitShort(id: string | null | undefined): string | null {
+  const u = syllabusUnit(id);
+  return u ? `Paper ${u.paper} · Unit ${u.unit}` : null;
+}
+
+// What a blueprint covers: a syllabus unit, or a question type.
+function blueprintLabel(directive: BlueprintDirective, unit: string | null | undefined): string {
+  const u = syllabusUnit(unit);
+  return u ? `${u.title} (${unitShort(unit)})` : DIRECTIVE_LABELS[directive];
+}
 
 function rebuildSummary(results: RebuildResult[]): string | null {
   const created = results.filter((r) => r.outcome === "created");
@@ -101,7 +124,7 @@ function rebuildSummary(results: RebuildResult[]): string | null {
   const parts: string[] = [];
   if (created.length) {
     parts.push(
-      `Updated ${created.map((r) => `${r.marks}-mark ${DIRECTIVE_LABELS[r.directive]}`).join(", ")}`,
+      `Updated ${created.map((r) => `${r.marks}-mark ${blueprintLabel(r.directive, r.unit)}`).join(", ")}`,
     );
   }
   if (drafts.length) {
@@ -161,6 +184,8 @@ export function SaathiAnswersPanel() {
         <ModelAnswersTab formats={formats} />
       ) : tab === "blueprints" ? (
         <BlueprintsTab formats={formats} />
+      ) : tab === "syllabus" ? (
+        <SyllabusTab />
       ) : tab === "try" ? (
         <TryTab formats={formats} />
       ) : tab === "scores" ? (
@@ -242,6 +267,7 @@ type Draft = {
   directive: string;
   year: string;
   paper: string;
+  unit: string;
   subject: string;
   source: string;
   holdout: boolean;
@@ -254,6 +280,7 @@ const emptyDraft = (marks = "10"): Draft => ({
   directive: AUTO,
   year: "",
   paper: "",
+  unit: AUTO,
   subject: "",
   source: "",
   holdout: false,
@@ -328,6 +355,7 @@ function ModelAnswersTab({ formats }: { formats: AnswerFormat[] }) {
       directive: r.directive,
       year: r.year ? String(r.year) : "",
       paper: r.paper ?? "",
+      unit: r.unit ?? AUTO,
       subject: r.subject ?? "",
       source: r.source ?? "",
       holdout: r.holdout,
@@ -383,10 +411,20 @@ function ModelAnswersTab({ formats }: { formats: AnswerFormat[] }) {
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   <Badge tone="primary">{r.marks} marks</Badge>
                   <Badge>{DIRECTIVE_LABELS[r.directive]}</Badge>
-                  {(r.year || r.paper) && (
+                  {(r.year || r.paper || r.unit) && (
                     <Badge>
-                      {[r.year, r.paper ? `Paper ${r.paper}` : null].filter(Boolean).join(" · ")}
+                      {[r.year, unitShort(r.unit) ?? (r.paper ? `Paper ${r.paper}` : null)]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </Badge>
+                  )}
+                  {r.unit && (
+                    <span
+                      title={topicText(r.topic_id) ?? "Topic not tagged"}
+                      className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                    >
+                      {syllabusUnit(r.unit)?.title}
+                    </span>
                   )}
                   {r.subject && <Badge>{r.subject}</Badge>}
                   <Badge>{r.word_count} words</Badge>
@@ -515,7 +553,8 @@ function ModelAnswerDialog({
           marks,
           directive: d.directive === AUTO ? null : (d.directive as MainsDirective),
           year: d.year ? Number(d.year) : null,
-          paper: d.paper || null,
+          paper: syllabusUnit(d.unit)?.paper ?? (d.paper || null),
+          unit: d.unit === AUTO ? null : d.unit,
           subject: d.subject || null,
           source: d.source || null,
           holdout: d.holdout,
@@ -584,15 +623,23 @@ function ModelAnswerDialog({
                 placeholder="2018"
               />
             </div>
-            <div className="space-y-1.5">
-              <Label>Paper</Label>
-              <Input
-                value={d.paper}
-                onChange={(e) => set("paper", e.target.value)}
-                placeholder="II"
-              />
-            </div>
             <div className="space-y-1.5 sm:col-span-2">
+              <Label>Syllabus unit</Label>
+              <Select value={d.unit} onValueChange={(v) => set("unit", v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={AUTO}>Detect from the question</SelectItem>
+                  {RAS_SYLLABUS.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {unitShort(u.id)} · {u.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
               <Label>Subject</Label>
               <Input
                 value={d.subject}
@@ -684,7 +731,8 @@ function ImportDialog({ formats, onClose }: { formats: AnswerFormat[]; onClose: 
             marks: it.marks,
             directive: it.directive,
             year: it.year,
-            paper: it.paper,
+            paper: syllabusUnit(it.unit)?.paper ?? it.paper,
+            unit: it.unit,
             subject: it.subject,
             holdout: it.holdout,
             rebuild: false,
@@ -727,7 +775,7 @@ function ImportDialog({ formats, onClose }: { formats: AnswerFormat[]; onClose: 
           <p className="text-muted-foreground">
             Paste answers or upload a .txt / .md file. Start each question with <code>Q:</code> and
             its answer with <code>A:</code>. <code>Marks</code>, <code>Year</code>,{" "}
-            <code>Paper</code>, <code>Subject</code>, <code>Type</code> and{" "}
+            <code>Paper</code>, <code>Unit</code>, <code>Subject</code>, <code>Type</code> and{" "}
             <code>Test only: yes</code> lines are optional (Hindi labels प्रश्न / उत्तर / अंक / वर्ष
             work too).
           </p>
@@ -818,11 +866,12 @@ function BlueprintsTab({ formats }: { formats: AnswerFormat[] }) {
   const [rebuilding, setRebuilding] = useState(false);
   const [newMarks, setNewMarks] = useState(preferredMarks(formats));
   const [newType, setNewType] = useState<BlueprintDirective>("any");
+  const [newUnit, setNewUnit] = useState(ALL);
 
   const groups = useMemo(() => {
     const map = new Map<string, BlueprintWithScore[]>();
     for (const b of bpQ.data ?? []) {
-      const key = `${b.marks}|${b.directive}`;
+      const key = `${b.marks}|${b.directive}|${b.unit ?? ""}`;
       const list = map.get(key) ?? [];
       list.push(b);
       map.set(key, list);
@@ -832,6 +881,8 @@ function BlueprintsTab({ formats }: { formats: AnswerFormat[] }) {
       .sort(
         (a, b) =>
           a[0].marks - b[0].marks ||
+          Number(!!a[0].unit) - Number(!!b[0].unit) ||
+          (a[0].unit ?? "").localeCompare(b[0].unit ?? "") ||
           (a[0].directive === "any" ? -1 : b[0].directive === "any" ? 1 : 0) ||
           a[0].directive.localeCompare(b[0].directive),
       );
@@ -853,7 +904,13 @@ function BlueprintsTab({ formats }: { formats: AnswerFormat[] }) {
 
   async function startByHand() {
     try {
-      await createFn({ data: { marks: Number(newMarks), directive: newType } });
+      await createFn({
+        data: {
+          marks: Number(newMarks),
+          directive: newUnit === ALL ? newType : "any",
+          unit: newUnit === ALL ? null : newUnit,
+        },
+      });
       toast.success("Blueprint created. Edit it to match how you want answers written.");
       qc.invalidateQueries({ queryKey: ["saathiBlueprints"] });
     } catch (e) {
@@ -894,7 +951,10 @@ function BlueprintsTab({ formats }: { formats: AnswerFormat[] }) {
             {groups
               .filter((g) => g[0].marks === m)
               .map((versions) => (
-                <BlueprintCard key={`${m}-${versions[0].directive}`} versions={versions} />
+                <BlueprintCard
+                  key={`${m}-${versions[0].directive}-${versions[0].unit}`}
+                  versions={versions}
+                />
               ))}
           </section>
         ))
@@ -903,12 +963,29 @@ function BlueprintsTab({ formats }: { formats: AnswerFormat[] }) {
       <section className="space-y-2 rounded-2xl border border-border bg-card p-4">
         <h3 className="text-sm font-semibold">Write a blueprint by hand</h3>
         <p className="text-xs text-muted-foreground">
-          For a marks band or question type without model answers yet. It starts from the standard
-          structure; edit it afterwards.
+          For a marks band, question type or syllabus unit without model answers yet. It starts from
+          the standard structure; edit it afterwards.
         </p>
-        <div className="grid gap-2 sm:grid-cols-[12rem_14rem_auto] sm:justify-start">
+        <div className="grid gap-2 sm:grid-cols-[12rem_14rem_16rem_auto] sm:justify-start">
           <MarksSelect formats={formats} value={newMarks} onChange={setNewMarks} />
-          <Select value={newType} onValueChange={(v) => setNewType(v as BlueprintDirective)}>
+          <Select value={newUnit} onValueChange={setNewUnit}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All syllabus units</SelectItem>
+              {RAS_SYLLABUS.map((u) => (
+                <SelectItem key={u.id} value={u.id}>
+                  {unitShort(u.id)} · {u.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={newUnit === ALL ? newType : "any"}
+            disabled={newUnit !== ALL}
+            onValueChange={(v) => setNewType(v as BlueprintDirective)}
+          >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -960,7 +1037,7 @@ function BlueprintCard({ versions }: { versions: BlueprintWithScore[] }) {
   return (
     <div className="space-y-3 rounded-2xl border border-border bg-card p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="font-medium">{DIRECTIVE_LABELS[shown.directive]}</div>
+        <div className="font-medium">{blueprintLabel(shown.directive, shown.unit)}</div>
         <Badge>v{shown.version}</Badge>
         {shown.status === "active" ? (
           <Badge tone="good">In use</Badge>
@@ -1086,7 +1163,7 @@ function BlueprintCard({ versions }: { versions: BlueprintWithScore[] }) {
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>
-                Edit blueprint · {shown.marks} marks · {DIRECTIVE_LABELS[shown.directive]}
+                Edit blueprint · {shown.marks} marks · {blueprintLabel(shown.directive, shown.unit)}
               </DialogTitle>
             </DialogHeader>
             <p className="text-sm text-muted-foreground">
@@ -1139,13 +1216,20 @@ function MainsInfoBadges({ written }: { written: WrittenAnswer }) {
       <Badge>{DIRECTIVE_LABELS[i.directive]}</Badge>
       {i.blueprint ? (
         <Badge tone="good">
-          Blueprint: {DIRECTIVE_LABELS[i.blueprint.directive]} v{i.blueprint.version} (
-          {i.blueprint.samples} answers)
+          Blueprint: {blueprintLabel(i.blueprint.directive, i.blueprint.unit)} v
+          {i.blueprint.version} ({i.blueprint.samples} answers)
         </Badge>
       ) : (
         <Badge tone="warn">Standard structure (no blueprint yet)</Badge>
       )}
       <Badge>{i.exemplars} example answers</Badge>
+      {i.syllabus ? (
+        <Badge>
+          Syllabus: Paper {i.syllabus.paper} · {i.syllabus.unit} › {i.syllabus.topic}
+        </Badge>
+      ) : (
+        <Badge tone="warn">No syllabus topic matched</Badge>
+      )}
       {i.pyq && (
         <Badge tone="primary">
           Asked in{" "}
@@ -1434,8 +1518,9 @@ function LimitsTab({ formats }: { formats: AnswerFormat[] }) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        The word limit for each marks band, as in the current RAS Mains pattern. Students pick from
-        the bands switched on here. Changing a limit rebuilds that band's blueprints.
+        The word limit for each marks band. The RPSC scheme (09-01-2026) for papers I–III has 5-mark
+        questions in about 50 words and 10-mark questions in about 150 words. Students pick from the
+        bands switched on here. Changing a limit rebuilds that band's blueprints.
       </p>
       <ul className="divide-y divide-border rounded-2xl border border-border bg-card">
         {formats.map((f) => (
@@ -1503,6 +1588,140 @@ function LimitsTab({ formats }: { formats: AnswerFormat[] }) {
           <Plus className="mr-1 h-4 w-4" /> Add marks band
         </Button>
       </form>
+    </div>
+  );
+}
+
+// ====================== Syllabus ======================
+
+function countText(answers: Record<number, number>): string {
+  const parts = Object.entries(answers)
+    .sort((a, b) => Number(a[0]) - Number(b[0]))
+    .map(([m, n]) => `${n} × ${m}m`);
+  return parts.join(" · ");
+}
+
+function SyllabusTab() {
+  const coverageFn = useServerFn(getSyllabusCoverage);
+  const [resync, setResync] = useState(false);
+  const coverageQ = useQuery({
+    queryKey: ["saathiSyllabusCoverage"],
+    queryFn: () => coverageFn({ data: { resync: false } }),
+  });
+  const [open, setOpen] = useState<string | null>(null);
+  const data: SyllabusCoverage | undefined = coverageQ.data;
+  const byTopic = new Map((data?.topics ?? []).map((t) => [t.id, t.answers]));
+  const byUnit = new Map((data?.units ?? []).map((u) => [u.id, u]));
+  const total = (rec: Record<number, number> | undefined) =>
+    Object.values(rec ?? {}).reduce((a, b) => a + b, 0);
+
+  async function sync() {
+    setResync(true);
+    try {
+      await coverageFn({ data: { resync: true } });
+      await coverageQ.refetch();
+      toast.success("Syllabus is up to date");
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't sync the syllabus"));
+    } finally {
+      setResync(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-border bg-card p-4 text-sm text-muted-foreground">
+        The RAS Mains syllabus for papers I–III (RPSC, 09-01-2026). SAATHI matches each question to
+        its nearest topic, follows that unit's conventions (for example section numbers in Law,
+        articles in Polity, maps in Geography) and uses the unit's own blueprint once it has 2 or
+        more model answers. Topics with no model answers are where to add more.
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {data && (
+            <Badge tone={data.synced >= TOPICS.length ? "good" : "warn"}>
+              {data.synced} / {TOPICS.length} topics ready for matching
+            </Badge>
+          )}
+          <Button size="sm" variant="outline" onClick={sync} disabled={resync}>
+            <RefreshCw className={`mr-1 h-3.5 w-3.5 ${resync ? "animate-spin" : ""}`} />
+            Sync syllabus
+          </Button>
+        </div>
+      </div>
+
+      {coverageQ.isLoading ? (
+        <p className="text-sm text-muted-foreground">Preparing the syllabus…</p>
+      ) : coverageQ.error ? (
+        <p className="text-sm text-destructive">{errorText(coverageQ.error, "Couldn't load")}</p>
+      ) : (
+        <ul className="space-y-2">
+          {RAS_SYLLABUS.map((u) => {
+            const cov = byUnit.get(u.id);
+            const n = total(cov?.answers);
+            const covered = u.parts
+              .flatMap((p, pi) => p.topics.map((_, ti) => `${u.id}.${pi}.${ti}`))
+              .filter((id) => total(byTopic.get(id)) > 0).length;
+            const topicCount = u.parts.reduce((a, p) => a + p.topics.length, 0);
+            const isOpen = open === u.id;
+            return (
+              <li key={u.id} className="rounded-2xl border border-border bg-card">
+                <button
+                  type="button"
+                  onClick={() => setOpen(isOpen ? null : u.id)}
+                  className="flex w-full flex-wrap items-center gap-2 p-3 text-left"
+                  aria-expanded={isOpen}
+                >
+                  <span className="text-xs text-muted-foreground">{unitShort(u.id)}</span>
+                  <span className="font-medium">{u.title}</span>
+                  <span className="ml-auto flex flex-wrap gap-1.5">
+                    <Badge tone={n >= 2 ? "good" : n ? "primary" : "warn"}>
+                      {n} model answer{n === 1 ? "" : "s"}
+                      {n ? ` (${countText(cov!.answers)})` : ""}
+                    </Badge>
+                    <Badge>
+                      {covered} / {topicCount} topics covered
+                    </Badge>
+                  </span>
+                </button>
+                {isOpen && (
+                  <div className="space-y-3 border-t border-border p-3 text-sm">
+                    <p className="text-xs text-muted-foreground">Answer style: {u.hint}</p>
+                    {u.parts.map((p, pi) => (
+                      <div key={p.name}>
+                        <div className="mb-1 font-medium">{p.name}</div>
+                        <ul className="space-y-1">
+                          {p.topics.map((t, ti) => {
+                            const rec = byTopic.get(`${u.id}.${pi}.${ti}`);
+                            const count = total(rec);
+                            return (
+                              <li key={t} className="flex items-start gap-2">
+                                <span
+                                  className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${count ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
+                                />
+                                <span className="flex-1">{t}</span>
+                                {count > 0 && (
+                                  <span className="shrink-0 text-xs text-muted-foreground">
+                                    {countText(rec!)}
+                                  </span>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    ))}
+                    {cov && cov.untagged > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        {cov.untagged} answer{cov.untagged === 1 ? "" : "s"} in this unit had no
+                        close topic match.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

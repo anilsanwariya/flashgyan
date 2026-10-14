@@ -5,16 +5,20 @@
 //   Marks: 10
 //   Year: 2018
 //   Paper: II
+//   Unit: III
 //   Subject: Art & Culture
 //   A:
 //   Stepwells (baoris) are ...
 //
-// Hindi labels work too: प्रश्न, उत्तर, अंक, वर्ष, प्रश्न पत्र, विषय.
+// Hindi labels work too: प्रश्न, उत्तर, अंक, वर्ष, प्रश्न पत्र, इकाई, विषय.
+// Paper and Unit (I–III) pick the syllabus unit; without them SAATHI tags the
+// unit from the question.
 import {
   detectMarks,
   isDirective,
   type MainsDirective,
 } from "../../supabase/functions/_shared/saathi-mains.ts";
+import { unitFromPaper } from "../../supabase/functions/_shared/ras-syllabus.ts";
 
 export type ParsedModelAnswer = {
   question: string;
@@ -23,6 +27,8 @@ export type ParsedModelAnswer = {
   directive: MainsDirective | null;
   year: number | null;
   paper: string | null;
+  // Syllabus unit id from the Paper and Unit lines, e.g. "p2u3".
+  unit: string | null;
   subject: string | null;
   holdout: boolean;
 };
@@ -30,13 +36,14 @@ export type ParsedModelAnswer = {
 const QUESTION = /^\s*(?:Q|Ques|Question|प्रश्न|प्र)\s*\.?\s*\d*\s*[:：.)-]\s*(.*)$/i;
 const ANSWER = /^\s*(?:A|Ans|Answer|उत्तर|उ)\s*\.?\s*[:：.)-]\s*(.*)$/i;
 const FIELD =
-  /^\s*(Marks|अंक|Year|वर्ष|Paper|प्रश्न ?पत्र|Subject|विषय|Type|Test only|Holdout)\s*[:：]\s*(.*)$/i;
+  /^\s*(Marks|अंक|Year|वर्ष|Paper|प्रश्न ?पत्र|Unit|इकाई|Subject|विषय|Type|Test only|Holdout)\s*[:：]\s*(.*)$/i;
 
 function fieldName(label: string): keyof ParsedModelAnswer | null {
   const l = label.toLowerCase().replace(/\s+/g, " ");
   if (l === "marks" || l === "अंक") return "marks";
   if (l === "year" || l === "वर्ष") return "year";
   if (l === "paper" || l.startsWith("प्रश्न")) return "paper";
+  if (l === "unit" || l === "इकाई") return "unit";
   if (l === "subject" || l === "विषय") return "subject";
   if (l === "type") return "directive";
   if (l === "test only" || l === "holdout") return "holdout";
@@ -66,6 +73,7 @@ export function parseModelAnswers(text: string): {
         directive: cur.directive,
         year: cur.year,
         paper: cur.paper,
+        unit: unitFromPaper(cur.paper, cur.unit),
         subject: cur.subject,
         holdout: cur.holdout,
       });
@@ -87,6 +95,7 @@ export function parseModelAnswers(text: string): {
         directive: null,
         year: null,
         paper: null,
+        unit: null,
         subject: null,
         holdout: false,
         inAnswer: false,
@@ -123,6 +132,8 @@ export function parseModelAnswers(text: string): {
         cur.directive = isDirective(v) ? v : null;
       } else if (name === "holdout") {
         cur.holdout = /^(y|yes|true|1|हाँ|हां)$/i.test(value);
+      } else if (name === "unit") {
+        cur.unit = value || null;
       } else if (name === "paper") {
         cur.paper = value || null;
       } else if (name === "subject") {
@@ -140,7 +151,8 @@ export function parseModelAnswers(text: string): {
 export const MODEL_ANSWER_TEMPLATE = `Q: Discuss the significance of stepwells (baoris) in Rajasthan's water management.
 Marks: 10
 Year: 2018
-Paper: II
+Paper: I
+Unit: I
 Subject: Art & Culture
 A:
 Stepwells, locally called baoris, are ...
@@ -148,8 +160,13 @@ Stepwells, locally called baoris, are ...
 - Point two ...
 Conclusion ...
 
-Q: What is the Indira Gandhi Canal?
-Marks: 2
+Q: Explain the importance of the Indira Gandhi Canal for western Rajasthan.
+Marks: 5
+Paper: II
+Unit: III
+Test only: yes
 A:
-India's longest canal, bringing Sutlej-Beas water to north-west Rajasthan.
+The Indira Gandhi Canal carries Sutlej-Beas water from the Harike barrage ...
+- Irrigation ...
+- Drinking water ...
 `;

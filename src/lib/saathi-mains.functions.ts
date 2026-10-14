@@ -9,6 +9,7 @@ import {
   MAINS_DIRECTIVES,
   type BlueprintDirective,
 } from "../../supabase/functions/_shared/saathi-mains.ts";
+import { RAS_SYLLABUS, syllabusTopics } from "../../supabase/functions/_shared/ras-syllabus.ts";
 import type {
   Blueprint,
   BlueprintScore,
@@ -49,6 +50,8 @@ const isMissing = (e: { code?: string; message?: string } | null) =>
 const directiveSchema = z.enum(MAINS_DIRECTIVES);
 const blueprintDirectiveSchema = z.enum([...MAINS_DIRECTIVES, "any"]);
 const marksSchema = z.number().int().min(1).max(50);
+const unitIds = RAS_SYLLABUS.map((u) => u.id) as [string, ...string[]];
+const unitSchema = z.enum(unitIds);
 
 // ---------- Word limits ----------
 
@@ -160,6 +163,7 @@ const modelAnswerSchema = z.object({
   paper: z.string().trim().max(60).nullish(),
   subject: z.string().trim().max(120).nullish(),
   source: z.string().trim().max(300).nullish(),
+  unit: unitSchema.nullish(),
   holdout: z.boolean().default(false),
   // Bulk imports rebuild once at the end instead of after every answer.
   rebuild: z.boolean().default(true),
@@ -303,6 +307,7 @@ export const createBlueprint = createServerFn({ method: "POST" })
       .object({
         marks: marksSchema,
         directive: blueprintDirectiveSchema,
+        unit: unitSchema.nullish(),
         guide: z.string().trim().max(6000).nullish(),
       })
       .parse(input),
@@ -312,6 +317,7 @@ export const createBlueprint = createServerFn({ method: "POST" })
     return (await server()).createManualBlueprint(
       data.marks,
       data.directive as BlueprintDirective,
+      data.unit ?? "",
       data.guide ?? null,
     );
   });
@@ -396,4 +402,60 @@ export const listBlueprintScores = createServerFn({ method: "GET" })
       .limit(500);
     if (error) throw new Error(error.message);
     return (data ?? []) as unknown as BlueprintScore[];
+  });
+
+// ---------- Syllabus coverage ----------
+
+export type SyllabusCoverage = {
+  // Topics embedded for matching questions (0 until the first sync).
+  synced: number;
+  topics: { id: string; answers: Record<number, number> }[];
+  units: { id: string; answers: Record<number, number>; untagged: number }[];
+};
+
+// How many model answers each syllabus topic and unit has, per marks band.
+// Opening it also brings the database copy of the syllabus up to date.
+export const getSyllabusCoverage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z.object({ resync: z.boolean().default(false) }).parse(input ?? {}),
+  )
+  .handler(async ({ data, context }): Promise<SyllabusCoverage> => {
+    const admin = await assertAdmin(context.userId);
+    await (await server()).syncSyllabus(data.resync);
+    const [answers, synced] = await Promise.all([
+      admin
+        .from("saathi_model_answers" as never)
+        .select("marks,unit,topic_id")
+        .limit(5000),
+      admin
+        .from("ras_syllabus_topics" as never)
+        .select("id", { count: "exact", head: true })
+        .not("embedding", "is", null),
+    ]);
+    if (answers.error) throw new Error(answers.error.message);
+    const rows = (answers.data ?? []) as {
+      marks: number;
+      unit: string | null;
+      topic_id: string | null;
+    }[];
+    const bump = (rec: Record<number, number>, marks: number) => {
+      rec[marks] = (rec[marks] ?? 0) + 1;
+    };
+    const topics = syllabusTopics().map((t) => {
+      const answers: Record<number, number> = {};
+      for (const r of rows) if (r.topic_id === t.id) bump(answers, r.marks);
+      return { id: t.id, answers };
+    });
+    const units = RAS_SYLLABUS.map((u) => {
+      const answers: Record<number, number> = {};
+      let untagged = 0;
+      for (const r of rows) {
+        if (r.unit !== u.id) continue;
+        bump(answers, r.marks);
+        if (!r.topic_id) untagged++;
+      }
+      return { id: u.id, answers, untagged };
+    });
+    return { synced: synced.count ?? 0, topics, units };
   });

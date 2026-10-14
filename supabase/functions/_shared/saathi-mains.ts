@@ -19,6 +19,7 @@ import {
   type SaathiRpc,
   type SaathiTurn,
 } from "./saathi-core.ts";
+import { syllabusUnit } from "./ras-syllabus.ts";
 
 // ---------- Question types ----------
 
@@ -29,6 +30,8 @@ export const MAINS_DIRECTIVES = [
   "critical",
   "compare",
   "suggest",
+  // Ethics case studies (paper II, unit I).
+  "case_study",
 ] as const;
 export type MainsDirective = (typeof MAINS_DIRECTIVES)[number];
 // Blueprints learned from every answer of a marks band, whatever its directive.
@@ -41,6 +44,7 @@ export const DIRECTIVE_LABELS: Record<BlueprintDirective, string> = {
   critical: "Critically examine",
   compare: "Compare / Differentiate",
   suggest: "Suggest measures",
+  case_study: "Ethics case study",
   any: "All question types",
 };
 
@@ -58,11 +62,24 @@ const DIRECTIVE_HINTS: Record<MainsDirective, string> = {
     "Compare both sides on the same parameters, preferably in a table, then state the key difference.",
   suggest:
     "State the problem in a line, then give specific, practical measures, including government schemes or initiatives the material mentions.",
+  case_study:
+    "This is an ethics case study: state the facts and the stakeholders in brief, identify the ethical dilemma and the values in conflict, weigh the available options with their merits and demerits, then choose and justify one course of action using ethical principles, laws and service rules.",
 };
 
 // Checked in order: the first group with a matching phrase wins. English
 // phrases match whole words; Hindi phrases match anywhere.
 const DIRECTIVE_PATTERNS: { directive: MainsDirective; en: RegExp; hi: string[] }[] = [
+  {
+    directive: "case_study",
+    en: /\b(case study|what would you do|what will you do|course of action|options available to you|you are (?:a|an|the|posted|working))\b/i,
+    hi: [
+      "केस स्टडी",
+      "प्रकरण अध्ययन",
+      "आप क्या करेंगे",
+      "आपके पास क्या विकल्प",
+      "कार्यवाही का मार्ग",
+    ],
+  },
   {
     directive: "critical",
     en: /\b(critically|critical|evaluate|assess|comment on|do you agree|justify|appraise)\b/i,
@@ -122,12 +139,13 @@ export function detectMarks(question: string): number | null {
   return Number.isInteger(n) && n > 0 && n <= 50 ? n : null;
 }
 
-// Used when the answer formats table hasn't been set up.
-export const DEFAULT_WORD_LIMITS: Record<number, number> = { 2: 15, 5: 50, 10: 100, 20: 200 };
+// RPSC scheme for papers I–III (09-01-2026). Used when the answer formats
+// table hasn't been set up.
+export const DEFAULT_WORD_LIMITS: Record<number, number> = { 5: 50, 10: 150 };
 export const DEFAULT_MAINS_MARKS = 10;
 
 export function defaultWordLimit(marks: number): number {
-  return DEFAULT_WORD_LIMITS[marks] ?? Math.max(15, marks * 10);
+  return DEFAULT_WORD_LIMITS[marks] ?? Math.max(15, marks * 15);
 }
 
 // ---------- Word counting ----------
@@ -232,7 +250,7 @@ export function analysisMessages(question: string, answer: string, marks: number
     {
       role: "system",
       content: `You study model answers to RAS (Rajasthan Administrative Service) Mains exam questions to learn how good answers are structured. Describe the STRUCTURE of the answer, not its facts. Reply with JSON only:
-{"directive": one of ${JSON.stringify(MAINS_DIRECTIVES)} (what the question asks: define/what is, explain/describe, discuss/analyse, critically examine/evaluate, compare/differentiate, suggest measures),
+{"directive": one of ${JSON.stringify(MAINS_DIRECTIVES)} (what the question asks: define/what is, explain/describe, discuss/analyse, critically examine/evaluate, compare/differentiate, suggest measures, or case_study for an ethics case study scenario),
  "intro": {"style": one of ${JSON.stringify(INTRO_STYLES)}, "words": number of words in the introduction (0 if none)},
  "body": {"format": one of ${JSON.stringify(BODY_FORMATS)}, "points": number of distinct points or arguments, "headings": up to 6 generic English labels for the dimensions or sub-headings it covers, e.g. "Causes", "Impact", "Measures", "Economic", "Social" (no topic-specific facts)},
  "conclusion": {"style": one of ${JSON.stringify(CONCLUSION_STYLES)}, "words": number of words in the conclusion (0 if none)},
@@ -437,10 +455,13 @@ export function renderBlueprintGuide(opts: {
   directive: BlueprintDirective;
   stats: BlueprintStats;
   tips: string[];
+  // Syllabus unit id for a unit's own blueprint.
+  unit?: string;
 }): string {
   const { marks, wordLimit, stats, tips } = opts;
+  const scope = syllabusUnit(opts.unit)?.title ?? DIRECTIVE_LABELS[opts.directive];
   const lines: string[] = [
-    `Learned from ${stats.samples} model answer${stats.samples === 1 ? "" : "s"} (${marks} marks, ${DIRECTIVE_LABELS[opts.directive]}; they average ${stats.words.median} words).`,
+    `Learned from ${stats.samples} model answer${stats.samples === 1 ? "" : "s"} (${marks} marks, ${scope}; they average ${stats.words.median} words).`,
   ];
 
   if (wordLimit <= 30) {
@@ -501,7 +522,17 @@ export function renderBlueprintGuide(opts: {
 }
 
 // Structure for marks bands with no learned blueprint yet.
-export function defaultGuide(marks: number, wordLimit: number): string {
+export function defaultGuide(marks: number, wordLimit: number, directive?: MainsDirective): string {
+  if (directive === "case_study") {
+    const part = (share: number) => budget(wordLimit, share, 10);
+    return [
+      `1. Facts and stakeholders (~${part(0.15)} words): the situation in a line and who is affected.`,
+      `2. Ethical issues (~${part(0.2)} words): the dilemma and the values or duties in conflict.`,
+      `3. Options (~${part(0.3)} words): 2–3 possible courses of action with their merits and demerits.`,
+      `4. Course of action (~${part(0.25)} words): the option you choose, justified by ethical principles, laws and service rules.`,
+      "5. Conclusion (one line): the value the decision upholds.",
+    ].join("\n");
+  }
   if (wordLimit <= 30) {
     return `- Write 1–2 crisp sentences (about ${wordLimit} words) with the key fact. No introduction or conclusion.`;
   }
@@ -561,6 +592,8 @@ export type MainsBlueprint = {
   id: string | null;
   marks: number;
   directive: BlueprintDirective;
+  // Syllabus unit id ('' or missing = all units).
+  unit?: string;
   version: number;
   guide: string;
   sample_count: number;
@@ -586,12 +619,29 @@ export type MainsPyq = {
   similarity: number;
 };
 
+// The syllabus topic a question was matched to.
+export type MainsTopic = {
+  id: string;
+  unit_id: string;
+  paper: string;
+  unit_title: string;
+  part: string;
+  topic: string;
+  similarity: number;
+};
+
 export type MainsInfo = {
   marks: number;
   wordLimit: number;
   directive: MainsDirective;
   // null when SAATHI used the built-in structure (no blueprint learned yet).
-  blueprint: { version: number; samples: number; directive: BlueprintDirective } | null;
+  blueprint: {
+    version: number;
+    samples: number;
+    directive: BlueprintDirective;
+    unit?: string;
+  } | null;
+  syllabus?: { paper: string; unit: string; part: string; topic: string } | null;
   exemplars: number;
   // Only when and where it was asked; the stored question stays admin-only.
   pyq: Pick<MainsPyq, "year" | "paper" | "marks"> | null;
@@ -608,6 +658,7 @@ export type MainsPlan = {
   blueprint: MainsBlueprint | null;
   exemplars: MainsExemplar[];
   pyq: MainsPyq | null;
+  topic: MainsTopic | null;
 };
 
 // Similarity above which a model answer's question counts as the same question.
@@ -619,6 +670,8 @@ type MainsContext = {
   blueprint: MainsBlueprint | null;
   exemplars: MainsExemplar[] | null;
   pyq: MainsPyq | null;
+  // Missing on databases without the syllabus migration.
+  topic?: MainsTopic | null;
 };
 
 // Word limit, blueprint, closest model answers and any matching previous-year
@@ -691,6 +744,7 @@ export async function saathiMainsPlan(opts: {
     blueprint: context.blueprint ?? null,
     exemplars: (context.exemplars ?? []).filter((e) => e.id !== opts.excludeAnswerId),
     pyq,
+    topic: context.topic ?? null,
   };
 }
 
@@ -704,6 +758,15 @@ export function mainsInfo(plan: MainsPlan, answer?: string): MainsInfo {
           version: plan.blueprint.version,
           samples: plan.blueprint.sample_count,
           directive: plan.blueprint.directive,
+          unit: plan.blueprint.unit || undefined,
+        }
+      : null,
+    syllabus: plan.topic
+      ? {
+          paper: plan.topic.paper,
+          unit: plan.topic.unit_title,
+          part: plan.topic.part,
+          topic: plan.topic.topic,
         }
       : null,
     exemplars: plan.exemplars.length,
@@ -724,7 +787,13 @@ const MAINS_FORMAT: Record<SaathiChannel, string> = {
 };
 
 export function mainsSystemPrompt(channel: SaathiChannel, plan: MainsPlan): string {
-  const guide = plan.blueprint?.guide?.trim() || defaultGuide(plan.marks, plan.wordLimit);
+  const guide =
+    plan.blueprint?.guide?.trim() || defaultGuide(plan.marks, plan.wordLimit, plan.directive);
+  const unit = syllabusUnit(plan.topic?.unit_id);
+  const syllabus =
+    plan.topic && unit
+      ? `\n\nSYLLABUS: RAS Mains Paper ${unit.paper}, Unit ${unit.unit} (${unit.title}) › ${plan.topic.part}: ${plan.topic.topic}. In this unit, good answers: ${unit.hint}`
+      : "";
   const examples = plan.exemplars.length
     ? `\n\nEXAMPLE ANSWERS: The model answers from previous years given with the question show the expected structure, depth and style. Learn from how they are organised. Do not copy their sentences, and do not take facts from them unless the study material states the same facts.`
     : "";
@@ -732,7 +801,7 @@ export function mainsSystemPrompt(channel: SaathiChannel, plan: MainsPlan): stri
 
 FACTS: Use ONLY facts from the study material provided with the question. Do not use outside knowledge and do not guess. If the material does not cover the question at all, begin your reply with the exact token ${SAATHI_NO_ANSWER_MARKER} and then, in one or two short sentences, say that this topic isn't in the study material yet. If it covers only part of the question, write the best answer the material supports, then add a final line starting with "Note:" that says what is not covered.
 
-QUESTION: ${plan.marks} marks, about ${plan.wordLimit} words. ${DIRECTIVE_HINTS[plan.directive]}
+QUESTION: ${plan.marks} marks, about ${plan.wordLimit} words. ${DIRECTIVE_HINTS[plan.directive]}${syllabus}
 
 STRUCTURE TO FOLLOW:
 ${guide}

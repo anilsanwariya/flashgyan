@@ -589,6 +589,14 @@ function MainsBadges({ info }: { info: MainsMeta }) {
         </span>
       )}
       {where && <span className={`${chip} text-primary`}>🗂 Asked in {where}</span>}
+      {info.syllabus && (
+        <span
+          className={`${chip} text-muted-foreground`}
+          title={`${info.syllabus.part}: ${info.syllabus.topic}`}
+        >
+          📘 Paper {info.syllabus.paper} · {info.syllabus.unit}
+        </span>
+      )}
       {info.blueprint && (
         <span
           className={`${chip} text-muted-foreground`}

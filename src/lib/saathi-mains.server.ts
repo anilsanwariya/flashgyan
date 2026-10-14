@@ -6,6 +6,7 @@ import {
   collectSources,
   saathiComplete,
   saathiEmbed,
+  saathiEmbedMany,
   stripNoAnswer,
   type SaathiRpc,
   type SaathiSource,
@@ -36,6 +37,10 @@ import {
   type MainsInfo,
   type MainsScore,
 } from "../../supabase/functions/_shared/saathi-mains.ts";
+import {
+  syllabusTopics,
+  topicEmbeddingText,
+} from "../../supabase/functions/_shared/ras-syllabus.ts";
 
 export const rpc: SaathiRpc = (fn, args) => supabaseAdmin.rpc(fn as never, args as never);
 
@@ -59,6 +64,9 @@ export type ModelAnswer = {
   paper: string | null;
   subject: string | null;
   source: string | null;
+  // Syllabus unit id (e.g. "p1u1") and topic id (e.g. "p1u1.0.4").
+  unit: string | null;
+  topic_id: string | null;
   holdout: boolean;
   word_count: number;
   analysis: AnswerAnalysis | null;
@@ -68,12 +76,14 @@ export type ModelAnswer = {
 };
 
 export const MODEL_ANSWER_COLS =
-  "id,question,answer,marks,directive,exam,year,paper,subject,source,holdout,word_count,analysis,analysis_error,created_at,updated_at";
+  "id,question,answer,marks,directive,exam,year,paper,subject,source,unit,topic_id,holdout,word_count,analysis,analysis_error,created_at,updated_at";
 
 export type Blueprint = {
   id: string;
   marks: number;
   directive: BlueprintDirective;
+  // Syllabus unit id, or '' for all units.
+  unit: string;
   version: number;
   status: "active" | "draft" | "archived";
   locked: boolean;
@@ -92,6 +102,58 @@ export async function wordLimitFor(marks: number): Promise<number> {
     .maybeSingle();
   return (data as { word_limit: number } | null)?.word_limit ?? defaultWordLimit(marks);
 }
+
+// Keeps the database copy of the syllabus (with embeddings) in step with
+// ras-syllabus.ts. Only new or changed topics are embedded. Returns the number
+// of topics that were added or updated.
+let syllabusSynced = false;
+export async function syncSyllabus(force = false): Promise<number> {
+  if (syllabusSynced && !force) return 0;
+  const topics = syllabusTopics();
+  const { data, error } = await from("ras_syllabus_topics").select("id,unit_title,part,topic");
+  if (error) throw new Error(error.message);
+  const existing = new Map(
+    ((data ?? []) as { id: string; unit_title: string; part: string; topic: string }[]).map((r) => [
+      r.id,
+      `${r.unit_title}|${r.part}|${r.topic}`,
+    ]),
+  );
+  const stale = topics.filter((t) => existing.get(t.id) !== `${t.unit_title}|${t.part}|${t.topic}`);
+  if (stale.length) {
+    const embeddings = await saathiEmbedMany(apiKey(), stale.map(topicEmbeddingText));
+    const rows = stale.map((t, i) => ({
+      ...t,
+      embedding: embeddings[i] as unknown as string,
+      updated_at: new Date().toISOString(),
+    }));
+    const { error: uErr } = await from("ras_syllabus_topics").upsert(rows as never);
+    if (uErr) throw new Error(uErr.message);
+  }
+  const removed = [...existing.keys()].filter((id) => !topics.some((t) => t.id === id));
+  if (removed.length) {
+    const { error: dErr } = await from("ras_syllabus_topics").delete().in("id", removed);
+    if (dErr) throw new Error(dErr.message);
+  }
+  syllabusSynced = true;
+  return stale.length;
+}
+
+type NearestTopic = { id: string; unit_id: string; similarity: number };
+
+async function nearestTopic(embedding: number[]): Promise<NearestTopic | null> {
+  try {
+    await syncSyllabus();
+  } catch (e) {
+    console.error("syllabus sync:", e);
+    return null;
+  }
+  const { data, error } = await rpc("saathi_nearest_syllabus_topic", { p_embedding: embedding });
+  if (error) return null;
+  return (data as NearestTopic | null) ?? null;
+}
+
+// Below this a question isn't tagged with a syllabus topic automatically.
+const MIN_TOPIC_SIMILARITY = 0.5;
 
 // Reads a model answer's structure and embeds its question. The answer is saved
 // either way; a failed analysis is recorded so it can be retried.
@@ -116,8 +178,15 @@ export async function analyseModelAnswer(id: string, adoptDirective = false): Pr
   const analysis = analysisResult.error
     ? null
     : parseAnalysis(analysisResult.raw, row.answer, row.directive);
+  // Tag the syllabus topic; an admin-chosen unit is kept, and its topic is only
+  // filled in when the nearest topic belongs to that unit.
+  const near = await nearestTopic(embedding);
+  const fits =
+    near && near.similarity >= MIN_TOPIC_SIMILARITY && (!row.unit || near.unit_id === row.unit);
   const update = {
     embedding: embedding as unknown as string,
+    unit: row.unit ?? (fits ? near!.unit_id : null),
+    topic_id: fits ? near!.id : null,
     word_count: countWords(row.answer),
     ...(adoptDirective && analysis ? { directive: analysis.directive } : {}),
     analysis,
@@ -144,6 +213,8 @@ export type ModelAnswerInput = {
   paper?: string | null;
   subject?: string | null;
   source?: string | null;
+  // Syllabus unit id; null lets SAATHI tag it from the question.
+  unit?: string | null;
   holdout?: boolean;
 };
 
@@ -157,24 +228,28 @@ export async function saveModelAnswer(input: ModelAnswerInput & { id?: string })
     paper: input.paper?.trim() || null,
     subject: input.subject?.trim() || null,
     source: input.source?.trim() || null,
+    unit: input.unit || null,
     holdout: input.holdout ?? false,
     word_count: countWords(input.answer),
     updated_at: new Date().toISOString(),
   };
   if (input.id) {
     const { data: before, error: bErr } = await from("saathi_model_answers")
-      .select("question,answer,marks")
+      .select("question,answer,marks,unit")
       .eq("id", input.id)
       .single();
     if (bErr) throw new Error(bErr.message);
-    const prev = before as { question: string; answer: string; marks: number };
+    const prev = before as { question: string; answer: string; marks: number; unit: string | null };
     const { error } = await from("saathi_model_answers")
       .update(row as never)
       .eq("id", input.id);
     if (error) throw new Error(error.message);
-    // Only re-read the answer when its text or marks changed.
+    // Only re-read the answer when its text, marks or unit changed.
     const changed =
-      prev.question !== row.question || prev.answer !== row.answer || prev.marks !== row.marks;
+      prev.question !== row.question ||
+      prev.answer !== row.answer ||
+      prev.marks !== row.marks ||
+      prev.unit !== row.unit;
     if (changed) {
       return { answer: await analyseModelAnswer(input.id, !input.directive), oldMarks: prev.marks };
     }
@@ -213,6 +288,7 @@ async function activate(next: Blueprint) {
     .update({ status: "archived" } as never)
     .eq("marks", next.marks)
     .eq("directive", next.directive)
+    .eq("unit", next.unit)
     .eq("status", "active")
     .neq("id", next.id);
   if (aErr) throw new Error(aErr.message);
@@ -222,11 +298,12 @@ async function activate(next: Blueprint) {
   if (error) throw new Error(error.message);
 }
 
-async function blueprintVersions(marks: number, directive: BlueprintDirective) {
+async function blueprintVersions(marks: number, directive: BlueprintDirective, unit: string) {
   const { data, error } = await from("saathi_blueprints")
     .select("*")
     .eq("marks", marks)
     .eq("directive", directive)
+    .eq("unit", unit)
     .order("version", { ascending: false });
   if (error) throw new Error(error.message);
   return (data ?? []) as unknown as Blueprint[];
@@ -236,7 +313,7 @@ async function insertBlueprint(
   row: Omit<Blueprint, "id" | "created_at" | "version" | "status">,
   makeActive: boolean,
 ): Promise<Blueprint> {
-  const versions = await blueprintVersions(row.marks, row.directive);
+  const versions = await blueprintVersions(row.marks, row.directive, row.unit);
   const version = (versions[0]?.version ?? 0) + 1;
   // Older drafts are replaced by the new version.
   const drafts = versions.filter((v) => v.status === "draft").map((v) => v.id);
@@ -261,19 +338,21 @@ async function insertBlueprint(
 export type RebuildResult = {
   marks: number;
   directive: BlueprintDirective;
+  unit: string;
   outcome: "created" | "draft" | "unchanged" | "too_few" | "retired";
   version?: number;
   samples: number;
 };
 
 // Rebuilds the blueprints of one marks band from its analysed model answers:
-// one for all question types together ('any') and one per question type with
-// enough answers. Nothing changes when the set of answers is the same, unless
-// forced (e.g. after a word limit change). A blueprint an admin edited (locked)
-// is never replaced: the rebuilt version is saved as a draft to review.
+// one for all question types together ('any'), one per question type and one
+// per syllabus unit with enough answers. Nothing changes when the set of
+// answers is the same, unless forced (e.g. after a word limit change). A
+// blueprint an admin edited (locked) is never replaced: the rebuilt version is
+// saved as a draft to review.
 export async function rebuildBlueprints(marks: number, force = false): Promise<RebuildResult[]> {
   const { data, error } = await from("saathi_model_answers")
-    .select("id,directive,analysis")
+    .select("id,directive,unit,analysis")
     .eq("marks", marks)
     .eq("holdout", false)
     .not("analysis", "is", null);
@@ -281,28 +360,36 @@ export async function rebuildBlueprints(marks: number, force = false): Promise<R
   const rows = (data ?? []) as unknown as {
     id: string;
     directive: MainsDirective;
+    unit: string | null;
     analysis: AnswerAnalysis;
   }[];
   const wordLimit = await wordLimitFor(marks);
 
-  const groups = new Map<BlueprintDirective, typeof rows>([["any", rows]]);
+  type Key = { directive: BlueprintDirective; unit: string };
+  const groups = new Map<string, { key: Key; rows: typeof rows }>();
+  const add = (key: Key, r?: (typeof rows)[number]) => {
+    const id = `${key.directive}|${key.unit}`;
+    const g = groups.get(id) ?? { key, rows: [] };
+    if (r) g.rows.push(r);
+    groups.set(id, g);
+  };
+  add({ directive: "any", unit: "" });
   for (const r of rows) {
-    const list = groups.get(r.directive) ?? [];
-    list.push(r);
-    groups.set(r.directive, list);
+    add({ directive: "any", unit: "" }, r);
+    add({ directive: r.directive, unit: "" }, r);
+    if (r.unit) add({ directive: "any", unit: r.unit }, r);
   }
-  // Question types that had a blueprint before but may now have too few answers.
+  // Blueprints that exist but may now have too few answers.
   const { data: existing } = await from("saathi_blueprints")
-    .select("directive")
+    .select("directive,unit")
     .eq("marks", marks)
     .eq("status", "active");
-  for (const e of (existing ?? []) as { directive: BlueprintDirective }[]) {
-    if (!groups.has(e.directive)) groups.set(e.directive, []);
-  }
+  for (const e of (existing ?? []) as Key[]) add({ directive: e.directive, unit: e.unit ?? "" });
 
   const results: RebuildResult[] = [];
-  for (const [directive, list] of groups) {
-    const versions = await blueprintVersions(marks, directive);
+  for (const { key, rows: list } of groups.values()) {
+    const { directive, unit } = key;
+    const versions = await blueprintVersions(marks, directive, unit);
     const active = versions.find((v) => v.status === "active");
     const ids = list.map((r) => r.id);
     if (list.length < MIN_BLUEPRINT_SAMPLES) {
@@ -311,26 +398,27 @@ export async function rebuildBlueprints(marks: number, force = false): Promise<R
         await from("saathi_blueprints")
           .update({ status: "archived" } as never)
           .eq("id", active.id);
-        results.push({ marks, directive, outcome: "retired", samples: list.length });
+        results.push({ marks, directive, unit, outcome: "retired", samples: list.length });
       } else {
-        results.push({ marks, directive, outcome: "too_few", samples: list.length });
+        results.push({ marks, directive, unit, outcome: "too_few", samples: list.length });
       }
       continue;
     }
     const latest = versions[0];
     if (!force && latest && !latest.locked && sameIds(latest.answer_ids, ids)) {
-      results.push({ marks, directive, outcome: "unchanged", samples: list.length });
+      results.push({ marks, directive, unit, outcome: "unchanged", samples: list.length });
       continue;
     }
     const analyses = list.map((r) => r.analysis);
     const stats = aggregateAnalyses(analyses);
     const tips = await mergeTips(analyses.flatMap((a) => a.strengths));
-    const guide = renderBlueprintGuide({ marks, wordLimit, directive, stats, tips });
+    const guide = renderBlueprintGuide({ marks, wordLimit, directive, stats, tips, unit });
     const makeActive = !active?.locked;
     const created = await insertBlueprint(
       {
         marks,
         directive,
+        unit,
         locked: false,
         guide,
         stats,
@@ -343,6 +431,7 @@ export async function rebuildBlueprints(marks: number, force = false): Promise<R
     results.push({
       marks,
       directive,
+      unit,
       outcome: makeActive ? "created" : "draft",
       version: created.version,
       samples: list.length,
@@ -360,6 +449,7 @@ export async function editBlueprintGuide(id: string, guide: string): Promise<Blu
     {
       marks: base.marks,
       directive: base.directive,
+      unit: base.unit,
       locked: true,
       guide,
       stats: base.stats,
@@ -375,13 +465,17 @@ export async function editBlueprintGuide(id: string, guide: string): Promise<Blu
 export async function createManualBlueprint(
   marks: number,
   directive: BlueprintDirective,
+  unit: string,
   guide: string | null,
 ): Promise<Blueprint> {
-  const text = guide?.trim() || defaultGuide(marks, await wordLimitFor(marks));
+  const text =
+    guide?.trim() ||
+    defaultGuide(marks, await wordLimitFor(marks), directive === "any" ? undefined : directive);
   return insertBlueprint(
     {
       marks,
       directive,
+      unit,
       locked: true,
       guide: text,
       stats: null,
@@ -427,7 +521,7 @@ export async function writeMainsAnswer(opts: {
     marks: opts.marks,
     excludeAnswerId: opts.excludeAnswerId,
   });
-  const guide = plan.blueprint?.guide ?? defaultGuide(plan.marks, plan.wordLimit);
+  const guide = plan.blueprint?.guide ?? defaultGuide(plan.marks, plan.wordLimit, plan.directive);
   const base = {
     guide,
     blueprintId: plan.blueprint?.id ?? null,

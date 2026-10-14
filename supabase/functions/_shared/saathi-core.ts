@@ -67,9 +67,11 @@ export type SaathiStreamEvent =
         marks: number;
         wordLimit: number;
         directive: string;
-        blueprint: { version: number; samples: number; directive: string } | null;
+        blueprint: { version: number; samples: number; directive: string; unit?: string } | null;
         exemplars: number;
         pyq: { year: number | null; paper: string | null; marks: number } | null;
+        // The RAS Mains syllabus topic the question was matched to.
+        syllabus?: { paper: string; unit: string; part: string; topic: string } | null;
         words?: number;
       };
     }
