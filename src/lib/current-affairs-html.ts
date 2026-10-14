@@ -46,12 +46,14 @@ function itemHtml(item: MagazineItem, number: number, showDate: boolean): string
     ? `<div class="bi points"><ul class="hi" lang="hi">${c.points.map((p) => `<li>${esc(p.hi)}</li>`).join("")}</ul><ul class="en" lang="en">${c.points.map((p) => `<li>${esc(p.en)}</li>`).join("")}</ul></div>`
     : "";
   const tags = [
-    item.rajasthan && item.category !== "rajasthan" ? `<span class="tag raj">राजस्थान</span>` : "",
-    item.importance >= 3 ? `<span class="tag star">★ परीक्षा उपयोगी · Exam focus</span>` : "",
+    item.rajasthan && item.category !== "rajasthan" ? `<span class="tag raj">Rajasthan</span>` : "",
     showDate ? `<span class="tag">${esc(formatDate(item.issue_date, "en"))}</span>` : "",
+    item.source_names.length
+      ? `<span class="tag src-tag">Source: ${esc(item.source_names.join(", "))}</span>`
+      : "",
   ].join("");
   const background = c.background
-    ? `<div class="box context"><div class="box-title">पृष्ठभूमि · Background</div>${biBlock(c.background)}${
+    ? `<div class="box context"><div class="box-title">Background</div>${biBlock(c.background)}${
         item.context_sources.length
           ? `<div class="src">FlashGyan notes: ${esc(item.context_sources.map((s) => s.title).join(", "))}</div>`
           : ""
@@ -59,10 +61,10 @@ function itemHtml(item: MagazineItem, number: number, showDate: boolean): string
     : "";
   const why =
     c.why.en || c.why.hi
-      ? `<div class="box why"><div class="box-title">RAS हेतु महत्व · Why it matters</div>${biBlock(c.why)}</div>`
+      ? `<div class="box why"><div class="box-title">Why it matters</div>${biBlock(c.why)}</div>`
       : "";
   const dyk = c.dyk?.length
-    ? `<div class="box dyk"><div class="box-title">क्या आप जानते हैं? · Did you know?</div><ul>${c.dyk
+    ? `<div class="box dyk"><div class="box-title">Did you know?</div><ul>${c.dyk
         .map(
           (d) =>
             `<li><span lang="hi">${esc(d.hi)}</span><br/><span class="en">${esc(d.en)}</span> <span class="site">(${esc(d.site)})</span></li>`,
@@ -77,7 +79,6 @@ function itemHtml(item: MagazineItem, number: number, showDate: boolean): string
   ${why}
   ${background}
   ${dyk}
-  ${item.source_names.length ? `<div class="src">Source: ${esc(item.source_names.join(", "))}</div>` : ""}
 </article>`;
 }
 
@@ -92,22 +93,37 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .watermark img { width: 60%; opacity: .06; transform: rotate(-30deg); }
 .watermark span { font-size: 80pt; font-weight: 700; color: ${accent}; opacity: .05; transform: rotate(-30deg); }
 .cover, .section { position: relative; z-index: 1; }
-.cover { height: 265mm; display: flex; flex-direction: column; page-break-after: always; }
-.cover-top { display: flex; justify-content: space-between; align-items: center; }
-.cover-top img { height: 18mm; max-width: 70mm; object-fit: contain; }
-.brand { font-weight: 700; color: ${accent}; font-size: 14pt; }
-.cover-band { margin-top: 18mm; background: ${accent}; color: #fff; border-radius: 6mm; padding: 12mm 10mm; }
-.cover-band h1 { margin: 0; font-size: 30pt; line-height: 1.2; }
-.cover-band h2 { margin: 2mm 0 0; font-size: 18pt; font-weight: 600; opacity: .95; }
-.cover-band .date { margin-top: 6mm; font-size: 13pt; }
-.highlights { margin-top: 10mm; }
-.highlights h3, .toc h3 { font-size: 12pt; color: ${accent}; border-bottom: 2px solid ${accent}; padding-bottom: 1mm; margin: 0 0 3mm; }
-.highlights li { margin-bottom: 1.5mm; }
-.toc { margin-top: 8mm; }
-.toc table { width: 100%; border-collapse: collapse; }
-.toc td { padding: 1.5mm 0; border-bottom: 1px dotted #cbd5e1; }
-.toc td:last-child { text-align: right; color: #64748b; }
-.cover-foot { margin-top: auto; text-align: center; color: #64748b; font-size: 9pt; }
+@page :first { margin: 0; }
+.cover { width: 210mm; height: 297mm; display: flex; flex-direction: column; page-break-after: always; background: #fff; overflow: hidden; }
+.cover-logos { display: flex; justify-content: space-between; align-items: center; padding: 9mm 14mm 7mm; }
+.cover-logos img { height: 16mm; max-width: 75mm; object-fit: contain; }
+.brand { font-weight: 700; color: ${accent}; font-size: 15pt; }
+.cover-hero { position: relative; margin: 0 10mm; border-radius: 7mm; padding: 13mm 12mm 11mm; color: #fff; overflow: hidden;
+  background: radial-gradient(circle at 92% 8%, rgba(255,255,255,.18) 0 22mm, transparent 22.2mm),
+    radial-gradient(circle at 78% 105%, rgba(255,255,255,.10) 0 30mm, transparent 30.2mm),
+    linear-gradient(135deg, ${accent} 0%, ${darken(accent)} 100%); }
+.eyebrow { font-size: 9pt; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; opacity: .85; }
+.cover-hero h1 { margin: 3mm 0 0; font-size: 38pt; line-height: 1.05; font-weight: 700; letter-spacing: -.01em; max-width: 140mm; }
+.date-pill { display: inline-block; margin-top: 6mm; padding: 1.8mm 5mm; border-radius: 20mm; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35); font-size: 11pt; font-weight: 600; }
+.stats { display: flex; gap: 4mm; margin-top: 9mm; }
+.stats div { flex: 1; background: rgba(255,255,255,.12); border-radius: 3.5mm; padding: 3mm 4mm; }
+.stats b { display: block; font-size: 20pt; line-height: 1.1; }
+.stats span { font-size: 8.5pt; opacity: .9; }
+.cover-body { flex: 1; display: flex; flex-direction: column; padding: 8mm 14mm 6mm; }
+.cta { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 6mm; border-radius: 4mm; padding: 5mm 6mm; background: #f5f3ff; border: 1px solid #ddd6fe; }
+.cta b { display: block; font-size: 11pt; color: #1f2937; }
+.cta span { font-size: 9pt; color: #64748b; }
+.cta-handle { flex: none; padding: 2mm 5mm; border-radius: 20mm; background: ${accent}; color: #fff; font-weight: 700; font-size: 11pt; }
+.cover-h { margin: 0 0 3mm; font-size: 10pt; letter-spacing: .12em; text-transform: uppercase; color: ${accent}; }
+.hl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3.5mm; margin-bottom: 8mm; }
+.hl { border: 1px solid #e5e7eb; border-top: 3px solid ${accent}; border-radius: 3mm; padding: 3mm 3.5mm; background: #fff; }
+.hl-cat { font-size: 7.5pt; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: ${accent}; }
+.hl-hi { margin-top: 1mm; font-weight: 700; font-size: 10pt; line-height: 1.35; }
+.hl-en { margin-top: .8mm; font-size: 8.5pt; color: #64748b; line-height: 1.35; }
+.toc { display: grid; grid-template-columns: 1fr 1fr; column-gap: 8mm; }
+.toc-row { display: flex; justify-content: space-between; padding: 2mm 0; border-bottom: 1px dashed #cbd5e1; font-size: 10pt; }
+.toc-row b { color: ${accent}; }
+.cover-foot { display: flex; justify-content: space-between; margin: 0 10mm 14mm; border-radius: 4mm; padding: 4mm 6mm; background: ${darken(accent, 0.55)}; color: #fff; font-size: 9pt; }
 .section { margin-bottom: 6mm; }
 .section.new-page { page-break-before: always; }
 .section-title { break-after: avoid; display: flex; justify-content: space-between; align-items: baseline; background: ${accent}; color: #fff; padding: 3mm 5mm; border-radius: 3mm; margin-bottom: 5mm; }
@@ -121,7 +137,7 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .tags { margin: 2mm 0 0 10mm; display: flex; gap: 2mm; flex-wrap: wrap; }
 .tag { font-size: 8pt; padding: .5mm 2mm; border-radius: 2mm; background: #f1f5f9; color: #475569; }
 .tag.raj { background: #fff7ed; color: #c2410c; }
-.tag.star { background: #fef9c3; color: #854d0e; }
+.tag.src-tag { background: transparent; color: #94a3b8; padding-left: 0; }
 .bi { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; margin-top: 2mm; }
 .bi li, .box { break-inside: avoid; }
 .bi .en { color: #334155; }
@@ -140,22 +156,32 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .dyk li { margin-bottom: 1mm; break-inside: avoid; }
 .dyk .en { color: #475569; }
 .dyk .site { color: #94a3b8; font-size: 8pt; }
-.part { font-size: 11pt; color: ${accent}; margin: 5mm 0 3mm; break-after: avoid; }
-.mains-list li { margin-bottom: 2.5mm; break-inside: avoid; }
-.mains-list .en, .answers .en { color: #64748b; }
-.src { margin-top: 2mm; font-size: 8pt; color: #94a3b8; }
-.mcq { break-inside: avoid; margin-bottom: 4mm; }
-.mcq .q { display: flex; gap: 2mm; font-weight: 600; }
-.mcq .stmt { white-space: pre-line; }
-.mcq .stmt.en { color: #475569; font-weight: 500; margin-top: 1mm; }
-.mcq ol { margin: 1mm 0 0; padding-left: 6mm; list-style: lower-alpha; }
-.answers td { padding: 1mm 3mm; border: 1px solid #e5e7eb; font-size: 9pt; }
+.part { font-size: 11pt; color: ${accent}; margin: 5mm 0 3mm; break-after: avoid; text-transform: uppercase; letter-spacing: .06em; }
+.mcq { display: flex; gap: 2mm; break-inside: avoid; margin-bottom: 4mm; padding-bottom: 3mm; border-bottom: 1px dashed #e5e7eb; }
+.qn { flex: none; width: 6mm; font-weight: 700; color: ${accent}; }
+.pair { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; }
+.side .stmt { white-space: pre-line; font-weight: 600; }
+.side[lang="en"] { color: #334155; }
+.side ol { list-style: none; margin: 1.5mm 0 0; padding: 0; }
+.side li { margin-bottom: .6mm; }
+.opt { font-weight: 600; color: ${accent}; }
 .answers { border-collapse: collapse; width: 100%; }
+.answers td { padding: 1.5mm 2.5mm; border: 1px solid #e5e7eb; font-size: 9pt; vertical-align: top; }
+.answers .kn, .answers .ka { width: 9mm; text-align: center; font-weight: 600; }
+.answers .en { color: #475569; }
 .corrections li { margin-bottom: 2mm; }
 `;
 
+const OPTION_LETTERS = ["a", "b", "c", "d"];
+
+function mcqSide(question: string, options: string[], lang: "hi" | "en"): string {
+  return `<div class="side" lang="${lang}"><div class="stmt">${esc(question)}</div><ol>${options
+    .map((o, i) => `<li><span class="opt">(${OPTION_LETTERS[i]})</span> ${esc(o)}</li>`)
+    .join("")}</ol></div>`;
+}
+
 // The last section: RAS Prelims MCQs (RPSC pattern) with an answer key, then
-// RAS Mains questions from the same news.
+// RAS Mains questions. Hindi and English sit side by side, as in RPSC papers.
 function practicePage(items: MagazineItem[]): string {
   const withMcq = items.filter((i) => i.content.mcq);
   const withMains = items.filter((i) => i.content.mains);
@@ -163,27 +189,44 @@ function practicePage(items: MagazineItem[]): string {
   const qs = withMcq
     .map((i, n) => {
       const m = i.content.mcq!;
-      return `<div class="mcq"><div class="q"><span class="qn">${n + 1}.</span><div><div class="stmt" lang="hi">${esc(m.question.hi)}</div><div class="stmt en">${esc(m.question.en)}</div></div></div><ol>${m.options
-        .map((o) => `<li><span lang="hi">${esc(o.hi)}</span> / ${esc(o.en)}</li>`)
-        .join("")}</ol></div>`;
+      return `<div class="mcq"><span class="qn">${n + 1}.</span><div class="pair">${mcqSide(
+        m.question.hi,
+        m.options.map((o) => o.hi),
+        "hi",
+      )}${mcqSide(
+        m.question.en,
+        m.options.map((o) => o.en),
+        "en",
+      )}</div></div>`;
     })
     .join("");
   const key = withMcq
     .map((i, n) => {
       const m = i.content.mcq!;
-      return `<tr><td>${n + 1}</td><td>(${"abcd"[m.answer]})</td><td><span lang="hi">${esc(m.explanation.hi)}</span><br/><span class="en">${esc(m.explanation.en)}</span></td></tr>`;
+      return `<tr><td class="kn">${n + 1}</td><td class="ka">(${OPTION_LETTERS[m.answer]})</td><td lang="hi">${esc(m.explanation.hi)}</td><td class="en">${esc(m.explanation.en)}</td></tr>`;
     })
     .join("");
   const mains = withMains
     .map(
       (i, n) =>
-        `<li><span lang="hi">${esc(i.content.mains!.hi)}</span><br/><span class="en">${esc(i.content.mains!.en)}</span></li>`,
+        `<div class="mcq"><span class="qn">${n + 1}.</span><div class="pair"><div class="side" lang="hi">${esc(i.content.mains!.hi)}</div><div class="side" lang="en">${esc(i.content.mains!.en)}</div></div></div>`,
     )
     .join("");
-  return `<section class="section new-page"><div class="section-title"><h2 lang="hi">अभ्यास प्रश्न</h2><span>Practice Questions</span></div>
-${qs ? `<h3 class="part">भाग अ: प्रारंभिक परीक्षा · Part A: Prelims (RPSC pattern)</h3>${qs}` : ""}
-${mains ? `<h3 class="part">भाग ब: मुख्य परीक्षा · Part B: Mains</h3><ol class="mains-list">${mains}</ol>` : ""}
-${key ? `<h3 class="part">उत्तर कुंजी · Answer key (Part A)</h3><table class="answers">${key}</table>` : ""}</section>`;
+  return `<section class="section new-page"><div class="section-title"><h2>Practice Questions</h2><span>RPSC pattern</span></div>
+${qs ? `<h3 class="part">Part A: Prelims</h3>${qs}` : ""}
+${mains ? `<h3 class="part">Part B: Mains</h3>${mains}` : ""}
+${key ? `<h3 class="part">Answer key (Part A)</h3><table class="answers">${key}</table>` : ""}</section>`;
+}
+
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+// A darker shade of the accent colour for the cover gradient.
+function darken(hex: string, amount = 0.45): string {
+  const h = hex.replace("#", "");
+  const full = h.length === 3 ? [...h].map((c) => c + c).join("") : h.slice(0, 6);
+  const n = parseInt(full, 16);
+  const ch = (shift: number) => Math.round(((n >> shift) & 255) * (1 - amount));
+  return `#${[16, 8, 0].map((sh) => ch(sh).toString(16).padStart(2, "0")).join("")}`;
 }
 
 export function renderMagazine(opts: {
@@ -210,44 +253,46 @@ export function renderMagazine(opts: {
     groups.set(it.category, list);
   }
 
-  const title = monthly
-    ? { hi: s.title_hi.replace("दैनिक", "मासिक"), en: s.title_en.replace(/^Daily/i, "Monthly") }
-    : { hi: s.title_hi, en: s.title_en };
+  const title = monthly ? s.title_en.replace(/^Daily/i, "Monthly") : s.title_en;
   const dateLine = monthly
-    ? `${formatDate(opts.period, "hi", false)} · ${formatDate(opts.period, "en", false)}`
-    : `${formatDate(opts.period, "hi")} · ${formatDate(opts.period, "en")}`;
+    ? formatDate(opts.period, "en", false)
+    : `${WEEKDAYS[new Date(`${opts.period}T00:00:00Z`).getUTCDay()]}, ${formatDate(opts.period, "en")}`;
   // Chrome repeats fixed elements on every printed page.
   const watermark = safeUrl(s.logo_main_url)
     ? `<div class="watermark"><img src="${esc(safeUrl(s.logo_main_url))}" alt="" /></div>`
     : `<div class="watermark"><span>FlashGyan</span></div>`;
   const logo = (u: string) => (safeUrl(u) ? `<img src="${esc(safeUrl(u))}" alt="" />` : "");
-  const highlights = items
-    .filter((i) => i.importance >= 3)
-    .slice(0, monthly ? 12 : 6)
+  // The most exam-relevant stories lead the cover.
+  const top = [...items].sort((a, b) => b.importance - a.importance).slice(0, monthly ? 6 : 4);
+  const highlights = top
     .map(
       (i) =>
-        `<li><b lang="hi">${esc(i.content.headline.hi)}</b><br/><span class="en">${esc(i.content.headline.en)}</span></li>`,
+        `<div class="hl"><span class="hl-cat">${esc(categoryLabel(i.category).en)}</span><div class="hl-hi" lang="hi">${esc(i.content.headline.hi)}</div><div class="hl-en">${esc(i.content.headline.en)}</div></div>`,
     )
     .join("");
+  // A public @username (numeric chat ids are not shown).
+  const channel = /^@[A-Za-z0-9_]{4,}$/.test(s.channel.trim()) ? s.channel.trim() : "";
+  const questions =
+    items.filter((i) => i.content.mcq).length + items.filter((i) => i.content.mains).length;
   const toc = [...groups.entries()]
-    .map(([cat, list]) => {
-      const l = categoryLabel(cat);
-      return `<tr><td><span lang="hi">${esc(l.hi)}</span> · ${esc(l.en)}</td><td>${list.length}</td></tr>`;
-    })
+    .map(
+      ([cat, list]) =>
+        `<div class="toc-row"><span>${esc(categoryLabel(cat).en)}</span><b>${list.length}</b></div>`,
+    )
     .join("");
 
   let n = 0;
   const sections = [...groups.entries()]
     .map(([cat, list]) => {
       const l = categoryLabel(cat);
-      return `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2 lang="hi">${esc(l.hi)}</h2><span>${esc(l.en)}</span></div>${list
+      return `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>${esc(l.en)}</h2><span>${list.length} ${list.length === 1 ? "story" : "stories"}</span></div>${list
         .map((it) => itemHtml(it, ++n, monthly))
         .join("")}</section>`;
     })
     .join("");
 
   const corrections = opts.corrections?.length
-    ? `<section class="section"><div class="section-title"><h2 lang="hi">अद्यतन एवं संशोधन</h2><span>Updates & corrections</span></div><ul class="corrections">${opts.corrections
+    ? `<section class="section"><div class="section-title"><h2>Updates &amp; corrections</h2><span>This month</span></div><ul class="corrections">${opts.corrections
         .map(
           (c) =>
             `<li><b>${esc(formatDate(c.date, "en"))}:</b> <span lang="hi">${esc(c.summary.hi)}</span><br/><span class="en">${esc(c.summary.en)}</span></li>`,
@@ -256,10 +301,10 @@ export function renderMagazine(opts: {
     : "";
 
   return `<!doctype html>
-<html lang="hi">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>${esc(title.en)} — ${esc(dateLine)}</title>
+<title>${esc(title)} — ${esc(dateLine)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600;700&family=Noto+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
@@ -268,15 +313,28 @@ export function renderMagazine(opts: {
 <body>
 ${watermark}
 <section class="cover">
-  <div class="cover-top">${logo(s.logo_main_url) || `<span class="brand">${esc(s.brand_line)}</span>`}${logo(s.logo_partner_url)}</div>
-  <div class="cover-band">
-    <h1 lang="hi">${esc(title.hi)}</h1>
-    <h2>${esc(title.en)}</h2>
-    <div class="date">${esc(dateLine)}</div>
+  <div class="cover-logos">${logo(s.logo_main_url) || `<span class="brand">${esc(s.brand_line)}</span>`}${logo(s.logo_partner_url)}</div>
+  <div class="cover-hero">
+    <div class="eyebrow">RAS Prelims &amp; Mains · Bilingual</div>
+    <h1>${esc(title)}</h1>
+    <div class="date-pill">${esc(dateLine)}</div>
+    <div class="stats">
+      <div><b>${items.length}</b><span>${items.length === 1 ? "story" : "stories"}</span></div>
+      <div><b>${groups.size}</b><span>${groups.size === 1 ? "section" : "sections"}</span></div>
+      <div><b>${questions}</b><span>practice questions</span></div>
+    </div>
   </div>
-  ${highlights ? `<div class="highlights"><h3>मुख्य समाचार · Highlights</h3><ul>${highlights}</ul></div>` : ""}
-  <div class="toc"><h3>विषय-सूची · Contents</h3><table>${toc}${items.some((i) => i.content.mcq || i.content.mains) ? `<tr><td><span lang="hi">अभ्यास प्रश्न</span> · Practice Questions</td><td>${items.filter((i) => i.content.mcq).length + items.filter((i) => i.content.mains).length}</td></tr>` : ""}</table></div>
-  <div class="cover-foot">${esc(s.brand_line)} · RAS Prelims &amp; Mains</div>
+  <div class="cover-body">
+    ${highlights ? `<h3 class="cover-h">In this issue</h3><div class="hl-grid">${highlights}</div>` : ""}
+    <h3 class="cover-h">Contents</h3>
+    <div class="toc">${toc}${questions ? `<div class="toc-row"><span>Practice Questions</span><b>${questions}</b></div>` : ""}</div>
+    ${
+      channel
+        ? `<div class="cta"><div><b>Get it every morning on Telegram</b><span>Daily current affairs for RAS, bilingual, free.</span></div><div class="cta-handle">${esc(channel)}</div></div>`
+        : ""
+    }
+  </div>
+  <div class="cover-foot"><span>${esc(s.brand_line)}</span><span>हिंदी &amp; English</span></div>
 </section>
 ${sections}
 ${corrections}
