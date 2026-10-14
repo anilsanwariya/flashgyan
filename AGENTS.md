@@ -17,3 +17,4 @@
 - Reuse AppDownloadPopup with optional copy and continuation props for the homepage demo; preserve existing feature defaults so their completion flows stay unchanged.
 - Keep Telegram repaint workarounds free of transforms on html/body; transformed portal ancestors break viewport positioning for fixed dialogs.
 - Route every Play Store link through src/lib/app-promo.ts (playStoreUrl/openPlayStore) so installs keep their referrer tags and open correctly inside Telegram; gate download popups with shouldShowAppPrompt so they appear at most once a day.
+- Run Telegram Mains answers as bounded EdgeRuntime.waitUntil jobs after an immediate acknowledgment; suppress aborted-job delivery so slow AI calls cannot hold the webhook open or send late duplicate replies.

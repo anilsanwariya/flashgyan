@@ -2,6 +2,7 @@
 // Reads content EXCLUSIVELY from bot_* tables. Tracks users in bot_users
 // and quiz state in bot_sessions. Public webhook (Telegram calls it directly).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { runTelegramAnswerJob } from "../_shared/telegram-answer-job.ts";
 import {
   SaathiAiError,
   cleanHistory,
@@ -563,7 +564,7 @@ type CachedAnswer = {
 function parseAnswerArgs(args: string): { marks: number | null; question: string } {
   const m = /^(\d{1,2})\s+([\s\S]+)$/.exec(args);
   const marks = m ? Number(m[1]) : null;
-  return marks && marks <= 50 ? { marks, question: m![2].trim() } : { marks: null, question: args };
+  return m && marks && marks <= 50 ? { marks, question: m[2].trim() } : { marks: null, question: args };
 }
 
 function mainsHeader(info: MainsInfo): string {
@@ -590,6 +591,7 @@ async function handleSaathiAsk(
   user_id: number,
   question: string,
   mains?: { marks: number | null },
+  signal?: AbortSignal,
 ) {
   if (!question) {
     await tg("sendMessage", {
@@ -607,7 +609,9 @@ async function handleSaathiAsk(
   question = question.slice(0, 2000);
   const userKey = String(user_id);
   await logEvent(chat_id, "saathi");
+  if (signal?.aborted) return;
   const stopTyping = keepTyping(chat_id);
+  signal?.addEventListener("abort", stopTyping, { once: true });
 
   let answer: string;
   let noAnswer = true;
@@ -731,14 +735,18 @@ async function handleSaathiAsk(
     // AI or database failures are not knowledge gaps and are not remembered.
     console.error("saathi error", e);
     stopTyping();
+    if (signal?.aborted) return;
     const busy = e instanceof SaathiAiError && (e.status === 429 || e.status === 402);
     await tg("sendMessage", {
       chat_id,
       text: busy ? e.message : "SAATHI is having trouble right now. Please try again in a moment.",
     });
     return;
+  } finally {
+    stopTyping();
+    signal?.removeEventListener("abort", stopTyping);
   }
-  stopTyping();
+  if (signal?.aborted) return;
 
   // Only real answers become memory, so follow-ups build on useful context.
   if (!noAnswer) {
@@ -763,6 +771,7 @@ async function handleSaathiAsk(
   const extras = wordsLine + srcLine + nextLine;
   const body =
     header + clipHtml(mdToTelegramHtml(answer), 3900 - extras.length - header.length) + extras;
+  if (signal?.aborted) return;
   const res = await tg("sendMessage", { chat_id, text: body, parse_mode: "HTML" });
   if (!res.ok) {
     // Fallback if Telegram rejects the markup: send safely escaped plain text.
@@ -772,6 +781,33 @@ async function handleSaathiAsk(
       parse_mode: "HTML",
     });
   }
+}
+
+async function queueMainsAnswer(chat_id: number, user_id: number, args: string) {
+  const { marks, question } = parseAnswerArgs(args);
+  // Usage and configuration errors remain immediate, without a drafting notice.
+  if (!question || !LOVABLE_API_KEY) {
+    await handleSaathiAsk(chat_id, user_id, question, { marks });
+    return;
+  }
+  await tg("sendMessage", {
+    chat_id,
+    text: /[\u0900-\u097F]/.test(question)
+      ? "✍️ आपका RAS मुख्य परीक्षा उत्तर तैयार कर रहा हूँ…"
+      : "✍️ Drafting your RAS Mains answer…",
+  });
+  continueInBackground(runTelegramAnswerJob({
+    process: (signal) => handleSaathiAsk(chat_id, user_id, question, { marks }, signal),
+    onFailure: async (timedOut) => {
+      console.error("telegram mains job", timedOut ? "deadline exceeded" : "failed");
+      await tg("sendMessage", {
+        chat_id,
+        text: timedOut
+          ? "Your answer is taking too long. Please try /answer again in a moment."
+          : "SAATHI couldn't deliver your answer. Please try /answer again in a moment.",
+      });
+    },
+  }));
 }
 
 // ---------- Broadcasts ----------
@@ -899,8 +935,7 @@ async function runCommand(
       await handleSaathiAsk(ctx.chat_id, ctx.user_id, args);
       return;
     case "answer": {
-      const { marks, question } = parseAnswerArgs(args);
-      await handleSaathiAsk(ctx.chat_id, ctx.user_id, question, { marks });
+      await queueMainsAnswer(ctx.chat_id, ctx.user_id, args);
       return;
     }
     case "flashcards":
@@ -920,6 +955,11 @@ async function runCommand(
 
 // The bot's original fixed behaviour, used until the admin migration is applied.
 async function handleTextLegacy(chat_id: number, user_id: number, text: string, isGroup: boolean) {
+  const parsed = parseCommand(text);
+  if (parsed?.name === "answer" && !isGroup) {
+    await queueMainsAnswer(chat_id, user_id, parsed.args);
+    return;
+  }
   if (text === "/ask" || text.startsWith("/ask ") || text.startsWith("/ask@")) {
     await handleSaathiAsk(chat_id, user_id, text.replace(/^\/ask(@\S+)?\s*/i, "").trim());
     return;
