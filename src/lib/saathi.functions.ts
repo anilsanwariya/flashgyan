@@ -88,12 +88,14 @@ export const createSaathiDoc = createServerFn({ method: "POST" })
 export const updateSaathiDoc = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
-    z.object({
-      id: z.string().uuid(),
-      ...docMeta,
-      content: z.string().trim().min(1).max(200_000),
-      is_chunk: z.boolean().default(false),
-    }).parse(input),
+    z
+      .object({
+        id: z.string().uuid(),
+        ...docMeta,
+        content: z.string().trim().min(1).max(200_000),
+        is_chunk: z.boolean().default(false),
+      })
+      .parse(input),
   )
   .handler(async ({ data, context }) => {
     const admin = await assertAdmin(context.userId);
@@ -163,10 +165,12 @@ export const updateSaathiDoc = createServerFn({ method: "POST" })
 export const appendSaathiDoc = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
-    z.object({
-      parent_id: z.string().uuid(),
-      content: z.string().trim().min(1).max(500_000),
-    }).parse(input),
+    z
+      .object({
+        parent_id: z.string().uuid(),
+        content: z.string().trim().min(1).max(500_000),
+      })
+      .parse(input),
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
@@ -179,10 +183,12 @@ export const appendSaathiDoc = createServerFn({ method: "POST" })
 export const replaceSaathiDoc = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
-    z.object({
-      id: z.string().uuid(),
-      content: z.string().trim().min(1).max(500_000).optional(),
-    }).parse(input),
+    z
+      .object({
+        id: z.string().uuid(),
+        content: z.string().trim().min(1).max(500_000).optional(),
+      })
+      .parse(input),
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
@@ -235,10 +241,12 @@ export type SaathiRetrievalHit = {
 export const testSaathiRetrieval = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
-    z.object({
-      question: z.string().trim().min(1).max(2000),
-      subjects: z.array(z.string().trim().min(1).max(120)).max(50).default([]),
-    }).parse(input),
+    z
+      .object({
+        question: z.string().trim().min(1).max(2000),
+        subjects: z.array(z.string().trim().min(1).max(120)).max(50).default([]),
+      })
+      .parse(input),
   )
   .handler(async ({ data, context }): Promise<SaathiRetrievalHit[]> => {
     const admin = await assertAdmin(context.userId);
@@ -295,12 +303,14 @@ export const listSaathiTopics = createServerFn({ method: "GET" }).handler(
 
 export const submitSaathiFeedback = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
-    z.object({
-      question: z.string().trim().min(1).max(2000),
-      answer: z.string().trim().min(1).max(20_000),
-      rating: z.union([z.literal(1), z.literal(-1)]),
-      sources: z.array(z.string().max(300)).max(20).default([]),
-    }).parse(input),
+    z
+      .object({
+        question: z.string().trim().min(1).max(2000),
+        answer: z.string().trim().min(1).max(20_000),
+        rating: z.union([z.literal(1), z.literal(-1)]),
+        sources: z.array(z.string().max(300)).max(20).default([]),
+      })
+      .parse(input),
   )
   .handler(async ({ data }) => {
     const { getRequest } = await import("@tanstack/react-start/server");
@@ -363,34 +373,39 @@ export type SaathiFeedback = {
 
 export const listSaathiFeedback = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<{ up: number; down: number; recentDown: SaathiFeedback[] }> => {
-    const admin = await assertAdmin(context.userId);
-    const table = "saathi_feedback" as never;
-    const [up, down, recent] = await Promise.all([
-      admin.from(table).select("id", { count: "exact", head: true }).eq("rating", 1),
-      admin.from(table).select("id", { count: "exact", head: true }).eq("rating", -1),
-      admin
-        .from(table)
-        .select("id,question,answer,rating,sources,created_at")
-        .eq("rating", -1)
-        .order("created_at", { ascending: false })
-        .limit(50),
-    ]);
-    const failed = [up, down, recent].find((r) => r.error);
-    if (failed?.error) throw new Error(failed.error.message);
-    return {
-      up: up.count ?? 0,
-      down: down.count ?? 0,
-      recentDown: (recent.data ?? []) as unknown as SaathiFeedback[],
-    };
-  });
+  .handler(
+    async ({ context }): Promise<{ up: number; down: number; recentDown: SaathiFeedback[] }> => {
+      const admin = await assertAdmin(context.userId);
+      const table = "saathi_feedback" as never;
+      const [up, down, recent] = await Promise.all([
+        admin.from(table).select("id", { count: "exact", head: true }).eq("rating", 1),
+        admin.from(table).select("id", { count: "exact", head: true }).eq("rating", -1),
+        admin
+          .from(table)
+          .select("id,question,answer,rating,sources,created_at")
+          .eq("rating", -1)
+          .order("created_at", { ascending: false })
+          .limit(50),
+      ]);
+      const failed = [up, down, recent].find((r) => r.error);
+      if (failed?.error) throw new Error(failed.error.message);
+      return {
+        up: up.count ?? 0,
+        down: down.count ?? 0,
+        recentDown: (recent.data ?? []) as unknown as SaathiFeedback[],
+      };
+    },
+  );
 
 export const deleteSaathiFeedback = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const admin = await assertAdmin(context.userId);
-    const { error } = await admin.from("saathi_feedback" as never).delete().eq("id", data.id);
+    const { error } = await admin
+      .from("saathi_feedback" as never)
+      .delete()
+      .eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
   });

@@ -142,14 +142,26 @@ export function SaathiPanel() {
   function startEditParent(d: SaathiDoc) {
     setMode("content");
     setEditKind({ kind: "edit-parent", id: d.id });
-    setForm({ title: d.title, subject: d.subject, topic: d.topic ?? "", medium: d.medium, content: "" });
+    setForm({
+      title: d.title,
+      subject: d.subject,
+      topic: d.topic ?? "",
+      medium: d.medium,
+      content: "",
+    });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function startReplace(d: SaathiDoc) {
     setMode("content");
     setEditKind({ kind: "replace", parentId: d.id, parentTitle: d.title });
-    setForm({ title: d.title, subject: d.subject, topic: d.topic ?? "", medium: d.medium, content: "" });
+    setForm({
+      title: d.title,
+      subject: d.subject,
+      topic: d.topic ?? "",
+      medium: d.medium,
+      content: "",
+    });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -291,7 +303,12 @@ export function SaathiPanel() {
   }
 
   async function onDelete(doc: SaathiDoc, label: string) {
-    if (!confirm(`Delete ${label} "${doc.title}"?${doc.parent_id == null ? " All its chunks will be deleted." : ""}`)) return;
+    if (
+      !confirm(
+        `Delete ${label} "${doc.title}"?${doc.parent_id == null ? " All its chunks will be deleted." : ""}`,
+      )
+    )
+      return;
     try {
       await deleteFn({ data: { id: doc.id } });
       toast.success("Deleted");
@@ -388,7 +405,6 @@ export function SaathiPanel() {
         <KnowledgeGapsPanel />
       )}
 
-
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h3 className="font-semibold">
@@ -430,10 +446,7 @@ export function SaathiPanel() {
               const isOpen = expanded.has(d.id);
               const chunks = childrenByParent.get(d.id) ?? [];
               return (
-                <li
-                  key={d.id}
-                  className="rounded-lg bg-card border border-border overflow-hidden"
-                >
+                <li key={d.id} className="rounded-lg bg-card border border-border overflow-hidden">
                   <div className="flex items-center gap-2 p-2">
                     <button
                       type="button"
@@ -471,7 +484,9 @@ export function SaathiPanel() {
                       title="Rebuild chunks"
                       aria-label="Rebuild chunks"
                     >
-                      <RefreshCw className={`h-4 w-4 ${rebuilding === d.id ? "animate-spin" : ""}`} />
+                      <RefreshCw
+                        className={`h-4 w-4 ${rebuilding === d.id ? "animate-spin" : ""}`}
+                      />
                     </button>
                     <button
                       onClick={() => startReplace(d)}
@@ -552,7 +567,11 @@ function ChunkRow({
           className="h-6 w-6 grid place-items-center rounded hover:bg-muted shrink-0"
           aria-label={open ? "Collapse" : "Expand"}
         >
-          {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5" />
+          )}
         </button>
         <button
           type="button"
@@ -626,9 +645,9 @@ function EntryForm({
       ? `Append to "${editKind.parentTitle}"`
       : isReplace
         ? `Replace content of "${editKind.parentTitle}"`
-      : isEditParent
-        ? "Edit deck metadata"
-        : "New deck";
+        : isEditParent
+          ? "Edit deck metadata"
+          : "New deck";
 
   const submitLabel = isChunk
     ? saving
@@ -642,13 +661,13 @@ function EntryForm({
         ? saving
           ? "Replacing…"
           : "Replace Content"
-      : isEditParent
-        ? saving
-          ? "Saving…"
-          : "Update Deck"
-        : saving
-          ? "Saving…"
-          : "Save to SAATHI";
+        : isEditParent
+          ? saving
+            ? "Saving…"
+            : "Update Deck"
+          : saving
+            ? "Saving…"
+            : "Save to SAATHI";
 
   // Each file's text is appended as soon as it is read, in the order added.
   const queue = useFileQueue({
@@ -823,10 +842,20 @@ function EntryForm({
           </div>
           <FileQueueList queue={queue} />
           <div className="flex flex-wrap items-center gap-1 mb-2">
-            <button type="button" className={toolbarBtn} title="Heading 1" onClick={() => prefixLine("# ")}>
+            <button
+              type="button"
+              className={toolbarBtn}
+              title="Heading 1"
+              onClick={() => prefixLine("# ")}
+            >
               <Heading1 className="h-4 w-4" />
             </button>
-            <button type="button" className={toolbarBtn} title="Heading 2" onClick={() => prefixLine("## ")}>
+            <button
+              type="button"
+              className={toolbarBtn}
+              title="Heading 2"
+              onClick={() => prefixLine("## ")}
+            >
               <Heading2 className="h-4 w-4" />
             </button>
             <button type="button" className={toolbarBtn} title="Bold" onClick={() => wrap("**")}>
@@ -843,26 +872,31 @@ function EntryForm({
             >
               <Highlighter className="h-4 w-4" />
             </button>
-            <button type="button" className={toolbarBtn} title="Bullet list" onClick={() => prefixLine("- ")}>
+            <button
+              type="button"
+              className={toolbarBtn}
+              title="Bullet list"
+              onClick={() => prefixLine("- ")}
+            >
               <List className="h-4 w-4" />
             </button>
           </div>
           <FileDropZone onFiles={(files) => queue.add(isChunk ? files.slice(0, 1) : files)}>
-          <Textarea
-            id="s-content"
-            ref={taRef}
-            value={form.content}
-            onChange={(e) => setForm((p) => ({ ...p, content: e.target.value }))}
-            rows={12}
-            placeholder={
-              isAppend
-                ? "Paste content or upload a PDF to add new chunks to this deck."
-                : isReplace
-                  ? "Paste the new content or upload a PDF. It replaces all of this deck's chunks."
-                : "Paste text, drop PDFs here, or use the toolbar for **bold**, *italic*, # headings and <mark>highlight</mark>."
-            }
-            className="font-mono text-sm"
-          />
+            <Textarea
+              id="s-content"
+              ref={taRef}
+              value={form.content}
+              onChange={(e) => setForm((p) => ({ ...p, content: e.target.value }))}
+              rows={12}
+              placeholder={
+                isAppend
+                  ? "Paste content or upload a PDF to add new chunks to this deck."
+                  : isReplace
+                    ? "Paste the new content or upload a PDF. It replaces all of this deck's chunks."
+                    : "Paste text, drop PDFs here, or use the toolbar for **bold**, *italic*, # headings and <mark>highlight</mark>."
+              }
+              className="font-mono text-sm"
+            />
           </FileDropZone>
           <div className="mt-1 flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
             <span>
@@ -976,12 +1010,10 @@ function QnABulkUpload({
       <div className="font-semibold">Bulk Q&amp;A upload</div>
       <p className="text-xs text-muted-foreground">
         Excel columns: <code className="font-mono">order</code>,{" "}
-        <code className="font-mono">question</code>,{" "}
-        <code className="font-mono">answer</code>, then one column per
-        explanation section (the header text becomes the section title). One
-        Excel file = one SAATHI entry; the file name becomes the entry title.
-        Each row is saved as its own chunk, so explanations stay with their
-        question. You can pick multiple files at once.
+        <code className="font-mono">question</code>, <code className="font-mono">answer</code>, then
+        one column per explanation section (the header text becomes the section title). One Excel
+        file = one SAATHI entry; the file name becomes the entry title. Each row is saved as its own
+        chunk, so explanations stay with their question. You can pick multiple files at once.
       </p>
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -1001,10 +1033,7 @@ function QnABulkUpload({
         </div>
         <div>
           <Label>Medium</Label>
-          <Select
-            value={medium}
-            onValueChange={(v) => setMedium(v as SaathiMedium)}
-          >
+          <Select value={medium} onValueChange={(v) => setMedium(v as SaathiMedium)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -1084,7 +1113,8 @@ function KnowledgeGapsPanel() {
         <div>
           <h3 className="font-semibold">Knowledge Gaps</h3>
           <p className="text-sm text-muted-foreground">
-            Questions students asked that SAATHI couldn't answer. Upload matching study material, then dismiss the gap.
+            Questions students asked that SAATHI couldn't answer. Upload matching study material,
+            then dismiss the gap.
           </p>
         </div>
 
@@ -1211,7 +1241,9 @@ function FeedbackPanel() {
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{f.answer}</ReactMarkdown>
               </div>
               {f.sources.length > 0 && (
-                <p className="mt-2 text-xs text-muted-foreground">Sources: {f.sources.join(", ")}</p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Sources: {f.sources.join(", ")}
+                </p>
               )}
             </details>
           ))}
