@@ -62,6 +62,16 @@ export type SaathiStreamEvent =
       followups?: string[];
       searchQuery?: string;
       englishQuery?: string | null;
+      // Answer-writing mode: marks, word limit, blueprint used, words written.
+      mains?: {
+        marks: number;
+        wordLimit: number;
+        directive: string;
+        blueprint: { version: number; samples: number; directive: string } | null;
+        exemplars: number;
+        pyq: { year: number | null; paper: string | null; marks: number } | null;
+        words?: number;
+      };
     }
   | { type: "error"; message: string };
 
@@ -72,7 +82,7 @@ export type SaathiQuizItem = {
   explanation: string;
 };
 
-type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 type RpcResult = { data: unknown; error: { message: string; code?: string } | null };
 export type SaathiRpc = (fn: string, args: Record<string, unknown>) => PromiseLike<RpcResult>;
@@ -227,7 +237,7 @@ export type SaathiQuery = {
   english: string | null;
 };
 
-function parseJsonLoose<T>(raw: string): T | null {
+export function parseJsonLoose<T>(raw: string): T | null {
   const text = raw.replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
   try {
     return JSON.parse(text) as T;
@@ -321,6 +331,18 @@ export async function saathiSearch(
     .slice(0, matchCount);
 }
 
+function queryTexts(query: SaathiQuery): string[] {
+  return query.english ? [query.standalone, query.english] : [query.standalone];
+}
+
+// Embeddings for the standalone question and, when present, its English version.
+export async function saathiEmbedQuery(apiKey: string, query: SaathiQuery): Promise<number[][]> {
+  const texts = queryTexts(query);
+  return texts.length === 1
+    ? [await saathiEmbed(apiKey, texts[0])]
+    : saathiEmbedMany(apiKey, texts);
+}
+
 // Searches with the standalone question and, when present, its English version,
 // keeping each chunk's best scores from either search.
 export async function saathiSearchQuery(
@@ -329,12 +351,11 @@ export async function saathiSearchQuery(
   query: SaathiQuery,
   subjects: string[] | null,
   matchCount = SAATHI_CANDIDATES,
+  // Precomputed from saathiEmbedQuery, when the caller also needs them.
+  precomputed?: number[][],
 ): Promise<SaathiMatch[]> {
-  const texts = query.english ? [query.standalone, query.english] : [query.standalone];
-  const embeddings =
-    texts.length === 1
-      ? [await saathiEmbed(apiKey, texts[0])]
-      : await saathiEmbedMany(apiKey, texts);
+  const texts = queryTexts(query);
+  const embeddings = precomputed ?? (await saathiEmbedQuery(apiKey, query));
   const results = await Promise.all(
     texts.map((t, i) =>
       saathiSearch(rpc, t, embeddings[i], subjects, matchCount, query.standalone),
@@ -425,15 +446,25 @@ export async function saathiRetrieve(opts: {
   question: string;
   subjects: string[] | null;
   query?: SaathiQuery;
+  embeddings?: number[][];
+  // How many chunks go to the model (longer answers need more material).
+  keep?: number;
 }): Promise<SaathiRetrieval> {
   const query = opts.query ?? (await saathiPrepareQuery(opts.apiKey, opts.history, opts.question));
-  const candidates = await saathiSearchQuery(opts.apiKey, opts.rpc, query, opts.subjects);
+  const candidates = await saathiSearchQuery(
+    opts.apiKey,
+    opts.rpc,
+    query,
+    opts.subjects,
+    SAATHI_CANDIDATES,
+    opts.embeddings,
+  );
   const relevant = relevantMatches(candidates);
   const matches = await saathiRerank(
     opts.apiKey,
     query.english ?? query.standalone,
     relevant,
-    SAATHI_CONTEXT_CHUNKS,
+    opts.keep ?? SAATHI_CONTEXT_CHUNKS,
     questionLanguage(query.standalone),
   );
   return { query, candidates, matches };

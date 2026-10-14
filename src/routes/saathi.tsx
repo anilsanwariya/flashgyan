@@ -7,8 +7,10 @@ import {
   Check,
   ChevronDown,
   Copy,
+  FileText,
   GraduationCap,
   Layers,
+  MessageCircle,
   Lock,
   Send,
   Sparkles,
@@ -26,6 +28,7 @@ import {
   submitSaathiFeedback,
   type SaathiTopic,
 } from "@/lib/saathi.functions";
+import { listSaathiAnswerFormats } from "@/lib/saathi-mains.functions";
 import { getHomeData } from "@/lib/home.functions";
 import { listDecks, type DeckSummary } from "@/lib/flashcards.functions";
 import type {
@@ -60,10 +63,25 @@ type Msg = {
   subjects?: string[];
   quiz?: SaathiQuizItem[];
   quizPicks?: (number | null)[];
+  // Answer-writing mode: marks, word limit and how the answer was structured.
+  mains?: MainsMeta;
+};
+
+type MainsMeta = NonNullable<Extract<SaathiStreamEvent, { type: "done" }>["mains"]>;
+type AskMode = "chat" | "mains";
+
+const DIRECTIVE_NAMES: Record<string, string> = {
+  define: "Define",
+  explain: "Explain",
+  discuss: "Discuss",
+  critical: "Critically examine",
+  compare: "Compare",
+  suggest: "Suggest measures",
 };
 
 const CHAT_KEY = "saathi.chat.v1";
 const SUBJECTS_KEY = "saathi.subjects.v1";
+const MODE_KEY = "saathi.mode.v1";
 const MAX_STORED = 40;
 const HISTORY_TURNS = 6;
 
@@ -136,6 +154,16 @@ function SaathiChat() {
   const [input, setInput] = useState("");
   const [selected, setSelected] = useState<string[]>(() => readStored<string[]>(SUBJECTS_KEY, []));
   const [sending, setSending] = useState(false);
+  const [mode, setMode] = useState<{ mode: AskMode; marks: number }>(() =>
+    readStored(MODE_KEY, { mode: "chat" as AskMode, marks: 10 }),
+  );
+  const formatsFn = useServerFn(listSaathiAnswerFormats);
+  const formatsQ = useQuery({
+    queryKey: ["saathiAnswerFormats", "public"],
+    queryFn: () => formatsFn(),
+    staleTime: 10 * 60_000,
+  });
+  const formats = useMemo(() => formatsQ.data ?? [], [formatsQ.data]);
   const abortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -150,6 +178,18 @@ function SaathiChat() {
   }, [topicsQ.data]);
 
   useEffect(() => writeStored(SUBJECTS_KEY, selected), [selected]);
+  useEffect(() => writeStored(MODE_KEY, mode), [mode]);
+
+  // Keep the chosen marks to the bands the admin offers.
+  useEffect(() => {
+    if (!formats.length || formats.some((f) => f.marks === mode.marks)) return;
+    setMode((m) => ({
+      ...m,
+      marks: formats.find((f) => f.marks === 10)?.marks ?? formats[0].marks,
+    }));
+  }, [formats, mode.marks]);
+
+  const writing = mode.mode === "mains";
 
   useEffect(() => {
     if (sending) return;
@@ -231,7 +271,12 @@ function SaathiChat() {
       const res = await fetch("/api/saathi/ask", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ question: text, subjects: selected, history }),
+        body: JSON.stringify({
+          question: text,
+          subjects: selected,
+          history,
+          ...(writing ? { mode: "mains", marks: mode.marks } : {}),
+        }),
         signal: controller.signal,
       });
       if (!res.ok || !res.body) {
@@ -264,6 +309,7 @@ function SaathiChat() {
               followups: event.followups,
               searchQuery: event.searchQuery,
               englishQuery: event.englishQuery,
+              mains: event.mains,
             });
           } else if (event.type === "error") {
             throw new Error(event.message);
@@ -371,11 +417,15 @@ function SaathiChat() {
                 <div className="mx-auto h-16 w-16 rounded-[24px] grad-lavender grid place-items-center mb-4 shadow-[0_8px_32px_rgba(var(--primary),0.2)]">
                   <Sparkles className="h-7 w-7 text-foreground" />
                 </div>
-                <h1 className="text-2xl font-extrabold tracking-tight">Ask SAATHI anything</h1>
+                <h1 className="text-2xl font-extrabold tracking-tight">
+                  {writing ? "Practise Mains answer writing" : "Ask SAATHI anything"}
+                </h1>
                 <p className="mt-2 text-sm text-muted-foreground max-w-md mx-auto">
-                  Ask in English or हिंदी. Answers come from our study material.
+                  {writing
+                    ? `Paste a RAS Mains question. SAATHI writes a ${mode.marks}-mark model answer in the exam structure, with facts from our study material.`
+                    : "Ask in English or हिंदी. Answers come from our study material."}
                 </p>
-                {starters.length > 0 && (
+                {!writing && starters.length > 0 && (
                   <div className="mt-6 grid gap-2 sm:grid-cols-2 max-w-xl mx-auto text-left">
                     {starters.map((s) => (
                       <button
@@ -410,7 +460,10 @@ function SaathiChat() {
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         <div className="max-w-3xl mx-auto px-5 pt-3 pb-3 space-y-2">
-          <SubjectMultiSelect options={subjects} selected={selected} onChange={setSelected} />
+          <div className="flex flex-wrap items-center gap-2">
+            <SubjectMultiSelect options={subjects} selected={selected} onChange={setSelected} />
+            <ModePicker mode={mode} formats={formats} disabled={sending} onChange={setMode} />
+          </div>
           <div className="flex items-end gap-2">
             <Textarea
               ref={inputRef}
@@ -418,7 +471,11 @@ function SaathiChat() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKey}
               disabled={locked}
-              placeholder="Ask in English or हिंदी…"
+              placeholder={
+                writing
+                  ? `${mode.marks}-mark question, English or हिंदी…`
+                  : "Ask in English or हिंदी…"
+              }
               rows={1}
               className="resize-none min-h-[48px] max-h-40 rounded-2xl bg-white/60 dark:bg-black/40 backdrop-blur-xl border-border/40"
             />
@@ -443,6 +500,103 @@ function SaathiChat() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ModePicker({
+  mode,
+  formats,
+  disabled,
+  onChange,
+}: {
+  mode: { mode: AskMode; marks: number };
+  formats: { marks: number; word_limit: number }[];
+  disabled: boolean;
+  onChange: (m: { mode: AskMode; marks: number }) => void;
+}) {
+  const pill = (active: boolean) =>
+    `inline-flex items-center gap-1 h-8 rounded-full px-3 text-xs font-medium border transition-colors ${
+      active
+        ? "bg-primary/15 text-primary border-primary/30"
+        : "bg-white/50 dark:bg-black/30 border-border/40 text-muted-foreground hover:text-foreground"
+    }`;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Answer style">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange({ ...mode, mode: "chat" })}
+        className={pill(mode.mode === "chat")}
+        aria-pressed={mode.mode === "chat"}
+      >
+        <MessageCircle className="h-3.5 w-3.5" /> Ask
+      </button>
+      <button
+        type="button"
+        disabled={disabled || formats.length === 0}
+        onClick={() => onChange({ ...mode, mode: "mains" })}
+        className={pill(mode.mode === "mains")}
+        aria-pressed={mode.mode === "mains"}
+        title="Write a RAS Mains answer"
+      >
+        <FileText className="h-3.5 w-3.5" /> Mains answer
+      </button>
+      {mode.mode === "mains" &&
+        formats.map((f) => (
+          <button
+            key={f.marks}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange({ mode: "mains", marks: f.marks })}
+            className={pill(mode.marks === f.marks)}
+            aria-pressed={mode.marks === f.marks}
+            title={`${f.word_limit} words`}
+          >
+            {f.marks} marks
+          </button>
+        ))}
+    </div>
+  );
+}
+
+function MainsBadges({ info }: { info: MainsMeta }) {
+  const where = info.pyq
+    ? [
+        info.pyq.year ? `RAS ${info.pyq.year}` : null,
+        info.pyq.paper ? `Paper ${info.pyq.paper}` : null,
+      ]
+        .filter(Boolean)
+        .join(", ") || "a previous year"
+    : null;
+  const within =
+    info.words !== undefined && Math.abs(info.words - info.wordLimit) <= info.wordLimit * 0.1;
+  const chip =
+    "text-[11px] rounded-full bg-white/50 dark:bg-black/30 backdrop-blur-xl border border-border/30 px-2.5 py-0.5";
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-1.5">
+      <span className={`${chip} font-medium text-foreground`}>
+        📝 {info.marks} marks · ~{info.wordLimit} words
+      </span>
+      {DIRECTIVE_NAMES[info.directive] && (
+        <span className={`${chip} text-muted-foreground`}>{DIRECTIVE_NAMES[info.directive]}</span>
+      )}
+      {info.words !== undefined && (
+        <span
+          className={`${chip} ${within ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground"}`}
+        >
+          ✍️ {info.words} words
+        </span>
+      )}
+      {where && <span className={`${chip} text-primary`}>🗂 Asked in {where}</span>}
+      {info.blueprint && (
+        <span
+          className={`${chip} text-muted-foreground`}
+          title="The answer structure SAATHI learned from model answers"
+        >
+          Structure from {info.blueprint.samples} model answers
+        </span>
+      )}
     </div>
   );
 }
@@ -670,6 +824,7 @@ function MessageBubble({
         <Sparkles className="h-4 w-4 text-foreground" />
       </div>
       <div className="min-w-0 flex-1">
+        {msg.mains && msg.status === "done" && !msg.noAnswer && <MainsBadges info={msg.mains} />}
         <div className="prose prose-sm dark:prose-invert max-w-none text-foreground rounded-[24px] bg-white/50 dark:bg-black/30 backdrop-blur-xl border border-border/30 px-4 py-3 prose-headings:font-bold prose-table:text-sm prose-td:border prose-th:border prose-td:px-2 prose-th:px-2 prose-td:py-1 prose-th:py-1">
           {streaming && !msg.content ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground not-prose">

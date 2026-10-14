@@ -17,6 +17,14 @@ import {
   type SaathiTurn,
 } from "../_shared/saathi-core.ts";
 import {
+  DIRECTIVE_LABELS,
+  mainsInfo,
+  mainsMessages,
+  mainsNoMaterialReply,
+  saathiMainsPlan,
+  type MainsInfo,
+} from "../_shared/saathi-mains.ts";
+import {
   BOT_DEFAULT_TEXTS,
   BROADCAST_DELAY_MS,
   clipHtml,
@@ -94,7 +102,7 @@ type BotCommand = {
   description_en: string;
   description_hi: string;
   action: "builtin" | "message";
-  builtin: "study" | "flashcards" | "mcq" | "ask" | "help" | null;
+  builtin: "study" | "flashcards" | "mcq" | "ask" | "answer" | "help" | null;
   response_text: string;
   media_url: string | null;
   media_type: "photo" | "document" | null;
@@ -543,11 +551,50 @@ function keepTyping(chat_id: number): () => void {
   return () => clearInterval(timer);
 }
 
-type CachedAnswer = { answer: string; sources: { title: string }[]; followups: string[] };
+type CachedAnswer = {
+  answer: string;
+  sources: { title: string }[];
+  followups: string[];
+  meta?: { mains?: MainsInfo } | null;
+};
 
-async function handleSaathiAsk(chat_id: number, user_id: number, question: string) {
+// "/answer 10 question" or "/answer question (10 marks)": marks come first or
+// are found in the question.
+function parseAnswerArgs(args: string): { marks: number | null; question: string } {
+  const m = /^(\d{1,2})\s+([\s\S]+)$/.exec(args);
+  const marks = m ? Number(m[1]) : null;
+  return marks && marks <= 50 ? { marks, question: m![2].trim() } : { marks: null, question: args };
+}
+
+function mainsHeader(info: MainsInfo): string {
+  const parts = [
+    `📝 <b>${info.marks} marks</b> · ~${info.wordLimit} words`,
+    tgEsc(DIRECTIVE_LABELS[info.directive]),
+  ];
+  const lines = [parts.join(" · ")];
+  if (info.pyq) {
+    const when = [info.pyq.year ? `RAS ${info.pyq.year}` : "a previous year", info.pyq.paper ? `Paper ${tgEsc(info.pyq.paper)}` : null]
+      .filter(Boolean)
+      .join(", ");
+    lines.push(`🗂 <i>Asked in ${when}</i>`);
+  }
+  return lines.join("\n") + "\n\n";
+}
+
+// mains: write a descriptive exam answer (/answer) instead of a chat answer.
+async function handleSaathiAsk(
+  chat_id: number,
+  user_id: number,
+  question: string,
+  mains?: { marks: number | null },
+) {
   if (!question) {
-    await tg("sendMessage", { chat_id, text: "Usage: /ask <your question>" });
+    await tg("sendMessage", {
+      chat_id,
+      text: mains
+        ? "Usage: /answer 10 <your question>\n(the number is the marks: 2, 5, 10 or 20)"
+        : "Usage: /ask <your question>",
+    });
     return;
   }
   if (!LOVABLE_API_KEY) {
@@ -563,6 +610,8 @@ async function handleSaathiAsk(chat_id: number, user_id: number, question: strin
   let noAnswer = true;
   let sourceTitles: string[] = [];
   let followups: string[] = [];
+  let info: MainsInfo | null = null;
+  const channel = mains ? `telegram:mains:${mains.marks ?? "auto"}` : "telegram";
   try {
     // Conversational memory: the most recent turns, oldest first.
     const { data: rows } = await supabase
@@ -575,7 +624,7 @@ async function handleSaathiAsk(chat_id: number, user_id: number, question: strin
 
     const query = await saathiPrepareQuery(LOVABLE_API_KEY, history, question);
     const { data: cachedRows } = await supabase.rpc("saathi_cache_get", {
-      p_channel: "telegram",
+      p_channel: channel,
       p_question: query.standalone,
       p_subjects: [],
     });
@@ -586,6 +635,52 @@ async function handleSaathiAsk(chat_id: number, user_id: number, question: strin
       noAnswer = false;
       sourceTitles = cached.sources.map((s) => s.title);
       followups = cached.followups ?? [];
+      info = cached.meta?.mains ?? null;
+    } else if (mains) {
+      const plan = await saathiMainsPlan({
+        apiKey: LOVABLE_API_KEY,
+        rpc: saathiRpc,
+        history,
+        question,
+        subjects: null,
+        marks: mains.marks,
+        query,
+      });
+      info = mainsInfo(plan);
+      if (plan.matches.length === 0) {
+        answer = mainsNoMaterialReply(question);
+      } else {
+        const parsed = stripNoAnswer(
+          await saathiComplete(
+            LOVABLE_API_KEY,
+            mainsMessages({ channel: "telegram", history, question, plan }),
+          ),
+        );
+        noAnswer = parsed.noAnswer || !parsed.text.trim();
+        answer = parsed.text.trim() || mainsNoMaterialReply(question);
+        if (!noAnswer) {
+          info = mainsInfo(plan, answer);
+          const sources = collectSources(plan.matches);
+          sourceTitles = sources.map((s) => s.title);
+          const { error } = await supabase.rpc("saathi_cache_put", {
+            p_channel: channel,
+            p_question: query.standalone,
+            p_subjects: [],
+            p_answer: answer,
+            p_sources: sources,
+            p_followups: [],
+            p_english_query: query.english,
+            p_meta: { mains: info },
+          });
+          if (error && error.code !== "PGRST202") console.error("cache put error", error.message);
+        }
+      }
+      if (noAnswer) {
+        const { error } = await supabase.rpc("increment_knowledge_gap", {
+          gap_question: query.standalone,
+        });
+        if (error) console.error("gap rpc error", error.message);
+      }
     } else {
       const { matches } = await saathiRetrieve({
         apiKey: LOVABLE_API_KEY,
@@ -657,14 +752,20 @@ async function handleSaathiAsk(chat_id: number, user_id: number, question: strin
   const nextLine = followups.length
     ? `\n\n💡 <i>You could also ask:</i>\n${followups.map((q) => `/ask ${tgEsc(q)}`).join("\n")}`
     : "";
-  const extras = srcLine + nextLine;
-  const body = clipHtml(mdToTelegramHtml(answer), 3900 - extras.length) + extras;
+  const wordsLine =
+    info && !noAnswer && info.words !== undefined
+      ? `\n\n✍️ <i>${info.words} words${info.blueprint ? ` · structure learned from ${info.blueprint.samples} model answers` : ""}</i>`
+      : "";
+  const header = info && !noAnswer ? mainsHeader(info) : "";
+  const extras = wordsLine + srcLine + nextLine;
+  const body =
+    header + clipHtml(mdToTelegramHtml(answer), 3900 - extras.length - header.length) + extras;
   const res = await tg("sendMessage", { chat_id, text: body, parse_mode: "HTML" });
   if (!res.ok) {
     // Fallback if Telegram rejects the markup: send safely escaped plain text.
     await tg("sendMessage", {
       chat_id,
-      text: tgEsc(answer).slice(0, 3900 - extras.length) + extras,
+      text: header + tgEsc(answer).slice(0, 3900 - extras.length - header.length) + extras,
       parse_mode: "HTML",
     });
   }
@@ -794,6 +895,11 @@ async function runCommand(
     case "ask":
       await handleSaathiAsk(ctx.chat_id, ctx.user_id, args);
       return;
+    case "answer": {
+      const { marks, question } = parseAnswerArgs(args);
+      await handleSaathiAsk(ctx.chat_id, ctx.user_id, question, { marks });
+      return;
+    }
     case "flashcards":
       await sendSubjectPicker(ctx.chat_id, "flashcards");
       return;
