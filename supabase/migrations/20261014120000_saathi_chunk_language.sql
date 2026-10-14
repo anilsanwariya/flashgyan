@@ -14,7 +14,7 @@ SET search_path = public
 AS $$
   WITH c AS (
     SELECT
-      length(regexp_replace(coalesce(t, ''), '[^ऀ-ॿ]', '', 'g')) AS deva,
+      length(regexp_replace(coalesce(t, ''), '[^\u0900-\u097F]', '', 'g')) AS deva,
       length(regexp_replace(coalesce(t, ''), '[^A-Za-z]', '', 'g')) AS latin
   )
   SELECT CASE
