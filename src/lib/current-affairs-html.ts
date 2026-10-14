@@ -10,6 +10,7 @@ import {
   type CaFact,
   type MagazineSettings,
 } from "@/lib/current-affairs";
+import { VISUAL_CSS, visualHtml, type Visual } from "@/lib/ca-visuals";
 
 export type MagazineItem = {
   id: string;
@@ -40,7 +41,32 @@ function biBlock(b: Bi | null | undefined, cls = ""): string {
   return `<div class="bi ${cls}"><div class="hi" lang="hi">${esc(b.hi)}</div><div class="en" lang="en">${esc(b.en)}</div></div>`;
 }
 
-function itemHtml(item: MagazineItem, number: number, showDate: boolean): string {
+// Line icons (Lucide, ISC licence) for the sections.
+const ICON_PATHS: Record<string, string> = {
+  rajasthan:
+    '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
+  national:
+    '<path d="M3 22h18"/><path d="M6 18v-7"/><path d="M10 18v-7"/><path d="M14 18v-7"/><path d="M18 18v-7"/><path d="M12 2 20 7H4z"/>',
+  international:
+    '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+  science:
+    '<path d="M10 2v7.5a2 2 0 0 1-.2.9L4.7 20.6a1 1 0 0 0 .9 1.4h12.8a1 1 0 0 0 .9-1.4l-5.1-10.2a2 2 0 0 1-.2-.9V2"/><path d="M8.5 2h7"/><path d="M7 16h10"/>',
+  economy: '<path d="M22 7 13.5 15.5l-5-5L2 17"/><path d="M16 7h6v6"/>',
+  sports:
+    '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.7V17c0 .6-.5 1-1 1.2C7.9 18.8 7 20.2 7 22"/><path d="M14 14.7V17c0 .6.5 1 1 1.2 1.1.6 2 2 2 3.8"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>',
+  misc: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>',
+  editorial: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  revision: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
+  practice:
+    '<rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/>',
+};
+
+function icon(id: string, cls = "icon"): string {
+  const paths = ICON_PATHS[id] ?? ICON_PATHS.misc;
+  return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+}
+
+function itemHtml(item: MagazineItem, number: number, showDate: boolean, accent: string): string {
   const c = item.content;
   const points = c.points.length
     ? `<div class="bi points"><ul class="hi" lang="hi">${c.points.map((p) => `<li>${esc(p.hi)}</li>`).join("")}</ul><ul class="en" lang="en">${c.points.map((p) => `<li>${esc(p.en)}</li>`).join("")}</ul></div>`
@@ -76,6 +102,7 @@ function itemHtml(item: MagazineItem, number: number, showDate: boolean): string
   ${tags ? `<div class="tags">${tags}</div>` : ""}
   ${biBlock(c.summary, "summary")}
   ${points}
+  ${c.visual ? visualHtml(c.visual, accent) : ""}
   ${why}
   ${background}
   ${dyk}
@@ -170,7 +197,40 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .answers .kn, .answers .ka { width: 9mm; text-align: center; font-weight: 600; }
 .answers .en { color: #475569; }
 .corrections li { margin-bottom: 2mm; }
+.icon { width: 1.15em; height: 1.15em; vertical-align: -0.2em; flex: none; }
+.section-title h2 { display: flex; align-items: center; gap: 2.5mm; }
+.toc-row span { display: inline-flex; align-items: center; gap: 2mm; }
+.toc-row .icon { color: ${accent}; }
+.rev-cat { display: flex; align-items: center; gap: 2mm; font-size: 10pt; color: ${accent}; margin: 4mm 0 2mm; break-after: avoid; text-transform: uppercase; letter-spacing: .06em; }
+.rev { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.rev td:nth-child(2) { width: 47%; }
+.rev td { padding: 1.6mm 2.5mm; border-bottom: 1px solid #e5e7eb; vertical-align: top; font-size: 9.2pt; }
+.rev tr { break-inside: avoid; }
+.rev .rn { width: 7mm; font-weight: 700; color: ${accent}; }
+.rev .en { color: #475569; }
+${VISUAL_CSS(accent)}
 `;
+
+// One line per story, by section, for last-minute revision.
+function revisionPage(groups: Map<string, MagazineItem[]>): string {
+  let n = 0;
+  const parts = [...groups.entries()]
+    .map(([cat, list]) => {
+      const rows = list
+        .filter((i) => i.content.oneliner && (i.content.oneliner.en || i.content.oneliner.hi))
+        .map((i) => {
+          const o = i.content.oneliner!;
+          return `<tr><td class="rn">${++n}</td><td lang="hi">${esc(o.hi)}</td><td class="en">${esc(o.en)}</td></tr>`;
+        })
+        .join("");
+      return rows
+        ? `<h3 class="rev-cat">${icon(cat)} ${esc(categoryLabel(cat).en)}</h3><table class="rev">${rows}</table>`
+        : "";
+    })
+    .join("");
+  if (!n) return "";
+  return `<section class="section new-page"><div class="section-title"><h2>${icon("revision")} 60-Second Revision</h2><span>One line per story</span></div>${parts}</section>`;
+}
 
 const OPTION_LETTERS = ["a", "b", "c", "d"];
 
@@ -212,7 +272,7 @@ function practicePage(items: MagazineItem[]): string {
         `<div class="mcq"><span class="qn">${n + 1}.</span><div class="pair"><div class="side" lang="hi">${esc(i.content.mains!.hi)}</div><div class="side" lang="en">${esc(i.content.mains!.en)}</div></div></div>`,
     )
     .join("");
-  return `<section class="section new-page"><div class="section-title"><h2>Practice Questions</h2><span>RPSC pattern</span></div>
+  return `<section class="section new-page"><div class="section-title"><h2>${icon("practice")} Practice Questions</h2><span>RPSC pattern</span></div>
 ${qs ? `<h3 class="part">Part A: Prelims</h3>${qs}` : ""}
 ${mains ? `<h3 class="part">Part B: Mains</h3>${mains}` : ""}
 ${key ? `<h3 class="part">Answer key (Part A)</h3><table class="answers">${key}</table>` : ""}</section>`;
@@ -274,10 +334,12 @@ export function renderMagazine(opts: {
   const channel = /^@[A-Za-z0-9_]{4,}$/.test(s.channel.trim()) ? s.channel.trim() : "";
   const questions =
     items.filter((i) => i.content.mcq).length + items.filter((i) => i.content.mains).length;
+  const revisionCount = items.filter((i) => i.content.oneliner).length;
+  const visuals = items.filter((i) => i.content.visual).length;
   const toc = [...groups.entries()]
     .map(
       ([cat, list]) =>
-        `<div class="toc-row"><span>${esc(categoryLabel(cat).en)}</span><b>${list.length}</b></div>`,
+        `<div class="toc-row"><span>${icon(cat)} ${esc(categoryLabel(cat).en)}</span><b>${list.length}</b></div>`,
     )
     .join("");
 
@@ -285,8 +347,8 @@ export function renderMagazine(opts: {
   const sections = [...groups.entries()]
     .map(([cat, list]) => {
       const l = categoryLabel(cat);
-      return `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>${esc(l.en)}</h2><span>${list.length} ${list.length === 1 ? "story" : "stories"}</span></div>${list
-        .map((it) => itemHtml(it, ++n, monthly))
+      return `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>${icon(cat)} ${esc(l.en)}</h2><span>${list.length} ${list.length === 1 ? "story" : "stories"}</span></div>${list
+        .map((it) => itemHtml(it, ++n, monthly, accent))
         .join("")}</section>`;
     })
     .join("");
@@ -321,13 +383,14 @@ ${watermark}
     <div class="stats">
       <div><b>${items.length}</b><span>${items.length === 1 ? "story" : "stories"}</span></div>
       <div><b>${groups.size}</b><span>${groups.size === 1 ? "section" : "sections"}</span></div>
+      ${visuals ? `<div><b>${visuals}</b><span>charts &amp; diagrams</span></div>` : ""}
       <div><b>${questions}</b><span>practice questions</span></div>
     </div>
   </div>
   <div class="cover-body">
     ${highlights ? `<h3 class="cover-h">In this issue</h3><div class="hl-grid">${highlights}</div>` : ""}
     <h3 class="cover-h">Contents</h3>
-    <div class="toc">${toc}${questions ? `<div class="toc-row"><span>Practice Questions</span><b>${questions}</b></div>` : ""}</div>
+    <div class="toc">${toc}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} 60-Second Revision</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} Practice Questions</span><b>${questions}</b></div>` : ""}</div>
     ${
       channel
         ? `<div class="cta"><div><b>Get it every morning on Telegram</b><span>Daily current affairs for RAS, bilingual, free.</span></div><div class="cta-handle">${esc(channel)}</div></div>`
@@ -338,6 +401,7 @@ ${watermark}
 </section>
 ${sections}
 ${corrections}
+${revisionPage(groups)}
 ${practicePage(items)}
 </body>
 </html>`;
@@ -346,4 +410,13 @@ ${practicePage(items)}
 // Page numbers and brand line printed at the bottom of every page.
 export function footerTemplate(settings: MagazineSettings): string {
   return `<div style="width:100%;font-size:8px;color:#94a3b8;padding:0 12mm;display:flex;justify-content:space-between;font-family:sans-serif"><span>${esc(settings.brand_line)}</span><span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>`;
+}
+
+// One visual on its own page, for the admin preview.
+export function visualPreviewHtml(visual: Visual, accent = "#6d28d9"): string {
+  const a = safeColor(accent);
+  return `<!doctype html><html><head><meta charset="utf-8" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600;700&family=Noto+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+<style>${CSS(a)} body { margin: 0; padding: 2px; background: #fff; } .box { margin-top: 0; }</style></head>
+<body>${visualHtml(visual, a)}</body></html>`;
 }

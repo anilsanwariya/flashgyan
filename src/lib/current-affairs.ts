@@ -2,6 +2,8 @@
 // check facts against their sources, merge duplicate stories, apply
 // corrections and schedule posts. No database or network access here.
 
+import { unverifiedNumbers, type Visual } from "@/lib/ca-visuals";
+
 export const UPLOAD_SECTIONS = [
   {
     id: "editorial",
@@ -85,6 +87,10 @@ export type CaContent = {
   mains: Bi | null;
   // "Did you know?" facts from trusted websites (missing on older items).
   dyk?: DykFact[];
+  // A chart, table, timeline, flow chart or mind map built from the facts,
+  // and the story in one line for the revision page (missing on older items).
+  visual?: Visual | null;
+  oneliner?: Bi | null;
 };
 
 // A fact from the web, with the page it came from and the exact passage.
@@ -427,8 +433,12 @@ export function applyChanges(
       headline: swap(next.headline),
       summary: swap(next.summary),
       why: swap(next.why),
+      oneliner: next.oneliner ? swap(next.oneliner) : next.oneliner,
     };
   }
+  // A visual showing a number the correction replaced is dropped (it can be
+  // made again from the corrected facts).
+  if (next?.visual && unverifiedNumbers(next.visual, nextFacts).length) next.visual = null;
   return { facts: nextFacts, content: next };
 }
 
@@ -519,6 +529,8 @@ export type MagazineSettings = {
   collect_time: string;
   // Message the test chat on Telegram when the day's draft is ready.
   notify_when_ready: boolean;
+  // Add a chart, table, timeline, flow chart or mind map to each story.
+  visuals: boolean;
 };
 
 // Official and reference sites the "Did you know?" search may use. Subdomains
@@ -555,6 +567,7 @@ export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   auto_collect: true,
   collect_time: "21:00",
   notify_when_ready: true,
+  visuals: true,
 };
 
 export function categoryLabel(id: string): { en: string; hi: string } {

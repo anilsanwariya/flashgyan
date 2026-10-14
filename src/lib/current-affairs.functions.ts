@@ -64,6 +64,9 @@ const contentSchema = z.object({
     )
     .max(5)
     .optional(),
+  // Checked and cleaned by cleanVisual in the handler.
+  visual: z.unknown().optional(),
+  oneliner: bi.nullable().optional(),
 });
 
 // ---------- Settings ----------
@@ -102,6 +105,7 @@ export const saveMagazineSettings = createServerFn({ method: "POST" })
         auto_collect: z.boolean(),
         collect_time: z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/, "Use HH:MM"),
         notify_when_ready: z.boolean(),
+        visuals: z.boolean(),
       })
       .parse(d),
   )
@@ -204,10 +208,22 @@ export const updateCaItem = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<CaItem> => {
     await assertAdmin(context.userId);
     const { id, ...patch } = data;
+    if (patch.content && patch.content.visual !== undefined) {
+      const { cleanVisual } = await import("@/lib/ca-visuals");
+      patch.content.visual = cleanVisual(patch.content.visual).visual;
+    }
     return (await server()).updateItem(
       id,
       patch as Parameters<Awaited<ReturnType<typeof server>>["updateItem"]>[1],
     );
+  });
+
+export const redoCaVisual = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<CaItem> => {
+    await assertAdmin(context.userId);
+    return (await server()).redoVisual(data.id);
   });
 
 export const decideCaCorrection = createServerFn({ method: "POST" })
