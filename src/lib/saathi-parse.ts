@@ -133,12 +133,20 @@ async function fileToBase64(file: File): Promise<string> {
 
 // Sends the PDF to our TanStack server fn which calls LlamaParse.
 async function extractPdf(file: File, medium?: "Hindi" | "English" | "Bilingual"): Promise<string> {
+  return (await extractPdfPages(file, medium)).markdown;
+}
+
+// The parsed PDF as a whole and page by page (for header/footer cleanup).
+export async function extractPdfPages(
+  file: File,
+  medium?: "Hindi" | "English" | "Bilingual",
+): Promise<{ markdown: string; pages: string[] }> {
   const base64 = await fileToBase64(file);
-  const { markdown } = await parsePdfWithLlama({
+  const { markdown, pages } = await parsePdfWithLlama({
     data: { filename: file.name, base64, medium },
   });
   if (!markdown) throw new Error("No markdown returned from parser");
-  return markdown;
+  return { markdown, pages: pages.length ? pages : [markdown] };
 }
 
 export type QnARow = {

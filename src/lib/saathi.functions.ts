@@ -216,6 +216,8 @@ export type SaathiHealthRow = {
   is_legacy: boolean;
   has_source: boolean;
   chunk_count: number;
+  hindi_chunks?: number;
+  english_chunks?: number;
   avg_chars: number;
   max_chars: number;
   tiny_chunks: number;

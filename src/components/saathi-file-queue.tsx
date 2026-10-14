@@ -4,7 +4,8 @@
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import { CheckCircle2, Loader2, RotateCcw, Upload, X, XCircle, Clock } from "lucide-react";
-import { extractTextFromFile } from "@/lib/saathi-parse";
+import { extractPdfPages, extractTextFromFile } from "@/lib/saathi-parse";
+import { cleanPdfPages, type CleanResult } from "@/lib/saathi-clean";
 import type { SaathiMedium } from "@/lib/saathi.functions";
 
 export type QueueStatus = "waiting" | "reading" | "done" | "failed";
@@ -15,14 +16,24 @@ export type QueueItem = {
   status: QueueStatus;
   chars?: number;
   error?: string;
+  // PDF cleanup: what was removed, the uncleaned text, and the exact block that
+  // was appended (so the cleanup can be undone while that block is unedited).
+  removed?: CleanResult["removed"];
+  raw?: string;
+  block?: string;
+  cleanupUndone?: boolean;
 };
+
+export type PdfCleanup = { enabled: boolean; phrases: string[] };
 
 const ACCEPTED = /\.(pdf|docx|xlsx|xls|txt|md)$/i;
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
 
 export function useFileQueue(opts: {
   medium: SaathiMedium;
-  onText: (file: File, text: string) => void;
+  // Appends the text to the deck and returns the exact block that was added.
+  onText: (file: File, text: string) => string;
+  cleanup: PdfCleanup;
   // Changing this (e.g. switching to another deck) empties the queue and drops
   // the result of any file still being read.
   resetKey: unknown;
@@ -32,6 +43,8 @@ export function useFileQueue(opts: {
   onTextRef.current = opts.onText;
   const mediumRef = useRef(opts.medium);
   mediumRef.current = opts.medium;
+  const cleanupRef = useRef(opts.cleanup);
+  cleanupRef.current = opts.cleanup;
   const generation = useRef(0);
 
   useEffect(() => {
@@ -51,11 +64,21 @@ export function useFileQueue(opts: {
     patch(next.id, { status: "reading", error: undefined });
     (async () => {
       try {
-        const text = (await extractTextFromFile(next.file, mediumRef.current)).trim();
+        const isPdf = /\.pdf$/i.test(next.file.name);
+        let text: string;
+        let extra: Partial<QueueItem> = {};
+        if (isPdf && cleanupRef.current.enabled) {
+          const { markdown, pages } = await extractPdfPages(next.file, mediumRef.current);
+          const cleaned = cleanPdfPages(pages, cleanupRef.current.phrases);
+          text = cleaned.text.trim();
+          extra = { removed: cleaned.removed, raw: markdown.trim() };
+        } else {
+          text = (await extractTextFromFile(next.file, mediumRef.current)).trim();
+        }
         if (gen !== generation.current) return;
         if (!text) throw new Error("No text found in this file");
-        onTextRef.current(next.file, text);
-        patch(next.id, { status: "done", chars: text.length });
+        const block = onTextRef.current(next.file, text);
+        patch(next.id, { status: "done", chars: text.length, block, ...extra });
       } catch (err) {
         if (gen !== generation.current) return;
         patch(next.id, {
@@ -97,6 +120,7 @@ export function useFileQueue(opts: {
     items,
     busy,
     add,
+    patch,
     retry: (id: string) => patch(id, { status: "waiting", error: undefined }),
     remove: (id: string) => setItems((cur) => cur.filter((i) => i.id !== id)),
     clearFinished: () => setItems((cur) => cur.filter((i) => i.status !== "done")),
@@ -165,9 +189,12 @@ const STATUS_ICON: Record<QueueStatus, ReactNode> = {
 
 export function FileQueueList({
   queue,
+  onUndoCleanup,
 }: {
   queue: Pick<ReturnType<typeof useFileQueue>, "items" | "retry" | "remove" | "clearFinished">;
+  onUndoCleanup?: (item: QueueItem) => void;
 }) {
+  const [showRemoved, setShowRemoved] = useState<string | null>(null);
   if (queue.items.length === 0) return null;
   const done = queue.items.filter((i) => i.status === "done").length;
   const reading = queue.items.findIndex((i) => i.status === "reading");
@@ -187,52 +214,94 @@ export function FileQueueList({
         )}
       </div>
       <ul className="space-y-1">
-        {queue.items.map((item) => (
-          <li
-            key={item.id}
-            className="flex items-center gap-2 rounded-lg bg-background px-2 py-1.5 text-sm"
-          >
-            {STATUS_ICON[item.status]}
-            <div className="min-w-0 flex-1">
-              <div className="truncate">{item.file.name}</div>
-              <div
-                className={`truncate text-xs ${
-                  item.status === "failed" ? "text-destructive" : "text-muted-foreground"
-                }`}
-              >
-                {item.status === "waiting" && "Waiting"}
-                {item.status === "reading" &&
-                  (/\.pdf$/i.test(item.file.name)
-                    ? "Reading PDF (can take a minute)…"
-                    : "Reading…")}
-                {item.status === "done" && `Added ${item.chars?.toLocaleString()} characters`}
-                {item.status === "failed" && item.error}
+        {queue.items.map((item) => {
+          const removedLines = item.removed?.reduce((n, r) => n + r.count, 0) ?? 0;
+          return (
+            <li key={item.id} className="rounded-lg bg-background px-2 py-1.5 text-sm">
+              <div className="flex items-center gap-2">
+                {STATUS_ICON[item.status]}
+                <div className="min-w-0 flex-1">
+                  <div className="truncate">{item.file.name}</div>
+                  <div
+                    className={`truncate text-xs ${
+                      item.status === "failed" ? "text-destructive" : "text-muted-foreground"
+                    }`}
+                  >
+                    {item.status === "waiting" && "Waiting"}
+                    {item.status === "reading" &&
+                      (/\.pdf$/i.test(item.file.name)
+                        ? "Reading PDF (can take a minute)…"
+                        : "Reading…")}
+                    {item.status === "done" && `Added ${item.chars?.toLocaleString()} characters`}
+                    {item.status === "done" && removedLines > 0 && !item.cleanupUndone && (
+                      <>
+                        {" · "}
+                        <button
+                          type="button"
+                          className="underline hover:text-foreground"
+                          onClick={() => setShowRemoved(showRemoved === item.id ? null : item.id)}
+                        >
+                          removed {removedLines} header/footer lines
+                        </button>
+                      </>
+                    )}
+                    {item.status === "done" && item.cleanupUndone && " · cleanup undone"}
+                    {item.status === "failed" && item.error}
+                  </div>
+                </div>
+                {item.status === "failed" && (
+                  <button
+                    type="button"
+                    onClick={() => queue.retry(item.id)}
+                    className="grid h-7 w-7 place-items-center rounded-md hover:bg-muted"
+                    title="Retry"
+                    aria-label={`Retry ${item.file.name}`}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {item.status !== "reading" && (
+                  <button
+                    type="button"
+                    onClick={() => queue.remove(item.id)}
+                    className="grid h-7 w-7 place-items-center rounded-md hover:bg-muted"
+                    title={item.status === "done" ? "Hide (its text stays in the deck)" : "Remove"}
+                    aria-label={`Remove ${item.file.name}`}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
-            </div>
-            {item.status === "failed" && (
-              <button
-                type="button"
-                onClick={() => queue.retry(item.id)}
-                className="grid h-7 w-7 place-items-center rounded-md hover:bg-muted"
-                title="Retry"
-                aria-label={`Retry ${item.file.name}`}
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-              </button>
-            )}
-            {item.status !== "reading" && (
-              <button
-                type="button"
-                onClick={() => queue.remove(item.id)}
-                className="grid h-7 w-7 place-items-center rounded-md hover:bg-muted"
-                title={item.status === "done" ? "Hide (its text stays in the deck)" : "Remove"}
-                aria-label={`Remove ${item.file.name}`}
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </li>
-        ))}
+              {showRemoved === item.id && item.removed && (
+                <div className="mt-1.5 rounded-md border border-border bg-muted/30 p-2 text-xs">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">Removed from this PDF:</span>
+                    {onUndoCleanup && (
+                      <button
+                        type="button"
+                        className="font-medium text-primary hover:underline"
+                        onClick={() => {
+                          onUndoCleanup(item);
+                          setShowRemoved(null);
+                        }}
+                      >
+                        Undo cleanup
+                      </button>
+                    )}
+                  </div>
+                  <ul className="max-h-40 space-y-0.5 overflow-y-auto">
+                    {item.removed.map((r) => (
+                      <li key={r.line} className="truncate">
+                        <span className="text-muted-foreground">{r.count}×</span>{" "}
+                        {r.line || "(blank)"}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

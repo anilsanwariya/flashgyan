@@ -34,6 +34,8 @@ export type SaathiMatch = {
   subject: string;
   topic?: string | null;
   medium?: string | null;
+  // The chunk's own language, detected from its script ("Hindi" | "English").
+  language?: string | null;
   content: string;
   source_file: string | null;
   vector_score: number;
@@ -363,16 +365,25 @@ export async function saathiRerank(
   question: string,
   matches: SaathiMatch[],
   keep = SAATHI_CONTEXT_CHUNKS,
+  // The student's language; when the same facts appear in Hindi and English,
+  // the version in this language is kept.
+  preferLanguage?: "Hindi" | "English",
 ): Promise<SaathiMatch[]> {
   if (matches.length <= keep) return matches;
   const list = matches
-    .map((m, i) => `[${i + 1}] ${m.source_file || m.title}\n${m.content.slice(0, 700)}`)
+    .map((m, i) => {
+      const lang = languageOf(m);
+      return `[${i + 1}]${lang ? ` (${lang})` : ""} ${m.source_file || m.title}\n${m.content.slice(0, 700)}`;
+    })
     .join("\n\n");
+  const languageRule = preferLanguage
+    ? ` The material may contain the same content in Hindi and English: never pick two passages that state the same facts in different languages; keep the ${preferLanguage} one.`
+    : "";
   try {
     const raw = await saathiComplete(apiKey, [
       {
         role: "system",
-        content: `You rank study material for answering a student's question. Reply with a JSON array of the numbers of the passages that help answer it, most useful first, at most ${keep} numbers. Use [] if none help.`,
+        content: `You rank study material for answering a student's question. Reply with a JSON array of the numbers of the passages that help answer it, most useful first, at most ${keep} numbers. Use [] if none help.${languageRule}`,
       },
       { role: "user", content: `Question: ${question}\n\nPassages:\n\n${list}` },
     ]);
@@ -418,7 +429,13 @@ export async function saathiRetrieve(opts: {
   const query = opts.query ?? (await saathiPrepareQuery(opts.apiKey, opts.history, opts.question));
   const candidates = await saathiSearchQuery(opts.apiKey, opts.rpc, query, opts.subjects);
   const relevant = relevantMatches(candidates);
-  const matches = await saathiRerank(opts.apiKey, query.english ?? query.standalone, relevant);
+  const matches = await saathiRerank(
+    opts.apiKey,
+    query.english ?? query.standalone,
+    relevant,
+    SAATHI_CONTEXT_CHUNKS,
+    questionLanguage(query.standalone),
+  );
   return { query, candidates, matches };
 }
 
@@ -428,14 +445,23 @@ const LANGUAGE_BONUS = 0.03;
 // Nudges chunks written in the question's language (by the document's medium) ahead
 // of equally relevant chunks in the other language. Relevance cut-offs still use
 // the raw scores.
+export function questionLanguage(text: string): "Hindi" | "English" {
+  return DEVANAGARI.test(text) ? "Hindi" : "English";
+}
+
+// A chunk's language: detected per chunk, falling back to its deck's medium for
+// databases that haven't added per-chunk languages yet.
+function languageOf(m: SaathiMatch): string | null {
+  return m.language ?? (m.medium === "Bilingual" ? null : (m.medium ?? null));
+}
+
 function preferQuestionLanguage(matches: SaathiMatch[], query: string): SaathiMatch[] {
-  const wanted = DEVANAGARI.test(query) ? "Hindi" : "English";
+  const wanted = questionLanguage(query);
   return matches
-    .map((m) => ({
-      ...m,
-      similarity:
-        m.similarity + (m.medium === wanted || m.medium === "Bilingual" ? LANGUAGE_BONUS : 0),
-    }))
+    .map((m) => {
+      const lang = languageOf(m);
+      return { ...m, similarity: m.similarity + (lang === wanted || !lang ? LANGUAGE_BONUS : 0) };
+    })
     .sort((a, b) => b.similarity - a.similarity);
 }
 

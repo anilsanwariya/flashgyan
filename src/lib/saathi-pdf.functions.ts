@@ -49,6 +49,8 @@ export const parsePdfWithLlama = createServerFn({ method: "POST" })
     // Devanagari OCR also reads Latin text, so Bilingual material uses it too.
     form.append("language", data.medium && data.medium !== "English" ? "hi" : "en");
     form.append("result_type", "markdown");
+    // Diagonal text on book pages is almost always a watermark.
+    form.append("skip_diagonal_text", "true");
 
     const uploadRes = await fetch(`${LLAMA_BASE}/upload`, {
       method: "POST",
@@ -85,16 +87,30 @@ export const parsePdfWithLlama = createServerFn({ method: "POST" })
       }
     }
 
-    // 3) Fetch markdown
-    const mdRes = await fetch(`${LLAMA_BASE}/job/${jobId}/result/markdown`, {
-      headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
-    });
-    if (!mdRes.ok) {
-      const body = await mdRes.text().catch(() => "");
-      throw new Error(`LlamaParse result failed (${mdRes.status}): ${body.slice(0, 500)}`);
+    // 3) Fetch the result page by page (needed to spot running headers and
+    //    footers), falling back to the single markdown document.
+    const headers = { Authorization: `Bearer ${apiKey}`, Accept: "application/json" };
+    let pages: string[] = [];
+    const jsonRes = await fetch(`${LLAMA_BASE}/job/${jobId}/result/json`, { headers });
+    if (jsonRes.ok) {
+      const json = (await jsonRes.json().catch(() => null)) as {
+        pages?: { md?: string; text?: string }[];
+      } | null;
+      pages = (json?.pages ?? []).map((p) => (p.md ?? p.text ?? "").trim());
     }
-    const mdJson = (await mdRes.json()) as { markdown?: string };
-    const markdown = (mdJson.markdown ?? "").trim();
+    let markdown = pages.join("\n\n").trim();
+    if (!markdown) {
+      const mdRes = await fetch(`${LLAMA_BASE}/job/${jobId}/result/markdown`, { headers });
+      if (!mdRes.ok) {
+        const body = await mdRes.text().catch(() => "");
+        throw new Error(`LlamaParse result failed (${mdRes.status}): ${body.slice(0, 500)}`);
+      }
+      const mdJson = (await mdRes.json()) as { markdown?: string };
+      markdown = (mdJson.markdown ?? "").trim();
+      // LlamaParse separates pages in its markdown with a "---" line.
+      const split = markdown.split(/\n-{3}\n/);
+      pages = split.length >= 3 ? split : [markdown];
+    }
     if (!markdown) throw new Error("LlamaParse returned empty markdown");
-    return { markdown };
+    return { markdown, pages };
   });
