@@ -3,11 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
-import { Send, Upload, Users, Loader2, Trash2 } from "lucide-react";
+import { Upload, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -18,7 +17,6 @@ import {
 } from "@/components/ui/select";
 import { parseMcqWorkbook } from "@/lib/mcq-parse";
 import {
-  broadcastBotMessage,
   bulkImportBotFlashcards,
   bulkImportBotMcq,
   createBotMcqTest,
@@ -26,8 +24,16 @@ import {
   deleteBotMcqTest,
   listBotFlashcardDecks,
   listBotMcqTests,
-  listBotUsers,
 } from "@/lib/bot-manager.functions";
+import {
+  BotAutoRepliesPanel,
+  BotBroadcastPanel,
+  BotCommandsPanel,
+  BotMessagesPanel,
+  BotStatsPanel,
+  BotUsersPanel,
+  BotWebhookPanel,
+} from "@/components/bot-admin-panels";
 
 // ---------- Flashcard XLSX parser (same shape as admin flashcard parser) ----------
 type Section = { title: string; body: string };
@@ -100,17 +106,42 @@ export function BotManagerPanel() {
       <div>
         <h2 className="text-lg font-semibold">🤖 Telegram Bot Manager</h2>
         <p className="text-sm text-muted-foreground">
-          Broadcast to Telegram users and manage isolated bot content.
+          Commands, replies, messages, broadcasts and bot content. Changes reach the bot within a
+          minute, without redeploying.
         </p>
       </div>
       <Tabs defaultValue="broadcast">
-        <TabsList>
+        <TabsList className="h-auto flex-wrap">
           <TabsTrigger value="broadcast">📢 Broadcast</TabsTrigger>
+          <TabsTrigger value="commands">⌨️ Commands</TabsTrigger>
+          <TabsTrigger value="replies">💬 Auto-replies</TabsTrigger>
+          <TabsTrigger value="messages">✏️ Messages & profile</TabsTrigger>
+          <TabsTrigger value="stats">📊 Stats</TabsTrigger>
+          <TabsTrigger value="users">👥 Users</TabsTrigger>
+          <TabsTrigger value="connection">🔌 Connection</TabsTrigger>
           <TabsTrigger value="flashcards">🃏 Bot Flashcards</TabsTrigger>
           <TabsTrigger value="mcq">📝 Bot MCQs</TabsTrigger>
         </TabsList>
         <TabsContent value="broadcast" className="mt-4">
-          <BroadcastPanel />
+          <BotBroadcastPanel />
+        </TabsContent>
+        <TabsContent value="commands" className="mt-4">
+          <BotCommandsPanel />
+        </TabsContent>
+        <TabsContent value="replies" className="mt-4">
+          <BotAutoRepliesPanel />
+        </TabsContent>
+        <TabsContent value="messages" className="mt-4">
+          <BotMessagesPanel />
+        </TabsContent>
+        <TabsContent value="stats" className="mt-4">
+          <BotStatsPanel />
+        </TabsContent>
+        <TabsContent value="users" className="mt-4">
+          <BotUsersPanel />
+        </TabsContent>
+        <TabsContent value="connection" className="mt-4">
+          <BotWebhookPanel />
         </TabsContent>
         <TabsContent value="flashcards" className="mt-4">
           <FlashcardUploadPanel />
@@ -120,54 +151,6 @@ export function BotManagerPanel() {
         </TabsContent>
       </Tabs>
     </div>
-  );
-}
-
-function BroadcastPanel() {
-  const list = useServerFn(listBotUsers);
-  const broadcast = useServerFn(broadcastBotMessage);
-  const { data: users } = useQuery({ queryKey: ["bot-users"], queryFn: () => list() });
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function onSend() {
-    if (!text.trim()) return;
-    setBusy(true);
-    try {
-      const res = await broadcast({ data: { text: text.trim() } });
-      toast.success(`Sent to ${res.sent}/${res.total} (${res.failed} failed)`);
-      setText("");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Broadcast failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section className="rounded-2xl border border-border bg-card p-5 space-y-4">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Users className="h-4 w-4" />
-        {users?.length ?? 0} bot users tracked
-      </div>
-      <div>
-        <Label htmlFor="broadcast-text" className="text-xs">
-          Message (HTML allowed: &lt;b&gt;, &lt;i&gt;, &lt;a href&gt;)
-        </Label>
-        <Textarea
-          id="broadcast-text"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={6}
-          placeholder="🎯 Daily reminder: 5 new questions await you! Send /study to begin."
-          disabled={busy}
-        />
-      </div>
-      <Button onClick={onSend} disabled={busy || !text.trim()}>
-        {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
-        Send to All
-      </Button>
-    </section>
   );
 }
 

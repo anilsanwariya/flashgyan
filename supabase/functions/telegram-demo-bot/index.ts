@@ -16,6 +16,17 @@ import {
   type SaathiRpc,
   type SaathiTurn,
 } from "../_shared/saathi-core.ts";
+import {
+  BOT_DEFAULT_TEXTS,
+  BROADCAST_DELAY_MS,
+  clipHtml,
+  mdToTelegramHtml,
+  sendBotMessage,
+  tgEsc,
+  type BotButton,
+  type BotMessage,
+  type BotTexts,
+} from "../_shared/telegram.ts";
 
 const TELEGRAM_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -67,6 +78,144 @@ function explanationFrom(sections: any): string {
     .join("\n\n");
 }
 
+// ---------- Admin-managed settings, commands and auto-replies ----------
+// Read from the database (edited in the admin panel) and cached briefly so
+// changes apply within a minute without redeploying. If the admin migration
+// hasn't been applied, the bot keeps its original built-in behaviour.
+const CACHE_MS = 60_000;
+let botAdminReady = true;
+
+type BotSettings = BotTexts & { webhook_secret: string | null };
+
+const DEFAULT_SETTINGS: BotSettings = { ...BOT_DEFAULT_TEXTS, webhook_secret: null };
+
+type BotCommand = {
+  command: string;
+  description_en: string;
+  description_hi: string;
+  action: "builtin" | "message";
+  builtin: "study" | "flashcards" | "mcq" | "ask" | "help" | null;
+  response_text: string;
+  media_url: string | null;
+  media_type: "photo" | "document" | null;
+  buttons: BotButton[];
+  show_in_menu: boolean;
+  scope: "private" | "all";
+  enabled: boolean;
+  sort_order: number;
+};
+
+type AutoReply = {
+  id: string;
+  keywords: string[];
+  match_type: "contains" | "exact";
+  response_text: string;
+  media_url: string | null;
+  media_type: "photo" | "document" | null;
+  buttons: BotButton[];
+  priority: number;
+};
+
+const cache: {
+  settings?: { at: number; value: BotSettings };
+  commands?: { at: number; value: BotCommand[] | null };
+  replies?: { at: number; value: AutoReply[] };
+} = {};
+
+const isMissingTable = (e: { code?: string; message?: string } | null) =>
+  !!e && (e.code === "42P01" || e.code === "PGRST205" || /does not exist|schema cache/i.test(e.message ?? ""));
+
+async function getSettings(fresh = false): Promise<BotSettings> {
+  if (!fresh && cache.settings && Date.now() - cache.settings.at < CACHE_MS) {
+    return cache.settings.value;
+  }
+  const { data, error } = await supabase.from("bot_settings").select("key, value");
+  if (error) {
+    if (isMissingTable(error)) botAdminReady = false;
+    else console.error("bot settings", error.message);
+    return cache.settings?.value ?? DEFAULT_SETTINGS;
+  }
+  const value = { ...DEFAULT_SETTINGS };
+  for (const row of (data ?? []) as { key: string; value: unknown }[]) {
+    if (row.key in value) (value as Record<string, unknown>)[row.key] = row.value;
+  }
+  cache.settings = { at: Date.now(), value };
+  return value;
+}
+
+// Null means the commands table doesn't exist yet (use built-in behaviour).
+async function getCommands(): Promise<BotCommand[] | null> {
+  if (cache.commands && Date.now() - cache.commands.at < CACHE_MS) return cache.commands.value;
+  const { data, error } = await supabase.from("bot_commands").select("*").order("sort_order");
+  let value: BotCommand[] | null;
+  if (error) {
+    if (!isMissingTable(error)) console.error("bot commands", error.message);
+    value = isMissingTable(error) ? null : (cache.commands?.value ?? null);
+  } else {
+    value = (data ?? []) as BotCommand[];
+  }
+  cache.commands = { at: Date.now(), value };
+  return value;
+}
+
+async function getAutoReplies(): Promise<AutoReply[]> {
+  if (cache.replies && Date.now() - cache.replies.at < CACHE_MS) return cache.replies.value;
+  const { data, error } = await supabase
+    .from("bot_auto_replies")
+    .select("id, keywords, match_type, response_text, media_url, media_type, buttons, priority")
+    .eq("enabled", true)
+    .order("priority");
+  const value = error ? (cache.replies?.value ?? []) : ((data ?? []) as AutoReply[]);
+  cache.replies = { at: Date.now(), value };
+  return value;
+}
+
+const normalizeText = (t: string) => t.toLowerCase().replace(/\s+/g, " ").trim();
+
+function findAutoReply(replies: AutoReply[], text: string): AutoReply | null {
+  const t = normalizeText(text);
+  for (const r of replies) {
+    const hit = r.keywords.some((k) => {
+      const kw = normalizeText(k);
+      return kw && (r.match_type === "exact" ? t === kw : t.includes(kw));
+    });
+    if (hit) return r;
+  }
+  return null;
+}
+
+async function logEvent(chat_id: number, kind: string, name: string | null = null) {
+  if (!botAdminReady) return;
+  const { error } = await supabase.from("bot_events").insert({ chat_id, kind, name });
+  if (error && !isMissingTable(error)) console.error("bot event", error.message);
+}
+
+function messageFrom(r: {
+  response_text: string;
+  media_url: string | null;
+  media_type: "photo" | "document" | null;
+  buttons: BotButton[];
+}): BotMessage {
+  return {
+    text: r.response_text,
+    mediaUrl: r.media_url,
+    mediaType: r.media_type,
+    buttons: Array.isArray(r.buttons) ? r.buttons : [],
+  };
+}
+
+async function sendHelp(chat_id: number, languageCode: string | undefined, commands: BotCommand[]) {
+  const hindi = (languageCode ?? "").startsWith("hi");
+  const lines = commands
+    .filter((c) => c.enabled && c.show_in_menu)
+    .map((c) => `/${c.command} — ${tgEsc((hindi && c.description_hi) || c.description_en || "")}`);
+  await tg("sendMessage", {
+    chat_id,
+    text: lines.length ? `<b>Commands</b>\n\n${lines.join("\n")}` : "No commands yet.",
+    parse_mode: "HTML",
+  });
+}
+
 // ---------- User tracking ----------
 async function trackUser(from: any, chat_id: number) {
   if (!from) return;
@@ -77,6 +226,8 @@ async function trackUser(from: any, chat_id: number) {
         username: from.username ?? null,
         first_name: from.first_name ?? null,
         last_active: new Date().toISOString(),
+        // Any message from the user means they haven't blocked the bot.
+        ...(botAdminReady ? { language_code: from.language_code ?? null, blocked: false } : {}),
       },
       { onConflict: "chat_id" },
     );
@@ -140,17 +291,33 @@ async function randomMcqBySubject(subject: string) {
 
 // ---------- Menus ----------
 async function sendMainMenu(chat_id: number) {
+  const settings = await getSettings();
   await tg("sendMessage", {
     chat_id,
-    text: "📚 <b>Welcome to FlashGyan!</b>\nWhat would you like to practice today?",
+    text: mdToTelegramHtml(settings.welcome_text),
     parse_mode: "HTML",
     reply_markup: {
       inline_keyboard: [
         [
-          { text: "🃏 Flashcards", callback_data: "menu_flashcards" },
-          { text: "📝 MCQ Quiz", callback_data: "menu_mcqs" },
+          { text: settings.flashcards_button, callback_data: "menu_flashcards" },
+          { text: settings.mcq_button, callback_data: "menu_mcqs" },
         ],
       ],
+    },
+  });
+}
+
+// Sends the subject pickers as new messages (for /flashcards and /mcq).
+async function sendSubjectPicker(chat_id: number, kind: "flashcards" | "mcq") {
+  const subs = kind === "flashcards" ? await listFlashcardSubjects() : await listMcqSubjects();
+  const prefix = kind === "flashcards" ? "subj_" : "mcqsubj_";
+  const rows = await Promise.all(subs.map(async (s) => [{ text: s, callback_data: `${prefix}${await sha8(s)}` }]));
+  await tg("sendMessage", {
+    chat_id,
+    text: kind === "flashcards" ? "🃏 <b>Flashcards</b>\nPick a subject:" : "📝 <b>MCQ Quiz</b>\nPick a subject:",
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: rows.length ? rows : [[{ text: "No subjects yet", callback_data: "noop" }]],
     },
   });
 }
@@ -368,34 +535,6 @@ async function handlePollAnswer(pa: any) {
 // Question answering lives in ../_shared/saathi-core.ts, shared with the website.
 const saathiRpc: SaathiRpc = (fn, args) => supabase.rpc(fn, args);
 
-function tgEsc(s: string) {
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-// Converts the model's light Markdown into Telegram-safe HTML.
-function mdToTelegramHtml(md: string): string {
-  const lines = tgEsc(md.replace(/\r/g, "")).split("\n").map((line) => {
-    let l = line.replace(/^\s*#{1,6}\s+(.+)$/, "**$1**");
-    l = l.replace(/^(\s*)[-*•]\s+/, "$1• ");
-    return l;
-  });
-  let s = lines.join("\n").replace(/\n{3,}/g, "\n\n");
-  s = s.replace(/`([^`\n]+)`/g, "<code>$1</code>");
-  s = s.replace(/\*\*([^*\n]+?)\*\*/g, "<b>$1</b>");
-  s = s.replace(/__([^_\n]+?)__/g, "<b>$1</b>");
-  s = s.replace(/(^|[^*\w])\*([^*\n]+?)\*(?!\w)/g, "$1<i>$2</i>");
-  s = s.replace(/(^|[^_\w])_([^_\n]+?)_(?!\w)/g, "$1<i>$2</i>");
-  return s.replace(/\*\*/g, "").trim();
-}
-
-// Trims to Telegram's limit on a line boundary so tags are never cut mid-way.
-function clipHtml(html: string, max: number): string {
-  if (html.length <= max) return html;
-  const cut = html.slice(0, max);
-  const nl = cut.lastIndexOf("\n");
-  return (nl > max * 0.5 ? cut.slice(0, nl) : cut.replace(/<[^>]*$/, "")) + "\n…";
-}
-
 // Keeps Telegram's "typing…" indicator on while SAATHI works (it lasts ~5 seconds).
 function keepTyping(chat_id: number): () => void {
   const send = () => tg("sendChatAction", { chat_id, action: "typing" }).catch(() => {});
@@ -417,6 +556,7 @@ async function handleSaathiAsk(chat_id: number, user_id: number, question: strin
   }
   question = question.slice(0, 2000);
   const userKey = String(user_id);
+  await logEvent(chat_id, "saathi");
   const stopTyping = keepTyping(chat_id);
 
   let answer: string;
@@ -530,10 +670,236 @@ async function handleSaathiAsk(chat_id: number, user_id: number, question: strin
   }
 }
 
+// ---------- Broadcasts ----------
+// Sends due broadcasts in batches. Runs when the admin panel asks for it, on a
+// schedule (optional cron), and opportunistically while the bot is in use.
+// Each run sends for up to ~20 seconds, saves its place, and hands over to a
+// fresh run if recipients remain.
+const TICK_BUDGET_MS = 20_000;
+const BATCH_SIZE = 50;
+let lastTickAt = 0;
+
+type BroadcastRow = {
+  id: string;
+  text: string;
+  media_url: string | null;
+  media_type: "photo" | "document" | null;
+  buttons: BotButton[];
+  segment: Record<string, unknown>;
+  cursor: number | null;
+  total: number;
+  sent: number;
+  failed: number;
+  blocked: number;
+};
+
+const TICK_URL = `${SUPABASE_URL}/functions/v1/telegram-demo-bot?task=broadcast`;
+
+async function runBroadcastTick(): Promise<{ processed: number; more: boolean }> {
+  const started = Date.now();
+  let processed = 0;
+  while (Date.now() - started < TICK_BUDGET_MS) {
+    const { data: claimed, error } = await supabase.rpc("bot_claim_broadcast", { lock_seconds: 60 });
+    if (error) {
+      if (!isMissingTable(error) && error.code !== "PGRST202") console.error("claim", error.message);
+      return { processed, more: false };
+    }
+    const b = ((claimed ?? []) as BroadcastRow[])[0];
+    if (!b) return { processed, more: false };
+
+    if (b.cursor === null && b.total === 0) {
+      const { data: count } = await supabase.rpc("bot_segment_count", { segment: b.segment });
+      b.total = Number(count ?? 0);
+      await supabase.from("bot_broadcasts").update({ total: b.total }).eq("id", b.id);
+    }
+
+    let finished = false;
+    while (Date.now() - started < TICK_BUDGET_MS) {
+      const { data: rows } = await supabase.rpc("bot_segment_users", {
+        segment: b.segment,
+        after_chat_id: b.cursor,
+        max_rows: BATCH_SIZE,
+      });
+      const ids = ((rows ?? []) as { chat_id: number }[]).map((r) => r.chat_id);
+      if (ids.length === 0) {
+        finished = true;
+        break;
+      }
+      for (const chat_id of ids) {
+        const res = await sendBotMessage(TELEGRAM_TOKEN, chat_id, messageFrom({ ...b, response_text: b.text }));
+        if (res.ok) b.sent++;
+        else if (res.blocked) {
+          b.blocked++;
+          await supabase.from("bot_users").update({ blocked: true }).eq("chat_id", chat_id);
+        } else b.failed++;
+        b.cursor = chat_id;
+        processed++;
+        await new Promise((r) => setTimeout(r, BROADCAST_DELAY_MS));
+        if (Date.now() - started >= TICK_BUDGET_MS) break;
+      }
+      // Save progress after every batch so a crash never resends to anyone.
+      await supabase
+        .from("bot_broadcasts")
+        .update({ cursor: b.cursor, sent: b.sent, failed: b.failed, blocked: b.blocked })
+        .eq("id", b.id);
+      if (await isCancelled(b.id)) break;
+    }
+
+    const cancelled = await isCancelled(b.id);
+    await supabase
+      .from("bot_broadcasts")
+      .update(
+        finished || cancelled
+          ? { status: cancelled ? "cancelled" : "done", finished_at: new Date().toISOString(), locked_until: null }
+          : { locked_until: null },
+      )
+      .eq("id", b.id);
+    if (!finished && !cancelled) {
+      // Out of time: let a fresh run continue where this one stopped.
+      continueInBackground(fetch(TICK_URL, { method: "POST" }).then(() => undefined));
+      return { processed, more: true };
+    }
+  }
+  return { processed, more: false };
+}
+
+async function isCancelled(id: string): Promise<boolean> {
+  const { data } = await supabase.from("bot_broadcasts").select("status").eq("id", id).maybeSingle();
+  return (data as { status?: string } | null)?.status === "cancelled";
+}
+
+function continueInBackground(p: Promise<unknown>) {
+  const runtime = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+  if (runtime?.waitUntil) runtime.waitUntil(p.catch((e) => console.error("background", e)));
+  else p.catch((e) => console.error("background", e));
+}
+
+// ---------- Commands ----------
+function parseCommand(text: string): { name: string; args: string } | null {
+  const m = /^\/([A-Za-z0-9_]{1,32})(?:@\S+)?(?:\s+([\s\S]*))?$/.exec(text);
+  return m ? { name: m[1].toLowerCase(), args: (m[2] ?? "").trim() } : null;
+}
+
+async function runCommand(
+  cmd: BotCommand,
+  args: string,
+  ctx: { chat_id: number; user_id: number; isGroup: boolean; languageCode?: string; commands: BotCommand[] },
+) {
+  await logEvent(ctx.chat_id, cmd.command === "start" ? "start" : "command", cmd.command);
+  if (cmd.action === "message") {
+    await sendBotMessage(TELEGRAM_TOKEN, ctx.chat_id, messageFrom(cmd), !ctx.isGroup);
+    return;
+  }
+  switch (cmd.builtin) {
+    case "ask":
+      await handleSaathiAsk(ctx.chat_id, ctx.user_id, args);
+      return;
+    case "flashcards":
+      await sendSubjectPicker(ctx.chat_id, "flashcards");
+      return;
+    case "mcq":
+      await supabase.from("bot_sessions").delete().eq("chat_id", ctx.chat_id);
+      await sendSubjectPicker(ctx.chat_id, "mcq");
+      return;
+    case "help":
+      await sendHelp(ctx.chat_id, ctx.languageCode, ctx.commands);
+      return;
+    default:
+      await sendMainMenu(ctx.chat_id);
+  }
+}
+
+// The bot's original fixed behaviour, used until the admin migration is applied.
+async function handleTextLegacy(chat_id: number, user_id: number, text: string, isGroup: boolean) {
+  if (text === "/ask" || text.startsWith("/ask ") || text.startsWith("/ask@")) {
+    await handleSaathiAsk(chat_id, user_id, text.replace(/^\/ask(@\S+)?\s*/i, "").trim());
+    return;
+  }
+  if (isGroup) return;
+  if (text.startsWith("/start") || text.startsWith("/study")) await sendMainMenu(chat_id);
+  else await tg("sendMessage", { chat_id, text: DEFAULT_SETTINGS.fallback_text });
+}
+
+async function handleText(message: any) {
+  const chat_id: number = message.chat.id;
+  const chat_type: string = message.chat.type ?? "private";
+  const isGroup = chat_type === "group" || chat_type === "supergroup";
+  const user_id: number = message.from?.id ?? chat_id;
+  const text: string = message.text.trim();
+
+  const commands = await getCommands();
+  if (!commands) return handleTextLegacy(chat_id, user_id, text, isGroup);
+
+  const parsed = parseCommand(text);
+  if (parsed) {
+    const cmd = commands.find((c) => c.command === parsed.name && c.enabled);
+    // In groups only commands marked for groups respond, so the bot stays quiet.
+    if (cmd && (!isGroup || cmd.scope === "all")) {
+      await runCommand(cmd, parsed.args, {
+        chat_id,
+        user_id,
+        isGroup,
+        languageCode: message.from?.language_code,
+        commands,
+      });
+      return;
+    }
+    if (isGroup) return;
+    const settings = await getSettings();
+    await logEvent(chat_id, "fallback", parsed.name);
+    await sendBotMessage(TELEGRAM_TOKEN, chat_id, { text: settings.fallback_text });
+    return;
+  }
+
+  if (isGroup) return;
+  const reply = findAutoReply(await getAutoReplies(), text);
+  if (reply) {
+    await logEvent(chat_id, "auto_reply", reply.keywords[0] ?? null);
+    await supabase.rpc("bot_auto_reply_hit", { reply_id: reply.id });
+    await sendBotMessage(TELEGRAM_TOKEN, chat_id, messageFrom(reply));
+    return;
+  }
+  const settings = await getSettings();
+  if (settings.free_text_to_saathi) {
+    await handleSaathiAsk(chat_id, user_id, text);
+    return;
+  }
+  await logEvent(chat_id, "fallback", null);
+  await sendBotMessage(TELEGRAM_TOKEN, chat_id, { text: settings.fallback_text });
+}
+
+// Telegram tells the bot when a user blocks or unblocks it.
+async function handleMyChatMember(update: any) {
+  const chat_id = update?.chat?.id;
+  const status = update?.new_chat_member?.status;
+  if (!chat_id || update?.chat?.type !== "private" || !botAdminReady) return;
+  const blocked = status === "kicked" || status === "left";
+  await supabase.from("bot_users").update({ blocked }).eq("chat_id", chat_id);
+}
+
+// Requests from Telegram carry the secret set with setWebhook. Until a secret
+// is configured in the admin panel, all requests are accepted as before.
+async function verifyTelegramSecret(req: Request): Promise<boolean> {
+  const got = req.headers.get("x-telegram-bot-api-secret-token");
+  let expected = (await getSettings()).webhook_secret;
+  if (expected && got !== expected) expected = (await getSettings(true)).webhook_secret;
+  return !expected || got === expected;
+}
+
 // ---------- Webhook ----------
 Deno.serve(async (req) => {
+  const url = new URL(req.url);
+  if (url.searchParams.get("task") === "broadcast") {
+    // Only sends broadcasts an admin already created and that are due, so it is
+    // safe to trigger from cron or the admin panel without credentials. Replies
+    // at once; sending continues in the background.
+    continueInBackground(runBroadcastTick());
+    return Response.json({ started: true });
+  }
   if (req.method === "OPTIONS") return new Response("ok");
   if (req.method !== "POST") return new Response("ok");
+  // Also loads settings, which tells the bot whether the admin tables exist.
+  if (!(await verifyTelegramSecret(req))) return new Response("forbidden", { status: 401 });
   let update: any;
   try {
     update = await req.json();
@@ -541,30 +907,18 @@ Deno.serve(async (req) => {
     return new Response("bad json", { status: 400 });
   }
 
+  // While the bot is in use, also pick up any scheduled broadcasts that are due.
+  if (botAdminReady && Date.now() - lastTickAt > 60_000) {
+    lastTickAt = Date.now();
+    continueInBackground(runBroadcastTick());
+  }
+
   try {
-    if (update.message?.text) {
-      const chat_id = update.message.chat.id;
-      const chat_type: string = update.message.chat.type ?? "private";
-      await trackUser(update.message.from, chat_id);
-      const text: string = update.message.text.trim();
-      const isGroup = chat_type === "group" || chat_type === "supergroup";
-
-      // /ask handler — works in DMs and groups, with conversational memory
-      if (text === "/ask" || text.startsWith("/ask ") || text.startsWith("/ask@")) {
-        const question = text.replace(/^\/ask(@\S+)?\s*/i, "").trim();
-        const user_id = update.message.from?.id ?? chat_id;
-        await handleSaathiAsk(chat_id, user_id, question);
-        return new Response("ok");
-      }
-
-      // In groups, ignore anything else so the bot doesn't interrupt normal chat.
-      if (isGroup) return new Response("ok");
-
-      if (text.startsWith("/start") || text.startsWith("/study")) {
-        await sendMainMenu(chat_id);
-      } else {
-        await tg("sendMessage", { chat_id, text: "Send /study to begin, or /ask <question> to ask SAATHI." });
-      }
+    if (update.my_chat_member) {
+      await handleMyChatMember(update.my_chat_member);
+    } else if (update.message?.text) {
+      await trackUser(update.message.from, update.message.chat.id);
+      await handleText(update.message);
     } else if (update.callback_query) {
       const cq = update.callback_query;
       const chat_id = cq.message.chat.id;
@@ -585,6 +939,7 @@ Deno.serve(async (req) => {
         if (!subject) {
           await tg("editMessageText", { chat_id, message_id, text: "Subject unavailable." });
         } else {
+          await logEvent(chat_id, "flashcards", subject);
           await editQuestion(chat_id, message_id, 1, code, subject);
         }
       } else if (data.startsWith("rev_")) {
@@ -614,6 +969,7 @@ Deno.serve(async (req) => {
           await tg("sendMessage", { chat_id, text: "Subject unavailable." });
         } else {
           // fresh session on subject choice
+          await logEvent(chat_id, "mcq", subject);
           await supabase.from("bot_sessions").delete().eq("chat_id", chat_id);
           await sendMcqPoll(chat_id, code, subject);
         }

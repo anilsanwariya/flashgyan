@@ -1,5 +1,5 @@
 // Server functions for the Bot Manager admin panel:
-// - list bot_users, broadcast a Telegram message to all
+// - list bot_users (broadcasts live in bot-admin.functions.ts)
 // - bulk-insert bot_flashcards, bot_mcq_tests, bot_mcq_questions
 // All handlers are admin-gated via user_roles.
 import { createServerFn } from "@tanstack/react-start";
@@ -37,45 +37,6 @@ export const listBotUsers = createServerFn({ method: "GET" })
       .order("last_active", { ascending: false });
     if (error) throw new Error(error.message);
     return (data ?? []) as unknown as BotUserRow[];
-  });
-
-export const broadcastBotMessage = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) =>
-    z.object({ text: z.string().min(1).max(4000) }).parse(d),
-  )
-  .handler(async ({ data, context }) => {
-    const admin = await assertAdmin(context.userId);
-    const token = process.env.TELEGRAM_BOT_TOKEN;
-    if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
-
-    const { data: users, error } = await admin
-      .from("bot_users")
-      .select("chat_id");
-    if (error) throw new Error(error.message);
-
-    let sent = 0;
-    let failed = 0;
-    for (const u of users ?? []) {
-      try {
-        const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            chat_id: (u as { chat_id: number }).chat_id,
-            text: data.text,
-            parse_mode: "HTML",
-          }),
-        });
-        if (r.ok) sent++;
-        else failed++;
-      } catch {
-        failed++;
-      }
-      // Respect Telegram's ~30 msg/sec limit
-      await new Promise((res) => setTimeout(res, 40));
-    }
-    return { sent, failed, total: (users ?? []).length };
   });
 
 // ---------- Bot flashcards ----------
