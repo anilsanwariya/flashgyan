@@ -7,7 +7,6 @@ import { Upload, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -100,58 +99,39 @@ function parseFcWorkbook(file: ArrayBuffer) {
   return { rows, invalid, missingCols: [] };
 }
 
-export function BotManagerPanel() {
-  return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">🤖 Telegram Bot Manager</h2>
-        <p className="text-sm text-muted-foreground">
-          Commands, replies, messages, broadcasts and bot content. Changes reach the bot within a
-          minute, without redeploying.
-        </p>
-      </div>
-      <Tabs defaultValue="broadcast">
-        <TabsList className="h-auto flex-wrap">
-          <TabsTrigger value="broadcast">📢 Broadcast</TabsTrigger>
-          <TabsTrigger value="commands">⌨️ Commands</TabsTrigger>
-          <TabsTrigger value="replies">💬 Auto-replies</TabsTrigger>
-          <TabsTrigger value="messages">✏️ Messages & profile</TabsTrigger>
-          <TabsTrigger value="stats">📊 Stats</TabsTrigger>
-          <TabsTrigger value="users">👥 Users</TabsTrigger>
-          <TabsTrigger value="connection">🔌 Connection</TabsTrigger>
-          <TabsTrigger value="flashcards">🃏 Bot Flashcards</TabsTrigger>
-          <TabsTrigger value="mcq">📝 Bot MCQs</TabsTrigger>
-        </TabsList>
-        <TabsContent value="broadcast" className="mt-4">
-          <BotBroadcastPanel />
-        </TabsContent>
-        <TabsContent value="commands" className="mt-4">
-          <BotCommandsPanel />
-        </TabsContent>
-        <TabsContent value="replies" className="mt-4">
-          <BotAutoRepliesPanel />
-        </TabsContent>
-        <TabsContent value="messages" className="mt-4">
-          <BotMessagesPanel />
-        </TabsContent>
-        <TabsContent value="stats" className="mt-4">
-          <BotStatsPanel />
-        </TabsContent>
-        <TabsContent value="users" className="mt-4">
-          <BotUsersPanel />
-        </TabsContent>
-        <TabsContent value="connection" className="mt-4">
-          <BotWebhookPanel />
-        </TabsContent>
-        <TabsContent value="flashcards" className="mt-4">
-          <FlashcardUploadPanel />
-        </TabsContent>
-        <TabsContent value="mcq" className="mt-4">
-          <McqUploadPanel />
-        </TabsContent>
-      </Tabs>
-    </div>
-  );
+export type BotSection =
+  | "broadcast"
+  | "commands"
+  | "replies"
+  | "messages"
+  | "stats"
+  | "users"
+  | "connection"
+  | "flashcards"
+  | "mcq";
+
+// One bot page at a time; the admin sidebar chooses which.
+export function BotManagerPanel({ section }: { section: BotSection }) {
+  switch (section) {
+    case "commands":
+      return <BotCommandsPanel />;
+    case "replies":
+      return <BotAutoRepliesPanel />;
+    case "messages":
+      return <BotMessagesPanel />;
+    case "stats":
+      return <BotStatsPanel />;
+    case "users":
+      return <BotUsersPanel />;
+    case "connection":
+      return <BotWebhookPanel />;
+    case "flashcards":
+      return <FlashcardUploadPanel />;
+    case "mcq":
+      return <McqUploadPanel />;
+    default:
+      return <BotBroadcastPanel />;
+  }
 }
 
 // ---------- Bot Flashcards ----------

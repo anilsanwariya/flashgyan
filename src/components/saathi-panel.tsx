@@ -332,12 +332,6 @@ export function SaathiPanel() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="font-semibold">SAATHI Knowledge Base</h2>
-        <p className="text-sm text-muted-foreground">
-          Upload study material. SAATHI answers only from what you save here.
-        </p>
-      </div>
 
       {!isEditing && (
         <div className="inline-flex rounded-lg border border-border p-0.5 bg-muted/40">
