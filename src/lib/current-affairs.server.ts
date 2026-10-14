@@ -31,6 +31,7 @@ import {
   parseExtracted,
   splitSource,
   storyText,
+  type Bi,
   type CaChange,
   type CaContent,
   type CaFact,
@@ -38,6 +39,7 @@ import {
   type MagazineSettings,
   type UploadSection,
 } from "@/lib/current-affairs";
+import { parseVisual, visualMessages, type Visual } from "@/lib/ca-visuals";
 import {
   footerTemplate,
   renderMagazine,
@@ -173,6 +175,8 @@ export async function addSource(input: {
   source_name: string;
   title: string;
   content: string;
+  // The web page it came from (automatic collection).
+  url?: string | null;
 }): Promise<CaSource> {
   const chunks = splitSource(input.content).length;
   const { data, error } = await from("ca_sources")
@@ -392,9 +396,12 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
       ...new Set(parsed.backgroundFrom.map((i) => kb[i]?.title).filter(Boolean) as string[]),
     ].map((title) => ({ title }));
 
-    const dyk = await findDidYouKnow(parsed.content.headline.en || item.headline, item.facts);
+    const [dyk, look] = await Promise.all([
+      findDidYouKnow(parsed.content.headline.en || item.headline, item.facts),
+      makeVisual(item),
+    ]);
     const update = {
-      content: { ...parsed.content, dyk },
+      content: { ...parsed.content, dyk, ...look },
       context_sources: contextSources,
       syllabus_topic_id: syllabusId,
       unit: syllabusId ? t!.unit_id : null,
@@ -417,6 +424,54 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
       .eq("id", itemId);
     throw e;
   }
+}
+
+// ---------- Visuals ----------
+
+// Asks SAATHI for the story's visual and revision line. A visual whose numbers
+// aren't all in the facts gets one retry with the reason, then is left out.
+// Never fails the item.
+export async function makeVisual(
+  item: Pick<CaItem, "headline" | "category" | "facts">,
+): Promise<{ visual: Visual | null; oneliner: Bi | null }> {
+  try {
+    const settings = await getMagazineSettings();
+    let problem: string | undefined;
+    let oneliner: Bi | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const raw = await saathiComplete(
+        apiKey(),
+        visualMessages({
+          headline: item.headline,
+          category: item.category,
+          facts: item.facts,
+          problem,
+        }),
+      );
+      const r = parseVisual(raw, item.facts, item.headline);
+      oneliner = r.oneliner ?? oneliner;
+      if (!settings.visuals) return { visual: null, oneliner };
+      if (r.visual || !r.problem) return { visual: r.visual, oneliner };
+      problem = r.problem;
+    }
+    console.error("visual rejected:", problem);
+    return { visual: null, oneliner };
+  } catch (e) {
+    console.error("visual:", e);
+    return { visual: null, oneliner: null };
+  }
+}
+
+// Makes the visual again (the admin's "Redo visual").
+export async function redoVisual(itemId: string): Promise<CaItem> {
+  const { data, error } = await from("ca_items").select(ITEM_COLS).eq("id", itemId).single();
+  fail(error);
+  const item = data as unknown as CaItem;
+  if (!item.content) throw new Error("Write the text first");
+  const look = await makeVisual(item);
+  if (!look.visual)
+    throw new Error("SAATHI couldn't make a visual from these facts that passed the number check.");
+  return updateItem(itemId, { content: { ...item.content, ...look } });
 }
 
 // ---------- "Did you know?" from trusted websites ----------

@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import {
   AlertTriangle,
   ArrowDown,
+  BarChart3,
   ArrowUp,
   CheckCircle2,
   ChevronLeft,
@@ -34,6 +35,7 @@ import {
   getMagazineSettings,
   postCaIssueNow,
   previewCaIssue,
+  redoCaVisual,
   saveMagazineSettings,
   sendCaIssueTest,
   updateCaItem,
@@ -55,6 +57,9 @@ import {
   type UploadSection,
 } from "@/lib/current-affairs";
 import { unitLabel } from "../../supabase/functions/_shared/ras-syllabus.ts";
+import { VISUAL_LABELS } from "@/lib/ca-visuals";
+import { visualPreviewHtml } from "@/lib/current-affairs-html";
+import { CollectionBox, WatchSitesSettings } from "@/components/ca-collect-panel";
 import { FileDropZone, FileQueueList, useFileQueue } from "@/components/saathi-file-queue";
 import { SAATHI_ACCEPT } from "@/lib/saathi-parse";
 import { Button } from "@/components/ui/button";
@@ -555,6 +560,8 @@ function DailyPanel() {
         onChanged={refresh}
       />
 
+      <CollectionBox date={date} onChanged={refresh} />
+
       {/* Upload */}
       <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
         <h3 className="font-semibold">Add the day's sources</h3>
@@ -838,6 +845,7 @@ function ItemCard({
 }) {
   const updateFn = useServerFn(updateCaItem);
   const enrichFn = useServerFn(enrichCaItem);
+  const redoFn = useServerFn(redoCaVisual);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [showFacts, setShowFacts] = useState(false);
@@ -1056,6 +1064,17 @@ function ItemCard({
         </div>
       )}
 
+      {c && !dropped && (
+        <VisualBox
+          content={c}
+          busy={busy}
+          onRemove={() =>
+            act(() => updateFn({ data: { id: item.id, content: { ...c, visual: null } } }))
+          }
+          onRedo={() => act(() => redoFn({ data: { id: item.id } }))}
+        />
+      )}
+
       <button
         type="button"
         onClick={() => setShowFacts((v) => !v)}
@@ -1102,6 +1121,74 @@ function ItemCard({
         />
       )}
     </article>
+  );
+}
+
+// The story's visual as it will print, with the revision line.
+function VisualBox({
+  content,
+  busy,
+  onRemove,
+  onRedo,
+}: {
+  content: CaContent;
+  busy: boolean;
+  onRemove: () => void;
+  onRedo: () => void;
+}) {
+  const frame = useRef<HTMLIFrameElement>(null);
+  const [height, setHeight] = useState(160);
+  const v = content.visual;
+  const html = useMemo(() => (v ? visualPreviewHtml(v) : ""), [v]);
+  const fit = () => {
+    const doc = frame.current?.contentDocument;
+    if (doc?.body) setHeight(Math.min(900, doc.body.scrollHeight + 4));
+  };
+  return (
+    <div className="mt-3 rounded-xl border border-border p-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary">
+          <BarChart3 className="h-3.5 w-3.5" />
+          {v ? `Visual · ${VISUAL_LABELS[v.type]}` : "No visual"}
+        </span>
+        {!v && (
+          <span className="text-xs text-muted-foreground">
+            SAATHI found no visual whose numbers all match the facts.
+          </span>
+        )}
+        <div className="ml-auto flex gap-1">
+          <Button size="sm" variant="outline" className="h-7" disabled={busy} onClick={onRedo}>
+            <RefreshCw className="mr-1 h-3.5 w-3.5" /> {v ? "Redo visual" : "Make visual"}
+          </Button>
+          {v && (
+            <Button size="sm" variant="ghost" className="h-7" disabled={busy} onClick={onRemove}>
+              Remove
+            </Button>
+          )}
+        </div>
+      </div>
+      {v && (
+        <iframe
+          ref={frame}
+          title="Visual preview"
+          srcDoc={html}
+          onLoad={() => {
+            fit();
+            // Web fonts can change the height after load.
+            setTimeout(fit, 600);
+          }}
+          className="mt-2 w-full rounded-lg bg-white"
+          style={{ height }}
+        />
+      )}
+      {content.oneliner && (content.oneliner.en || content.oneliner.hi) && (
+        <p className="mt-2 text-xs">
+          <span className="font-semibold text-muted-foreground">Revision line: </span>
+          <span lang="hi">{content.oneliner.hi}</span>
+          <span className="text-muted-foreground"> · {content.oneliner.en}</span>
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -1437,6 +1524,10 @@ function SettingsPanel() {
           trusted_domains: text("trusted_domains")
             .split(/[\s,]+/)
             .filter(Boolean),
+          auto_collect: Boolean(form!.auto_collect),
+          collect_time: text("collect_time"),
+          notify_when_ready: Boolean(form!.notify_when_ready),
+          visuals: Boolean(form!.visuals),
         },
       });
       toast.success("Saved");
@@ -1576,6 +1667,17 @@ function SettingsPanel() {
             </span>
           </span>
         </label>
+        <label className="flex items-start gap-3">
+          <Switch checked={Boolean(form.visuals)} onCheckedChange={(v) => set("visuals", v)} />
+          <span className="text-sm">
+            <span className="font-medium">Add a visual to each story</span>
+            <span className="block text-muted-foreground">
+              SAATHI picks a chart, table, timeline, flow chart, key-number cards or a mind map for
+              each story, built only from its facts. A visual with any number that isn't in the
+              facts is rejected. Every issue also gets a 60-second revision page.
+            </span>
+          </span>
+        </label>
         <div className="text-sm">
           PDF making (Cloudflare):{" "}
           {s.pdf_ready ? <Badge tone="good">Ready</Badge> : <Badge tone="warn">Not set up</Badge>}
@@ -1636,6 +1738,45 @@ function SettingsPanel() {
             gov.in also covers pib.gov.in, rajasthan.gov.in and other government sites.
           </p>
         </div>
+      </section>
+
+      <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+        <h3 className="font-semibold">Automatic news collection</h3>
+        <label className="flex items-start gap-3">
+          <Switch
+            checked={Boolean(form.auto_collect)}
+            onCheckedChange={(v) => set("auto_collect", v)}
+          />
+          <span className="text-sm">
+            <span className="font-medium">Collect the day's news from the websites below</span>
+            <span className="block text-muted-foreground">
+              At the time below SAATHI reads each website's latest articles, picks the ones that
+              matter for RAS, fetches their text and writes the day's draft. Nothing is posted until
+              you approve it.
+            </span>
+          </span>
+        </label>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {field(
+            "collect_time",
+            "Collection time (IST)",
+            "21:00",
+            "Late evening catches the whole day's news.",
+          )}
+        </div>
+        <label className="flex items-start gap-3">
+          <Switch
+            checked={Boolean(form.notify_when_ready)}
+            onCheckedChange={(v) => set("notify_when_ready", v)}
+          />
+          <span className="text-sm">
+            <span className="font-medium">Message me on Telegram when the draft is ready</span>
+            <span className="block text-muted-foreground">
+              Sent to your chat id for tests, with a link to review it.
+            </span>
+          </span>
+        </label>
+        <WatchSitesSettings />
       </section>
 
       <Button onClick={save} disabled={saving}>

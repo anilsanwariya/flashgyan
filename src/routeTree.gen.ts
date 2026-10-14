@@ -26,6 +26,7 @@ import { Route as McqResultTestIdRouteImport } from './routes/mcq-result.$testId
 import { Route as McqTestIdRouteImport } from './routes/mcq.$testId'
 import { Route as PracticeMcqTestIdRouteImport } from './routes/practice-mcq.$testId'
 import { Route as PracticeDeckIdRouteImport } from './routes/practice.$deckId'
+import { Route as ApiCaTickRouteImport } from './routes/api.ca.tick'
 import { Route as ApiSaathiAskRouteImport } from './routes/api.saathi.ask'
 
 const IndexRoute = IndexRouteImport.update({
@@ -112,6 +113,11 @@ const PracticeDeckIdRoute = PracticeDeckIdRouteImport.update({
   path: '/practice/$deckId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCaTickRoute = ApiCaTickRouteImport.update({
+  id: '/api/ca/tick',
+  path: '/api/ca/tick',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSaathiAskRoute = ApiSaathiAskRouteImport.update({
   id: '/api/saathi/ask',
   path: '/api/saathi/ask',
@@ -135,6 +141,7 @@ export interface FileRoutesByFullPath {
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
+  '/api/ca/tick': typeof ApiCaTickRoute
   '/api/saathi/ask': typeof ApiSaathiAskRoute
 }
 export interface FileRoutesByTo {
@@ -154,6 +161,7 @@ export interface FileRoutesByTo {
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
+  '/api/ca/tick': typeof ApiCaTickRoute
   '/api/saathi/ask': typeof ApiSaathiAskRoute
 }
 export interface FileRoutesById {
@@ -175,6 +183,7 @@ export interface FileRoutesById {
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
+  '/api/ca/tick': typeof ApiCaTickRoute
   '/api/saathi/ask': typeof ApiSaathiAskRoute
 }
 export interface FileRouteTypes {
@@ -196,6 +205,7 @@ export interface FileRouteTypes {
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
     | '/practice/$deckId'
+    | '/api/ca/tick'
     | '/api/saathi/ask'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -215,6 +225,7 @@ export interface FileRouteTypes {
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
     | '/practice/$deckId'
+    | '/api/ca/tick'
     | '/api/saathi/ask'
   id:
     | '__root__'
@@ -235,6 +246,7 @@ export interface FileRouteTypes {
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
     | '/practice/$deckId'
+    | '/api/ca/tick'
     | '/api/saathi/ask'
   fileRoutesById: FileRoutesById
 }
@@ -255,6 +267,7 @@ export interface RootRouteChildren {
   McqTestIdRoute: typeof McqTestIdRoute
   PracticeMcqTestIdRoute: typeof PracticeMcqTestIdRoute
   PracticeDeckIdRoute: typeof PracticeDeckIdRoute
+  ApiCaTickRoute: typeof ApiCaTickRoute
   ApiSaathiAskRoute: typeof ApiSaathiAskRoute
 }
 
@@ -379,6 +392,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PracticeDeckIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/ca/tick': {
+      id: '/api/ca/tick'
+      path: '/api/ca/tick'
+      fullPath: '/api/ca/tick'
+      preLoaderRoute: typeof ApiCaTickRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/saathi/ask': {
       id: '/api/saathi/ask'
       path: '/api/saathi/ask'
@@ -417,6 +437,7 @@ const rootRouteChildren: RootRouteChildren = {
   McqTestIdRoute: McqTestIdRoute,
   PracticeMcqTestIdRoute: PracticeMcqTestIdRoute,
   PracticeDeckIdRoute: PracticeDeckIdRoute,
+  ApiCaTickRoute: ApiCaTickRoute,
   ApiSaathiAskRoute: ApiSaathiAskRoute,
 }
 export const routeTree = rootRouteImport
