@@ -26,25 +26,36 @@ export const UPLOAD_SECTIONS = [
 ] as const;
 export type UploadSection = (typeof UPLOAD_SECTIONS)[number]["id"];
 
-// Magazine sections, in the order they appear.
+// Magazine sections, in the order they appear. Practice questions are the
+// last section, built from the items' questions.
 export const CATEGORIES = [
   { id: "rajasthan", en: "Rajasthan", hi: "राजस्थान" },
   { id: "national", en: "National", hi: "राष्ट्रीय" },
   { id: "international", en: "International", hi: "अंतरराष्ट्रीय" },
-  { id: "economy", en: "Economy", hi: "अर्थव्यवस्था" },
-  { id: "schemes", en: "Schemes & Policies", hi: "योजनाएँ एवं नीतियाँ" },
   { id: "science", en: "Science & Technology", hi: "विज्ञान एवं प्रौद्योगिकी" },
-  { id: "environment", en: "Environment", hi: "पर्यावरण" },
+  { id: "economy", en: "Economics", hi: "अर्थव्यवस्था" },
   { id: "sports", en: "Sports", hi: "खेल" },
-  { id: "persons", en: "Persons, Awards & Appointments", hi: "व्यक्ति, पुरस्कार एवं नियुक्तियाँ" },
-  { id: "days", en: "Important Days & Events", hi: "महत्वपूर्ण दिवस एवं आयोजन" },
-  { id: "editorial", en: "Editorial Summaries", hi: "संपादकीय सारांश" },
+  { id: "misc", en: "Miscellaneous Topics", hi: "विविध" },
+  { id: "editorial", en: "Editorials", hi: "संपादकीय" },
 ] as const;
 export type Category = (typeof CATEGORIES)[number]["id"];
 const CATEGORY_IDS = CATEGORIES.map((c) => c.id) as string[];
 
+// Earlier section names, mapped to the current ones.
+const LEGACY_CATEGORIES: Record<string, Category> = {
+  schemes: "national",
+  environment: "science",
+  persons: "misc",
+  days: "misc",
+};
+
 export const isCategory = (v: unknown): v is Category =>
   typeof v === "string" && CATEGORY_IDS.includes(v);
+
+export function normalizeCategory(v: unknown): Category {
+  if (isCategory(v)) return v;
+  return (typeof v === "string" && LEGACY_CATEGORIES[v]) || "misc";
+}
 
 export type Bi = { en: string; hi: string };
 
@@ -167,7 +178,8 @@ export function extractMessages(opts: {
     {
       role: "system",
       content: `You are the current affairs editor of a magazine for RAS (Rajasthan Administrative Service) exam aspirants. From the source text, extract the news items worth knowing for the RAS Prelims and Mains exams.
-Include: Rajasthan government decisions, schemes, appointments and events; national policies, schemes, bills, reports, indices and court judgments; international relations, summits and organisations; economic data; science, defence and environment; awards, persons in news, sports and important days.
+Include: Rajasthan government decisions, schemes, appointments and events; national policies, schemes, bills, reports, indices and court judgments; international relations, summits and organisations; economic data; science, technology, defence, space, health and environment; sports; awards, appointments, persons in news and important days.
+Categories: "rajasthan" for anything about Rajasthan; "national" for India-wide polity, governance, schemes and judgments; "international"; "science" for science, technology, defence, space, health and environment; "economy"; "sports"; "misc" for awards, appointments, persons in news, important days, reports and indices that fit nowhere else; "editorial" only for editorials.
 Skip: advertisements, crime and accidents, purely local incidents, opinion without facts, market tips, entertainment.${editorial}
 Reply with JSON only: [{"headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 (3 = very likely to be asked in the exam), "rajasthan": true if it concerns Rajasthan, "facts": [{"text": one fact in English, "quote": the exact words from the source that state this fact, copied character for character (5 to 30 words, in the source's language)}]}].
 Use only facts stated in the source and keep every number, name and date exactly. At most 8 facts per item. Reply [] if nothing is exam-relevant.`,
@@ -197,7 +209,7 @@ export function parseExtracted(raw: string, source: string, sourceId: string): R
       const importance = Math.round(Number(o.importance));
       return {
         headline: str(o.headline, 300),
-        category: isCategory(o.category) ? o.category : "national",
+        category: normalizeCategory(o.category),
         importance: (importance >= 1 && importance <= 3 ? importance : 2) as 1 | 2 | 3,
         rajasthan: o.rajasthan === true,
         facts,
@@ -254,8 +266,11 @@ Reply with JSON only:
  "why": {"en": "one or two sentences on why this matters for RAS (which exam paper or topic)", "hi": "..."},
  "background": {"en": "2-3 sentences", "hi": "..."} or null,
  "background_from": ["K1", ...],
- "mcq": {"question": {"en": "...", "hi": "..."}, "options": [{"en": "...", "hi": "..."} x4], "answer": index 0-3, "explanation": {"en": "...", "hi": "..."}} (the answer must be stated in the facts),
- "mains": {"en": "a likely RAS Mains question", "hi": "..."} or null}`,
+ "mcq": {"question": {"en": "...", "hi": "..."}, "options": [{"en": "...", "hi": "..."} x4], "answer": index 0-3, "explanation": {"en": "...", "hi": "..."}},
+ "mains": {"en": "...", "hi": "..."} or null}
+PRACTICE QUESTIONS follow the RPSC (RAS) pattern and difficulty:
+- "mcq" is a RAS Prelims question of moderate to hard difficulty, not a one-line recall question. Prefer statement-based ("Consider the following statements: 1. … 2. … 3. … Which of the statements given above is/are correct?" with options like "Only 1 and 2"), match-the-pairs, or "Which one of the following is NOT correct?" formats. Put each statement on its own line (use line breaks inside the string). Options must be plausible; the correct answer and every statement must be decidable from the facts. The Hindi version uses RPSC's Hindi phrasing (e.g. "निम्नलिखित कथनों पर विचार कीजिए", "उपर्युक्त में से कौन-सा/से कथन सही है/हैं?").
+- "mains" is a RAS Mains question in the RPSC style, ending with the marks and word limit: "(5 marks, 50 words)" or "(10 marks, 150 words)" ("(5 अंक, 50 शब्द)" / "(10 अंक, 150 शब्द)" in Hindi); null if the news has no Mains value.`,
     },
     {
       role: "user",

@@ -19,6 +19,7 @@ import {
   extractMessages,
   formatDate,
   isCategory,
+  normalizeCategory,
   mergeFacts,
   monthRange,
   parseChanges,
@@ -353,6 +354,7 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
   const { data, error } = await from("ca_items").select(ITEM_COLS).eq("id", itemId).single();
   fail(error);
   const item = data as unknown as CaItem;
+  item.category = normalizeCategory(item.category);
   const key = apiKey();
   try {
     const query = `${item.headline}\n${item.facts.map((f) => f.text).join(" ")}`.slice(0, 1000);
@@ -470,7 +472,10 @@ export async function getDay(date: string): Promise<DayData> {
   const month = monthRange(date);
   return {
     sources: (sources.data ?? []) as unknown as CaSource[],
-    items: (items.data ?? []) as unknown as CaItem[],
+    items: ((items.data ?? []) as unknown as CaItem[]).map((i) => ({
+      ...i,
+      category: normalizeCategory(i.category),
+    })),
     issue: (issue.data as unknown as CaIssue | null) ?? null,
     corrections: await listCorrections(month.from, month.to, "pending"),
   };
@@ -594,7 +599,7 @@ async function magazineItems(fromDate: string, toDate: string): Promise<Magazine
   return items.map((i) => ({
     id: i.id,
     issue_date: i.issue_date,
-    category: i.category,
+    category: normalizeCategory(i.category),
     importance: i.importance,
     rajasthan: i.rajasthan,
     content: i.content!,
