@@ -14,6 +14,192 @@ export type Database = {
   }
   public: {
     Tables: {
+      bot_auto_replies: {
+        Row: {
+          buttons: Json
+          created_at: string
+          enabled: boolean
+          hits: number
+          id: string
+          keywords: string[]
+          match_type: string
+          media_type: string | null
+          media_url: string | null
+          priority: number
+          response_text: string
+          updated_at: string
+        }
+        Insert: {
+          buttons?: Json
+          created_at?: string
+          enabled?: boolean
+          hits?: number
+          id?: string
+          keywords?: string[]
+          match_type?: string
+          media_type?: string | null
+          media_url?: string | null
+          priority?: number
+          response_text?: string
+          updated_at?: string
+        }
+        Update: {
+          buttons?: Json
+          created_at?: string
+          enabled?: boolean
+          hits?: number
+          id?: string
+          keywords?: string[]
+          match_type?: string
+          media_type?: string | null
+          media_url?: string | null
+          priority?: number
+          response_text?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      bot_broadcasts: {
+        Row: {
+          blocked: number
+          buttons: Json
+          created_at: string
+          cursor: number | null
+          failed: number
+          finished_at: string | null
+          id: string
+          locked_until: string | null
+          media_type: string | null
+          media_url: string | null
+          scheduled_at: string
+          segment: Json
+          sent: number
+          started_at: string | null
+          status: string
+          text: string
+          total: number
+        }
+        Insert: {
+          blocked?: number
+          buttons?: Json
+          created_at?: string
+          cursor?: number | null
+          failed?: number
+          finished_at?: string | null
+          id?: string
+          locked_until?: string | null
+          media_type?: string | null
+          media_url?: string | null
+          scheduled_at?: string
+          segment?: Json
+          sent?: number
+          started_at?: string | null
+          status?: string
+          text?: string
+          total?: number
+        }
+        Update: {
+          blocked?: number
+          buttons?: Json
+          created_at?: string
+          cursor?: number | null
+          failed?: number
+          finished_at?: string | null
+          id?: string
+          locked_until?: string | null
+          media_type?: string | null
+          media_url?: string | null
+          scheduled_at?: string
+          segment?: Json
+          sent?: number
+          started_at?: string | null
+          status?: string
+          text?: string
+          total?: number
+        }
+        Relationships: []
+      }
+      bot_commands: {
+        Row: {
+          action: string
+          builtin: string | null
+          buttons: Json
+          command: string
+          created_at: string
+          description_en: string
+          description_hi: string
+          enabled: boolean
+          id: string
+          media_type: string | null
+          media_url: string | null
+          response_text: string
+          scope: string
+          show_in_menu: boolean
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          action?: string
+          builtin?: string | null
+          buttons?: Json
+          command: string
+          created_at?: string
+          description_en?: string
+          description_hi?: string
+          enabled?: boolean
+          id?: string
+          media_type?: string | null
+          media_url?: string | null
+          response_text?: string
+          scope?: string
+          show_in_menu?: boolean
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          action?: string
+          builtin?: string | null
+          buttons?: Json
+          command?: string
+          created_at?: string
+          description_en?: string
+          description_hi?: string
+          enabled?: boolean
+          id?: string
+          media_type?: string | null
+          media_url?: string | null
+          response_text?: string
+          scope?: string
+          show_in_menu?: boolean
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      bot_events: {
+        Row: {
+          chat_id: number
+          created_at: string
+          id: number
+          kind: string
+          name: string | null
+        }
+        Insert: {
+          chat_id: number
+          created_at?: string
+          id?: number
+          kind: string
+          name?: string | null
+        }
+        Update: {
+          chat_id?: number
+          created_at?: string
+          id?: number
+          kind?: string
+          name?: string | null
+        }
+        Relationships: []
+      }
       bot_flashcards: {
         Row: {
           answer: string
@@ -181,25 +367,49 @@ export type Database = {
         }
         Relationships: []
       }
+      bot_settings: {
+        Row: {
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value: Json
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: []
+      }
       bot_users: {
         Row: {
+          blocked: boolean
           chat_id: number
           created_at: string
           first_name: string | null
+          language_code: string | null
           last_active: string
           username: string | null
         }
         Insert: {
+          blocked?: boolean
           chat_id: number
           created_at?: string
           first_name?: string | null
+          language_code?: string | null
           last_active?: string
           username?: string | null
         }
         Update: {
+          blocked?: boolean
           chat_id?: number
           created_at?: string
           first_name?: string | null
+          language_code?: string | null
           last_active?: string
           username?: string | null
         }
@@ -601,6 +811,201 @@ export type Database = {
         }
         Relationships: []
       }
+      ras_syllabus_topics: {
+        Row: {
+          embedding: string | null
+          id: string
+          paper: string
+          part: string
+          topic: string
+          unit_id: string
+          unit_title: string
+          updated_at: string
+        }
+        Insert: {
+          embedding?: string | null
+          id: string
+          paper: string
+          part: string
+          topic: string
+          unit_id: string
+          unit_title: string
+          updated_at?: string
+        }
+        Update: {
+          embedding?: string | null
+          id?: string
+          paper?: string
+          part?: string
+          topic?: string
+          unit_id?: string
+          unit_title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      saathi_answer_cache: {
+        Row: {
+          answer: string
+          channel: string
+          created_at: string
+          english_query: string | null
+          followups: Json
+          hits: number
+          kb_version: number
+          key: string
+          last_hit_at: string | null
+          meta: Json | null
+          question: string
+          sources: Json
+        }
+        Insert: {
+          answer: string
+          channel: string
+          created_at?: string
+          english_query?: string | null
+          followups?: Json
+          hits?: number
+          kb_version: number
+          key: string
+          last_hit_at?: string | null
+          meta?: Json | null
+          question: string
+          sources?: Json
+        }
+        Update: {
+          answer?: string
+          channel?: string
+          created_at?: string
+          english_query?: string | null
+          followups?: Json
+          hits?: number
+          kb_version?: number
+          key?: string
+          last_hit_at?: string | null
+          meta?: Json | null
+          question?: string
+          sources?: Json
+        }
+        Relationships: []
+      }
+      saathi_answer_formats: {
+        Row: {
+          enabled: boolean
+          marks: number
+          updated_at: string
+          word_limit: number
+        }
+        Insert: {
+          enabled?: boolean
+          marks: number
+          updated_at?: string
+          word_limit: number
+        }
+        Update: {
+          enabled?: boolean
+          marks?: number
+          updated_at?: string
+          word_limit?: number
+        }
+        Relationships: []
+      }
+      saathi_blueprint_scores: {
+        Row: {
+          answer_id: string
+          blueprint_id: string | null
+          created_at: string
+          generated: string
+          id: string
+          scores: Json
+          total: number
+          word_count: number
+        }
+        Insert: {
+          answer_id: string
+          blueprint_id?: string | null
+          created_at?: string
+          generated: string
+          id?: string
+          scores: Json
+          total: number
+          word_count?: number
+        }
+        Update: {
+          answer_id?: string
+          blueprint_id?: string | null
+          created_at?: string
+          generated?: string
+          id?: string
+          scores?: Json
+          total?: number
+          word_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "saathi_blueprint_scores_answer_id_fkey"
+            columns: ["answer_id"]
+            isOneToOne: false
+            referencedRelation: "saathi_model_answers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "saathi_blueprint_scores_blueprint_id_fkey"
+            columns: ["blueprint_id"]
+            isOneToOne: false
+            referencedRelation: "saathi_blueprints"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      saathi_blueprints: {
+        Row: {
+          answer_ids: string[]
+          created_at: string
+          directive: string
+          guide: string
+          id: string
+          locked: boolean
+          marks: number
+          sample_count: number
+          stats: Json | null
+          status: string
+          tips: Json
+          unit: string
+          version: number
+        }
+        Insert: {
+          answer_ids?: string[]
+          created_at?: string
+          directive: string
+          guide: string
+          id?: string
+          locked?: boolean
+          marks: number
+          sample_count?: number
+          stats?: Json | null
+          status?: string
+          tips?: Json
+          unit?: string
+          version: number
+        }
+        Update: {
+          answer_ids?: string[]
+          created_at?: string
+          directive?: string
+          guide?: string
+          id?: string
+          locked?: boolean
+          marks?: number
+          sample_count?: number
+          stats?: Json | null
+          status?: string
+          tips?: Json
+          unit?: string
+          version?: number
+        }
+        Relationships: []
+      }
       saathi_chat_history: {
         Row: {
           content: string
@@ -625,6 +1030,84 @@ export type Database = {
         }
         Relationships: []
       }
+      saathi_eval_questions: {
+        Row: {
+          created_at: string
+          expected_document: string
+          id: string
+          last_english_query: string | null
+          last_passed: boolean | null
+          last_rank: number | null
+          last_run_at: string | null
+          question: string
+        }
+        Insert: {
+          created_at?: string
+          expected_document: string
+          id?: string
+          last_english_query?: string | null
+          last_passed?: boolean | null
+          last_rank?: number | null
+          last_run_at?: string | null
+          question: string
+        }
+        Update: {
+          created_at?: string
+          expected_document?: string
+          id?: string
+          last_english_query?: string | null
+          last_passed?: boolean | null
+          last_rank?: number | null
+          last_run_at?: string | null
+          question?: string
+        }
+        Relationships: []
+      }
+      saathi_feedback: {
+        Row: {
+          answer: string
+          created_at: string
+          id: string
+          question: string
+          rating: number
+          sources: string[]
+        }
+        Insert: {
+          answer: string
+          created_at?: string
+          id?: string
+          question: string
+          rating: number
+          sources?: string[]
+        }
+        Update: {
+          answer?: string
+          created_at?: string
+          id?: string
+          question?: string
+          rating?: number
+          sources?: string[]
+        }
+        Relationships: []
+      }
+      saathi_kb_version: {
+        Row: {
+          id: number
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          id?: number
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          id?: number
+          updated_at?: string
+          version?: number
+        }
+        Relationships: []
+      }
       saathi_knowledge: {
         Row: {
           chunk_index: number | null
@@ -634,6 +1117,7 @@ export type Database = {
           embedding: string | null
           fts_vector: unknown
           id: string
+          language: string | null
           medium: string
           parent_id: string | null
           source_file: string | null
@@ -651,6 +1135,7 @@ export type Database = {
           embedding?: string | null
           fts_vector?: unknown
           id?: string
+          language?: string | null
           medium?: string
           parent_id?: string | null
           source_file?: string | null
@@ -668,6 +1153,7 @@ export type Database = {
           embedding?: string | null
           fts_vector?: unknown
           id?: string
+          language?: string | null
           medium?: string
           parent_id?: string | null
           source_file?: string | null
@@ -694,6 +1180,7 @@ export type Database = {
           id: string
           last_asked_at: string
           question: string
+          question_key: string
         }
         Insert: {
           ask_count?: number
@@ -701,6 +1188,7 @@ export type Database = {
           id?: string
           last_asked_at?: string
           question: string
+          question_key: string
         }
         Update: {
           ask_count?: number
@@ -708,6 +1196,91 @@ export type Database = {
           id?: string
           last_asked_at?: string
           question?: string
+          question_key?: string
+        }
+        Relationships: []
+      }
+      saathi_model_answers: {
+        Row: {
+          analysis: Json | null
+          analysis_error: string | null
+          answer: string
+          created_at: string
+          directive: string
+          embedding: string | null
+          exam: string
+          holdout: boolean
+          id: string
+          marks: number
+          paper: string | null
+          question: string
+          source: string | null
+          subject: string | null
+          topic_id: string | null
+          unit: string | null
+          updated_at: string
+          word_count: number
+          year: number | null
+        }
+        Insert: {
+          analysis?: Json | null
+          analysis_error?: string | null
+          answer: string
+          created_at?: string
+          directive?: string
+          embedding?: string | null
+          exam?: string
+          holdout?: boolean
+          id?: string
+          marks: number
+          paper?: string | null
+          question: string
+          source?: string | null
+          subject?: string | null
+          topic_id?: string | null
+          unit?: string | null
+          updated_at?: string
+          word_count?: number
+          year?: number | null
+        }
+        Update: {
+          analysis?: Json | null
+          analysis_error?: string | null
+          answer?: string
+          created_at?: string
+          directive?: string
+          embedding?: string | null
+          exam?: string
+          holdout?: boolean
+          id?: string
+          marks?: number
+          paper?: string | null
+          question?: string
+          source?: string | null
+          subject?: string | null
+          topic_id?: string | null
+          unit?: string | null
+          updated_at?: string
+          word_count?: number
+          year?: number | null
+        }
+        Relationships: []
+      }
+      saathi_rate_limits: {
+        Row: {
+          hits: number
+          key: string
+          window_start: string
+        }
+        Insert: {
+          hits?: number
+          key: string
+          window_start?: string
+        }
+        Update: {
+          hits?: number
+          key?: string
+          window_start?: string
         }
         Relationships: []
       }
@@ -734,6 +1307,43 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      bot_auto_reply_hit: { Args: { reply_id: string }; Returns: undefined }
+      bot_claim_broadcast: {
+        Args: { lock_seconds?: number }
+        Returns: {
+          blocked: number
+          buttons: Json
+          created_at: string
+          cursor: number | null
+          failed: number
+          finished_at: string | null
+          id: string
+          locked_until: string | null
+          media_type: string | null
+          media_url: string | null
+          scheduled_at: string
+          segment: Json
+          sent: number
+          started_at: string | null
+          status: string
+          text: string
+          total: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "bot_broadcasts"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      bot_segment_count: { Args: { segment: Json }; Returns: number }
+      bot_segment_users: {
+        Args: { after_chat_id: number; max_rows: number; segment: Json }
+        Returns: {
+          chat_id: number
+        }[]
+      }
+      bot_stats: { Args: { days?: number }; Returns: Json }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -756,6 +1366,7 @@ export type Database = {
           content: string
           id: string
           keyword_score: number
+          language: string
           medium: string
           similarity: number
           source_file: string
@@ -795,6 +1406,51 @@ export type Database = {
           title: string
         }[]
       }
+      saathi_cache_get: {
+        Args: { p_channel: string; p_question: string; p_subjects: string[] }
+        Returns: {
+          answer: string
+          channel: string
+          created_at: string
+          english_query: string | null
+          followups: Json
+          hits: number
+          kb_version: number
+          key: string
+          last_hit_at: string | null
+          meta: Json | null
+          question: string
+          sources: Json
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "saathi_answer_cache"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      saathi_cache_key: {
+        Args: { p_channel: string; p_question: string; p_subjects: string[] }
+        Returns: string
+      }
+      saathi_cache_put: {
+        Args: {
+          p_answer: string
+          p_channel: string
+          p_english_query: string
+          p_followups: Json
+          p_meta?: Json
+          p_question: string
+          p_sources: Json
+          p_subjects: string[]
+        }
+        Returns: undefined
+      }
+      saathi_consume_rate_limit: {
+        Args: { max_hits: number; rl_key: string; window_seconds: number }
+        Returns: boolean
+      }
+      saathi_detect_language: { Args: { t: string }; Returns: string }
       saathi_find_duplicate_chunks: {
         Args: { contents: string[]; exclude_parent?: string }
         Returns: {
@@ -810,7 +1466,9 @@ export type Database = {
           chunk_count: number
           created_at: string
           duplicate_chunks: number
+          english_chunks: number
           has_source: boolean
+          hindi_chunks: number
           id: string
           is_legacy: boolean
           max_chars: number
@@ -823,6 +1481,21 @@ export type Database = {
           topic: string
         }[]
       }
+      saathi_mains_context: {
+        Args: {
+          p_count?: number
+          p_directive: string
+          p_embedding: string
+          p_marks: number
+          p_min_topic?: number
+        }
+        Returns: Json
+      }
+      saathi_nearest_syllabus_topic: {
+        Args: { p_embedding: string }
+        Returns: Json
+      }
+      saathi_normalize_question: { Args: { q: string }; Returns: string }
     }
     Enums: {
       app_role: "admin"
