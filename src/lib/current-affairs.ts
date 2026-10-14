@@ -514,6 +514,11 @@ export type MagazineSettings = {
   // "Did you know?" facts searched on the web (Tavily), from these sites only.
   do_you_know: boolean;
   trusted_domains: string[];
+  // Collect news from the watched websites every evening at this time (IST).
+  auto_collect: boolean;
+  collect_time: string;
+  // Message the test chat on Telegram when the day's draft is ready.
+  notify_when_ready: boolean;
 };
 
 // Official and reference sites the "Did you know?" search may use. Subdomains
@@ -547,6 +552,9 @@ export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   add_to_knowledge_base: true,
   do_you_know: true,
   trusted_domains: DEFAULT_TRUSTED_DOMAINS,
+  auto_collect: true,
+  collect_time: "21:00",
+  notify_when_ready: true,
 };
 
 export function categoryLabel(id: string): { en: string; hi: string } {

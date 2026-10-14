@@ -55,6 +55,7 @@ import {
   type UploadSection,
 } from "@/lib/current-affairs";
 import { unitLabel } from "../../supabase/functions/_shared/ras-syllabus.ts";
+import { CollectionBox, WatchSitesSettings } from "@/components/ca-collect-panel";
 import { FileDropZone, FileQueueList, useFileQueue } from "@/components/saathi-file-queue";
 import { SAATHI_ACCEPT } from "@/lib/saathi-parse";
 import { Button } from "@/components/ui/button";
@@ -554,6 +555,8 @@ function DailyPanel() {
         blocking={blocking}
         onChanged={refresh}
       />
+
+      <CollectionBox date={date} onChanged={refresh} />
 
       {/* Upload */}
       <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
@@ -1437,6 +1440,9 @@ function SettingsPanel() {
           trusted_domains: text("trusted_domains")
             .split(/[\s,]+/)
             .filter(Boolean),
+          auto_collect: Boolean(form!.auto_collect),
+          collect_time: text("collect_time"),
+          notify_when_ready: Boolean(form!.notify_when_ready),
         },
       });
       toast.success("Saved");
@@ -1636,6 +1642,45 @@ function SettingsPanel() {
             gov.in also covers pib.gov.in, rajasthan.gov.in and other government sites.
           </p>
         </div>
+      </section>
+
+      <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+        <h3 className="font-semibold">Automatic news collection</h3>
+        <label className="flex items-start gap-3">
+          <Switch
+            checked={Boolean(form.auto_collect)}
+            onCheckedChange={(v) => set("auto_collect", v)}
+          />
+          <span className="text-sm">
+            <span className="font-medium">Collect the day's news from the websites below</span>
+            <span className="block text-muted-foreground">
+              At the time below SAATHI reads each website's latest articles, picks the ones that
+              matter for RAS, fetches their text and writes the day's draft. Nothing is posted until
+              you approve it.
+            </span>
+          </span>
+        </label>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {field(
+            "collect_time",
+            "Collection time (IST)",
+            "21:00",
+            "Late evening catches the whole day's news.",
+          )}
+        </div>
+        <label className="flex items-start gap-3">
+          <Switch
+            checked={Boolean(form.notify_when_ready)}
+            onCheckedChange={(v) => set("notify_when_ready", v)}
+          />
+          <span className="text-sm">
+            <span className="font-medium">Message me on Telegram when the draft is ready</span>
+            <span className="block text-muted-foreground">
+              Sent to your chat id for tests, with a link to review it.
+            </span>
+          </span>
+        </label>
+        <WatchSitesSettings />
       </section>
 
       <Button onClick={save} disabled={saving}>

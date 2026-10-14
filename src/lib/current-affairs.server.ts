@@ -173,6 +173,8 @@ export async function addSource(input: {
   source_name: string;
   title: string;
   content: string;
+  // The web page it came from (automatic collection).
+  url?: string | null;
 }): Promise<CaSource> {
   const chunks = splitSource(input.content).length;
   const { data, error } = await from("ca_sources")

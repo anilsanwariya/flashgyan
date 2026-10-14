@@ -99,6 +99,9 @@ export const saveMagazineSettings = createServerFn({ method: "POST" })
         add_to_knowledge_base: z.boolean(),
         do_you_know: z.boolean(),
         trusted_domains: z.array(z.string().max(200)).max(100),
+        auto_collect: z.boolean(),
+        collect_time: z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/, "Use HH:MM"),
+        notify_when_ready: z.boolean(),
       })
       .parse(d),
   )
