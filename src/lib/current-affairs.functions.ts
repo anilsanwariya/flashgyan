@@ -107,6 +107,7 @@ export const saveMagazineSettings = createServerFn({ method: "POST" })
         collect_time: z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/, "Use HH:MM"),
         notify_when_ready: z.boolean(),
         visuals: z.boolean(),
+        daily_stories: z.number().int().min(3).max(40),
       })
       .parse(d),
   )

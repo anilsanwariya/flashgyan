@@ -1,6 +1,7 @@
 // Server-only current affairs magazine: sources → news items → bilingual
 // issues → PDF (Cloudflare browser rendering) → scheduled Telegram post.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { startsIncluded } from "@/lib/ca-blueprint";
 import {
   relevantMatches,
   saathiComplete,
@@ -244,6 +245,7 @@ export async function extractSourceChunk(sourceId: string, index: number) {
       }),
     );
     const found = parseExtracted(raw, text, src.id);
+    const { daily_stories } = await getMagazineSettings();
     let created = 0;
     let merged = 0;
     for (const item of found) {
@@ -282,9 +284,19 @@ export async function extractSourceChunk(sourceId: string, index: number) {
               (s) => s.similarity >= FOLLOW_UP_SIMILARITY,
             )
           : undefined;
+      // Unlikely stories, and less important ones once the day is full, arrive
+      // already dropped; an uploaded editorial always goes in.
+      const { count: includedSoFar } = await from("ca_items")
+        .select("id", { count: "exact", head: true })
+        .eq("issue_date", src.issue_date)
+        .eq("status", "included");
+      const included =
+        category === "editorial" ||
+        startsIncluded(item.importance, includedSoFar ?? 0, daily_stories);
       const { error: iErr } = await from("ca_items").insert({
         issue_date: src.issue_date,
         category,
+        status: included ? "included" : "dropped",
         headline: item.headline,
         facts: item.facts,
         source_ids: [src.id],

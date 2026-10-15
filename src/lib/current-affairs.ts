@@ -3,6 +3,13 @@
 // corrections and schedule posts. No database or network access here.
 
 import { unverifiedNumbers, type Visual } from "@/lib/ca-visuals";
+import {
+  DEFAULT_DAILY_STORIES,
+  REPEATABLE_SLOTS,
+  blueprintText,
+  keepSlotted,
+  storyType,
+} from "@/lib/ca-blueprint";
 
 export const UPLOAD_SECTIONS = [
   {
@@ -70,6 +77,9 @@ export type CaFact = {
   verified: boolean;
   // Set when an approved correction replaced this fact.
   corrected?: boolean;
+  // Which blueprint slot the fact fills (launch date, ministry, rank…);
+  // missing on older facts.
+  slot?: string;
 };
 
 export type CaMcq = { question: Bi; options: Bi[]; answer: number; explanation: Bi };
@@ -100,6 +110,8 @@ export type DykFact = Bi & { url: string; site: string; quote: string };
 
 export type RawItem = {
   headline: string;
+  // Blueprint story type (scheme, index, appointment…).
+  type: string;
   category: Category;
   importance: 1 | 2 | 3;
   rajasthan: boolean;
@@ -190,12 +202,12 @@ export function extractMessages(opts: {
   return [
     {
       role: "system",
-      content: `You are the current affairs editor of a magazine for RAS (Rajasthan Administrative Service) exam aspirants. From the source text, extract the news items worth knowing for the RAS Prelims and Mains exams.
-Include: Rajasthan government decisions, schemes, appointments and events; national policies, schemes, bills, reports, indices and court judgments; international relations, summits and organisations; economic data; science, technology, defence, space, health and environment; sports; awards, appointments, persons in news and important days.
+      content: `You are the current affairs editor of a magazine for RAS (Rajasthan Administrative Service) exam aspirants. From the source text, extract only the news items RPSC is likely to ask about in the RAS Prelims or Mains exam. Be strict: students lose time on news that is never asked, so leave out anything that does not clearly fit a story type below or would not give at least two exam facts.
+${blueprintText()}
 Categories: "rajasthan" for anything about Rajasthan; "national" for India-wide polity, governance, schemes and judgments; "international"; "science" for science, technology, defence, space, health and environment; "economy"; "sports"; "misc" for awards, appointments, persons in news, important days, reports and indices that fit nowhere else; "editorial" only for editorials.
 Skip: advertisements, crime and accidents, purely local incidents, opinion without facts, market tips, entertainment.${editorial}
-Reply with JSON only: [{"headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 (3 = very likely to be asked in the exam), "rajasthan": true if it concerns Rajasthan, "facts": [{"text": one fact in English, "quote": the exact words from the source that state this fact, copied character for character (5 to 30 words, in the source's language)}]}].
-Use only facts stated in the source and keep every number, name and date exactly. At most 8 facts per item. Reply [] if nothing is exam-relevant.`,
+Reply with JSON only: [{"type": one story type id, "headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 as described above, "rajasthan": true if it concerns Rajasthan, "facts": [{"slot": the slot id this fact fills, "text": one short fact in English, "quote": the exact words from the source that state this fact, copied character for character (5 to 30 words, in the source's language)}]}].
+Every fact must fill one slot of its story's type; leave a slot out if the source doesn't state it, and drop any fact that fits no slot. Use only facts stated in the source and keep every number, name and date exactly. Reply [] if nothing is exam-relevant.`,
     },
     {
       role: "user",
@@ -210,18 +222,28 @@ export function parseExtracted(raw: string, source: string, sourceId: string): R
   return list
     .map((x) => {
       const o = (x ?? {}) as Record<string, unknown>;
-      const facts = (Array.isArray(o.facts) ? o.facts : [])
+      const type = storyType(o.type);
+      const all = (Array.isArray(o.facts) ? o.facts : [])
         .map((f) => {
           const fo = (f ?? {}) as Record<string, unknown>;
           const text = str(fo.text, 600);
           const quote = str(fo.quote, 600);
-          return { text, quote, source_id: sourceId, verified: quoteInSource(quote, source) };
+          const slot = str(fo.slot, 40);
+          return {
+            text,
+            quote,
+            source_id: sourceId,
+            verified: quoteInSource(quote, source),
+            ...(slot ? { slot } : {}),
+          };
         })
-        .filter((f) => f.text)
-        .slice(0, 8);
+        .filter((f) => f.text);
+      // If the AI tagged no fact at all, keep the first few rather than lose the story.
+      const facts = all.some((f) => f.slot) ? keepSlotted(type, all) : all.slice(0, type.maxFacts);
       const importance = Math.round(Number(o.importance));
       return {
         headline: str(o.headline, 300),
+        type: type.id,
         category: normalizeCategory(o.category),
         importance: (importance >= 1 && importance <= 3 ? importance : 2) as 1 | 2 | 3,
         rajasthan: o.rajasthan === true,
@@ -236,14 +258,18 @@ export function storyText(item: { headline: string; facts: { text: string }[] })
   return [item.headline, ...item.facts.map((f) => f.text)].join("\n").slice(0, 4000);
 }
 
-// Adds facts from another source about the same story, skipping repeats.
-export function mergeFacts(base: CaFact[], extra: CaFact[], max = 12): CaFact[] {
+// Adds facts from another source about the same story, skipping repeats and
+// slots the story already has a fact for (repeatable slots excepted).
+export function mergeFacts(base: CaFact[], extra: CaFact[], max = 8): CaFact[] {
   const seen = new Set(base.map((f) => normalizeForMatch(f.text)));
+  const filled = new Set(base.map((f) => f.slot).filter(Boolean));
   const out = [...base];
   for (const f of extra) {
     const key = normalizeForMatch(f.text);
     if (seen.has(key)) continue;
+    if (f.slot && filled.has(f.slot) && !REPEATABLE_SLOTS.has(f.slot)) continue;
     seen.add(key);
+    if (f.slot) filled.add(f.slot);
     out.push(f);
     if (out.length >= max) break;
   }
@@ -582,6 +608,9 @@ export type MagazineSettings = {
   notify_when_ready: boolean;
   // Add a chart, table, timeline, flow chart or mind map to each story.
   visuals: boolean;
+  // Stories a day go into the issue; less important ones beyond this arrive
+  // already dropped (must-know stories always go in).
+  daily_stories: number;
 };
 
 // Official and reference sites the "Did you know?" search may use. Subdomains
@@ -619,6 +648,7 @@ export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   collect_time: "21:00",
   notify_when_ready: true,
   visuals: true,
+  daily_stories: DEFAULT_DAILY_STORIES,
 };
 
 export function categoryLabel(id: string): { en: string; hi: string } {

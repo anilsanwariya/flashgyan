@@ -191,6 +191,13 @@ export function StoryList({
           {items.filter((i) => i.content?.background).length} with background from your notes
         </Badge>
       </div>
+      {items.length - included > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Stories unlikely in the exam, and less important ones beyond your stories-per-day limit
+          (Magazine settings), arrive dropped at the bottom. Press “Include” on one to add it and
+          write it.
+        </p>
+      )}
 
       {/* Reading controls stay in reach while scrolling. */}
       <div className="sticky top-[3.75rem] z-20 -mx-4 flex flex-wrap items-center gap-2 border-b border-border bg-background/95 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6 lg:top-0 lg:-mx-2 lg:px-2">
@@ -855,8 +862,13 @@ function StoryCard({
               disabled={busy}
               onClick={() =>
                 act(
-                  () =>
-                    updateFn({ data: { id: item.id, status: dropped ? "included" : "dropped" } }),
+                  async () => {
+                    await updateFn({
+                      data: { id: item.id, status: dropped ? "included" : "dropped" },
+                    });
+                    // Stories that arrived dropped were never written.
+                    if (dropped && item.needs_enrich) await enrichFn({ data: { id: item.id } });
+                  },
                   dropped ? "Back in the issue" : "Dropped from the issue",
                 )
               }
