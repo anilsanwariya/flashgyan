@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { ExternalLink, Globe, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { clearCaCollectedDay } from "@/lib/current-affairs.functions";
 import {
   deleteCaWatchSite,
   getCaCollection,
@@ -13,6 +14,7 @@ import {
   runCaCollectionTick,
   saveCaWatchSite,
   setCaArticleStatus,
+  setCaArticlesStatus,
   startCaCollection,
   testCaWatchSite,
   type CaArticle,
@@ -20,6 +22,7 @@ import {
 } from "@/lib/ca-collect.functions";
 import { UPLOAD_SECTIONS, type UploadSection } from "@/lib/current-affairs";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -86,6 +89,9 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
   const startFn = useServerFn(startCaCollection);
   const tickFn = useServerFn(runCaCollectionTick);
   const statusFn = useServerFn(setCaArticleStatus);
+  const bulkFn = useServerFn(setCaArticlesStatus);
+  const clearFn = useServerFn(clearCaCollectedDay);
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
   const q = useQuery({
     queryKey: ["caCollection", date],
     queryFn: () => getFn({ data: { date } }),
@@ -93,6 +99,9 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
   const [work, setWork] = useState<string | null>(null);
   const [show, setShow] = useState<"picked" | "other">("picked");
   const stop = useRef(false);
+
+  // A new day starts with nothing selected.
+  useEffect(() => setChosen(new Set()), [date]);
 
   useEffect(() => {
     stop.current = false;
@@ -144,6 +153,39 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
     }
   }
 
+  async function setMany(status: "selected" | "skipped") {
+    const ids = [...chosen];
+    try {
+      await bulkFn({ data: { ids, status } });
+      setChosen(new Set());
+      reload();
+      toast.success(
+        status === "selected"
+          ? `${ids.length} added. Press “Continue” to fetch them now.`
+          : `${ids.length} removed`,
+      );
+    } catch (e) {
+      toast.error(errorText(e, "Failed"));
+    }
+  }
+
+  async function clearDay() {
+    if (
+      !confirm(
+        "Clear everything collected from the websites for this day?\n\nThis deletes the articles found, the sources made from them and the news items written only from them. Sources you uploaded yourself stay. Then press “Collect now” to start fresh.",
+      )
+    )
+      return;
+    try {
+      const r = await clearFn({ data: { date } });
+      setChosen(new Set());
+      reload();
+      toast.success(`Cleared ${r.articles} articles and ${r.sources} sources`);
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't clear"));
+    }
+  }
+
   if (q.error) {
     return (
       <section className="rounded-2xl border border-border bg-card p-4 text-sm">
@@ -162,6 +204,13 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
   const other = articles.filter((a) => a.status === "found" || a.status === "skipped");
   const count = (st: CaArticle["status"]) => articles.filter((a) => a.status === st).length;
   const list = show === "picked" ? picked : other;
+  // Articles already fetched are managed as sources below.
+  const canChoose = (a: CaArticle) => a.status !== "fetched" && a.status !== "parsing";
+  const selectable = list.filter(canChoose);
+  const allChosen = selectable.length > 0 && selectable.every((a) => chosen.has(a.id));
+  const chosenRows = articles.filter((a) => chosen.has(a.id));
+  const chosenToAdd = chosenRows.filter((a) => a.status !== "selected").length;
+  const chosenToRemove = chosenRows.filter((a) => a.status === "selected").length;
 
   return (
     <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
@@ -169,7 +218,9 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
         <h3 className="flex items-center gap-2 font-semibold">
           <Globe className="h-4 w-4" /> Automatic collection from websites
         </h3>
-        {run ? (
+        {run?.started_by === "cleared" ? (
+          <Pill>Cleared</Pill>
+        ) : run ? (
           <Pill
             tone={run.status === "done" ? "good" : run.status === "failed" ? "bad" : "warn"}
             title={run.error ?? ""}
@@ -185,13 +236,24 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
               <RefreshCw className="mr-1 h-4 w-4" /> Continue
             </Button>
           )}
+          {!work && (run || articles.length > 0) && run?.started_by !== "cleared" && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-destructive hover:text-destructive"
+              onClick={clearDay}
+            >
+              <Trash2 className="mr-1 h-4 w-4" /> Clear &amp; start fresh
+            </Button>
+          )}
           {!work && (
             <Button
               size="sm"
-              variant={run ? "outline" : "default"}
+              variant={run && run.started_by !== "cleared" ? "outline" : "default"}
               onClick={() => {
                 if (
                   run &&
+                  run.started_by !== "cleared" &&
                   !confirm(
                     "Read all websites again for this day? Articles already added stay; new ones are picked and added.",
                   )
@@ -200,7 +262,7 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
                 void drive(true);
               }}
             >
-              {run ? "Collect again" : "Collect now"}
+              {run && run.started_by !== "cleared" ? "Collect again" : "Collect now"}
             </Button>
           )}
         </div>
@@ -211,6 +273,11 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
           <span className="text-muted-foreground">
             (keep this page open, or let the schedule finish it)
           </span>
+        </p>
+      ) : run?.started_by === "cleared" ? (
+        <p className="text-xs text-muted-foreground">
+          Cleared {timeIst(run.finished_at ?? run.started_at)}. The schedule won't collect this day
+          again by itself; press “Collect now” to start fresh.
         </p>
       ) : run ? (
         <p className="text-xs text-muted-foreground">
@@ -239,7 +306,10 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
                 <button
                   key={k}
                   type="button"
-                  onClick={() => setShow(k)}
+                  onClick={() => {
+                    setShow(k);
+                    setChosen(new Set());
+                  }}
                   className={`rounded-md px-2.5 py-1 ${show === k ? "bg-muted font-medium" : "text-muted-foreground"}`}
                 >
                   {k === "picked" ? `Picked (${picked.length})` : `Not picked (${other.length})`}
@@ -247,6 +317,45 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
               ))}
             </div>
           </div>
+          {selectable.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <label className="inline-flex items-center gap-2">
+                <Checkbox
+                  checked={allChosen}
+                  onCheckedChange={(v) =>
+                    setChosen(v === true ? new Set(selectable.map((a) => a.id)) : new Set())
+                  }
+                  aria-label="Select all"
+                />
+                Select all
+              </label>
+              {chosen.size > 0 && (
+                <>
+                  <span className="text-muted-foreground">{chosen.size} selected</span>
+                  {chosenToAdd > 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7"
+                      onClick={() => setMany("selected")}
+                    >
+                      Add {chosenToAdd}
+                    </Button>
+                  )}
+                  {chosenToRemove > 0 && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7"
+                      onClick={() => setMany("skipped")}
+                    >
+                      Remove {chosenToRemove}
+                    </Button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
           <ul className="max-h-96 divide-y divide-border overflow-y-auto rounded-xl border border-border text-sm">
             {list.length === 0 && (
               <li className="p-3 text-center text-muted-foreground">Nothing here.</li>
@@ -255,6 +364,22 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
               const st = ARTICLE_STATUS[a.status];
               return (
                 <li key={a.id} className="flex flex-wrap items-center gap-2 p-2.5">
+                  {canChoose(a) ? (
+                    <Checkbox
+                      checked={chosen.has(a.id)}
+                      onCheckedChange={(v) =>
+                        setChosen((cur) => {
+                          const next = new Set(cur);
+                          if (v === true) next.add(a.id);
+                          else next.delete(a.id);
+                          return next;
+                        })
+                      }
+                      aria-label="Select article"
+                    />
+                  ) : (
+                    <span className="w-4" />
+                  )}
                   <Pill tone={st.tone} title={a.reason ?? ""}>
                     {st.label}
                   </Pill>

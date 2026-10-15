@@ -341,6 +341,91 @@ export async function deleteSource(sourceId: string) {
   fail((await from("ca_sources").delete().eq("id", sourceId)).error);
 }
 
+// Bulk changes are refused while the day's issue is waiting to be posted, so
+// the scheduled PDF never differs from what the admin sees.
+async function assertDayEditable(dates: string[]) {
+  if (!dates.length) return;
+  const { data } = await from("ca_issues")
+    .select("period,status")
+    .eq("kind", "daily")
+    .in("period", [...new Set(dates)])
+    .in("status", ["scheduled", "posting"]);
+  const busy = ((data ?? []) as { period: string }[])[0];
+  if (busy) {
+    throw new Error(
+      `The issue for ${formatDate(busy.period, "en")} is scheduled. Cancel the schedule first, then delete.`,
+    );
+  }
+}
+
+// Deletes several sources (and the facts that came only from them).
+export async function deleteSources(ids: string[]): Promise<number> {
+  if (!ids.length) return 0;
+  const { data } = await from("ca_sources").select("id,issue_date").in("id", ids);
+  const rows = (data ?? []) as { id: string; issue_date: string }[];
+  await assertDayEditable(rows.map((r) => r.issue_date));
+  for (const r of rows) await deleteSource(r.id);
+  return rows.length;
+}
+
+// Deletes news items outright (dropping only hides them from the issue).
+export async function deleteItems(ids: string[]): Promise<number> {
+  if (!ids.length) return 0;
+  const { data } = await from("ca_items").select("id,issue_date").in("id", ids);
+  const rows = (data ?? []) as { id: string; issue_date: string }[];
+  await assertDayEditable(rows.map((r) => r.issue_date));
+  if (!rows.length) return 0;
+  fail(
+    (
+      await from("ca_items")
+        .delete()
+        .in(
+          "id",
+          rows.map((r) => r.id),
+        )
+    ).error,
+  );
+  return rows.length;
+}
+
+// Removes everything collected from the watched websites for a day: the
+// articles found, the sources made from them and the facts and items that
+// came only from those sources. The admin's own uploads stay. The next
+// collection reads the websites again from scratch, as if new.
+export async function clearCollectedDay(date: string) {
+  await assertDayEditable([date]);
+  const { data } = await from("ca_sources")
+    .select("id")
+    .eq("issue_date", date)
+    .not("url", "is", null);
+  const sources = ((data ?? []) as { id: string }[]).map((r) => r.id);
+  for (const id of sources) await deleteSource(id);
+  const { count: articles, error } = await from("ca_articles")
+    .delete({ count: "exact" })
+    .eq("issue_date", date);
+  fail(error);
+  // The run is kept, marked as cleared, so the evening schedule doesn't start
+  // again by itself; "Collect now" starts a fresh one.
+  const at = new Date().toISOString();
+  fail(
+    (
+      await from("ca_runs")
+        .update({
+          status: "done",
+          started_by: "cleared",
+          discovered: [],
+          locked_until: null,
+          notified: true,
+          error: null,
+          finished_at: at,
+          updated_at: at,
+        } as never)
+        .eq("issue_date", date)
+    ).error,
+  );
+  return { sources: sources.length, articles: articles ?? 0 };
+}
+
 // ---------- Writing the magazine text ----------
 
 // Subjects in SAATHI's knowledge base, except current affairs itself, so the
