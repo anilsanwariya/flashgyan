@@ -28,6 +28,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { AppDownloadPopup } from "@/components/app-download-popup";
 import { shouldShowAppPrompt } from "@/lib/app-promo";
+import { useStudyKeys } from "@/lib/use-study-keys";
+import { KeyHints } from "@/components/key-hints";
 import { triggerHaptic } from "@/lib/haptics";
 
 const testQO = (id: string) =>
@@ -169,6 +171,18 @@ function TakeTest() {
     }
   }
 
+  useStudyKeys(
+    {
+      a: () => onPick(1),
+      b: () => onPick(2),
+      c: () => onPick(3),
+      d: () => onPick(4),
+      ArrowLeft: () => index > 0 && setIndex(index - 1),
+      ArrowRight: () => index < total - 1 && setIndex(index + 1),
+    },
+    total > 0 && !showDownloadPopup,
+  );
+
   const answeredCount = picks.filter((x) => x !== null).length;
   const isUrgent = timeLeft < 60;
 
@@ -179,7 +193,7 @@ function TakeTest() {
       <div className="absolute top-[40%] -right-[20%] w-[50%] h-[60%] rounded-full bg-blue-500/10 blur-[120px] -z-10 pointer-events-none" />
 
       {/* FIXED Padding pt-4 pb-3 */}
-      <header className="shrink-0 px-5 pt-4 pb-3 max-w-2xl w-full mx-auto backdrop-blur-2xl bg-white/40 dark:bg-black/40 z-50 border-b border-border/20 flex items-center justify-between">
+      <header className="shrink-0 px-5 pt-4 pb-3 max-w-2xl lg:max-w-3xl w-full mx-auto backdrop-blur-2xl bg-white/40 dark:bg-black/40 z-50 border-b border-border/20 flex items-center justify-between">
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <button
@@ -254,7 +268,7 @@ function TakeTest() {
         </AlertDialog>
       </header>
 
-      <main className="flex-1 min-h-0 flex flex-col px-5 pt-4 max-w-2xl w-full mx-auto pb-4">
+      <main className="flex-1 min-h-0 flex flex-col px-5 pt-4 max-w-2xl lg:max-w-3xl w-full mx-auto pb-4">
         <div className="text-center mb-4 shrink-0">
           <span className="inline-block text-[11px] font-bold uppercase tracking-widest text-primary/80 bg-primary/5 px-3 py-1 rounded-full border border-primary/10 backdrop-blur-md">
             {test.name}
@@ -285,7 +299,7 @@ function TakeTest() {
                       )}
                     </div>
 
-                    <p className="text-[20px] md:text-[24px] font-semibold leading-tight text-balance text-foreground/90 tracking-tight">
+                    <p className="text-[20px] md:text-[24px] lg:text-[26px] font-semibold leading-snug text-foreground/90 tracking-tight whitespace-pre-line">
                       {q.question}
                     </p>
 
@@ -329,7 +343,7 @@ function TakeTest() {
                               {String.fromCharCode(64 + n)}
                             </div>
                             <div
-                              className={`text-[16px] font-medium leading-snug flex-1 min-w-0 whitespace-pre-wrap mt-1 ${isPick ? "text-primary" : "text-foreground/90"}`}
+                              className={`text-[16px] lg:text-[17px] font-medium leading-snug flex-1 min-w-0 whitespace-pre-wrap mt-1 ${isPick ? "text-primary" : "text-foreground/90"}`}
                             >
                               {text}
                             </div>
@@ -370,7 +384,7 @@ function TakeTest() {
               type="button"
               onClick={() => setIndex(index - 1)}
               aria-label="Previous question"
-              className="absolute -left-3 top-1/2 -translate-y-1/2 z-10 h-14 w-14 rounded-full bg-white/20 dark:bg-black/20 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] flex items-center justify-center active:scale-90 transition-all"
+              className="absolute -left-3 top-1/2 -translate-y-1/2 z-10 h-14 w-14 rounded-full bg-white/20 dark:bg-black/20 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] hidden sm:flex items-center justify-center active:scale-90 transition-all"
             >
               <ChevronLeft className="h-6 w-6 text-foreground/80 ml-[-2px]" />
             </button>
@@ -380,7 +394,7 @@ function TakeTest() {
               type="button"
               onClick={() => setIndex(index + 1)}
               aria-label="Next question"
-              className="absolute -right-3 top-1/2 -translate-y-1/2 z-10 h-14 w-14 rounded-full bg-white/20 dark:bg-black/20 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] flex items-center justify-center active:scale-90 transition-all"
+              className="absolute -right-3 top-1/2 -translate-y-1/2 z-10 h-14 w-14 rounded-full bg-white/20 dark:bg-black/20 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] hidden sm:flex items-center justify-center active:scale-90 transition-all"
             >
               <ChevronRight className="h-6 w-6 text-foreground/80 mr-[-2px]" />
             </button>
@@ -389,7 +403,7 @@ function TakeTest() {
       </main>
 
       {/* FIXED Padding pb-6 pt-1 */}
-      <footer className="shrink-0 px-5 pb-6 pt-1 max-w-2xl w-full mx-auto relative z-10">
+      <footer className="shrink-0 px-5 pb-6 pt-1 max-w-2xl lg:max-w-3xl w-full mx-auto relative z-10">
         <div
           ref={paletteRef}
           className="flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth py-2 mask-fade-edges"
@@ -417,6 +431,12 @@ function TakeTest() {
             );
           })}
         </div>
+        <KeyHints
+          hints={[
+            ["A B C D", "answer"],
+            ["← →", "move"],
+          ]}
+        />
       </footer>
 
       <AppDownloadPopup

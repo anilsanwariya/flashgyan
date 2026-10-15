@@ -172,7 +172,7 @@ function Result() {
                     </div>
                   </div>
 
-                  <p className="text-[18px] font-bold leading-snug text-foreground/90">{q.question}</p>
+                  <p className="text-[18px] font-bold leading-snug text-foreground/90 whitespace-pre-line">{q.question}</p>
 
                   {q.image_url && (
                     <div className="relative rounded-3xl overflow-hidden border border-border/30 shadow-sm">
@@ -218,17 +218,17 @@ function Result() {
                             </span>
                             <div className="flex gap-2 mt-1.5">
                               {isCorrectOpt && (
-                                <span className="text-[10px] font-bold uppercase tracking-widest text-success">
+                                <span className="text-xs font-bold uppercase tracking-wider text-success">
                                   Correct Answer
                                 </span>
                               )}
                               {isUserOpt && !isCorrectOpt && (
-                                <span className="text-[10px] font-bold uppercase tracking-widest text-destructive">
+                                <span className="text-xs font-bold uppercase tracking-wider text-destructive">
                                   Your Answer
                                 </span>
                               )}
                               {isUserOpt && isCorrectOpt && (
-                                <span className="text-[10px] font-bold uppercase tracking-widest text-success">
+                                <span className="text-xs font-bold uppercase tracking-wider text-success">
                                   (Your Answer)
                                 </span>
                               )}
@@ -254,7 +254,7 @@ function Result() {
                       <div className="mt-4 space-y-4 bg-white/40 dark:bg-black/20 backdrop-blur-xl p-5 rounded-3xl border border-border/30">
                         {q.explanation_sections.map((s, si) => (
                           <div key={si}>
-                            <div className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">
+                            <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5">
                               {s.title}
                             </div>
                             <p className="text-[14px] text-foreground/80 leading-relaxed whitespace-pre-wrap">
@@ -319,7 +319,7 @@ function StatBox({
     <div className={`rounded-[28px] bg-white/50 dark:bg-black/30 border backdrop-blur-3xl p-4 text-center ${glow}`}>
       <div className={`flex justify-center mb-1.5 ${tone}`}>{icon}</div>
       <div className="text-2xl font-extrabold tabular-nums tracking-tight mb-0.5">{value}</div>
-      <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{label}</div>
     </div>
   );
 }

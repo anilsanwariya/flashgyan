@@ -350,7 +350,8 @@ function SaathiChat() {
   }
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Enter while a Hindi keyboard is still composing a word only finishes the word.
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       send();
     }
@@ -367,7 +368,7 @@ function SaathiChat() {
       <div className="pointer-events-none absolute -bottom-40 -right-20 h-[480px] w-[480px] rounded-full bg-secondary/30 blur-[120px]" />
 
       <header className="relative z-10 border-b border-border/20 bg-white/40 dark:bg-black/40 backdrop-blur-2xl sticky top-0">
-        <div className="max-w-3xl mx-auto px-5 py-3 flex items-center gap-3">
+        <div className="max-w-3xl lg:max-w-4xl mx-auto px-5 py-3 flex items-center gap-3">
           <Link
             to="/"
             className="inline-flex items-center justify-center h-10 w-10 rounded-full bg-white/50 dark:bg-black/40 border border-border/30 backdrop-blur-xl text-foreground/70 hover:text-foreground transition-all active:scale-95"
@@ -400,7 +401,7 @@ function SaathiChat() {
       </header>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto relative z-10">
-        <div className="max-w-3xl mx-auto px-5 py-6 space-y-5">
+        <div className="max-w-3xl lg:max-w-4xl mx-auto px-5 py-6 space-y-5">
           {locked ? (
             <div className="text-center py-16">
               <div className="mx-auto h-16 w-16 rounded-[24px] grad-lavender grid place-items-center mb-4">
@@ -459,7 +460,7 @@ function SaathiChat() {
         className="relative z-10 border-t border-border/20 bg-white/50 dark:bg-black/40 backdrop-blur-2xl sticky bottom-0"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
-        <div className="max-w-3xl mx-auto px-5 pt-3 pb-3 space-y-2">
+        <div className="max-w-3xl lg:max-w-4xl mx-auto px-5 pt-3 pb-3 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <SubjectMultiSelect options={subjects} selected={selected} onChange={setSelected} />
             <ModePicker mode={mode} formats={formats} disabled={sending} onChange={setMode} />
@@ -572,7 +573,7 @@ function MainsBadges({ info }: { info: MainsMeta }) {
   const within =
     info.words !== undefined && Math.abs(info.words - info.wordLimit) <= info.wordLimit * 0.1;
   const chip =
-    "text-[11px] rounded-full bg-white/50 dark:bg-black/30 backdrop-blur-xl border border-border/30 px-2.5 py-0.5";
+    "text-xs rounded-full bg-white/50 dark:bg-black/30 backdrop-blur-xl border border-border/30 px-2.5 py-1";
   return (
     <div className="mb-2 flex flex-wrap items-center gap-1.5">
       <span className={`${chip} font-medium text-foreground`}>
@@ -768,7 +769,7 @@ function MessageBubble({
   if (msg.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-[24px] bg-primary/15 text-foreground px-4 py-2.5 whitespace-pre-wrap backdrop-blur-xl border border-primary/20 shadow-[0_4px_16px_rgba(var(--primary),0.08)]">
+        <div className="max-w-[80%] rounded-[24px] bg-primary/15 text-foreground px-4 py-2.5 lg:text-[17px] whitespace-pre-wrap backdrop-blur-xl border border-primary/20 shadow-[0_4px_16px_rgba(var(--primary),0.08)]">
           {msg.content}
         </div>
       </div>
@@ -833,7 +834,7 @@ function MessageBubble({
       </div>
       <div className="min-w-0 flex-1">
         {msg.mains && msg.status === "done" && !msg.noAnswer && <MainsBadges info={msg.mains} />}
-        <div className="prose prose-sm dark:prose-invert max-w-none text-foreground rounded-[24px] bg-white/50 dark:bg-black/30 backdrop-blur-xl border border-border/30 px-4 py-3 prose-headings:font-bold prose-table:text-sm prose-td:border prose-th:border prose-td:px-2 prose-th:px-2 prose-td:py-1 prose-th:py-1">
+        <div className="prose prose-sm lg:text-base dark:prose-invert max-w-none text-foreground rounded-[24px] bg-white/50 dark:bg-black/30 backdrop-blur-xl border border-border/30 px-4 py-3 prose-headings:font-bold prose-table:text-sm prose-td:border prose-th:border prose-td:px-2 prose-th:px-2 prose-td:py-1 prose-th:py-1">
           {streaming && !msg.content ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground not-prose">
               <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
@@ -853,7 +854,7 @@ function MessageBubble({
                 key={s.title}
                 type="button"
                 onClick={() => setOpenSource(s)}
-                className="text-[11px] rounded-full bg-white/50 dark:bg-black/30 backdrop-blur-xl border border-border/30 text-muted-foreground hover:text-foreground px-2.5 py-0.5 transition-colors"
+                className="text-xs rounded-full bg-white/50 dark:bg-black/30 backdrop-blur-xl border border-border/30 text-muted-foreground hover:text-foreground px-3 py-1.5 transition-colors"
                 title={`${s.subject} — tap to read the source`}
               >
                 📚 {s.title}
@@ -890,7 +891,7 @@ function MessageBubble({
                 type="button"
                 onClick={startQuiz}
                 disabled={quizLoading}
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline disabled:opacity-60"
+                className="inline-flex min-h-9 items-center gap-1.5 text-[13px] font-medium text-primary hover:underline disabled:opacity-60"
               >
                 <GraduationCap className="h-3.5 w-3.5" />
                 {quizLoading ? "Making your quiz…" : "Quiz me on this"}
@@ -900,7 +901,7 @@ function MessageBubble({
               {...(deck
                 ? { to: "/decks/$deckId" as const, params: { deckId: deck.id } }
                 : { to: "/flashcards" as const })}
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+              className="inline-flex min-h-9 items-center gap-1.5 text-[13px] font-medium text-primary hover:underline"
             >
               <Layers className="h-3.5 w-3.5" />
               {deck ? `Practise “${deck.name}” flashcards` : "Practise this with flashcards"}
@@ -936,7 +937,7 @@ function MessageBubble({
                 type="button"
                 disabled={busy}
                 onClick={() => onAsk(q)}
-                className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-left text-xs text-foreground hover:bg-primary/10 disabled:opacity-50 transition-colors"
+                className="rounded-full border border-primary/30 bg-primary/5 px-3.5 py-2 text-left text-[13px] text-foreground hover:bg-primary/10 disabled:opacity-50 transition-colors"
               >
                 {q}
               </button>
@@ -1041,7 +1042,7 @@ function IconButton({
       disabled={disabled}
       aria-label={label}
       title={label}
-      className={`h-7 w-7 grid place-items-center rounded-full transition-colors ${
+      className={`h-9 w-9 grid place-items-center rounded-full transition-colors ${
         active
           ? "text-primary bg-primary/10"
           : "text-muted-foreground hover:text-foreground hover:bg-muted/60"

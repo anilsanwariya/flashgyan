@@ -413,7 +413,7 @@ export function BotCommandsPanel() {
         title="Commands"
         hint="Commands users type, like /notes. Changes reach the bot within a minute. Publish the menu to update the list users see when they type /."
         action={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={publish} disabled={busy}>
               <RefreshCw className="h-4 w-4" /> Publish menu to Telegram
             </Button>
@@ -434,7 +434,7 @@ export function BotCommandsPanel() {
                 <tr>
                   <th className="px-3 py-2">Command</th>
                   <th className="px-3 py-2">Does</th>
-                  <th className="px-3 py-2">Where</th>
+                  <th className="hidden px-3 py-2 sm:table-cell">Where</th>
                   <th className="px-3 py-2 w-24" />
                 </tr>
               </thead>
@@ -452,8 +452,13 @@ export function BotCommandsPanel() {
                       {c.action === "builtin"
                         ? BUILTINS[c.builtin ?? "study"]
                         : (c.response_text || "(photo/PDF)").slice(0, 80)}
+                      <div className="mt-1 text-muted-foreground sm:hidden">
+                        {c.scope === "all" ? "Chats + groups" : "Chats"}
+                        {!c.show_in_menu && " · hidden from menu"}
+                        {!c.enabled && " · off"}
+                      </div>
                     </td>
-                    <td className="px-3 py-2 text-xs">
+                    <td className="hidden px-3 py-2 text-xs sm:table-cell">
                       {c.scope === "all" ? "Chats + groups" : "Chats"}
                       {!c.show_in_menu && " · hidden from menu"}
                       {!c.enabled && " · off"}

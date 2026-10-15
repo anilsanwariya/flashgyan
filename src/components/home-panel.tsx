@@ -105,14 +105,14 @@ export function HomePanel() {
     <div className="space-y-8">
       {/* Banners */}
       <section className="rounded-2xl border border-border bg-card p-4 space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="font-semibold">Ad Banner Carousel</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
               2:1 ratio recommended. Auto-rotates on the home page.
             </p>
           </div>
-          <label className="inline-flex items-center gap-2 cursor-pointer rounded-md border border-input bg-background px-3 h-9 text-sm hover:bg-accent">
+          <label className="inline-flex shrink-0 items-center gap-2 cursor-pointer rounded-md border border-input bg-background px-3 h-9 text-sm hover:bg-accent">
             {uploadMut.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (

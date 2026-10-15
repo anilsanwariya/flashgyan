@@ -334,11 +334,11 @@ export function SaathiPanel() {
     <div className="space-y-6">
 
       {!isEditing && (
-        <div className="inline-flex rounded-lg border border-border p-0.5 bg-muted/40">
+        <div className="flex w-fit max-w-full overflow-x-auto no-scrollbar rounded-lg border border-border p-0.5 bg-muted/40">
           <button
             type="button"
             onClick={() => setMode("content")}
-            className={`px-3 py-1.5 text-sm rounded-md ${
+            className={`shrink-0 whitespace-nowrap px-3 py-1.5 text-sm rounded-md ${
               mode === "content" ? "bg-background shadow-sm font-medium" : "text-muted-foreground"
             }`}
           >
@@ -347,7 +347,7 @@ export function SaathiPanel() {
           <button
             type="button"
             onClick={() => setMode("qna")}
-            className={`px-3 py-1.5 text-sm rounded-md ${
+            className={`shrink-0 whitespace-nowrap px-3 py-1.5 text-sm rounded-md ${
               mode === "qna" ? "bg-background shadow-sm font-medium" : "text-muted-foreground"
             }`}
           >
@@ -356,7 +356,7 @@ export function SaathiPanel() {
           <button
             type="button"
             onClick={() => setMode("gaps")}
-            className={`px-3 py-1.5 text-sm rounded-md ${
+            className={`shrink-0 whitespace-nowrap px-3 py-1.5 text-sm rounded-md ${
               mode === "gaps" ? "bg-background shadow-sm font-medium" : "text-muted-foreground"
             }`}
           >
@@ -365,7 +365,7 @@ export function SaathiPanel() {
           <button
             type="button"
             onClick={() => setMode("test")}
-            className={`px-3 py-1.5 text-sm rounded-md ${
+            className={`shrink-0 whitespace-nowrap px-3 py-1.5 text-sm rounded-md ${
               mode === "test" ? "bg-background shadow-sm font-medium" : "text-muted-foreground"
             }`}
           >
@@ -374,7 +374,7 @@ export function SaathiPanel() {
           <button
             type="button"
             onClick={() => setMode("evals")}
-            className={`px-3 py-1.5 text-sm rounded-md ${
+            className={`shrink-0 whitespace-nowrap px-3 py-1.5 text-sm rounded-md ${
               mode === "evals" ? "bg-background shadow-sm font-medium" : "text-muted-foreground"
             }`}
           >
@@ -383,7 +383,7 @@ export function SaathiPanel() {
           <button
             type="button"
             onClick={() => setMode("health")}
-            className={`px-3 py-1.5 text-sm rounded-md ${
+            className={`shrink-0 whitespace-nowrap px-3 py-1.5 text-sm rounded-md ${
               mode === "health" ? "bg-background shadow-sm font-medium" : "text-muted-foreground"
             }`}
           >
