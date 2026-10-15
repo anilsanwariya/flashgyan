@@ -3,12 +3,16 @@
 // of these slots; anything that fits no slot (quotes, ceremony details, vague
 // claims) is thrown away before the story is written.
 //
-// Checked against RAS Prelims 2024 (held 2 Feb 2025): about 55 of the 150
-// questions were current affairs or recent data, and about 24 of those were
-// about Rajasthan. What they asked most: where something is (district, place,
-// host), numbers and targets with their years, policy validity dates, who
-// built, funded, inaugurated or chaired something, edition and "first" facts,
-// ranks, and eligibility.
+// Checked against RPSC papers:
+// - RAS Prelims 2024 (held 2 Feb 2025): about 55 of 150 questions were current
+//   affairs or recent data, about 24 of them about Rajasthan.
+// - Sub-Inspector GK & GS (held 20 Sep 2026): about 42 of 100, about 20 about
+//   Rajasthan; the newest ones were from 2 months before the exam, and 8 came
+//   from the Economic Survey, Rajasthan's Economic Review and Budget.
+// What they asked most: where something is (district, place, host), numbers
+// and targets with their years, policy validity dates, who built, funded,
+// inaugurated or chaired something, edition and "first" facts, ranks,
+// eligibility and benefit amounts, full forms, and MoU or contract partners.
 
 export type FactSlot = {
   id: string;
@@ -31,16 +35,19 @@ export const STORY_TYPES: StoryType[] = [
   {
     id: "scheme",
     label: "Government scheme, mission, programme or project (central or Rajasthan)",
-    maxFacts: 6,
+    maxFacts: 7,
     slots: [
       slot("name", "official name and phase"),
+      slot("fullform", "full form of its acronym"),
       slot("by", "ministry, department or state that runs it"),
       slot("funded", "funding or assisting agency (JICA, World Bank, ADB…)"),
       slot("launched", "launch date or place"),
       slot("aim", "objective"),
       slot("who", "who is eligible or benefits, with the criteria"),
       slot("reach", "coverage: households, districts, sanctuaries…", true),
-      slot("money", "subsidy, loan, outlay or benefit amount", true),
+      slot("money", "subsidy, loan, pension, outlay or benefit amount (per category)", true),
+      slot("districts", "what it assigns to particular districts", true),
+      slot("impact", "results so far, with numbers", true),
       slot("feature", "a key feature", true),
     ],
   },
@@ -79,14 +86,15 @@ export const STORY_TYPES: StoryType[] = [
       slot("by", "who publishes it"),
       slot("edition", "edition or year"),
       slot("india", "India's rank or score, out of how many"),
-      slot("rajasthan", "Rajasthan's rank or score"),
+      slot("rajasthan", "Rajasthan's rank, score or category, overall or in a sub-index", true),
       slot("top", "top or bottom country or state", true),
       slot("compare", "comparison with neighbours or the last edition", true),
     ],
   },
   {
     id: "economy",
-    label: "Economic data, budget, Economic Review figures, banking or trade",
+    label:
+      "Economic data: Economic Survey, Rajasthan Economic Review and Budget figures, banking, trade, poverty",
     maxFacts: 5,
     slots: [
       slot("indicator", "what is measured or decided"),
@@ -94,7 +102,7 @@ export const STORY_TYPES: StoryType[] = [
       slot("change", "change from the previous year"),
       slot("compare", "limit or benchmark it is compared with (FRBM limit…)", true),
       slot("rank", "state's rank or share in India"),
-      slot("by", "released or decided by"),
+      slot("by", "released or decided by (Economic Survey, Economic Review, RBI, World Bank…)"),
       slot("period", "year or period it covers"),
     ],
   },
@@ -114,10 +122,12 @@ export const STORY_TYPES: StoryType[] = [
   },
   {
     id: "institution",
-    label: "New institution, app, portal or body (launched, renamed or replacing another)",
+    label:
+      "New institution, app, portal, platform or body (launched, renamed or replacing another), or its motto",
     maxFacts: 4,
     slots: [
       slot("name", "name"),
+      slot("fullform", "full form of its acronym"),
       slot("by", "launched or set up by"),
       slot("replaces", "what it replaces or was renamed from"),
       slot("aim", "what it does"),
@@ -163,14 +173,16 @@ export const STORY_TYPES: StoryType[] = [
   },
   {
     id: "sports",
-    label: "Sports result, championship, host or medal tally",
-    maxFacts: 4,
+    label: "Sports or olympiad result, championship, host, medal tally or tournament award",
+    maxFacts: 5,
     slots: [
       slot("event", "event and edition"),
       slot("host", "host city, state or country"),
       slot("winner", "winner, their sport or medal won", true),
       slot("tally", "medal tally of India or Rajasthan", true),
       slot("scale", "number of sports, disciplines or teams"),
+      slot("date", "dates"),
+      slot("mascot", "mascot or theme"),
       slot("record", "record or first"),
     ],
   },
@@ -198,17 +210,20 @@ export const STORY_TYPES: StoryType[] = [
       slot("parties", "countries or forces involved"),
       slot("where", "where it takes place"),
       slot("kind", "what kind it is and what it does"),
+      slot("duration", "duration in days"),
+      slot("contract", "contract partners or firms", true),
       slot("first", "edition, first or record"),
     ],
   },
   {
     id: "science",
-    label: "Space, science, technology, agriculture research or health",
+    label: "Space, science, technology, new crop variety, agriculture research or health",
     maxFacts: 6,
     slots: [
       slot("name", "mission, discovery, technology, breed or disease"),
-      slot("by", "agency or institution that built or runs it"),
-      slot("where", "location, with altitude or other notable figure"),
+      slot("by", "agency or institution that built, developed or runs it"),
+      slot("partner", "collaborating institution or company", true),
+      slot("where", "location, with altitude or other notable figure, or regions it suits"),
       slot("inaugurated", "who inaugurated or launched it"),
       slot("aim", "purpose"),
       slot("date", "launch or announcement date"),
@@ -218,7 +233,7 @@ export const STORY_TYPES: StoryType[] = [
   },
   {
     id: "environment",
-    label: "Environment, wildlife, protected or conservation area, or GI tag",
+    label: "Environment, wildlife, breeding centre, protected or conservation area, or GI tag",
     maxFacts: 5,
     slots: [
       slot("name", "species, site, product or phenomenon"),
@@ -226,8 +241,32 @@ export const STORY_TYPES: StoryType[] = [
       slot("status", "status or recognition (IUCN, Ramsar, GI, tiger reserve…)"),
       slot("rank", "number in the series (54th tiger reserve) or size rank"),
       slot("size", "area or size"),
+      slot("total", "new total in India or Rajasthan (e.g. Ramsar wetland cities)"),
       slot("feature", "a notable feature", true),
       slot("by", "who declared or found it"),
+    ],
+  },
+  {
+    id: "agreement",
+    label: "MoU or contract between government bodies, companies or foundations",
+    maxFacts: 4,
+    slots: [
+      slot("parties", "who signed it"),
+      slot("aim", "purpose"),
+      slot("role", "a party's role (e.g. technical support unit)", true),
+      slot("date", "date signed"),
+      slot("money", "value", true),
+    ],
+  },
+  {
+    id: "book",
+    label: "Book released or authored",
+    maxFacts: 3,
+    slots: [
+      slot("book", "title"),
+      slot("author", "author(s)"),
+      slot("released", "released by and date"),
+      slot("theme", "subject"),
     ],
   },
   {
@@ -243,11 +282,12 @@ export const STORY_TYPES: StoryType[] = [
   },
   {
     id: "person",
-    label: "Person in news or obituary",
-    maxFacts: 3,
+    label: "Person in news, achievement or obituary",
+    maxFacts: 4,
     slots: [
       slot("person", "who"),
       slot("known", "what they are known for", true),
+      slot("feat", "first, record or selection (e.g. captain of India's team)", true),
       slot("from", "home state or district"),
     ],
   },
@@ -285,8 +325,8 @@ export const DROP_FACTS = [
 ];
 
 export const IMPORTANCE_GUIDE = `RPSC asks a lot about Rajasthan, including small items, so Rajasthan news with a name, place or number is never 1.
-3 = very likely: Rajasthan government schemes, policies (their targets and validity), budget and Economic Review figures, new industrial areas, parks and centres of excellence with their districts, conservation reserves and protected areas, state appointments, by-election data and Rajasthan's medals; national flagship schemes, new laws, constitutional bodies' decisions and Supreme Court judgments; indices and reports giving India's or Rajasthan's rank; Nobel, Bharat Ratna, Padma and national awards; heads of national bodies; DRDO, ISRO and science firsts ("India's first", "world's highest"); India's summits, dialogues and agreements; new tiger reserves, Ramsar sites and GI tags.
-2 = possible: any other Rajasthan news with a name, place or number (apps, portals, model villages, city bodies' initiatives); other central schemes, reports, apps and decisions; foreign elections and international summits; Khelo India, National Games, national championships and world titles; defence exercises; important days.
+3 = very likely: Rajasthan government schemes, policies (their targets and validity), Budget announcements with their places, Economic Survey and Rajasthan Economic Review figures, Rajasthan people's and institutions' firsts, records, awards and India-team selections, new industrial areas, parks and centres of excellence with their districts, conservation reserves and protected areas, state appointments, by-election data and Rajasthan's medals; national flagship schemes, new laws, constitutional bodies' decisions and Supreme Court judgments; indices and reports giving India's or Rajasthan's rank; Nobel, Bharat Ratna, Padma and national awards; heads of national bodies; DRDO, ISRO and science firsts ("India's first", "world's highest"); India's summits, dialogues and agreements; new tiger reserves, Ramsar sites and GI tags.
+2 = possible: any other Rajasthan news with a name, place or number (apps, portals, model villages, city bodies' initiatives, MoUs signed by state departments); other central schemes, reports, apps and decisions; foreign elections and international summits; Khelo India, National Games, national championships, world and junior world titles, olympiads and major tournaments' awards; defence exercises and contracts; books released by top dignitaries; important days.
 1 = unlikely: minor tournaments with no Indian or Rajasthan winner, routine appointments below the head of a body, follow-ups with nothing new.`;
 
 // The blueprint as prompt text.
