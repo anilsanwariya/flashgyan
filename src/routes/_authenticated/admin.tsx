@@ -1,5 +1,5 @@
 import { createFileRoute, useRouter, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
@@ -105,6 +105,7 @@ import { CurrentAffairsPanel, type CaSection } from "@/components/current-affair
 import { HomePanel } from "@/components/home-panel";
 import { BotManagerPanel, type BotSection } from "@/components/bot-manager-panel";
 import { AdminShell, isAdminSection, type AdminSectionId } from "@/components/admin-shell";
+import { setAdminDevice } from "@/lib/pwa";
 
 
 
@@ -193,7 +194,13 @@ function Admin() {
     window.scrollTo({ top: 0 });
   };
 
+  // The public site shows an Admin button on devices where the admin is signed in.
+  useEffect(() => {
+    if (adminQ.data) setAdminDevice(adminQ.data.isAdmin);
+  }, [adminQ.data]);
+
   async function onSignOut() {
+    setAdminDevice(false);
     await qc.cancelQueries();
     qc.clear();
     await supabase.auth.signOut();

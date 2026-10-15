@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f7f5ed" />
+    <title>You're offline · FlashGyan</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 24px;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Devanagari", sans-serif;
+        background: #f7f5ed; color: #1f2937; text-align: center;
+      }
+      @media (prefers-color-scheme: dark) { body { background: #111018; color: #e5e7eb; } p { color: #9ca3af !important; } }
+      .card { max-width: 340px; }
+      img { width: 72px; height: 72px; }
+      h1 { margin: 16px 0 4px; font-size: 22px; }
+      p { margin: 6px 0; color: #6b7280; line-height: 1.5; }
+      button {
+        margin-top: 18px; border: 0; border-radius: 999px; padding: 12px 22px; font-size: 15px;
+        font-weight: 600; color: #fff; background: #6d28d9; cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <img src="/icons/icon-192x192.png" alt="" />
+      <h1>You're offline</h1>
+      <p>Check your internet connection and try again.</p>
+      <p lang="hi">आप ऑफ़लाइन हैं। इंटरनेट कनेक्शन जाँचकर फिर से कोशिश करें।</p>
+      <button type="button" onclick="location.reload()">Try again · फिर से कोशिश करें</button>
+    </div>
+    <script>
+      window.addEventListener("online", () => location.reload());
+    </script>
+  </body>
+</html>
