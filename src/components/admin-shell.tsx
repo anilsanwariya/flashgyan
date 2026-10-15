@@ -304,9 +304,9 @@ export function AdminShell({
   return (
     <div className="min-h-dvh bg-background lg:grid lg:grid-cols-[16rem_1fr]">
       {/* Desktop sidebar */}
-      <aside className="hidden lg:flex lg:sticky lg:top-0 lg:h-dvh lg:flex-col lg:gap-5 lg:overflow-y-auto lg:border-r lg:border-border lg:bg-card/60 lg:px-3 lg:py-5">
+      <aside className="hidden lg:flex lg:sticky lg:top-0 lg:h-dvh lg:flex-col lg:gap-5 lg:border-r lg:border-border lg:bg-card/60 lg:px-3 lg:py-5">
         <Brand />
-        <div className="flex-1">
+        <div className="-mx-3 min-h-0 flex-1 overflow-y-auto px-3">
           <NavList current={current.id} onSelect={onNavigate} />
         </div>
         <FooterLinks onSignOut={onSignOut} />

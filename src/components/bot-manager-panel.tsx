@@ -298,7 +298,7 @@ function FlashcardUploadPanel() {
           )}
           <Button onClick={onImport} disabled={busy || !parsed}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
-            Import to bot_flashcards
+            Import cards
           </Button>
         </div>
       )}
@@ -429,7 +429,7 @@ function McqUploadPanel() {
           <Input placeholder="Topic" value={newTopic} onChange={(e) => setNewTopic(e.target.value)} disabled={busy} />
         </div>
         <Button variant="secondary" onClick={onCreateTest} disabled={busy}>
-          Create bot_mcq_test
+          Create bot test
         </Button>
       </div>
 
@@ -458,7 +458,7 @@ function McqUploadPanel() {
         />
         <Button onClick={onUpload} disabled={busy || !file || !testId}>
           {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
-          Import to bot_mcq_questions
+          Import questions
         </Button>
       </div>
     </section>
