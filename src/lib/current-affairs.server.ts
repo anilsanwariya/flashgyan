@@ -30,6 +30,8 @@ import {
   parseChanges,
   parseContent,
   parseExtracted,
+  removePoint,
+  shiftChanges,
   splitSource,
   storyText,
   type Bi,
@@ -714,6 +716,41 @@ export async function updateItem(
     .single();
   fail(error);
   return data as unknown as CaItem;
+}
+
+// Deletes one key point together with its fact (both languages).
+// The point is named by its fact's text, so several quick deletes on the same
+// story can't hit the wrong point after the list shifts.
+export async function deletePoint(
+  id: string,
+  factText: string,
+): Promise<{ item: CaItem; visualShowsIt: boolean }> {
+  const { data, error } = await from("ca_items").select(ITEM_COLS).eq("id", id).single();
+  fail(error);
+  const item = data as unknown as CaItem;
+  const index = item.facts.findIndex((f) => f.text === factText);
+  if (index < 0) throw new Error("That point was already removed");
+  const r = removePoint(item.facts, item.content, index);
+  const { data: saved, error: uErr } = await from("ca_items")
+    .update({ facts: r.facts, content: r.content, updated_at: new Date().toISOString() } as never)
+    .eq("id", id)
+    .select(ITEM_COLS)
+    .single();
+  fail(uErr);
+  const { data: pending } = await from("ca_corrections")
+    .select("id,changes")
+    .eq("item_id", id)
+    .eq("status", "pending");
+  for (const c of (pending ?? []) as Pick<CaCorrection, "id" | "changes">[]) {
+    const changes = shiftChanges(c.changes, index);
+    const q = changes
+      ? from("ca_corrections")
+          .update({ changes } as never)
+          .eq("id", c.id)
+      : from("ca_corrections").delete().eq("id", c.id);
+    fail((await q).error);
+  }
+  return { item: saved as unknown as CaItem, visualShowsIt: r.visualShowsIt };
 }
 
 export async function decideCorrection(id: string, approve: boolean) {
