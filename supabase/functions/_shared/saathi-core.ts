@@ -106,57 +106,60 @@ function gatewayError(status: number, body: string): SaathiAiError {
   return new SaathiAiError(`AI request failed (${status}): ${body.slice(0, 300)}`, status);
 }
 
-export async function saathiEmbed(apiKey: string, text: string): Promise<number[]> {
-  const res = await fetch(`${SAATHI_AI_GATEWAY}/embeddings`, {
+// Embeddings run directly on Google AI Studio with the project's GEMINI_API_KEY
+// (same model + 1536 dims as the stored vectors, so no re-index is needed).
+// The apiKey (Lovable key) argument is kept for existing callers.
+const GOOGLE_EMBED_BASE =
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001";
+
+function geminiKey(): string {
+  const g = globalThis as {
+    process?: { env?: Record<string, string | undefined> };
+    Deno?: { env: { get(k: string): string | undefined } };
+  };
+  const key = g.process?.env?.GEMINI_API_KEY ?? g.Deno?.env.get("GEMINI_API_KEY");
+  if (!key) throw new SaathiAiError("GEMINI_API_KEY is not configured", 500);
+  return key;
+}
+
+const embedReq = (text: string) => ({
+  model: "models/gemini-embedding-001",
+  content: { parts: [{ text }] },
+  outputDimensionality: SAATHI_EMBED_DIMS,
+});
+
+export async function saathiEmbed(_apiKey: string, text: string): Promise<number[]> {
+  const res = await fetch(`${GOOGLE_EMBED_BASE}:embedContent`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Lovable-API-Key": apiKey },
-    body: JSON.stringify({ model: SAATHI_EMBED_MODEL, input: text, dimensions: SAATHI_EMBED_DIMS }),
+    headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey() },
+    body: JSON.stringify(embedReq(text)),
   });
   if (!res.ok) throw gatewayError(res.status, await res.text());
-  const json = (await res.json()) as { data: { embedding: number[] }[] };
-  return json.data[0].embedding;
+  const json = (await res.json()) as { embedding: { values: number[] } };
+  return json.embedding.values;
 }
 
 const EMBED_BATCH = 64;
 
-// Embeds many texts with one request per batch, keeping input order. If the gateway
-// rejects batched input, falls back to a few single requests at a time.
 export async function saathiEmbedMany(apiKey: string, texts: string[]): Promise<number[][]> {
   const out: number[][] = [];
   for (let i = 0; i < texts.length; i += EMBED_BATCH) {
-    const batch = texts.slice(i, i + EMBED_BATCH);
-    out.push(...(await embedBatch(apiKey, batch)));
+    out.push(...(await embedBatch(apiKey, texts.slice(i, i + EMBED_BATCH))));
   }
   return out;
 }
 
-async function embedBatch(apiKey: string, batch: string[]): Promise<number[][]> {
-  const res = await fetch(`${SAATHI_AI_GATEWAY}/embeddings`, {
+async function embedBatch(_apiKey: string, batch: string[]): Promise<number[][]> {
+  const res = await fetch(`${GOOGLE_EMBED_BASE}:batchEmbedContents`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Lovable-API-Key": apiKey },
-    body: JSON.stringify({
-      model: SAATHI_EMBED_MODEL,
-      input: batch,
-      dimensions: SAATHI_EMBED_DIMS,
-    }),
+    headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey() },
+    body: JSON.stringify({ requests: batch.map(embedReq) }),
   });
-  if (res.status === 429 || res.status === 402) throw gatewayError(res.status, await res.text());
-  if (res.ok) {
-    const json = (await res.json()) as { data?: { embedding: number[]; index?: number }[] };
-    const data = json.data ?? [];
-    if (data.length === batch.length) {
-      return data
-        .map((d, i) => ({ i: d.index ?? i, e: d.embedding }))
-        .sort((a, b) => a.i - b.i)
-        .map((d) => d.e);
-    }
-  }
-  const single: number[][] = new Array(batch.length);
-  for (let i = 0; i < batch.length; i += 4) {
-    const part = await Promise.all(batch.slice(i, i + 4).map((t) => saathiEmbed(apiKey, t)));
-    part.forEach((e, j) => (single[i + j] = e));
-  }
-  return single;
+  if (!res.ok) throw gatewayError(res.status, await res.text());
+  const json = (await res.json()) as { embeddings?: { values: number[] }[] };
+  const data = json.embeddings ?? [];
+  if (data.length !== batch.length) throw new SaathiAiError("Embedding count mismatch", 500);
+  return data.map((d) => d.values);
 }
 
 // Text answers run on Claude through the project's own Anthropic key. The apiKey
