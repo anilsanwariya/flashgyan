@@ -31,6 +31,8 @@ import {
 } from "@/lib/session-store";
 import { AppDownloadPopup } from "@/components/app-download-popup";
 import { shouldShowAppPrompt } from "@/lib/app-promo";
+import { useStudyKeys } from "@/lib/use-study-keys";
+import { KeyHints } from "@/components/key-hints";
 
 const testQO = (id: string) =>
   queryOptions({
@@ -59,7 +61,9 @@ export const Route = createFileRoute("/practice-mcq/$testId")({
   errorComponent: ({ error }) => (
     <div className="min-h-dvh grid place-items-center p-6 text-center bg-background">
       <div>
-        <p className="text-destructive font-semibold">{error instanceof Error ? error.message : "The practice set could not be loaded."}</p>
+        <p className="text-destructive font-semibold">
+          {error instanceof Error ? error.message : "The practice set could not be loaded."}
+        </p>
         <Link to="/" className="text-primary mt-2 inline-block font-semibold">
           Back home
         </Link>
@@ -131,6 +135,19 @@ function PracticeMcq() {
     reviewRef.current[qId] = rating;
     saveReview(testId, reviewRef.current);
   }
+
+  useStudyKeys(
+    {
+      a: () => onPick(1),
+      b: () => onPick(2),
+      c: () => onPick(3),
+      d: () => onPick(4),
+      Enter: goNext,
+      ArrowLeft: goPrev,
+      ArrowRight: () => index < total - 1 && goNext(),
+    },
+    total > 0 && !showDownloadPopup,
+  );
 
   if (total === 0) {
     return (
@@ -272,7 +289,7 @@ function PracticeMcq() {
       <div className="absolute -top-[20%] -left-[10%] w-[60%] h-[50%] rounded-full bg-primary/10 blur-[100px] -z-10 pointer-events-none" />
       <div className="absolute top-[40%] -right-[20%] w-[50%] h-[60%] rounded-full bg-blue-500/10 blur-[120px] -z-10 pointer-events-none" />
 
-      <header className="shrink-0 px-5 pt-4 pb-3 max-w-2xl w-full mx-auto backdrop-blur-2xl bg-white/40 dark:bg-black/40 sticky top-0 z-50 border-b border-border/20">
+      <header className="shrink-0 px-5 pt-4 pb-3 max-w-2xl lg:max-w-3xl w-full mx-auto backdrop-blur-2xl bg-white/40 dark:bg-black/40 sticky top-0 z-50 border-b border-border/20">
         <div className="flex items-center justify-between mt-2">
           <AlertDialog>
             <AlertDialogTrigger asChild>
@@ -289,7 +306,8 @@ function PracticeMcq() {
                   End Session?
                 </AlertDialogTitle>
                 <AlertDialogDescription className="text-[14px] text-center text-muted-foreground mt-1.5 leading-snug">
-                  You can keep going, or end now and see your summary. Unanswered questions stay unanswered.
+                  You can keep going, or end now and see your summary. Unanswered questions stay
+                  unanswered.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter className="flex-col gap-3 pt-4 sm:space-x-0">
@@ -330,7 +348,7 @@ function PracticeMcq() {
         </div>
       </header>
 
-      <main className="flex-1 min-h-0 flex flex-col px-5 pt-6 max-w-2xl w-full mx-auto pb-4">
+      <main className="flex-1 min-h-0 flex flex-col px-5 pt-6 max-w-2xl lg:max-w-3xl w-full mx-auto pb-4">
         <div className="w-full h-full relative [perspective:1200px]">
           <AnimatePresence mode="wait">
             <motion.div
@@ -346,13 +364,17 @@ function PracticeMcq() {
               >
                 <ScrollArea className="h-full flex-1">
                   <div className="p-7 md:p-8 space-y-6">
-                    <p className="text-[20px] md:text-[24px] font-semibold leading-snug text-foreground/90 tracking-tight whitespace-pre-line">
+                    <p className="text-[20px] md:text-[24px] lg:text-[26px] font-semibold leading-snug text-foreground/90 tracking-tight whitespace-pre-line">
                       {q.question}
                     </p>
 
                     {q.image_url && (
                       <div className="relative rounded-[24px] overflow-hidden border border-border/30 shadow-sm">
-                        <img src={q.image_url} alt="" className="w-full aspect-[2/1] object-cover" />
+                        <img
+                          src={q.image_url}
+                          alt=""
+                          className="w-full aspect-[2/1] object-cover"
+                        />
                       </div>
                     )}
 
@@ -383,7 +405,8 @@ function PracticeMcq() {
                           if (isAnswer) {
                             baseCls += "border-success/40 bg-success/15 text-foreground shadow-sm";
                           } else if (isPick) {
-                            baseCls += "border-destructive/40 bg-destructive/15 text-foreground shadow-sm";
+                            baseCls +=
+                              "border-destructive/40 bg-destructive/15 text-foreground shadow-sm";
                           } else {
                             baseCls += "opacity-50 border-border/20 bg-background/20";
                           }
@@ -414,7 +437,7 @@ function PracticeMcq() {
                                 String.fromCharCode(64 + n)
                               )}
                             </div>
-                            <div className="text-[16px] font-medium leading-snug flex-1 min-w-0 whitespace-pre-wrap mt-1 text-foreground/90">
+                            <div className="text-[16px] lg:text-[17px] font-medium leading-snug flex-1 min-w-0 whitespace-pre-wrap mt-1 text-foreground/90">
                               {text}
                             </div>
                           </button>
@@ -456,7 +479,7 @@ function PracticeMcq() {
                                 <div className="text-[11px] font-semibold uppercase tracking-widest text-primary/70 mb-2">
                                   {s.title}
                                 </div>
-                                <p className="text-[15px] text-foreground/70 leading-relaxed whitespace-pre-wrap">
+                                <p className="text-[15px] lg:text-base text-foreground/70 leading-relaxed whitespace-pre-wrap">
                                   {s.body}
                                 </p>
                               </div>
@@ -494,25 +517,34 @@ function PracticeMcq() {
         </div>
       </main>
 
-      <footer className="shrink-0 px-5 pb-6 pt-2 max-w-2xl w-full mx-auto relative z-10 mb-2 flex gap-2">
-        {/* On phones the side arrows are hidden, so "previous" lives here. */}
-        {index > 0 && (
+      <footer className="shrink-0 px-5 pb-6 pt-2 max-w-2xl lg:max-w-3xl w-full mx-auto relative z-10 mb-2">
+        <div className="flex gap-2">
+          {/* On phones the side arrows are hidden, so "previous" lives here. */}
+          {index > 0 && (
+            <button
+              type="button"
+              onClick={goPrev}
+              aria-label="Previous question"
+              className="sm:hidden shrink-0 h-[52px] w-[52px] rounded-[24px] bg-white/50 dark:bg-black/30 border border-border/40 backdrop-blur-xl flex items-center justify-center active:scale-95 transition-all"
+            >
+              <ChevronLeft className="h-5 w-5 text-foreground/80" />
+            </button>
+          )}
           <button
-            type="button"
-            onClick={goPrev}
-            aria-label="Previous question"
-            className="sm:hidden shrink-0 h-[52px] w-[52px] rounded-[24px] bg-white/50 dark:bg-black/30 border border-border/40 backdrop-blur-xl flex items-center justify-center active:scale-95 transition-all"
+            onClick={goNext}
+            disabled={!isRevealed}
+            className="flex-1 w-full h-[52px] rounded-[24px] bg-primary/10 text-primary font-semibold text-[17px] border border-primary/20 backdrop-blur-xl hover:bg-primary/20 active:scale-[0.98] transition-all shadow-[0_4px_24px_rgba(var(--primary),0.1)] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
           >
-            <ChevronLeft className="h-5 w-5 text-foreground/80" />
+            {!answered ? "Pick an answer" : index >= total - 1 ? "Finish Session" : "Next Question"}
           </button>
-        )}
-        <button
-          onClick={goNext}
-          disabled={!isRevealed}
-          className="flex-1 w-full h-[52px] rounded-[24px] bg-primary/10 text-primary font-semibold text-[17px] border border-primary/20 backdrop-blur-xl hover:bg-primary/20 active:scale-[0.98] transition-all shadow-[0_4px_24px_rgba(var(--primary),0.1)] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
-        >
-          {!answered ? "Pick an answer" : index >= total - 1 ? "Finish Session" : "Next Question"}
-        </button>
+        </div>
+        <KeyHints
+          hints={[
+            ["A B C D", "answer"],
+            ["Enter", "next"],
+            ["← →", "move"],
+          ]}
+        />
       </footer>
 
       <AppDownloadPopup

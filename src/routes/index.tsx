@@ -104,6 +104,9 @@ function Home() {
   const installBar = useAndroidInstallBar();
   const showAppStore = !home.settings.hide_app_store && platform !== "android";
   const showGooglePlay = !home.settings.hide_google_play && platform !== "ios";
+  // With no banners, the app badges move into the empty right column on desktop.
+  const hasBanners = home.banners.length > 0;
+  const appsOnRight = !hasBanners && (showAppStore || showGooglePlay);
 
   useEffect(() => {
     const t = setInterval(() => setGreeting(greetingFor(new Date())), 60_000);
@@ -128,7 +131,15 @@ function Home() {
 
       <main className="px-5 max-w-2xl md:max-w-4xl lg:max-w-6xl mx-auto pb-12 space-y-7 pt-6">
         {/* Top section: stacked on mobile/tablet, 2-column split on desktop */}
-        <div className="space-y-7 lg:grid lg:grid-cols-[2fr_1fr] lg:gap-12 lg:items-center lg:space-y-0">
+        <div
+          className={`space-y-7 lg:grid lg:gap-12 lg:items-center lg:space-y-0 ${
+            hasBanners
+              ? "lg:grid-cols-[2fr_1fr]"
+              : appsOnRight
+                ? "lg:grid-cols-[3fr_2fr]"
+                : "lg:max-w-3xl"
+          }`}
+        >
           {/* Left column (desktop): greeting + description */}
           <div className="text-center space-y-1.5 animate-in fade-in slide-in-from-bottom-3 duration-700 lg:text-left lg:col-start-1 lg:row-start-1">
             <p className="text-[15px] font-bold tracking-tight text-[#910000]">
@@ -144,13 +155,28 @@ function Home() {
           </div>
 
           {/* Right column (desktop): banner spans the full left column height */}
-          <div className="w-full md:max-w-2xl md:mx-auto lg:max-w-none lg:col-start-2 lg:row-start-1 lg:row-span-3 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both">
-            <BannerCarousel banners={home.banners} />
-          </div>
+          {hasBanners && (
+            <div className="w-full md:max-w-2xl md:mx-auto lg:max-w-none lg:col-start-2 lg:row-start-1 lg:row-span-3 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both">
+              <BannerCarousel banners={home.banners} />
+            </div>
+          )}
 
           {/* Left column (desktop): app store badges */}
-          <div className="flex flex-col items-center gap-4 w-full max-w-sm mx-auto lg:mx-0 lg:items-start animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both lg:col-start-1 lg:row-start-2">
-            <div className="flex justify-center gap-4 items-center w-full lg:justify-start">
+          <div
+            className={`flex flex-col items-center gap-4 w-full max-w-sm mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both ${
+              !appsOnRight
+                ? "lg:mx-0 lg:items-start lg:col-start-1 lg:row-start-2"
+                : "lg:max-w-none lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:rounded-3xl lg:border lg:border-border/50 lg:bg-card/70 lg:p-8 lg:shadow-soft lg:backdrop-blur-xl"
+            }`}
+          >
+            {appsOnRight && (
+              <p className="hidden lg:block text-center text-lg font-bold text-foreground">
+                Study on the go with the FlashGyan app
+              </p>
+            )}
+            <div
+              className={`flex justify-center gap-4 items-center w-full ${appsOnRight ? "" : "lg:justify-start"}`}
+            >
               {showAppStore && (
                 <button
                   onClick={() => toast.info("iOS app is coming soon!")}
@@ -197,7 +223,11 @@ function Home() {
           </div>
 
           {/* Left column (desktop): CTA + caption */}
-          <div className="animate-in fade-in slide-in-from-bottom-5 duration-700 delay-200 fill-mode-both lg:col-start-1 lg:row-start-3">
+          <div
+            className={`animate-in fade-in slide-in-from-bottom-5 duration-700 delay-200 fill-mode-both lg:col-start-1 ${
+              appsOnRight ? "lg:row-start-2" : "lg:row-start-3"
+            }`}
+          >
             {home.settings.cta_url.trim() && home.settings.cta_label.trim() && (
               <ExternalCtaButton
                 label={home.settings.cta_label}
@@ -412,7 +442,7 @@ function WhyFlashGyan({ cards }: { cards: Flashcard[] }) {
         </div>
       </div>
 
-      <div className="mt-7 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-7 grid gap-4 md:grid-cols-2 lg:grid-cols-3 md:[&>:last-child:nth-child(odd)]:col-span-2 lg:[&>:last-child:nth-child(odd)]:col-span-1">
         {content.scienceCards.map((card, index) => {
           const Icon = scienceIcons[index];
           return (

@@ -73,7 +73,7 @@ function DeckCard({ deck, style }: { deck: DeckSummary; style: (typeof CARD_STYL
         to="/practice/$deckId"
         params={{ deckId: deck.id }}
         search={{ review: false }}
-        className={`group w-full text-left flex items-center gap-4 rounded-[28px] border-[1.5px] p-5 transition-all duration-200 shadow-[0_8px_20px_rgba(0,0,0,0.04)] hover:shadow-[0_12px_25px_rgba(0,0,0,0.08)] hover:-translate-y-1 active:translate-y-0.5 active:shadow-sm relative overflow-hidden ${style.gradient}`}
+        className={`group w-full h-full text-left flex items-center gap-4 rounded-[28px] border-[1.5px] p-5 transition-all duration-200 shadow-[0_8px_20px_rgba(0,0,0,0.04)] hover:shadow-[0_12px_25px_rgba(0,0,0,0.08)] hover:-translate-y-1 active:translate-y-0.5 active:shadow-sm relative overflow-hidden ${style.gradient}`}
       >
         <div className="relative h-14 w-14 rounded-2xl bg-white/60 backdrop-blur-md border border-white flex items-center justify-center shrink-0 shadow-[inset_0_2px_4px_rgba(255,255,255,0.8)] z-10">
           <Layers className={`h-6 w-6 ${style.iconColor}`} />
@@ -115,7 +115,7 @@ export function FlashcardsSection({ decks }: { decks: DeckSummary[] }) {
 
   return (
     <>
-      <section className="grid grid-cols-2 gap-4">
+      <section className="grid grid-cols-2 gap-4 md:max-w-xl">
         <FilterSelect
           label="Subject"
           placeholder="All subjects"
@@ -156,7 +156,7 @@ export function FlashcardsSection({ decks }: { decks: DeckSummary[] }) {
         {filtered.length === 0 ? (
           <EmptyState what="decks" />
         ) : (
-          <ul className="space-y-4">
+          <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {filtered.map((d, i) => (
               <DeckCard key={d.id} deck={d} style={CARD_STYLES[i % CARD_STYLES.length]} />
             ))}
@@ -174,7 +174,7 @@ export function McqSection({ tests }: { tests: McqTestSummary[] }) {
       <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-widest px-1">
         {tests.length} test{tests.length === 1 ? "" : "s"} available
       </h2>
-      <ul className="space-y-4">
+      <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {tests.map((t, i) => {
           const style = CARD_STYLES[i % CARD_STYLES.length];
           return (
@@ -182,7 +182,7 @@ export function McqSection({ tests }: { tests: McqTestSummary[] }) {
               <Link
                 to="/mcq/$testId"
                 params={{ testId: t.id }}
-                className={`group w-full text-left flex items-center gap-4 rounded-[28px] border-[1.5px] p-5 transition-all duration-200 shadow-[0_8px_20px_rgba(0,0,0,0.04)] hover:shadow-[0_12px_25px_rgba(0,0,0,0.08)] hover:-translate-y-1 active:translate-y-0.5 active:shadow-sm relative overflow-hidden ${style.gradient}`}
+                className={`group w-full h-full text-left flex items-center gap-4 rounded-[28px] border-[1.5px] p-5 transition-all duration-200 shadow-[0_8px_20px_rgba(0,0,0,0.04)] hover:shadow-[0_12px_25px_rgba(0,0,0,0.08)] hover:-translate-y-1 active:translate-y-0.5 active:shadow-sm relative overflow-hidden ${style.gradient}`}
               >
                 <div className="relative h-14 w-14 rounded-2xl bg-white/60 backdrop-blur-md border border-white flex items-center justify-center shrink-0 shadow-[inset_0_2px_4px_rgba(255,255,255,0.8)] z-10">
                   <Timer className={`h-6 w-6 ${style.iconColor}`} />
@@ -242,7 +242,7 @@ export function McqPracticeSection({ tests }: { tests: McqPracticeTestSummary[] 
 
   return (
     <>
-      <section className="grid grid-cols-2 gap-4">
+      <section className="grid grid-cols-2 gap-4 md:max-w-xl">
         <FilterSelect
           label="Subject"
           placeholder="All subjects"
@@ -284,7 +284,7 @@ export function McqPracticeSection({ tests }: { tests: McqPracticeTestSummary[] 
         {filtered.length === 0 ? (
           <EmptyState what="practice sets" />
         ) : (
-          <ul className="space-y-4">
+          <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {filtered.map((t, i) => {
               const style = CARD_STYLES[i % CARD_STYLES.length];
               return (
@@ -293,7 +293,7 @@ export function McqPracticeSection({ tests }: { tests: McqPracticeTestSummary[] 
                     to="/practice-mcq/$testId"
                     params={{ testId: t.id }}
                     search={{ review: false }}
-                    className={`group w-full text-left flex items-center gap-4 rounded-[28px] border-[1.5px] p-5 transition-all duration-200 shadow-[0_8px_20px_rgba(0,0,0,0.04)] hover:shadow-[0_12px_25px_rgba(0,0,0,0.08)] hover:-translate-y-1 active:translate-y-0.5 active:shadow-sm relative overflow-hidden ${style.gradient}`}
+                    className={`group w-full h-full text-left flex items-center gap-4 rounded-[28px] border-[1.5px] p-5 transition-all duration-200 shadow-[0_8px_20px_rgba(0,0,0,0.04)] hover:shadow-[0_12px_25px_rgba(0,0,0,0.08)] hover:-translate-y-1 active:translate-y-0.5 active:shadow-sm relative overflow-hidden ${style.gradient}`}
                   >
                     <div className="relative h-14 w-14 rounded-2xl bg-white/60 backdrop-blur-md border border-white flex items-center justify-center shrink-0 shadow-[inset_0_2px_4px_rgba(255,255,255,0.8)] z-10">
                       <Target className={`h-6 w-6 ${style.iconColor}`} />

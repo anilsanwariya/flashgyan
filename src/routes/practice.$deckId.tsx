@@ -28,6 +28,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { AppDownloadPopup } from "@/components/app-download-popup";
 import { shouldShowAppPrompt } from "@/lib/app-promo";
+import { useStudyKeys } from "@/lib/use-study-keys";
+import { KeyHints } from "@/components/key-hints";
 
 const deckQO = (deckId: string) =>
   queryOptions({
@@ -133,6 +135,18 @@ function Practice() {
   useEffect(() => {
     setFlipped(cardRatings[index] !== null);
   }, [index, cardRatings]);
+
+  useStudyKeys(
+    {
+      " ": () => !isTransitioning && setFlipped((f) => !f),
+      "1": () => flipped && rate("hard"),
+      "2": () => flipped && rate("medium"),
+      "3": () => flipped && rate("easy"),
+      ArrowLeft: goPrev,
+      ArrowRight: goNext,
+    },
+    total > 0 && !showDownloadPopup,
+  );
 
   if (total === 0) {
     return (
@@ -247,7 +261,7 @@ function Practice() {
       <div className="absolute top-[40%] -right-[20%] w-[50%] h-[60%] rounded-full bg-blue-500/10 blur-[120px] -z-10 pointer-events-none" />
 
       {/* FIXED Padding */}
-      <header className="shrink-0 px-5 pt-4 pb-3 max-w-2xl w-full mx-auto backdrop-blur-2xl bg-white/40 dark:bg-black/40 sticky top-0 z-50 border-b border-border/20">
+      <header className="shrink-0 px-5 pt-4 pb-3 max-w-2xl lg:max-w-3xl w-full mx-auto backdrop-blur-2xl bg-white/40 dark:bg-black/40 sticky top-0 z-50 border-b border-border/20">
         <div className="flex items-center justify-between mt-2">
           <AlertDialog>
             <AlertDialogTrigger asChild>
@@ -311,7 +325,7 @@ function Practice() {
         </div>
       </header>
 
-      <main className="flex-1 min-h-0 flex flex-col px-5 pt-6 max-w-2xl w-full mx-auto pb-4">
+      <main className="flex-1 min-h-0 flex flex-col px-5 pt-6 max-w-2xl lg:max-w-3xl w-full mx-auto pb-4">
         <div className="w-full h-full sm:max-h-[40rem] sm:my-auto relative [perspective:1200px]">
           <AnimatePresence mode="wait">
             <motion.div
@@ -346,7 +360,7 @@ function Practice() {
                         {card.prompt}
                       </div>
                       <div className="flex flex-col items-center justify-center gap-4 py-4">
-                        <p className="text-[22px] md:text-[26px] font-semibold leading-tight text-center text-balance text-foreground/90 tracking-tight">
+                        <p className="text-[22px] md:text-[26px] lg:text-[30px] font-semibold leading-tight text-center text-balance text-foreground/90 tracking-tight">
                           {card.question}
                         </p>
                         {card.image_url && (
@@ -374,14 +388,14 @@ function Practice() {
                       <div className="text-[11px] font-semibold uppercase tracking-widest text-primary/70">
                         {card.prompt}
                       </div>
-                      <p className="mt-2 text-[15px] font-medium leading-snug text-foreground/60">{card.question}</p>
+                      <p className="mt-2 text-[15px] lg:text-base font-medium leading-snug text-foreground/60">{card.question}</p>
 
                       <div className="mt-8 mb-4 border-b border-border/20 w-full" />
 
                       <div className="text-[11px] font-semibold uppercase tracking-widest text-success/80 mb-2">
                         Answer
                       </div>
-                      <p className="text-[22px] md:text-[26px] font-semibold leading-tight text-balance text-foreground/90 tracking-tight">
+                      <p className="text-[22px] md:text-[26px] lg:text-[30px] font-semibold leading-tight text-balance text-foreground/90 tracking-tight">
                         {card.answer}
                       </p>
 
@@ -390,7 +404,7 @@ function Practice() {
                           <div className="text-[11px] font-semibold uppercase tracking-widest text-primary/70 mb-2">
                             {s.title}
                           </div>
-                          <p className="text-[15px] text-foreground/70 leading-relaxed whitespace-pre-wrap">{s.body}</p>
+                          <p className="text-[15px] lg:text-base text-foreground/70 leading-relaxed whitespace-pre-wrap">{s.body}</p>
                         </div>
                       ))}
                     </div>
@@ -430,7 +444,7 @@ function Practice() {
       </main>
 
       {/* FIXED Padding */}
-      <footer className="shrink-0 px-5 pb-6 pt-2 max-w-2xl w-full mx-auto relative z-10 mb-2">
+      <footer className="shrink-0 px-5 pb-6 pt-2 max-w-2xl lg:max-w-3xl w-full mx-auto relative z-10 mb-2">
         {flipped ? (
           <div className="grid grid-cols-3 gap-3">
             <RatingButton
@@ -463,6 +477,13 @@ function Practice() {
             Reveal Answer
           </button>
         )}
+        <KeyHints
+          hints={[
+            ["Space", "flip"],
+            ["1 2 3", "hard / medium / easy"],
+            ["← →", "move"],
+          ]}
+        />
       </footer>
 
       <AppDownloadPopup

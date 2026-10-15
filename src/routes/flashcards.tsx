@@ -25,7 +25,7 @@ function FlashcardsPage() {
       <div className="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-primary/5 to-transparent -z-10 pointer-events-none" />
 
       <header className="sticky top-0 z-50 backdrop-blur-xl bg-background/70 border-b border-border/40 px-5 py-3 shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
-        <div className="flex items-center justify-between max-w-2xl mx-auto">
+        <div className="flex items-center justify-between max-w-2xl md:max-w-4xl lg:max-w-6xl mx-auto">
           <Link to="/" aria-label="Go to Home">
             <img src={finalLogo} alt="Flashgyan" className="h-10 w-auto object-contain drop-shadow-sm" />
           </Link>
@@ -37,7 +37,7 @@ function FlashcardsPage() {
         </div>
       </header>
 
-      <main className="px-5 max-w-2xl mx-auto pb-12 space-y-6 pt-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <main className="px-5 max-w-2xl md:max-w-4xl lg:max-w-6xl mx-auto pb-12 space-y-6 pt-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
         <div>
           <Link
             to="/"
