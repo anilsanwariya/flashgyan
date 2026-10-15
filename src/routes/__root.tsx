@@ -1,5 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Outlet, Link, createRootRouteWithContext, useRouter, HeadContent, Scripts, type ErrorComponentProps } from "@tanstack/react-router";
+import {
+  Outlet,
+  Link,
+  createRootRouteWithContext,
+  useRouter,
+  HeadContent,
+  Scripts,
+  type ErrorComponentProps,
+} from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
@@ -10,6 +18,11 @@ import { AuthProvider } from "@/hooks/use-auth";
 import { isTelegramMiniApp, getTelegramWebApp } from "@/lib/telegram-env";
 import { analyticsHeadScripts } from "@/lib/analytics";
 import { detectInstalledApp } from "@/lib/app-promo";
+import { captureInstallPrompt, registerServiceWorker } from "@/lib/pwa";
+import { PwaLayer } from "@/components/pwa-layer";
+
+// Chrome's install prompt can fire before React mounts.
+captureInstallPrompt();
 
 // Telegram Expander: Forces the mini-app to take up the full screen height
 function TelegramExpander() {
@@ -18,9 +31,9 @@ function TelegramExpander() {
       const tg = getTelegramWebApp();
       tg?.ready();
       tg?.expand();
-      
+
       document.body.classList.add("tg-mini-app");
-      tg?.enableClosingConfirmation(); 
+      tg?.enableClosingConfirmation();
 
       // Matches Telegram's native backdrop to prevent white/black flashing underneath
       try {
@@ -102,7 +115,9 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">This page didn't load</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">
+          This page didn't load
+        </h1>
         <p className="mt-2 text-sm text-muted-foreground">
           Something went wrong on our end. You can try refreshing or head back home.
         </p>
@@ -129,61 +144,75 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
 }
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
-  head: () => ({
-    meta: [
-      { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
-      { title: "Flashgyan: Smart Flashcards for Exam Success" },
-      {
-        name: "description",
-        content:
-          "FlashGyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go.",
-      },
-      { property: "og:title", content: "Flashgyan: Smart Flashcards for Exam Success" },
-      {
-        property: "og:description",
-        content:
-          "FlashGyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go.",
-      },
-      { property: "og:type", content: "website" },
-      { property: "og:site_name", content: "FlashGyan" },
-      { name: "twitter:card", content: "summary_large_image" },
-      { name: "theme-color", content: "#f7f5ed" },
-      { name: "twitter:title", content: "Flashgyan: Smart Flashcards for Exam Success" },
-      {
-        name: "twitter:description",
-        content:
-          "FlashGyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go.",
-      },
-      {
-        property: "og:image",
-        content:
-          "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/ab39d20b-0ba5-4e3e-a17e-c84d41522181",
-      },
-      {
-        name: "twitter:image",
-        content:
-          "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/ab39d20b-0ba5-4e3e-a17e-c84d41522181",
-      },
-    ],
-    links: [
-      { rel: "stylesheet", href: appCss },
-      { rel: "icon", type: "image/png", sizes: "96x96", href: "/favicon-96x96.png" },
-      { rel: "manifest", href: "/manifest.json?v=3" },
-      { rel: "apple-touch-icon", href: "/icons/icon-192x192.png?v=2" },
-      { rel: "preconnect", href: "https://fonts.googleapis.com" },
-      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
-      {
-        rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700;9..144,800&display=swap",
-      },
-    ],
-    scripts: [
-      // REMOVED async: true to ensure Telegram SDK loads synchronously before React checks for it
-      { src: "https://telegram.org/js/telegram-web-app.js" },
-      ...analyticsHeadScripts(),
-    ],
-  }),
+  head: ({ matches }) => {
+    // Admin pages offer their own installable app ("FG Admin").
+    const admin = matches.some((m) => {
+      const id = m.routeId as string;
+      return id === "/auth" || id.startsWith("/_authenticated");
+    });
+    return {
+      meta: [
+        { charSet: "utf-8" },
+        { name: "apple-mobile-web-app-capable", content: "yes" },
+        { name: "mobile-web-app-capable", content: "yes" },
+        { name: "apple-mobile-web-app-status-bar-style", content: "default" },
+        { name: "apple-mobile-web-app-title", content: admin ? "FG Admin" : "FlashGyan" },
+        { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
+        { title: "Flashgyan: Smart Flashcards for Exam Success" },
+        {
+          name: "description",
+          content:
+            "FlashGyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go.",
+        },
+        { property: "og:title", content: "Flashgyan: Smart Flashcards for Exam Success" },
+        {
+          property: "og:description",
+          content:
+            "FlashGyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go.",
+        },
+        { property: "og:type", content: "website" },
+        { property: "og:site_name", content: "FlashGyan" },
+        { name: "twitter:card", content: "summary_large_image" },
+        { name: "theme-color", content: "#f7f5ed" },
+        { name: "twitter:title", content: "Flashgyan: Smart Flashcards for Exam Success" },
+        {
+          name: "twitter:description",
+          content:
+            "FlashGyan uses active recall & spaced repetition to boost memory! Master any syllabus with our smart digital flashcards. Study efficiently anywhere you go.",
+        },
+        {
+          property: "og:image",
+          content:
+            "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/ab39d20b-0ba5-4e3e-a17e-c84d41522181",
+        },
+        {
+          name: "twitter:image",
+          content:
+            "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/ab39d20b-0ba5-4e3e-a17e-c84d41522181",
+        },
+      ],
+      links: [
+        { rel: "stylesheet", href: appCss },
+        { rel: "icon", type: "image/png", sizes: "96x96", href: "/favicon-96x96.png" },
+        { rel: "manifest", href: admin ? "/admin-manifest.json?v=1" : "/manifest.json?v=4" },
+        {
+          rel: "apple-touch-icon",
+          href: admin ? "/icons/admin-apple-touch-icon.png?v=1" : "/icons/apple-touch-icon.png?v=3",
+        },
+        { rel: "preconnect", href: "https://fonts.googleapis.com" },
+        { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
+        {
+          rel: "stylesheet",
+          href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700;9..144,800&display=swap",
+        },
+      ],
+      scripts: [
+        // REMOVED async: true to ensure Telegram SDK loads synchronously before React checks for it
+        { src: "https://telegram.org/js/telegram-web-app.js" },
+        ...analyticsHeadScripts(),
+      ],
+    };
+  },
   shellComponent: RootShell,
   component: RootComponent,
   notFoundComponent: NotFoundComponent,
@@ -210,6 +239,7 @@ function RootComponent() {
 
   useEffect(() => {
     void detectInstalledApp();
+    registerServiceWorker();
   }, []);
 
   useEffect(() => {
@@ -235,6 +265,7 @@ function RootComponent() {
       <AuthProvider>
         <TelegramExpander />
         <Outlet />
+        <PwaLayer />
       </AuthProvider>
     </QueryClientProvider>
   );

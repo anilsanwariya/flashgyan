@@ -1,0 +1,45 @@
+{
+  "id": "/admin",
+  "name": "FlashGyan Admin",
+  "short_name": "FG Admin",
+  "description": "FlashGyan admin panel.",
+  "lang": "en",
+  "start_url": "/admin",
+  "scope": "/admin",
+  "display": "standalone",
+  "background_color": "#ede9fe",
+  "theme_color": "#ede9fe",
+  "icons": [
+    {
+      "src": "/icons/admin-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/admin-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/admin-maskable-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/admin-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Daily magazine",
+      "url": "/admin?section=ca.daily",
+      "icons": [{ "src": "/icons/admin-192x192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
+}
