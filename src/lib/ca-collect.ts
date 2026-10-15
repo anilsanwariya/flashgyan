@@ -151,7 +151,7 @@ export function isRecent(link: FoundLink, now = new Date()): boolean {
 type ChatMessage = { role: "system" | "user"; content: string };
 
 const TYPE_LABELS = STORY_TYPES.filter((t) => t.id !== "other")
-  .map((t) => t.label.toLowerCase())
+  .map((t) => t.label)
   .join("; ");
 
 export function triageMessages(
