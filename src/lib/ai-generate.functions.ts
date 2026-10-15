@@ -116,7 +116,7 @@ async function assertAdmin(userId: string) {
   if (!data) throw new Error("Forbidden: admin role required");
 }
 
-async function callGemini(
+async function callClaude(
   markdown: string,
   userInstructions: string,
   responseSchema: unknown,
@@ -136,7 +136,7 @@ async function callGemini(
     },
   ]);
   if (!text.trim()) throw new Error("Claude returned empty output");
-  const parsed = parseJsonLoose<unknown>(text);
+  const parsed = parseJsonLoose<any>(text);
   if (!parsed) throw new Error("Claude returned non-JSON output");
   return parsed;
 }
@@ -165,7 +165,7 @@ export const generateFlashcardsFromMarkdown = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<{ rows: GeneratedFcRow[] }> => {
     await assertAdmin(context.userId);
     const instructions = FLASHCARD_USER_INSTRUCTIONS.replace("${count}", String(data.count));
-    const parsed = await callGemini(data.markdown, instructions, flashcardSchema);
+    const parsed = await callClaude(data.markdown, instructions, flashcardSchema);
     const raw = Array.isArray(parsed?.cards) ? parsed.cards : [];
     const rows: GeneratedFcRow[] = [];
     let ord = data.startOrder;
@@ -184,7 +184,7 @@ export const generateFlashcardsFromMarkdown = createServerFn({ method: "POST" })
         : [];
       rows.push({ order_index: ord++, prompt, question, answer, sections });
     }
-    if (rows.length === 0) throw new Error("Gemini did not produce any usable cards");
+    if (rows.length === 0) throw new Error("Claude did not produce any usable cards");
     return { rows };
   });
 
@@ -216,7 +216,7 @@ export const generateMcqsFromMarkdown = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<{ rows: GeneratedMcqRow[] }> => {
     await assertAdmin(context.userId);
     const instructions = MCQ_USER_INSTRUCTIONS.replace("${count}", String(data.count));
-    const parsed = await callGemini(data.markdown, instructions, mcqSchema);
+    const parsed = await callClaude(data.markdown, instructions, mcqSchema);
     const raw = Array.isArray(parsed?.questions) ? parsed.questions : [];
     const rows: GeneratedMcqRow[] = [];
     let ord = data.startOrder;
@@ -248,6 +248,6 @@ export const generateMcqsFromMarkdown = createServerFn({ method: "POST" })
         explanation_sections: sections,
       });
     }
-    if (rows.length === 0) throw new Error("Gemini did not produce any usable questions");
+    if (rows.length === 0) throw new Error("Claude did not produce any usable questions");
     return { rows };
   });
