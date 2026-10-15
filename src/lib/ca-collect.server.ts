@@ -4,7 +4,7 @@
 // read a site, pick headlines, fetch articles, then read and write them up
 // with the usual magazine pipeline.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { saathiComplete } from "../../supabase/functions/_shared/saathi-core.ts";
+import { saathiComplete, saathiErrorDetail } from "../../supabase/functions/_shared/saathi-core.ts";
 import {
   collectionDue,
   extractLinks,
@@ -149,7 +149,7 @@ export async function tick(origin?: string): Promise<TickResult> {
       steps.push(step);
     }
   } catch (e) {
-    failure = e instanceof Error ? e.message : String(e);
+    failure = saathiErrorDetail(e);
     console.error("ca collect:", e);
     await from("ca_runs")
       .update({ error: failure, updated_at: now() } as never)
