@@ -10,7 +10,7 @@ import {
   type CaFact,
   type MagazineSettings,
 } from "@/lib/current-affairs";
-import { VISUAL_CSS, visualHtml, type Visual } from "@/lib/ca-visuals";
+import { VISUAL_CSS, pointsToShow, visualHtml, type Visual } from "@/lib/ca-visuals";
 
 export type MagazineItem = {
   id: string;
@@ -68,8 +68,10 @@ function icon(id: string, cls = "icon"): string {
 
 function itemHtml(item: MagazineItem, number: number, showDate: boolean, accent: string): string {
   const c = item.content;
-  const points = c.points.length
-    ? `<div class="bi points"><ul class="hi" lang="hi">${c.points.map((p) => `<li>${esc(p.hi)}</li>`).join("")}</ul><ul class="en" lang="en">${c.points.map((p) => `<li>${esc(p.en)}</li>`).join("")}</ul></div>`
+  // Facts the visual shows aren't repeated as points.
+  const shown = pointsToShow(c);
+  const points = shown.length
+    ? `<div class="bi points"><ul class="hi" lang="hi">${shown.map((p) => `<li>${esc(p.hi)}</li>`).join("")}</ul><ul class="en" lang="en">${shown.map((p) => `<li>${esc(p.en)}</li>`).join("")}</ul></div>`
     : "";
   const tags = [
     item.rajasthan && item.category !== "rajasthan" ? `<span class="tag raj">Rajasthan</span>` : "",
@@ -101,8 +103,8 @@ function itemHtml(item: MagazineItem, number: number, showDate: boolean, accent:
   <div class="item-head"><span class="num">${number}</span><div class="heads"><h3 lang="hi">${esc(c.headline.hi)}</h3><h4 lang="en">${esc(c.headline.en)}</h4></div></div>
   ${tags ? `<div class="tags">${tags}</div>` : ""}
   ${biBlock(c.summary, "summary")}
-  ${points}
   ${c.visual ? visualHtml(c.visual, accent) : ""}
+  ${points}
   ${why}
   ${background}
   ${dyk}
@@ -204,6 +206,7 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .rev-cat { display: flex; align-items: center; gap: 2mm; font-size: 10pt; color: ${accent}; margin: 4mm 0 2mm; break-after: avoid; text-transform: uppercase; letter-spacing: .06em; }
 .rev { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .rev td:nth-child(2) { width: 47%; }
+.visual + .points { margin-top: 2.5mm; }
 .rev td { padding: 1.6mm 2.5mm; border-bottom: 1px solid #e5e7eb; vertical-align: top; font-size: 9.2pt; }
 .rev tr { break-inside: avoid; }
 .rev .rn { width: 7mm; font-weight: 700; color: ${accent}; }

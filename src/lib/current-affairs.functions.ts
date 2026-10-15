@@ -66,6 +66,7 @@ const contentSchema = z.object({
     .optional(),
   // Checked and cleaned by cleanVisual in the handler.
   visual: z.unknown().optional(),
+  visual_covers: z.array(z.number().int().min(0).max(100)).max(50).optional(),
   oneliner: bi.nullable().optional(),
 });
 

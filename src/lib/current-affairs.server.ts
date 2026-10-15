@@ -39,7 +39,7 @@ import {
   type MagazineSettings,
   type UploadSection,
 } from "@/lib/current-affairs";
-import { parseVisual, visualMessages, type Visual } from "@/lib/ca-visuals";
+import { VISUAL_LABELS, parseVisual, visualMessages, type Visual } from "@/lib/ca-visuals";
 import {
   footerTemplate,
   renderMagazine,
@@ -367,13 +367,15 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
   try {
     const query = `${item.headline}\n${item.facts.map((f) => f.text).join(" ")}`.slice(0, 1000);
     const subjects = await studySubjects();
-    const [kbMatches, embedding] = await Promise.all([
+    // The visual comes first so the text can leave out what it shows.
+    const [kbMatches, embedding, look] = await Promise.all([
       subjects.length
         ? saathiSearchQuery(key, rpc, { standalone: query, english: null }, subjects).then((m) =>
             relevantMatches(m).slice(0, 4),
           )
         : Promise.resolve([]),
       embedOne(storyText(item)),
+      makeVisual(item),
     ]);
     const { data: topic } = await rpc("saathi_nearest_syllabus_topic", { p_embedding: embedding });
     const t = topic as { id: string; unit_id: string; similarity: number } | null;
@@ -388,6 +390,9 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
         facts: item.facts,
         kb,
         syllabus: syllabusId ? (TOPIC_LABELS.get(syllabusId) ?? null) : null,
+        visual: look.visual
+          ? { type: VISUAL_LABELS[look.visual.type].toLowerCase(), covers: look.visual_covers }
+          : null,
       }),
     );
     const parsed = parseContent(raw, item.facts.length);
@@ -396,10 +401,7 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
       ...new Set(parsed.backgroundFrom.map((i) => kb[i]?.title).filter(Boolean) as string[]),
     ].map((title) => ({ title }));
 
-    const [dyk, look] = await Promise.all([
-      findDidYouKnow(parsed.content.headline.en || item.headline, item.facts),
-      makeVisual(item),
-    ]);
+    const dyk = await findDidYouKnow(parsed.content.headline.en || item.headline, item.facts);
     const update = {
       content: { ...parsed.content, dyk, ...look },
       context_sources: contextSources,
@@ -433,7 +435,7 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
 // Never fails the item.
 export async function makeVisual(
   item: Pick<CaItem, "headline" | "category" | "facts">,
-): Promise<{ visual: Visual | null; oneliner: Bi | null }> {
+): Promise<{ visual: Visual | null; visual_covers: number[]; oneliner: Bi | null }> {
   try {
     const settings = await getMagazineSettings();
     let problem: string | undefined;
@@ -450,15 +452,15 @@ export async function makeVisual(
       );
       const r = parseVisual(raw, item.facts, item.headline);
       oneliner = r.oneliner ?? oneliner;
-      if (!settings.visuals) return { visual: null, oneliner };
-      if (r.visual || !r.problem) return { visual: r.visual, oneliner };
+      if (!settings.visuals) return { visual: null, visual_covers: [], oneliner };
+      if (r.visual || !r.problem) return { visual: r.visual, visual_covers: r.covers, oneliner };
       problem = r.problem;
     }
     console.error("visual rejected:", problem);
-    return { visual: null, oneliner };
+    return { visual: null, visual_covers: [], oneliner };
   } catch (e) {
     console.error("visual:", e);
-    return { visual: null, oneliner: null };
+    return { visual: null, visual_covers: [], oneliner: null };
   }
 }
 

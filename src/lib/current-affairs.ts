@@ -90,6 +90,8 @@ export type CaContent = {
   // A chart, table, timeline, flow chart or mind map built from the facts,
   // and the story in one line for the revision page (missing on older items).
   visual?: Visual | null;
+  // Facts (0-based) the visual shows; their points are not printed with it.
+  visual_covers?: number[];
   oneliner?: Bi | null;
 };
 
@@ -258,24 +260,31 @@ export function enrichMessages(opts: {
   facts: CaFact[];
   kb: KbPassage[];
   syllabus: string | null;
+  // The visual printed with the text, and the facts (0-based) it shows.
+  visual?: { type: string; covers: number[] } | null;
 }): ChatMessage[] {
   const facts = opts.facts.map((f, i) => `${i + 1}. ${f.text}`).join("\n");
   const kb = opts.kb.length
     ? opts.kb.map((p, i) => `[K${i + 1}] ${p.title}\n${p.content.slice(0, 1500)}`).join("\n\n")
     : "(none)";
   const editorial = opts.category === "editorial";
+  const covered = opts.visual?.covers.map((i) => i + 1) ?? [];
+  const visualNote = opts.visual
+    ? `\nA ${opts.visual.type} printed with this story already shows ${covered.length ? `facts ${covered.join(", ")}` : "some of the facts"}. Do not restate ${covered.length ? "those facts" : "what it shows"} in the summary or "why"; still write their points (they are only printed if the visual is removed).`
+    : "";
   return [
     {
       role: "system",
       content: `You write a bilingual (Hindi and English) current affairs magazine for RAS exam aspirants. Write one news item from the numbered facts.
-RULES: Use only the facts given. Never add a number, name, date or claim that is not in the facts. Hindi must be natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी), with the same numbers and official names (give the English name in brackets the first time if it helps). Keep it crisp.
+RULES: Use only the facts given. Never add a number, name, date or claim that is not in the facts. Hindi must be natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी), with the same numbers and official names (give the English name in brackets the first time if it helps).
+BE BRIEF: students revise from this, so less theory, more memorable facts. Say each fact once: the summary gives only the gist (what happened, who, where), the points carry the details, and nothing is repeated between summary, points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}
 "background" explains the static concept the news relates to (for example the scheme's origin and aim, the constitutional article, the institution), using ONLY the knowledge-base passages [K…]; set it to null if none of them is genuinely about this news. List the passages you used in "background_from".
 Reply with JSON only:
 {"headline": {"en": "...", "hi": "..."},
- "summary": {"en": ${editorial ? '"4-5 sentences: the issue, the main argument and the suggested way forward"' : '"2-3 sentences"'}, "hi": "..."},
+ "summary": {"en": ${editorial ? '"3-4 short sentences: the issue, the main argument and the suggested way forward"' : opts.visual ? '"one sentence, at most 25 words"' : '"1-2 sentences, at most 40 words"'}, "hi": "..."},
  "points": [{"en": "...", "hi": "..."}] (exactly one per numbered fact, same order),
- "why": {"en": "one or two sentences on why this matters for RAS (which exam paper or topic)", "hi": "..."},
- "background": {"en": "2-3 sentences", "hi": "..."} or null,
+ "why": {"en": "one sentence, at most 25 words: why this matters for RAS (which exam paper or topic)", "hi": "..."},
+ "background": {"en": "1-2 sentences, at most 40 words", "hi": "..."} or null,
  "background_from": ["K1", ...],
  "mcq": {"question": {"en": "...", "hi": "..."}, "options": [{"en": "...", "hi": "..."} x4], "answer": index 0-3, "explanation": {"en": "...", "hi": "..."}},
  "mains": {"en": "...", "hi": "..."} or null}
@@ -437,8 +446,15 @@ export function applyChanges(
     };
   }
   // A visual showing a number the correction replaced is dropped (it can be
-  // made again from the corrected facts).
-  if (next?.visual && unverifiedNumbers(next.visual, nextFacts).length) next.visual = null;
+  // made again from the corrected facts), and its facts print as points again.
+  // So is one that shows a changed fact in place of its point.
+  const covers = new Set(next?.visual_covers ?? []);
+  if (
+    next?.visual &&
+    (unverifiedNumbers(next.visual, nextFacts).length || changes.some((c) => covers.has(c.fact)))
+  ) {
+    next.visual = null;
+  }
   return { facts: nextFacts, content: next };
 }
 
