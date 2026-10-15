@@ -415,6 +415,393 @@ export type Database = {
         }
         Relationships: []
       }
+      ca_articles: {
+        Row: {
+          created_at: string
+          id: string
+          issue_date: string
+          parse_job: string | null
+          published_at: string | null
+          reason: string | null
+          run_id: string | null
+          site_id: string | null
+          source_id: string | null
+          status: string
+          title: string
+          updated_at: string
+          url: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          issue_date: string
+          parse_job?: string | null
+          published_at?: string | null
+          reason?: string | null
+          run_id?: string | null
+          site_id?: string | null
+          source_id?: string | null
+          status?: string
+          title: string
+          updated_at?: string
+          url: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          issue_date?: string
+          parse_job?: string | null
+          published_at?: string | null
+          reason?: string | null
+          run_id?: string | null
+          site_id?: string | null
+          source_id?: string | null
+          status?: string
+          title?: string
+          updated_at?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ca_articles_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "ca_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ca_articles_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "ca_watch_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ca_articles_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "ca_sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ca_corrections: {
+        Row: {
+          changes: Json
+          created_at: string
+          decided_at: string | null
+          from_item_id: string | null
+          id: string
+          item_id: string
+          status: string
+          summary_en: string
+          summary_hi: string
+        }
+        Insert: {
+          changes?: Json
+          created_at?: string
+          decided_at?: string | null
+          from_item_id?: string | null
+          id?: string
+          item_id: string
+          status?: string
+          summary_en?: string
+          summary_hi?: string
+        }
+        Update: {
+          changes?: Json
+          created_at?: string
+          decided_at?: string | null
+          from_item_id?: string | null
+          id?: string
+          item_id?: string
+          status?: string
+          summary_en?: string
+          summary_hi?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ca_corrections_from_item_id_fkey"
+            columns: ["from_item_id"]
+            isOneToOne: false
+            referencedRelation: "ca_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ca_corrections_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "ca_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ca_issues: {
+        Row: {
+          approved_at: string | null
+          caption: string | null
+          created_at: string
+          error: string | null
+          id: string
+          item_count: number
+          kind: string
+          pdf_path: string | null
+          pdf_url: string | null
+          period: string
+          posted_at: string | null
+          scheduled_for: string | null
+          status: string
+          telegram_message_id: number | null
+          updated_at: string
+        }
+        Insert: {
+          approved_at?: string | null
+          caption?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          item_count?: number
+          kind: string
+          pdf_path?: string | null
+          pdf_url?: string | null
+          period: string
+          posted_at?: string | null
+          scheduled_for?: string | null
+          status?: string
+          telegram_message_id?: number | null
+          updated_at?: string
+        }
+        Update: {
+          approved_at?: string | null
+          caption?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          item_count?: number
+          kind?: string
+          pdf_path?: string | null
+          pdf_url?: string | null
+          period?: string
+          posted_at?: string | null
+          scheduled_for?: string | null
+          status?: string
+          telegram_message_id?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      ca_items: {
+        Row: {
+          category: string
+          content: Json | null
+          context_sources: Json
+          created_at: string
+          embedding: string | null
+          enrich_error: string | null
+          facts: Json
+          headline: string
+          id: string
+          importance: number
+          issue_date: string
+          needs_enrich: boolean
+          position: number
+          rajasthan: boolean
+          related_item_id: string | null
+          source_ids: string[]
+          status: string
+          syllabus_topic_id: string | null
+          unit: string | null
+          updated_at: string
+        }
+        Insert: {
+          category?: string
+          content?: Json | null
+          context_sources?: Json
+          created_at?: string
+          embedding?: string | null
+          enrich_error?: string | null
+          facts?: Json
+          headline: string
+          id?: string
+          importance?: number
+          issue_date: string
+          needs_enrich?: boolean
+          position?: number
+          rajasthan?: boolean
+          related_item_id?: string | null
+          source_ids?: string[]
+          status?: string
+          syllabus_topic_id?: string | null
+          unit?: string | null
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          content?: Json | null
+          context_sources?: Json
+          created_at?: string
+          embedding?: string | null
+          enrich_error?: string | null
+          facts?: Json
+          headline?: string
+          id?: string
+          importance?: number
+          issue_date?: string
+          needs_enrich?: boolean
+          position?: number
+          rajasthan?: boolean
+          related_item_id?: string | null
+          source_ids?: string[]
+          status?: string
+          syllabus_topic_id?: string | null
+          unit?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ca_items_related_item_id_fkey"
+            columns: ["related_item_id"]
+            isOneToOne: false
+            referencedRelation: "ca_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ca_runs: {
+        Row: {
+          discovered: string[]
+          error: string | null
+          finished_at: string | null
+          id: string
+          issue_date: string
+          locked_until: string | null
+          notified: boolean
+          started_at: string
+          started_by: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          discovered?: string[]
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          issue_date: string
+          locked_until?: string | null
+          notified?: boolean
+          started_at?: string
+          started_by?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          discovered?: string[]
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          issue_date?: string
+          locked_until?: string | null
+          notified?: boolean
+          started_at?: string
+          started_by?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      ca_sources: {
+        Row: {
+          chunks: number
+          chunks_done: number
+          content: string
+          created_at: string
+          error: string | null
+          id: string
+          issue_date: string
+          section: string
+          source_name: string
+          status: string
+          title: string
+          updated_at: string
+          url: string | null
+        }
+        Insert: {
+          chunks?: number
+          chunks_done?: number
+          content: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          issue_date: string
+          section: string
+          source_name?: string
+          status?: string
+          title: string
+          updated_at?: string
+          url?: string | null
+        }
+        Update: {
+          chunks?: number
+          chunks_done?: number
+          content?: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          issue_date?: string
+          section?: string
+          source_name?: string
+          status?: string
+          title?: string
+          updated_at?: string
+          url?: string | null
+        }
+        Relationships: []
+      }
+      ca_watch_sites: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          id: string
+          language: string
+          last_error: string | null
+          last_found: number | null
+          last_method: string | null
+          last_run_at: string | null
+          max_articles: number
+          name: string
+          section: string
+          url: string
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          language?: string
+          last_error?: string | null
+          last_found?: number | null
+          last_method?: string | null
+          last_run_at?: string | null
+          max_articles?: number
+          name: string
+          section?: string
+          url: string
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          language?: string
+          last_error?: string | null
+          last_found?: number | null
+          last_method?: string | null
+          last_run_at?: string | null
+          max_articles?: number
+          name?: string
+          section?: string
+          url?: string
+        }
+        Relationships: []
+      }
       flashcard_decks: {
         Row: {
           created_at: string
@@ -1344,6 +1731,69 @@ export type Database = {
         }[]
       }
       bot_stats: { Args: { days?: number }; Returns: Json }
+      ca_claim_due_issue: {
+        Args: never
+        Returns: {
+          approved_at: string | null
+          caption: string | null
+          created_at: string
+          error: string | null
+          id: string
+          item_count: number
+          kind: string
+          pdf_path: string | null
+          pdf_url: string | null
+          period: string
+          posted_at: string | null
+          scheduled_for: string | null
+          status: string
+          telegram_message_id: number | null
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "ca_issues"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      ca_claim_run: {
+        Args: { p_seconds?: number }
+        Returns: {
+          discovered: string[]
+          error: string | null
+          finished_at: string | null
+          id: string
+          issue_date: string
+          locked_until: string | null
+          notified: boolean
+          started_at: string
+          started_by: string
+          status: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "ca_runs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      ca_similar_items: {
+        Args: {
+          p_count?: number
+          p_embedding: string
+          p_exclude?: string
+          p_from: string
+          p_to: string
+        }
+        Returns: {
+          headline: string
+          id: string
+          issue_date: string
+          similarity: number
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
