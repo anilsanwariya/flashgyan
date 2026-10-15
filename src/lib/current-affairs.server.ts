@@ -284,15 +284,15 @@ export async function extractSourceChunk(sourceId: string, index: number) {
               (s) => s.similarity >= FOLLOW_UP_SIMILARITY,
             )
           : undefined;
-      // Unlikely stories, and less important ones once the day is full, arrive
-      // already dropped; an uploaded editorial always goes in.
+      // Unlikely stories, and less important non-Rajasthan ones once the day is
+      // full, arrive already dropped; an uploaded editorial always goes in.
       const { count: includedSoFar } = await from("ca_items")
         .select("id", { count: "exact", head: true })
         .eq("issue_date", src.issue_date)
         .eq("status", "included");
       const included =
         category === "editorial" ||
-        startsIncluded(item.importance, includedSoFar ?? 0, daily_stories);
+        startsIncluded(item.importance, includedSoFar ?? 0, daily_stories, item.rajasthan);
       const { error: iErr } = await from("ca_items").insert({
         issue_date: src.issue_date,
         category,

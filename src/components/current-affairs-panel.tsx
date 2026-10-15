@@ -1131,7 +1131,7 @@ function SettingsPanel() {
             "daily_stories",
             "Stories per day",
             "15",
-            "Must-know stories always go in. Less important ones beyond this number, and unlikely ones, arrive already dropped; you can bring any back.",
+            "Must-know stories always go in, and Rajasthan stories up to twice this number. Others beyond it, and unlikely ones, arrive already dropped; you can bring any back.",
           )}
         </div>
         <label className="flex items-start gap-3">
