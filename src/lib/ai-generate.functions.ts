@@ -1,12 +1,10 @@
 // Server functions that turn parsed PDF markdown into flashcards / MCQs
-// using the Gemini API. Output rows exactly match the shape our existing
+// using Claude. Output rows exactly match the shape our existing
 // Excel importer produces, so the same bulk-import path is reused.
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-
-const GEMINI_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+import { parseJsonLoose, saathiComplete } from "../../supabase/functions/_shared/saathi-core.ts";
 
 const SYSTEM_PROMPT = `You are an expert item-writer for Indian competitive state exams (RAS, REET, PSI, Patwari, LDC, and similar).
 Your job is to transform the given study material into rigorous, high-quality ACTIVE-RECALL items.
@@ -123,46 +121,24 @@ async function callGemini(
   userInstructions: string,
   responseSchema: unknown,
 ) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
-  // Cap the input to keep the request safe (~ well under 1M-token context).
+  // Runs on Claude via the project's ANTHROPIC_API_KEY (shared SAATHI helper).
   const truncated = markdown.length > 200_000 ? markdown.slice(0, 200_000) : markdown;
-  const body = {
-    system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { text: userInstructions },
-          { text: "\n---\nSOURCE MATERIAL (markdown):\n\n" + truncated },
-        ],
-      },
-    ],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema,
-      temperature: 0.4,
+  const text = await saathiComplete("", [
+    { role: "system", content: SYSTEM_PROMPT },
+    {
+      role: "user",
+      content:
+        userInstructions +
+        "\n\nReturn ONLY a JSON object (no prose, no code fences) matching this schema:\n" +
+        JSON.stringify(responseSchema) +
+        "\n---\nSOURCE MATERIAL (markdown):\n\n" +
+        truncated,
     },
-  };
-  const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`Gemini failed (${res.status}): ${txt.slice(0, 500)}`);
-  }
-  const json = (await res.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
-  };
-  const text = json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-  if (!text.trim()) throw new Error("Gemini returned empty output");
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error("Gemini returned non-JSON output");
-  }
+  ]);
+  if (!text.trim()) throw new Error("Claude returned empty output");
+  const parsed = parseJsonLoose<unknown>(text);
+  if (!parsed) throw new Error("Claude returned non-JSON output");
+  return parsed;
 }
 
 // ---------- Flashcards ----------

@@ -1,4 +1,4 @@
-// Admin helper: upload a PDF, parse via LlamaParse, then ask Gemini to
+// Admin helper: upload a PDF, parse via LlamaParse, then ask Claude to
 // synthesize flashcards / MCQs shaped like the Excel importer's rows.
 // The generated rows are handed back via `onGenerated` so they flow into
 // the same append/replace import UI used by the Excel path.
@@ -151,7 +151,7 @@ export function FlashcardsAiPanel({
   return (
     <Shell
       title="Generate with AI (via PDF)"
-      hint="We parse your PDF with LlamaParse, then Gemini writes flashcards tailored for RAS/REET/PSI/Patwari, preserving Hindi grammar and श्रुतिसम भिन्नार्थक pairs. Review before importing."
+      hint="We parse your PDF with LlamaParse, then Claude writes flashcards tailored for RAS/REET/PSI/Patwari, preserving Hindi grammar and श्रुतिसम भिन्नार्थक pairs. Review before importing."
       file={file}
       setFile={setFile}
       count={count}
@@ -197,7 +197,7 @@ export function McqAiPanel({
   return (
     <Shell
       title="Generate with AI (via PDF)"
-      hint="We parse your PDF with LlamaParse, then Gemini writes 4-option MCQs tailored for RAS/REET/PSI/Patwari, preserving Hindi grammar and श्रुतिसम भिन्नार्थक pairs. Review before importing."
+      hint="We parse your PDF with LlamaParse, then Claude writes 4-option MCQs tailored for RAS/REET/PSI/Patwari, preserving Hindi grammar and श्रुतिसम भिन्नार्थक pairs. Review before importing."
       file={file}
       setFile={setFile}
       count={count}
