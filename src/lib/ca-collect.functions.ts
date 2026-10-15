@@ -63,6 +63,23 @@ export const setCaArticleStatus = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const setCaArticlesStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        ids: z.array(z.string().uuid()).min(1).max(500),
+        status: z.enum(["selected", "skipped"]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    const s = await server();
+    for (const id of data.ids) await s.setArticleStatus(id, data.status);
+    return { ok: true };
+  });
+
 export const saveCaWatchSite = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>

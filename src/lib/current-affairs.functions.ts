@@ -184,6 +184,32 @@ export const deleteCaSource = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+const idsSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(1000) });
+
+export const deleteCaSources = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => idsSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return { deleted: await (await server()).deleteSources(data.ids) };
+  });
+
+export const deleteCaItems = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => idsSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return { deleted: await (await server()).deleteItems(data.ids) };
+  });
+
+export const clearCaCollectedDay = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ date: dateSchema }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).clearCollectedDay(data.date);
+  });
+
 export const enrichCaItem = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))

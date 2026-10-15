@@ -27,7 +27,9 @@ import {
   buildCaIssue,
   cancelCaIssue,
   decideCaCorrection,
+  deleteCaItems,
   deleteCaSource,
+  deleteCaSources,
   enrichCaItem,
   extractCaSourcePart,
   getCaDay,
@@ -67,6 +69,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -662,50 +665,168 @@ function DailyPanel() {
   );
 }
 
+// Ticks rows on and off, keeping only ids still in the list.
+function useChosen(ids: string[]) {
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const key = ids.join(",");
+  useEffect(() => {
+    const live = new Set(ids);
+    setChosen((cur) => {
+      const next = new Set([...cur].filter((id) => live.has(id)));
+      return next.size === cur.size ? cur : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  const toggle = (id: string, on: boolean) =>
+    setChosen((cur) => {
+      const next = new Set(cur);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  return { chosen, setChosen, toggle };
+}
+
+// "Select all", the number selected, and delete buttons for a list.
+function BulkBar({
+  ids,
+  chosen,
+  setChosen,
+  noun,
+  busy,
+  onDelete,
+}: {
+  ids: string[];
+  chosen: Set<string>;
+  setChosen: (s: Set<string>) => void;
+  noun: string;
+  busy: boolean;
+  onDelete: (ids: string[], all: boolean) => void;
+}) {
+  const all = ids.length > 0 && ids.every((id) => chosen.has(id));
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <label className="inline-flex items-center gap-2">
+        <Checkbox
+          checked={all}
+          onCheckedChange={(v) => setChosen(v === true ? new Set(ids) : new Set())}
+          aria-label={`Select all ${noun}`}
+        />
+        Select all
+      </label>
+      {chosen.size > 0 && (
+        <>
+          <span className="text-muted-foreground">{chosen.size} selected</span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-destructive hover:text-destructive"
+            disabled={busy}
+            onClick={() => onDelete([...chosen], false)}
+          >
+            <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete {chosen.size}
+          </Button>
+        </>
+      )}
+      <Button
+        size="sm"
+        variant="ghost"
+        className="ml-auto h-7 text-destructive hover:text-destructive"
+        disabled={busy || !ids.length}
+        onClick={() => onDelete(ids, true)}
+      >
+        Delete all {noun}
+      </Button>
+    </div>
+  );
+}
+
 function SourcesList({ sources, onChanged }: { sources: CaSource[]; onChanged: () => void }) {
   const deleteFn = useServerFn(deleteCaSource);
+  const bulkFn = useServerFn(deleteCaSources);
+  const ids = sources.map((s) => s.id);
+  const { chosen, setChosen, toggle } = useChosen(ids);
+  const [busy, setBusy] = useState(false);
   if (!sources.length) return null;
+
+  async function deleteMany(list: string[], all: boolean) {
+    if (
+      !confirm(
+        all
+          ? `Delete all ${list.length} sources for this day, and the facts and news items that came only from them?`
+          : `Delete ${list.length} selected source(s) and the facts that came only from them?`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const r = await bulkFn({ data: { ids: list } });
+      setChosen(new Set());
+      toast.success(`Deleted ${r.deleted} source(s)`);
+      onChanged();
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't delete"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <ul className="divide-y divide-border rounded-xl border border-border text-sm">
-      {sources.map((s) => (
-        <li key={s.id} className="flex flex-wrap items-center gap-2 p-2.5">
-          <Badge>{UPLOAD_SECTIONS.find((x) => x.id === s.section)?.label}</Badge>
-          <span className="min-w-0 flex-1 truncate">
-            {s.title}
-            {s.source_name ? (
-              <span className="text-muted-foreground"> · {s.source_name}</span>
-            ) : null}
-          </span>
-          {s.status === "error" ? (
-            <Badge tone="bad" title={s.error ?? ""}>
-              Failed
-            </Badge>
-          ) : s.chunks_done >= s.chunks ? (
-            <Badge tone="good">Read</Badge>
-          ) : (
-            <Badge tone="warn">
-              {s.chunks_done}/{s.chunks} parts read
-            </Badge>
-          )}
-          <Button
-            size="icon"
-            variant="ghost"
-            aria-label="Delete source"
-            onClick={async () => {
-              if (!confirm("Delete this source and the facts that came only from it?")) return;
-              try {
-                await deleteFn({ data: { id: s.id } });
-                onChanged();
-              } catch (e) {
-                toast.error(errorText(e, "Couldn't delete"));
-              }
-            }}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-2">
+      <BulkBar
+        ids={ids}
+        chosen={chosen}
+        setChosen={setChosen}
+        noun="sources"
+        busy={busy}
+        onDelete={deleteMany}
+      />
+      <ul className="divide-y divide-border rounded-xl border border-border text-sm">
+        {sources.map((s) => (
+          <li key={s.id} className="flex flex-wrap items-center gap-2 p-2.5">
+            <Checkbox
+              checked={chosen.has(s.id)}
+              onCheckedChange={(v) => toggle(s.id, v === true)}
+              aria-label="Select source"
+            />
+            <Badge>{UPLOAD_SECTIONS.find((x) => x.id === s.section)?.label}</Badge>
+            <span className="min-w-0 flex-1 truncate">
+              {s.title}
+              {s.source_name ? (
+                <span className="text-muted-foreground"> · {s.source_name}</span>
+              ) : null}
+            </span>
+            {s.status === "error" ? (
+              <Badge tone="bad" title={s.error ?? ""}>
+                Failed
+              </Badge>
+            ) : s.chunks_done >= s.chunks ? (
+              <Badge tone="good">Read</Badge>
+            ) : (
+              <Badge tone="warn">
+                {s.chunks_done}/{s.chunks} parts read
+              </Badge>
+            )}
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label="Delete source"
+              onClick={async () => {
+                if (!confirm("Delete this source and the facts that came only from it?")) return;
+                try {
+                  await deleteFn({ data: { id: s.id } });
+                  onChanged();
+                } catch (e) {
+                  toast.error(errorText(e, "Couldn't delete"));
+                }
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -794,9 +915,43 @@ function ItemsList({ items, onChanged }: { items: CaItem[]; onChanged: () => voi
   }, [items]);
   const included = items.filter((i) => i.status === "included").length;
   const unverified = items.reduce((n, i) => n + i.facts.filter((f) => !f.verified).length, 0);
+  const deleteFn = useServerFn(deleteCaItems);
+  const ids = items.map((i) => i.id);
+  const { chosen, setChosen, toggle } = useChosen(ids);
+  const [busy, setBusy] = useState(false);
+
+  async function deleteMany(list: string[], all: boolean) {
+    if (
+      !confirm(
+        all
+          ? `Delete all ${list.length} news items for this day? This can't be undone. The sources stay listed but are not read again; to start over, delete the sources too.`
+          : `Delete ${list.length} selected news item(s)? This can't be undone. (To keep an item out of the issue without deleting it, use its ✕ button.)`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const r = await deleteFn({ data: { ids: list } });
+      setChosen(new Set());
+      toast.success(`Deleted ${r.deleted} item(s)`);
+      onChanged();
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't delete"));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="space-y-5">
+      <BulkBar
+        ids={ids}
+        chosen={chosen}
+        setChosen={setChosen}
+        noun="items"
+        busy={busy}
+        onDelete={deleteMany}
+      />
       <div className="flex flex-wrap gap-2 text-xs">
         <Badge tone="primary">{included} items in the issue</Badge>
         {items.length - included > 0 && <Badge>{items.length - included} dropped</Badge>}
@@ -821,6 +976,8 @@ function ItemsList({ items, onChanged }: { items: CaItem[]; onChanged: () => voi
             <ItemCard
               key={it.id}
               item={it}
+              selected={chosen.has(it.id)}
+              onSelect={(on) => toggle(it.id, on)}
               above={list[i - 1]}
               below={list[i + 1]}
               onChanged={onChanged}
@@ -834,11 +991,15 @@ function ItemsList({ items, onChanged }: { items: CaItem[]; onChanged: () => voi
 
 function ItemCard({
   item,
+  selected,
+  onSelect,
   above,
   below,
   onChanged,
 }: {
   item: CaItem;
+  selected: boolean;
+  onSelect: (on: boolean) => void;
   above?: CaItem;
   below?: CaItem;
   onChanged: () => void;
@@ -879,9 +1040,15 @@ function ItemCard({
 
   return (
     <article
-      className={`rounded-2xl border border-border bg-card p-4 ${dropped ? "opacity-50" : ""}`}
+      className={`rounded-2xl border bg-card p-4 ${selected ? "border-primary ring-1 ring-primary/30" : "border-border"} ${dropped ? "opacity-50" : ""}`}
     >
       <div className="flex flex-wrap items-start gap-2">
+        <Checkbox
+          checked={selected}
+          onCheckedChange={(v) => onSelect(v === true)}
+          className="mt-1"
+          aria-label="Select item"
+        />
         <div className="min-w-0 flex-1">
           <div className="font-semibold">{c?.headline.hi || item.headline}</div>
           <div className="text-sm text-muted-foreground">{c?.headline.en || ""}</div>
