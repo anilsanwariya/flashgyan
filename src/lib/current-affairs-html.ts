@@ -11,6 +11,7 @@ import {
   type MagazineSettings,
 } from "@/lib/current-affairs";
 import { VISUAL_CSS, pointsToShow, visualHtml, type Visual } from "@/lib/ca-visuals";
+import type { CaFeature } from "@/lib/ca-feature";
 
 export type MagazineItem = {
   id: string;
@@ -211,17 +212,37 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .rev tr { break-inside: avoid; }
 .rev .rn { width: 7mm; font-weight: 700; color: ${accent}; }
 .rev .en { color: #475569; }
+.feat-title { font-size: 15pt; line-height: 1.35; margin: 2mm 0 1mm; }
+.feat-title .en { font-size: 12pt; color: #475569; }
+.feat-intro p { margin: 0; font-style: italic; }
+.feat-sec { break-inside: avoid; margin-top: 4mm; }
+.feat-h { font-size: 11pt; color: ${accent}; margin: 0 0 1mm; }
+.feat-src { margin-top: 4mm; font-size: 8.5pt; color: #64748b; }
+.rev .ans { font-weight: 700; color: ${accent}; }
 ${VISUAL_CSS(accent)}
 `;
 
-// One line per story, by section, for last-minute revision.
+const hasRevision = (i: MagazineItem) =>
+  Boolean(
+    (i.content.quick && (i.content.quick.q.en || i.content.quick.q.hi)) ||
+    (i.content.oneliner && (i.content.oneliner.en || i.content.oneliner.hi)),
+  );
+
+// One quick question (or, on older stories, one line) per story, by section,
+// for last-minute revision.
 function revisionPage(groups: Map<string, MagazineItem[]>): string {
   let n = 0;
+  let asked = 0;
   const parts = [...groups.entries()]
     .map(([cat, list]) => {
       const rows = list
-        .filter((i) => i.content.oneliner && (i.content.oneliner.en || i.content.oneliner.hi))
+        .filter(hasRevision)
         .map((i) => {
+          const q = i.content.quick;
+          if (q && (q.q.en || q.q.hi)) {
+            asked++;
+            return `<tr><td class="rn">${++n}</td><td lang="hi">${esc(q.q.hi)} <span class="ans">— ${esc(q.a.hi)}</span></td><td class="en">${esc(q.q.en)} <span class="ans">— ${esc(q.a.en)}</span></td></tr>`;
+          }
           const o = i.content.oneliner!;
           return `<tr><td class="rn">${++n}</td><td lang="hi">${esc(o.hi)}</td><td class="en">${esc(o.en)}</td></tr>`;
         })
@@ -232,7 +253,33 @@ function revisionPage(groups: Map<string, MagazineItem[]>): string {
     })
     .join("");
   if (!n) return "";
-  return `<section class="section new-page"><div class="section-title"><h2>${icon("revision")} 60-Second Revision</h2><span>One line per story</span></div>${parts}</section>`;
+  const sub =
+    asked === n
+      ? "Quick questions"
+      : asked
+        ? "Quick questions and key lines"
+        : "One line per story";
+  return `<section class="section new-page"><div class="section-title"><h2>${icon("revision")} 60-Second Revision</h2><span>${sub}</span></div>${parts}</section>`;
+}
+
+// The monthly background article: bilingual sections, one exam fact a line.
+function featurePage(f: CaFeature): string {
+  const lines = (t: string) =>
+    t
+      .split(/\n+/)
+      .map((l) => l.replace(/^[\s•\-–*]+/, "").trim())
+      .filter(Boolean);
+  const sections = f.sections
+    .map((s) => {
+      const hi = lines(s.body.hi);
+      const en = lines(s.body.en);
+      return `<div class="feat-sec"><h3 class="feat-h"><span lang="hi">${esc(s.heading.hi)}</span> · <span>${esc(s.heading.en)}</span></h3><div class="bi"><ul class="hi" lang="hi">${hi.map((l) => `<li>${esc(l)}</li>`).join("")}</ul><ul class="en" lang="en">${en.map((l) => `<li>${esc(l)}</li>`).join("")}</ul></div></div>`;
+    })
+    .join("");
+  const sources = f.sources.length
+    ? `<p class="feat-src">From FlashGyan study notes: ${esc(f.sources.join(", "))}</p>`
+    : "";
+  return `<section class="section new-page feature"><div class="section-title"><h2>${icon("background")} Background Article</h2><span>Static topic behind this month's news</span></div><h2 class="feat-title"><span lang="hi">${esc(f.title.hi)}</span><br/><span class="en">${esc(f.title.en)}</span></h2><div class="bi feat-intro"><p lang="hi">${esc(f.intro.hi)}</p><p class="en">${esc(f.intro.en)}</p></div>${sections}${sources}</section>`;
 }
 
 const OPTION_LETTERS = ["a", "b", "c", "d"];
@@ -298,6 +345,8 @@ export function renderMagazine(opts: {
   settings: MagazineSettings;
   items: MagazineItem[];
   corrections?: MagazineCorrection[];
+  // Monthly only: the background article, when included.
+  feature?: CaFeature | null;
 }): string {
   const s = opts.settings;
   const accent = safeColor(s.accent);
@@ -337,7 +386,7 @@ export function renderMagazine(opts: {
   const channel = /^@[A-Za-z0-9_]{4,}$/.test(s.channel.trim()) ? s.channel.trim() : "";
   const questions =
     items.filter((i) => i.content.mcq).length + items.filter((i) => i.content.mains).length;
-  const revisionCount = items.filter((i) => i.content.oneliner).length;
+  const revisionCount = items.filter(hasRevision).length;
   const visuals = items.filter((i) => i.content.visual).length;
   const toc = [...groups.entries()]
     .map(
@@ -393,7 +442,7 @@ ${watermark}
   <div class="cover-body">
     ${highlights ? `<h3 class="cover-h">In this issue</h3><div class="hl-grid">${highlights}</div>` : ""}
     <h3 class="cover-h">Contents</h3>
-    <div class="toc">${toc}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} 60-Second Revision</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} Practice Questions</span><b>${questions}</b></div>` : ""}</div>
+    <div class="toc">${toc}${opts.feature ? `<div class="toc-row"><span>${icon("background")} Background: ${esc(opts.feature.title.en)}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} 60-Second Revision</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} Practice Questions</span><b>${questions}</b></div>` : ""}</div>
     ${
       channel
         ? `<div class="cta"><div><b>Get it every morning on Telegram</b><span>Daily current affairs for RAS, bilingual, free.</span></div><div class="cta-handle">${esc(channel)}</div></div>`
@@ -404,6 +453,7 @@ ${watermark}
 </section>
 ${sections}
 ${corrections}
+${opts.feature ? featurePage(opts.feature) : ""}
 ${revisionPage(groups)}
 ${practicePage(items)}
 </body>

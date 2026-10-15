@@ -1,6 +1,15 @@
 // Server-only current affairs magazine: sources → news items → bilingual
 // issues → PDF (Cloudflare browser rendering) → scheduled Telegram post.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { startsIncluded } from "@/lib/ca-blueprint";
+import {
+  featureMessages,
+  featureTopicMessages,
+  parseFeature,
+  parseFeatureTopics,
+  type CaFeature,
+  type FeatureTopic,
+} from "@/lib/ca-feature";
 import {
   relevantMatches,
   saathiComplete,
@@ -37,6 +46,7 @@ import {
   type Bi,
   type CaChange,
   type CaContent,
+  type CaQuick,
   type CaFact,
   type Category,
   type MagazineSettings,
@@ -244,6 +254,7 @@ export async function extractSourceChunk(sourceId: string, index: number) {
       }),
     );
     const found = parseExtracted(raw, text, src.id);
+    const { daily_stories } = await getMagazineSettings();
     let created = 0;
     let merged = 0;
     for (const item of found) {
@@ -282,9 +293,19 @@ export async function extractSourceChunk(sourceId: string, index: number) {
               (s) => s.similarity >= FOLLOW_UP_SIMILARITY,
             )
           : undefined;
+      // Unlikely stories, and less important non-Rajasthan ones once the day is
+      // full, arrive already dropped; an uploaded editorial always goes in.
+      const { count: includedSoFar } = await from("ca_items")
+        .select("id", { count: "exact", head: true })
+        .eq("issue_date", src.issue_date)
+        .eq("status", "included");
+      const included =
+        category === "editorial" ||
+        startsIncluded(item.importance, includedSoFar ?? 0, daily_stories, item.rajasthan);
       const { error: iErr } = await from("ca_items").insert({
         issue_date: src.issue_date,
         category,
+        status: included ? "included" : "dropped",
         headline: item.headline,
         facts: item.facts,
         source_ids: [src.id],
@@ -516,18 +537,132 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
   }
 }
 
+// ---------- Monthly background article ----------
+
+const featureKey = (month: string) => `ca_feature:${month.slice(0, 7)}`;
+
+export async function getFeature(month: string): Promise<CaFeature | null> {
+  const { data } = await from("bot_settings")
+    .select("value")
+    .eq("key", featureKey(month))
+    .maybeSingle();
+  return (data as { value: CaFeature } | null)?.value ?? null;
+}
+
+// Saves the month's article (edits, or in/out of the issue); null deletes it.
+export async function saveFeature(month: string, feature: CaFeature | null) {
+  if (!feature) {
+    fail((await from("bot_settings").delete().eq("key", featureKey(month))).error);
+    return null;
+  }
+  const { error } = await from("bot_settings").upsert({
+    key: featureKey(month),
+    value: feature,
+    updated_at: new Date().toISOString(),
+  } as never);
+  fail(error);
+  return feature;
+}
+
+// Knowledge-base passages on a topic, from the study notes (not current affairs).
+async function featurePassages(query: string, count = 8) {
+  const subjects = await studySubjects();
+  if (!subjects.length) return [];
+  const matches = await saathiSearchQuery(
+    apiKey(),
+    rpc,
+    { standalone: query, english: null },
+    subjects,
+  );
+  return relevantMatches(matches)
+    .slice(0, count)
+    .map((m) => ({ title: m.source_file || m.title, content: m.content }));
+}
+
+const NOT_COVERED =
+  "Your SAATHI notes don't cover this topic well enough for an article. Add notes on it to the knowledge base first, or pick another topic.";
+
+// Up to 3 topics behind this month's stories that the knowledge base covers.
+export async function suggestFeatureTopics(month: string): Promise<FeatureTopic[]> {
+  const range = monthRange(month);
+  const { data, error } = await from("ca_items")
+    .select("headline,category,content")
+    .gte("issue_date", range.from)
+    .lte("issue_date", range.to)
+    .eq("status", "included")
+    .order("importance", { ascending: false })
+    .limit(150);
+  fail(error);
+  const stories = (
+    (data ?? []) as { headline: string; category: string; content: CaContent | null }[]
+  ).map((r) => ({
+    headline: r.content?.headline.en || r.headline,
+    category: categoryLabel(normalizeCategory(r.category)).en,
+  }));
+  if (!stories.length) throw new Error("There are no stories this month yet.");
+  const topics = parseFeatureTopics(
+    await saathiComplete(apiKey(), featureTopicMessages(stories)),
+    stories,
+  );
+  const checked = await Promise.all(
+    topics.map(async (t) => ({ ...t, passages: (await featurePassages(t.query)).length })),
+  );
+  return checked
+    .filter((t) => t.passages >= 2)
+    .sort((a, b) => b.stories.length - a.stories.length || b.passages - a.passages)
+    .slice(0, 3);
+}
+
+// Writes the month's article on a topic from the knowledge base. A draft with
+// a number the passages don't contain gets one retry, then fails.
+export async function writeFeature(
+  month: string,
+  topic: { topic: Bi; query: string; stories: string[] },
+): Promise<CaFeature> {
+  const passages = await featurePassages(topic.query || topic.topic.en);
+  if (passages.length < 2) throw new Error(NOT_COVERED);
+  let problem: string | undefined;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const raw = await saathiComplete(
+      apiKey(),
+      featureMessages({ topic: topic.topic, stories: topic.stories, passages, problem }),
+    );
+    const r = parseFeature(raw, passages);
+    if (r.ok) {
+      const feature: CaFeature = {
+        topic: topic.topic,
+        title: r.title,
+        intro: r.intro,
+        sections: r.sections,
+        sources: [...new Set(r.from.map((i) => passages[i].title).filter(Boolean))],
+        included: true,
+        created_at: new Date().toISOString(),
+      };
+      await saveFeature(month, feature);
+      return feature;
+    }
+    if (r.reason === "not covered") throw new Error(NOT_COVERED);
+    problem = r.reason;
+  }
+  throw new Error(`SAATHI's article didn't pass the fact check: ${problem}`);
+}
+
 // ---------- Visuals ----------
 
 // Asks SAATHI for the story's visual and revision line. A visual whose numbers
 // aren't all in the facts gets one retry with the reason, then is left out.
 // Never fails the item.
-export async function makeVisual(
-  item: Pick<CaItem, "headline" | "category" | "facts">,
-): Promise<{ visual: Visual | null; visual_covers: number[]; oneliner: Bi | null }> {
+export async function makeVisual(item: Pick<CaItem, "headline" | "category" | "facts">): Promise<{
+  visual: Visual | null;
+  visual_covers: number[];
+  oneliner: Bi | null;
+  quick: CaQuick | null;
+}> {
   try {
     const settings = await getMagazineSettings();
     let problem: string | undefined;
     let oneliner: Bi | null = null;
+    let quick: CaQuick | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       const raw = await saathiComplete(
         apiKey(),
@@ -540,15 +675,17 @@ export async function makeVisual(
       );
       const r = parseVisual(raw, item.facts, item.headline);
       oneliner = r.oneliner ?? oneliner;
-      if (!settings.visuals) return { visual: null, visual_covers: [], oneliner };
-      if (r.visual || !r.problem) return { visual: r.visual, visual_covers: r.covers, oneliner };
+      quick = r.quick ?? quick;
+      if (!settings.visuals) return { visual: null, visual_covers: [], oneliner, quick };
+      if (r.visual || !r.problem)
+        return { visual: r.visual, visual_covers: r.covers, oneliner, quick };
       problem = r.problem;
     }
     console.error("visual rejected:", problem);
-    return { visual: null, visual_covers: [], oneliner };
+    return { visual: null, visual_covers: [], oneliner, quick };
   } catch (e) {
     console.error("visual:", e);
-    return { visual: null, visual_covers: [], oneliner: null };
+    return { visual: null, visual_covers: [], oneliner: null, quick: null };
   }
 }
 
@@ -559,8 +696,16 @@ export async function redoVisual(itemId: string): Promise<CaItem> {
   const item = data as unknown as CaItem;
   if (!item.content) throw new Error("Write the text first");
   const look = await makeVisual(item);
-  if (!look.visual)
+  if (!look.visual) {
+    // Keep the new revision line and question even without a visual.
+    const keep = {
+      ...(look.oneliner ? { oneliner: look.oneliner } : {}),
+      ...(look.quick ? { quick: look.quick } : {}),
+    };
+    if (Object.keys(keep).length)
+      await updateItem(itemId, { content: { ...item.content, ...keep } });
     throw new Error("SAATHI couldn't make a visual from these facts that passed the number check.");
+  }
   return updateItem(itemId, { content: { ...item.content, ...look } });
 }
 
@@ -847,6 +992,7 @@ export async function issueHtml(kind: "daily" | "monthly", period: string) {
       summary: { en: c.summary_en, hi: c.summary_hi },
     }));
   }
+  const feature = kind === "monthly" ? await getFeature(range.from) : null;
   return {
     html: renderMagazine({
       kind,
@@ -854,6 +1000,7 @@ export async function issueHtml(kind: "daily" | "monthly", period: string) {
       settings,
       items,
       corrections,
+      feature: feature?.included ? feature : null,
     }),
     settings,
     count: items.length,

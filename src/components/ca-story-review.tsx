@@ -44,7 +44,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-type Lang = "hi" | "en" | "both";
+export type Lang = "hi" | "en" | "both";
 
 const LANG_KEY = "ca-review-lang";
 const reviewedKey = (date: string) => `ca-reviewed:${date}`;
@@ -191,6 +191,13 @@ export function StoryList({
           {items.filter((i) => i.content?.background).length} with background from your notes
         </Badge>
       </div>
+      {items.length - included > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Stories unlikely in the exam, and less important ones beyond your stories-per-day limit
+          (Magazine settings), arrive dropped at the bottom. Press “Include” on one to add it and
+          write it.
+        </p>
+      )}
 
       {/* Reading controls stay in reach while scrolling. */}
       <div className="sticky top-[3.75rem] z-20 -mx-4 flex flex-wrap items-center gap-2 border-b border-border bg-background/95 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6 lg:top-0 lg:-mx-2 lg:px-2">
@@ -635,6 +642,30 @@ function StoryCard({
                 </Part>
               )}
 
+              {c.quick && (
+                <Part title="Quick revision question · त्वरित प्रश्न">
+                  <BiLine
+                    value={c.quick.q}
+                    lang={lang}
+                    editing={editing}
+                    onSave={(v) => save({ quick: { ...c.quick!, q: v } })}
+                    onDelete={() => act(() => save({ quick: null }), "Question removed")}
+                  />
+                  <div className="mt-1 flex gap-2">
+                    <span className="mt-0.5 shrink-0 text-sm font-semibold text-primary">→</span>
+                    <div className="min-w-0 flex-1">
+                      <BiLine
+                        value={c.quick.a}
+                        lang={lang}
+                        editing={editing}
+                        strong
+                        onSave={(v) => save({ quick: { ...c.quick!, a: v } })}
+                      />
+                    </div>
+                  </div>
+                </Part>
+              )}
+
               {c.background && (
                 <Part title="Background · पृष्ठभूमि" tone="background">
                   <BiLine
@@ -855,8 +886,13 @@ function StoryCard({
               disabled={busy}
               onClick={() =>
                 act(
-                  () =>
-                    updateFn({ data: { id: item.id, status: dropped ? "included" : "dropped" } }),
+                  async () => {
+                    await updateFn({
+                      data: { id: item.id, status: dropped ? "included" : "dropped" },
+                    });
+                    // Stories that arrived dropped were never written.
+                    if (dropped && item.needs_enrich) await enrichFn({ data: { id: item.id } });
+                  },
                   dropped ? "Back in the issue" : "Dropped from the issue",
                 )
               }
@@ -951,7 +987,7 @@ function Part({
 
 // A bilingual line shown as plain text. In edit mode it gets a pencil (and a
 // bin when it can be deleted); only the pencil opens text boxes for it.
-function BiLine({
+export function BiLine({
   value,
   lang,
   editing = false,

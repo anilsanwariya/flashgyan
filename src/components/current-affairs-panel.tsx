@@ -48,6 +48,7 @@ import {
 } from "@/lib/current-affairs";
 import { CollectionBox, WatchSitesSettings } from "@/components/ca-collect-panel";
 import { StoryList } from "@/components/ca-story-review";
+import { FeatureBox } from "@/components/ca-feature-box";
 import { Badge, BulkBar, errorText, useChosen } from "@/components/ca-ui";
 import { FileDropZone, FileQueueList, useFileQueue } from "@/components/saathi-file-queue";
 import { SAATHI_ACCEPT } from "@/lib/saathi-parse";
@@ -834,6 +835,8 @@ function MonthlyPanel() {
         onChanged={refresh}
       />
 
+      {items > 0 && <FeatureBox month={month} />}
+
       {data && (
         <section className="space-y-2 rounded-2xl border border-border bg-card p-4">
           <div className="flex flex-wrap gap-2 text-xs">
@@ -961,7 +964,11 @@ function SettingsPanel() {
 
   useEffect(() => {
     if (q.data && !form) {
-      setForm({ ...q.data, trusted_domains: q.data.trusted_domains.join("\n") });
+      setForm({
+        ...q.data,
+        trusted_domains: q.data.trusted_domains.join("\n"),
+        daily_stories: String(q.data.daily_stories),
+      });
     }
   }, [q.data, form]);
 
@@ -993,6 +1000,7 @@ function SettingsPanel() {
           collect_time: text("collect_time"),
           notify_when_ready: Boolean(form!.notify_when_ready),
           visuals: Boolean(form!.visuals),
+          daily_stories: Number(text("daily_stories")) || 15,
         },
       });
       toast.success("Saved");
@@ -1121,6 +1129,14 @@ function SettingsPanel() {
 
       <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
         <h3 className="font-semibold">SAATHI and PDF</h3>
+        <div className="sm:max-w-md">
+          {field(
+            "daily_stories",
+            "Stories per day",
+            "15",
+            "Must-know stories always go in, and Rajasthan stories up to twice this number. Others beyond it, and unlikely ones, arrive already dropped; you can bring any back.",
+          )}
+        </div>
         <label className="flex items-start gap-3">
           <Switch
             checked={Boolean(form.add_to_knowledge_base)}

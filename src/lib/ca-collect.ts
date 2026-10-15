@@ -1,5 +1,6 @@
 // Automatic news collection: reading RSS feeds and news pages, and the AI
 // prompt that picks exam-relevant headlines. Pure helpers, no network here.
+import { IMPORTANCE_GUIDE, SKIP_STORIES, STORY_TYPES } from "@/lib/ca-blueprint";
 
 export type FoundLink = { url: string; title: string; published_at: string | null };
 
@@ -149,6 +150,10 @@ export function isRecent(link: FoundLink, now = new Date()): boolean {
 
 type ChatMessage = { role: "system" | "user"; content: string };
 
+const TYPE_LABELS = STORY_TYPES.filter((t) => t.id !== "other")
+  .map((t) => t.label)
+  .join("; ");
+
 export function triageMessages(
   list: { title: string; site: string }[],
   max: number,
@@ -156,9 +161,9 @@ export function triageMessages(
   return [
     {
       role: "system",
-      content: `You pick news for a daily current affairs magazine for RAS (Rajasthan Administrative Service) exam aspirants. From the numbered headlines (Hindi or English), choose those likely to matter for the RAS Prelims or Mains exam:
-Rajasthan government decisions, schemes, budgets, appointments and events; central government policies, schemes, bills, reports, indices and Supreme Court judgments; international relations, summits and organisations; economy and data; science, technology, defence, space, health and environment; major sports results; awards, appointments and important days.
-Skip: crime, accidents, political quarrels and statements, elections gossip, entertainment, celebrities, local civic complaints, weather updates, opinion pieces, horoscopes, markets and stock tips, duplicate headlines about the same story (keep the most informative one).
+      content: `You pick news for a daily current affairs magazine for RAS (Rajasthan Administrative Service) exam aspirants. From the numbered headlines (Hindi or English), choose only those RPSC is likely to ask about in the RAS Prelims or Mains exam. Be strict: a headline must clearly fit one of these story types: ${TYPE_LABELS}.
+Skip: ${SKIP_STORIES.join("; ")}; opinion pieces; duplicate headlines about the same story (keep the most informative one).
+Rank by importance and leave out importance-1 headlines: ${IMPORTANCE_GUIDE}
 Reply with JSON only: an array of the chosen numbers, most exam-relevant first, at most ${max}. Reply [] if none.`,
     },
     {
