@@ -7,6 +7,7 @@ import {
   saathiEmbed,
   saathiSearchQuery,
   type SaathiRpc,
+  saathiErrorDetail,
 } from "../../supabase/functions/_shared/saathi-core.ts";
 import {
   DEFAULT_MAGAZINE_SETTINGS,
@@ -307,11 +308,11 @@ export async function extractSourceChunk(sourceId: string, index: number) {
     await from("ca_sources")
       .update({
         status: "error",
-        error: e instanceof Error ? e.message : String(e),
+        error: saathiErrorDetail(e),
         updated_at: new Date().toISOString(),
       } as never)
       .eq("id", sourceId);
-    throw e;
+    throw new Error(saathiErrorDetail(e));
   }
 }
 
@@ -507,9 +508,9 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
     return saved as unknown as CaItem;
   } catch (e) {
     await from("ca_items")
-      .update({ enrich_error: e instanceof Error ? e.message : String(e) } as never)
+      .update({ enrich_error: saathiErrorDetail(e) } as never)
       .eq("id", itemId);
-    throw e;
+    throw new Error(saathiErrorDetail(e));
   }
 }
 

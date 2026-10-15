@@ -118,6 +118,16 @@ export const saveMagazineSettings = createServerFn({ method: "POST" })
     });
   });
 
+// One tiny request to each AI service, to see which one is failing and why.
+export const checkAiServices = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    const { saathiCheckProviders } =
+      await import("../../supabase/functions/_shared/saathi-core.ts");
+    return saathiCheckProviders();
+  });
+
 export const uploadMagazineLogo = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>

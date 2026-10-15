@@ -25,6 +25,7 @@ import {
 import {
   addCaSource,
   buildCaIssue,
+  checkAiServices,
   cancelCaIssue,
   decideCaCorrection,
   deleteCaItems,
@@ -1674,6 +1675,76 @@ function MonthlyPanel() {
 
 // ====================== Settings ======================
 
+// Which AI service is failing, in the provider's own words.
+function AiServicesBox() {
+  const checkFn = useServerFn(checkAiServices);
+  const [busy, setBusy] = useState(false);
+  const [rows, setRows] = useState<Awaited<ReturnType<typeof checkFn>> | null>(null);
+  async function check() {
+    setBusy(true);
+    try {
+      setRows(await checkFn());
+    } catch (e) {
+      toast.error(errorText(e, "Check failed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const hint = (r: NonNullable<typeof rows>[number]) => {
+    if (r.ok) return "";
+    if (r.provider.startsWith("Anthropic")) {
+      if (r.status === 402 || /credit|billing/i.test(r.message))
+        return "Add credits or a payment method at console.anthropic.com → Billing.";
+      if (r.status === 401) return "The ANTHROPIC_API_KEY secret is wrong or revoked.";
+      if (r.status === 404) return "The model name isn't available to this Anthropic account.";
+    }
+    if (r.provider.startsWith("Google")) {
+      if (r.status === 429)
+        return "Google's free quota is used up for now; wait, or enable billing for the key at aistudio.google.com.";
+      if (r.status === 400 || r.status === 403)
+        return "The GEMINI_API_KEY secret is wrong, or the Gemini API isn't enabled for it (aistudio.google.com → API keys).";
+    }
+    return "";
+  };
+  return (
+    <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      <div className="flex items-center gap-2">
+        <h3 className="font-semibold">AI services</h3>
+        <Button size="sm" variant="outline" className="ml-auto" onClick={check} disabled={busy}>
+          <RefreshCw className={`mr-1 h-4 w-4 ${busy ? "animate-spin" : ""}`} />
+          {busy ? "Checking…" : "Check now"}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        SAATHI writes with Claude (ANTHROPIC_API_KEY) and searches your notes with Google Gemini
+        embeddings (GEMINI_API_KEY). If students see “SAATHI is unavailable”, check here which
+        service refused and why.
+      </p>
+      {rows && (
+        <ul className="space-y-1.5 text-sm">
+          {rows.map((r) => (
+            <li key={r.provider} className="rounded-lg border border-border p-2">
+              <div className="flex items-center gap-2">
+                {r.ok ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                ) : (
+                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+                )}
+                <span className="font-medium">{r.provider}</span>
+                {r.status > 0 && <Badge tone={r.ok ? "good" : "bad"}>{r.status}</Badge>}
+              </div>
+              <div className="pl-6 text-xs text-muted-foreground">{r.message}</div>
+              {hint(r) && (
+                <div className="pl-6 text-xs text-amber-700 dark:text-amber-400">{hint(r)}</div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function SettingsPanel() {
   const qc = useQueryClient();
   const getFn = useServerFn(getMagazineSettings);
@@ -1840,6 +1911,8 @@ function SettingsPanel() {
           })}
         </div>
       </section>
+
+      <AiServicesBox />
 
       <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
         <h3 className="font-semibold">SAATHI and PDF</h3>

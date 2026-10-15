@@ -93,17 +93,61 @@ export class SaathiAiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    // What the provider actually said, for admins and logs (students see message).
+    readonly detail: string = message,
   ) {
     super(message);
   }
 }
 
-function gatewayError(status: number, body: string): SaathiAiError {
+export type AiProvider = "Anthropic (Claude)" | "Google Gemini (search)";
+
+// The provider's own error text, e.g. "Your credit balance is too low".
+function providerMessage(body: string): string {
+  try {
+    const j = JSON.parse(body) as { error?: { message?: string } | string; message?: string };
+    const m = typeof j.error === "string" ? j.error : (j.error?.message ?? j.message);
+    if (m) return m;
+  } catch {
+    // not JSON
+  }
+  return body.slice(0, 300);
+}
+
+function gatewayError(
+  status: number,
+  body: string,
+  provider: AiProvider = "Google Gemini (search)",
+): SaathiAiError {
+  const detail = `${provider} answered ${status}: ${providerMessage(body)}`;
+  console.error(`[saathi] ${detail}`);
   if (status === 429)
-    return new SaathiAiError("SAATHI is busy right now. Please try again in a minute.", 429);
+    return new SaathiAiError(
+      "SAATHI is busy right now. Please try again in a minute.",
+      429,
+      detail,
+    );
   if (status === 402)
-    return new SaathiAiError("SAATHI is unavailable right now. Please try again later.", 402);
-  return new SaathiAiError(`AI request failed (${status}): ${body.slice(0, 300)}`, status);
+    return new SaathiAiError(
+      "SAATHI is unavailable right now. Please try again later.",
+      402,
+      detail,
+    );
+  return new SaathiAiError(`AI request failed (${status}): ${body.slice(0, 300)}`, status, detail);
+}
+
+// The provider's explanation when there is one (for admin screens), else the message.
+export function saathiErrorDetail(e: unknown): string {
+  if (e instanceof SaathiAiError) return e.detail;
+  return e instanceof Error ? e.message : String(e);
+}
+
+function envGet(name: string): string | undefined {
+  const g = globalThis as {
+    process?: { env?: Record<string, string | undefined> };
+    Deno?: { env: { get(k: string): string | undefined } };
+  };
+  return g.process?.env?.[name] ?? g.Deno?.env.get(name);
 }
 
 // Embeddings run directly on Google AI Studio with the project's GEMINI_API_KEY
@@ -113,11 +157,7 @@ const GOOGLE_EMBED_BASE =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001";
 
 function geminiKey(): string {
-  const g = globalThis as {
-    process?: { env?: Record<string, string | undefined> };
-    Deno?: { env: { get(k: string): string | undefined } };
-  };
-  const key = g.process?.env?.GEMINI_API_KEY ?? g.Deno?.env.get("GEMINI_API_KEY");
+  const key = envGet("GEMINI_API_KEY");
   if (!key) throw new SaathiAiError("GEMINI_API_KEY is not configured", 500);
   return key;
 }
@@ -163,16 +203,12 @@ async function embedBatch(_apiKey: string, batch: string[]): Promise<number[][]>
 }
 
 // Text answers run on Claude through the project's own Anthropic key. The apiKey
-// argument (Lovable key) is kept for callers and still powers embeddings.
+// argument (Lovable key) is kept for existing callers.
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_MAX_TOKENS = 8000;
 
 function anthropicKey(): string {
-  const g = globalThis as {
-    process?: { env?: Record<string, string | undefined> };
-    Deno?: { env: { get(k: string): string | undefined } };
-  };
-  const key = g.process?.env?.ANTHROPIC_API_KEY ?? g.Deno?.env.get("ANTHROPIC_API_KEY");
+  const key = envGet("ANTHROPIC_API_KEY");
   if (!key) throw new SaathiAiError("ANTHROPIC_API_KEY is not configured", 500);
   return key;
 }
@@ -190,7 +226,8 @@ function toAnthropic(messages: ChatMessage[]) {
     if (last && last.role === m.role) last.content += `\n\n${m.content}`;
     else turns.push({ role: m.role, content: m.content });
   }
-  if (!turns.length || turns[0].role !== "user") turns.unshift({ role: "user", content: "(start)" });
+  if (!turns.length || turns[0].role !== "user")
+    turns.unshift({ role: "user", content: "(start)" });
   return { system: system || undefined, messages: turns };
 }
 
@@ -214,7 +251,7 @@ function anthropicRequest(messages: ChatMessage[], signal?: AbortSignal) {
 
 export async function saathiComplete(_apiKey: string, messages: ChatMessage[]): Promise<string> {
   const res = await anthropicRequest(messages);
-  if (!res.ok || !res.body) throw gatewayError(res.status, await res.text());
+  if (!res.ok || !res.body) throw gatewayError(res.status, await res.text(), "Anthropic (Claude)");
   let out = "";
   for await (const d of readSseDeltas(res.body)) out += d;
   return out.trim();
@@ -228,7 +265,7 @@ export async function saathiCompleteStream(
   signal?: AbortSignal,
 ): Promise<AsyncGenerator<string>> {
   const res = await anthropicRequest(messages, signal);
-  if (!res.ok || !res.body) throw gatewayError(res.status, await res.text());
+  if (!res.ok || !res.body) throw gatewayError(res.status, await res.text(), "Anthropic (Claude)");
   return readSseDeltas(res.body);
 }
 
@@ -771,4 +808,73 @@ export function parseQuiz(raw: string): SaathiQuizItem[] {
         q.answer < 4,
     )
     .slice(0, 3);
+}
+
+export type AiCheck = { provider: AiProvider; ok: boolean; status: number; message: string };
+
+// Makes one tiny request to each AI service SAATHI uses, for the admin's
+// "Check AI services" button.
+export async function saathiCheckProviders(): Promise<AiCheck[]> {
+  const run = async (provider: AiProvider, call: () => Promise<Response>): Promise<AiCheck> => {
+    try {
+      const res = await call();
+      const body = await res.text();
+      return {
+        provider,
+        ok: res.ok,
+        status: res.status,
+        message: res.ok ? "Working" : providerMessage(body),
+      };
+    } catch (e) {
+      return {
+        provider,
+        ok: false,
+        status: 0,
+        message: e instanceof Error ? e.message : String(e),
+      };
+    }
+  };
+  const anthropic = envGet("ANTHROPIC_API_KEY");
+  const google = envGet("GEMINI_API_KEY");
+  return Promise.all([
+    anthropic
+      ? run("Anthropic (Claude)", () =>
+          fetch(ANTHROPIC_URL, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": anthropic,
+              "anthropic-version": "2023-06-01",
+            },
+            body: JSON.stringify({
+              model: SAATHI_CHAT_MODEL,
+              max_tokens: 16,
+              messages: [{ role: "user", content: "Reply OK" }],
+            }),
+          }),
+        )
+      : Promise.resolve<AiCheck>({
+          provider: "Anthropic (Claude)",
+          ok: false,
+          status: 0,
+          message: "ANTHROPIC_API_KEY is not set in the project's secrets",
+        }),
+    google
+      ? run("Google Gemini (search)", () =>
+          fetch(`${GOOGLE_EMBED_BASE}:embedContent`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-goog-api-key": google },
+            body: JSON.stringify({
+              content: { parts: [{ text: "test" }] },
+              outputDimensionality: SAATHI_EMBED_DIMS,
+            }),
+          }),
+        )
+      : Promise.resolve<AiCheck>({
+          provider: "Google Gemini (search)",
+          ok: false,
+          status: 0,
+          message: "GEMINI_API_KEY is not set in the project's secrets",
+        }),
+  ]);
 }
