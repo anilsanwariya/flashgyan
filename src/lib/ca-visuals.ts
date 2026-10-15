@@ -3,7 +3,7 @@
 // visual that makes a story easiest to learn, built only from the item's
 // facts; every number in it must appear in those facts, or it is rejected.
 // Rendered as plain HTML/SVG so the PDF stays sharp.
-import type { Bi, CaFact } from "@/lib/current-affairs";
+import type { Bi, CaFact, CaQuick } from "@/lib/current-affairs";
 
 export type Visual =
   | { type: "stats"; title: Bi; stats: { value: string; label: Bi }[] }
@@ -136,7 +136,8 @@ export function visualMessages(opts: {
 STRICT RULES: Use only the numbered facts. Every number you write (in values, labels, dates and in both languages) must appear in the facts exactly as written there: no totals, differences, percentages, conversions (no lakh/crore/हजार conversions) or rounding of your own. Never number the steps or branches yourself. Keep every label short (at most 8 words; table cells at most 12). Hindi is natural standard Hindi as used in RPSC exams; use the same digits as English. If the facts are too thin for a useful visual, use null.
 The visual replaces text: the story's written points leave out every fact the visual shows completely, so prefer a visual that carries as many facts as possible. List those facts in "covers": the numbers of facts whose every figure, name and date is in the visual.
 "oneliner" is the single most exam-worthy line of the story, at most 20 words, for a last-minute revision page.
-Reply with JSON only: {"visual": {...} or null, "covers": [fact numbers], "oneliner": {"en": "...", "hi": "..."}}`,
+"quick" is one short exam question on the fact RPSC is most likely to ask (where, which district, who, how many, which edition), with its answer in at most 8 words, taken exactly from the facts. Ask it the way exam papers do ("Where will the ₹300 crore AI Hub be built?" → "Jodhpur"); never ask about something the facts don't state.
+Reply with JSON only: {"visual": {...} or null, "covers": [fact numbers], "oneliner": {"en": "...", "hi": "..."}, "quick": {"q": {"en": "...", "hi": "..."}, "a": {"en": "...", "hi": "..."}}}`,
     },
     {
       role: "user",
@@ -262,21 +263,47 @@ export function parseVisual(
   raw: string,
   facts: CaFact[],
   headline = "",
-): { visual: Visual | null; covers: number[]; oneliner: Bi | null; problem: string | null } {
+): {
+  visual: Visual | null;
+  covers: number[];
+  oneliner: Bi | null;
+  quick: CaQuick | null;
+  problem: string | null;
+} {
   const o = (parseJson(raw) ?? {}) as Record<string, unknown>;
   const oneliner = bi(o.oneliner, 300);
+  const quick = parseQuick(o.quick, facts, headline);
   const { visual, problem } = cleanVisual(o.visual);
-  if (!visual) return { visual: null, covers: [], oneliner, problem };
+  if (!visual) return { visual: null, covers: [], oneliner, quick, problem };
   const bad = unverifiedNumbers(visual, facts, headline);
   if (bad.length) {
     return {
       visual: null,
       covers: [],
       oneliner,
+      quick,
       problem: `These numbers are not in the facts: ${bad.join(", ")}.`,
     };
   }
-  return { visual, covers: coveredFacts(visual, o.covers, facts), oneliner, problem: null };
+  return {
+    visual,
+    covers: coveredFacts(visual, o.covers, facts),
+    oneliner,
+    quick,
+    problem: null,
+  };
+}
+
+// The quick question and answer, kept only when both languages are there and
+// every number in the answer is in the facts.
+export function parseQuick(v: unknown, facts: CaFact[], headline = ""): CaQuick | null {
+  const o = (v ?? {}) as Record<string, unknown>;
+  const q = bi(o.q, 300);
+  const a = bi(o.a, 120);
+  if (!q?.en || !q.hi || !a?.en || !a.hi) return null;
+  const known = new Set(numbersIn([headline, ...facts.map((f) => f.text)].join(" ")));
+  if (numbersIn(`${a.en} ${a.hi}`).some((n) => !known.has(n))) return null;
+  return { q, a };
 }
 
 // The written points to print: those the visual doesn't already show.

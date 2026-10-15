@@ -68,6 +68,7 @@ const contentSchema = z.object({
   visual: z.unknown().optional(),
   visual_covers: z.array(z.number().int().min(0).max(100)).max(50).optional(),
   oneliner: bi.nullable().optional(),
+  quick: z.object({ q: bi, a: bi }).nullable().optional(),
 });
 
 // ---------- Settings ----------
@@ -386,4 +387,62 @@ export const getCaMonth = createServerFn({ method: "POST" })
       issue: all.find((i) => i.kind === "monthly" && i.period === range.from) ?? null,
       corrections,
     };
+  });
+
+// ---------- Monthly background article ----------
+
+const featureSchema = z.object({
+  topic: bi,
+  title: bi,
+  intro: bi,
+  sections: z
+    .array(z.object({ heading: bi, body: bi }))
+    .min(1)
+    .max(8),
+  sources: z.array(z.string().max(300)).max(20),
+  included: z.boolean(),
+  created_at: z.string().max(40),
+});
+
+export const getCaFeature = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ month: dateSchema }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).getFeature(data.month);
+  });
+
+export const suggestCaFeatureTopics = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ month: dateSchema }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).suggestFeatureTopics(data.month);
+  });
+
+export const writeCaFeature = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        month: dateSchema,
+        topic: bi,
+        query: z.string().trim().min(2).max(300),
+        stories: z.array(z.string().max(400)).max(10),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).writeFeature(data.month, data);
+  });
+
+export const saveCaFeature = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ month: dateSchema, feature: featureSchema.nullable() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).saveFeature(data.month, data.feature);
   });

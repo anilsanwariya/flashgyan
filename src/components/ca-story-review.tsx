@@ -44,7 +44,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-type Lang = "hi" | "en" | "both";
+export type Lang = "hi" | "en" | "both";
 
 const LANG_KEY = "ca-review-lang";
 const reviewedKey = (date: string) => `ca-reviewed:${date}`;
@@ -642,6 +642,30 @@ function StoryCard({
                 </Part>
               )}
 
+              {c.quick && (
+                <Part title="Quick revision question · त्वरित प्रश्न">
+                  <BiLine
+                    value={c.quick.q}
+                    lang={lang}
+                    editing={editing}
+                    onSave={(v) => save({ quick: { ...c.quick!, q: v } })}
+                    onDelete={() => act(() => save({ quick: null }), "Question removed")}
+                  />
+                  <div className="mt-1 flex gap-2">
+                    <span className="mt-0.5 shrink-0 text-sm font-semibold text-primary">→</span>
+                    <div className="min-w-0 flex-1">
+                      <BiLine
+                        value={c.quick.a}
+                        lang={lang}
+                        editing={editing}
+                        strong
+                        onSave={(v) => save({ quick: { ...c.quick!, a: v } })}
+                      />
+                    </div>
+                  </div>
+                </Part>
+              )}
+
               {c.background && (
                 <Part title="Background · पृष्ठभूमि" tone="background">
                   <BiLine
@@ -963,7 +987,7 @@ function Part({
 
 // A bilingual line shown as plain text. In edit mode it gets a pencil (and a
 // bin when it can be deleted); only the pencil opens text boxes for it.
-function BiLine({
+export function BiLine({
   value,
   lang,
   editing = false,

@@ -103,7 +103,12 @@ export type CaContent = {
   // Facts (0-based) the visual shows; their points are not printed with it.
   visual_covers?: number[];
   oneliner?: Bi | null;
+  // One quick exam question with a short answer, for the revision page
+  // (missing on older items, which show the one-liner instead).
+  quick?: CaQuick | null;
 };
+
+export type CaQuick = { q: Bi; a: Bi };
 
 // A fact from the web, with the page it came from and the exact passage.
 export type DykFact = Bi & { url: string; site: string; quote: string };
@@ -469,6 +474,7 @@ export function applyChanges(
       summary: swap(next.summary),
       why: swap(next.why),
       oneliner: next.oneliner ? swap(next.oneliner) : next.oneliner,
+      quick: next.quick ? { q: swap(next.quick.q), a: swap(next.quick.a) } : next.quick,
     };
   }
   // A visual showing a number the correction replaced is dropped (it can be

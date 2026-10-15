@@ -48,6 +48,7 @@ import {
 } from "@/lib/current-affairs";
 import { CollectionBox, WatchSitesSettings } from "@/components/ca-collect-panel";
 import { StoryList } from "@/components/ca-story-review";
+import { FeatureBox } from "@/components/ca-feature-box";
 import { Badge, BulkBar, errorText, useChosen } from "@/components/ca-ui";
 import { FileDropZone, FileQueueList, useFileQueue } from "@/components/saathi-file-queue";
 import { SAATHI_ACCEPT } from "@/lib/saathi-parse";
@@ -833,6 +834,8 @@ function MonthlyPanel() {
         }
         onChanged={refresh}
       />
+
+      {items > 0 && <FeatureBox month={month} />}
 
       {data && (
         <section className="space-y-2 rounded-2xl border border-border bg-card p-4">
