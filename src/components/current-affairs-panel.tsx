@@ -1698,10 +1698,12 @@ function AiServicesBox() {
       if (r.status === 401) return "The ANTHROPIC_API_KEY secret is wrong or revoked.";
       if (r.status === 404) return "The model name isn't available to this Anthropic account.";
     }
-    if (r.provider.startsWith("Lovable") && (r.status === 402 || r.status === 429))
-      return r.status === 402
-        ? "Lovable AI credits are used up: add credits in Lovable (Settings → Plans & credits), or add a GEMINI_API_KEY secret so search uses Google directly."
-        : "Lovable AI is rate-limiting; try again shortly.";
+    if (r.provider.startsWith("Google")) {
+      if (r.status === 429)
+        return "Google's free quota is used up for now; wait, or enable billing for the key at aistudio.google.com.";
+      if (r.status === 400 || r.status === 403)
+        return "The GEMINI_API_KEY secret is wrong, or the Gemini API isn't enabled for it (aistudio.google.com → API keys).";
+    }
     return "";
   };
   return (
@@ -1714,8 +1716,9 @@ function AiServicesBox() {
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">
-        SAATHI writes with Claude and searches your notes with Gemini embeddings. If students see
-        “SAATHI is unavailable”, check here which service refused and why.
+        SAATHI writes with Claude (ANTHROPIC_API_KEY) and searches your notes with Google Gemini
+        embeddings (GEMINI_API_KEY). If students see “SAATHI is unavailable”, check here which
+        service refused and why.
       </p>
       {rows && (
         <ul className="space-y-1.5 text-sm">

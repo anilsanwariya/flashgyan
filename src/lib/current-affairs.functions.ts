@@ -125,7 +125,7 @@ export const checkAiServices = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     const { saathiCheckProviders } =
       await import("../../supabase/functions/_shared/saathi-core.ts");
-    return saathiCheckProviders(process.env.LOVABLE_API_KEY);
+    return saathiCheckProviders();
   });
 
 export const uploadMagazineLogo = createServerFn({ method: "POST" })

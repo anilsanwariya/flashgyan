@@ -100,7 +100,7 @@ export class SaathiAiError extends Error {
   }
 }
 
-export type AiProvider = "Anthropic (Claude)" | "Lovable AI (search)" | "Google Gemini (search)";
+export type AiProvider = "Anthropic (Claude)" | "Google Gemini (search)";
 
 // The provider's own error text, e.g. "Your credit balance is too low".
 function providerMessage(body: string): string {
@@ -117,7 +117,7 @@ function providerMessage(body: string): string {
 function gatewayError(
   status: number,
   body: string,
-  provider: AiProvider = "Lovable AI (search)",
+  provider: AiProvider = "Google Gemini (search)",
 ): SaathiAiError {
   const detail = `${provider} answered ${status}: ${providerMessage(body)}`;
   console.error(`[saathi] ${detail}`);
@@ -150,96 +150,60 @@ function envGet(name: string): string | undefined {
   return g.process?.env?.[name] ?? g.Deno?.env.get(name);
 }
 
-const GOOGLE_EMBED_URL =
+// Embeddings run directly on Google AI Studio with the project's GEMINI_API_KEY
+// (same model + 1536 dims as the stored vectors, so no re-index is needed).
+// The apiKey (Lovable key) argument is kept for existing callers.
+const GOOGLE_EMBED_BASE =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001";
 
-// The same embedding model called at Google directly (GEMINI_API_KEY). Used when
-// the Lovable gateway refuses for billing or access reasons, so search keeps
-// working. Similarity is cosine, so these vectors match the stored ones.
-async function googleEmbed(texts: string[]): Promise<number[][]> {
+function geminiKey(): string {
   const key = envGet("GEMINI_API_KEY");
   if (!key) throw new SaathiAiError("GEMINI_API_KEY is not configured", 500);
-  const res = await fetch(`${GOOGLE_EMBED_URL}:batchEmbedContents`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-    body: JSON.stringify({
-      requests: texts.map((text) => ({
-        model: "models/gemini-embedding-001",
-        content: { parts: [{ text }] },
-        outputDimensionality: SAATHI_EMBED_DIMS,
-      })),
-    }),
-  });
-  if (!res.ok) throw gatewayError(res.status, await res.text(), "Google Gemini (search)");
-  const json = (await res.json()) as { embeddings?: { values: number[] }[] };
-  const out = (json.embeddings ?? []).map((e) => e.values);
-  if (out.length !== texts.length) throw new SaathiAiError("Google returned no embeddings", 500);
-  return out;
+  return key;
 }
 
-// Lovable refused because of billing or access: try Google directly if a key is set.
-const canUseGoogle = (status: number) =>
-  [401, 402, 403].includes(status) && Boolean(envGet("GEMINI_API_KEY"));
+const embedReq = (text: string) => ({
+  model: "models/gemini-embedding-001",
+  content: { parts: [{ text }] },
+  outputDimensionality: SAATHI_EMBED_DIMS,
+});
 
-export async function saathiEmbed(apiKey: string, text: string): Promise<number[]> {
-  const res = await fetch(`${SAATHI_AI_GATEWAY}/embeddings`, {
+export async function saathiEmbed(_apiKey: string, text: string): Promise<number[]> {
+  const res = await fetch(`${GOOGLE_EMBED_BASE}:embedContent`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Lovable-API-Key": apiKey },
-    body: JSON.stringify({ model: SAATHI_EMBED_MODEL, input: text, dimensions: SAATHI_EMBED_DIMS }),
+    headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey() },
+    body: JSON.stringify(embedReq(text)),
   });
-  if (!res.ok) {
-    if (canUseGoogle(res.status)) return (await googleEmbed([text]))[0];
-    throw gatewayError(res.status, await res.text());
-  }
-  const json = (await res.json()) as { data: { embedding: number[] }[] };
-  return json.data[0].embedding;
+  if (!res.ok) throw gatewayError(res.status, await res.text());
+  const json = (await res.json()) as { embedding: { values: number[] } };
+  return json.embedding.values;
 }
 
 const EMBED_BATCH = 64;
 
-// Embeds many texts with one request per batch, keeping input order. If the gateway
-// rejects batched input, falls back to a few single requests at a time.
 export async function saathiEmbedMany(apiKey: string, texts: string[]): Promise<number[][]> {
   const out: number[][] = [];
   for (let i = 0; i < texts.length; i += EMBED_BATCH) {
-    const batch = texts.slice(i, i + EMBED_BATCH);
-    out.push(...(await embedBatch(apiKey, batch)));
+    out.push(...(await embedBatch(apiKey, texts.slice(i, i + EMBED_BATCH))));
   }
   return out;
 }
 
-async function embedBatch(apiKey: string, batch: string[]): Promise<number[][]> {
-  const res = await fetch(`${SAATHI_AI_GATEWAY}/embeddings`, {
+async function embedBatch(_apiKey: string, batch: string[]): Promise<number[][]> {
+  const res = await fetch(`${GOOGLE_EMBED_BASE}:batchEmbedContents`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Lovable-API-Key": apiKey },
-    body: JSON.stringify({
-      model: SAATHI_EMBED_MODEL,
-      input: batch,
-      dimensions: SAATHI_EMBED_DIMS,
-    }),
+    headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey() },
+    body: JSON.stringify({ requests: batch.map(embedReq) }),
   });
-  if (!res.ok && canUseGoogle(res.status)) return googleEmbed(batch);
-  if (res.status === 429 || res.status === 402) throw gatewayError(res.status, await res.text());
-  if (res.ok) {
-    const json = (await res.json()) as { data?: { embedding: number[]; index?: number }[] };
-    const data = json.data ?? [];
-    if (data.length === batch.length) {
-      return data
-        .map((d, i) => ({ i: d.index ?? i, e: d.embedding }))
-        .sort((a, b) => a.i - b.i)
-        .map((d) => d.e);
-    }
-  }
-  const single: number[][] = new Array(batch.length);
-  for (let i = 0; i < batch.length; i += 4) {
-    const part = await Promise.all(batch.slice(i, i + 4).map((t) => saathiEmbed(apiKey, t)));
-    part.forEach((e, j) => (single[i + j] = e));
-  }
-  return single;
+  if (!res.ok) throw gatewayError(res.status, await res.text());
+  const json = (await res.json()) as { embeddings?: { values: number[] }[] };
+  const data = json.embeddings ?? [];
+  if (data.length !== batch.length) throw new SaathiAiError("Embedding count mismatch", 500);
+  return data.map((d) => d.values);
 }
 
 // Text answers run on Claude through the project's own Anthropic key. The apiKey
-// argument (Lovable key) is kept for callers and still powers embeddings.
+// argument (Lovable key) is kept for existing callers.
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_MAX_TOKENS = 8000;
 
@@ -850,7 +814,7 @@ export type AiCheck = { provider: AiProvider; ok: boolean; status: number; messa
 
 // Makes one tiny request to each AI service SAATHI uses, for the admin's
 // "Check AI services" button.
-export async function saathiCheckProviders(lovableKey: string | undefined): Promise<AiCheck[]> {
+export async function saathiCheckProviders(): Promise<AiCheck[]> {
   const run = async (provider: AiProvider, call: () => Promise<Response>): Promise<AiCheck> => {
     try {
       const res = await call();
@@ -895,27 +859,9 @@ export async function saathiCheckProviders(lovableKey: string | undefined): Prom
           status: 0,
           message: "ANTHROPIC_API_KEY is not set in the project's secrets",
         }),
-    lovableKey
-      ? run("Lovable AI (search)", () =>
-          fetch(`${SAATHI_AI_GATEWAY}/embeddings`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Lovable-API-Key": lovableKey },
-            body: JSON.stringify({
-              model: SAATHI_EMBED_MODEL,
-              input: "test",
-              dimensions: SAATHI_EMBED_DIMS,
-            }),
-          }),
-        )
-      : Promise.resolve<AiCheck>({
-          provider: "Lovable AI (search)",
-          ok: false,
-          status: 0,
-          message: "LOVABLE_API_KEY is not set",
-        }),
     google
       ? run("Google Gemini (search)", () =>
-          fetch(`${GOOGLE_EMBED_URL}:embedContent`, {
+          fetch(`${GOOGLE_EMBED_BASE}:embedContent`, {
             method: "POST",
             headers: { "Content-Type": "application/json", "x-goog-api-key": google },
             body: JSON.stringify({
@@ -928,7 +874,7 @@ export async function saathiCheckProviders(lovableKey: string | undefined): Prom
           provider: "Google Gemini (search)",
           ok: false,
           status: 0,
-          message: "GEMINI_API_KEY is not set (optional backup for search)",
+          message: "GEMINI_API_KEY is not set in the project's secrets",
         }),
   ]);
 }
