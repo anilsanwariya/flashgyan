@@ -577,7 +577,7 @@ function FlashcardDemo({
         <span>{card.subject} · {card.topic}</span>
         <span>{index + 1} {content.progress} {cards.length}</span>
       </div>
-      <div className="relative h-[28rem] w-full [perspective:1200px] sm:h-[30rem]">
+      <div className="relative h-[22rem] w-full [perspective:1200px] sm:h-[24rem]">
         <AnimatePresence mode="wait">
           <motion.div
             key={card.id}
@@ -598,8 +598,8 @@ function FlashcardDemo({
                 className="absolute inset-0 flex h-full w-full flex-col overflow-hidden rounded-3xl border border-border/40 bg-card/70 shadow-soft backdrop-blur-3xl"
                 style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden", transform: "translateZ(1px)" }}
               >
-                <ScrollArea className="h-full flex-1">
-                  <div className="flex min-h-full flex-col justify-center p-7 md:p-9">
+                <ScrollArea className="h-full flex-1 [&_[data-radix-scroll-area-viewport]>div]:!flex [&_[data-radix-scroll-area-viewport]>div]:min-h-full [&_[data-radix-scroll-area-viewport]>div]:flex-col">
+                  <div className="flex flex-1 flex-col justify-center p-7 md:p-9">
                     <p className="text-center text-[11px] font-bold uppercase text-primary">{card.prompt}</p>
                     <p className="mt-7 text-center text-xl font-semibold leading-snug text-foreground md:text-2xl">{card.question}</p>
                     {card.image_url && <img src={card.image_url} alt="" className="mt-6 aspect-[2/1] w-full rounded-2xl border border-border/30 object-cover" />}
@@ -866,8 +866,8 @@ function ExternalCtaButton({
           {locked ? <Lock className="h-6 w-6" /> : <ExternalLink className="h-6 w-6" />}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-lg font-bold tracking-tight drop-shadow-sm">{label}</div>
-          {subtitle && <div className="mt-0.5 truncate text-sm font-medium text-primary-foreground/80">{subtitle}</div>}
+          <div className="line-clamp-2 text-lg font-bold leading-snug tracking-tight drop-shadow-sm">{label}</div>
+          {subtitle && <div className="mt-0.5 line-clamp-2 text-sm font-medium text-primary-foreground/80">{subtitle}</div>}
         </div>
         {!locked && <ChevronRight className="h-6 w-6 shrink-0 text-primary-foreground/90" />}
       </div>
@@ -926,10 +926,25 @@ function FeatureCard({
 }
 
 function TelegramFloatingButton({ raised = false }: { raised?: boolean }) {
+  // Slides away while scrolling down (so it doesn't sit on top of cards) and
+  // comes back when scrolling up or near the top.
+  const [away, setAway] = useState(false);
+  useEffect(() => {
+    let last = window.scrollY;
+    const onScroll = () => {
+      const y = window.scrollY;
+      if (Math.abs(y - last) < 8) return;
+      setAway(y > last && y > 160);
+      last = y;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
   return (
     <div
-      className={`fixed right-6 z-50 pointer-events-none transition-[bottom] duration-300 ${raised ? "bottom-28" : "bottom-6"}`}
+      className={`fixed right-4 sm:right-6 z-50 pointer-events-none transition-[bottom,opacity,translate] duration-300 ${raised ? "bottom-28" : "bottom-5 sm:bottom-6"} ${away ? "opacity-0 translate-y-6" : "opacity-100"}`}
       style={{ animation: "float-bob 3s ease-in-out infinite" }}
+      aria-hidden={away || undefined}
     >
       {/* The style block injects the keyframes safely into React. 
         It floats the wrapper, keeping the button's native hover effects perfectly intact.
@@ -945,7 +960,8 @@ function TelegramFloatingButton({ raised = false }: { raised?: boolean }) {
         target="_blank"
         rel="noopener noreferrer"
         aria-label="Join Telegram"
-        className="flex h-14 w-14 items-center justify-center rounded-full bg-[#229ed9]/30 backdrop-blur-xl border border-[#229ed9]/40 shadow-[0_8px_32px_rgba(34,158,217,0.25)] transition-all hover:scale-110 hover:bg-[#229ed9]/40 active:scale-95 overflow-hidden pointer-events-auto"
+        tabIndex={away ? -1 : undefined}
+        className={`flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-full bg-white/90 dark:bg-black/60 backdrop-blur-xl border border-[#229ed9]/40 shadow-[0_8px_32px_rgba(34,158,217,0.3)] transition-all hover:scale-110 active:scale-95 overflow-hidden ${away ? "pointer-events-none" : "pointer-events-auto"}`}
       >
         <img src={tgIcon} alt="Telegram" className="h-8 w-8 object-contain drop-shadow-md" />
       </a>

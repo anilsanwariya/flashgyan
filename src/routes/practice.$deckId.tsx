@@ -40,6 +40,9 @@ const practiceSearchSchema = z.object({
 });
 
 export const Route = createFileRoute("/practice/$deckId")({
+  // Cards are shuffled and saved review progress is read in the browser, so
+  // rendering on the server would show a different first card and then swap.
+  ssr: false,
   validateSearch: zodValidator(practiceSearchSchema),
   loader: ({ context, params }) => context.queryClient.ensureQueryData(deckQO(params.deckId)),
   component: Practice,
@@ -309,7 +312,7 @@ function Practice() {
       </header>
 
       <main className="flex-1 min-h-0 flex flex-col px-5 pt-6 max-w-2xl w-full mx-auto pb-4">
-        <div className="w-full h-full relative [perspective:1200px]">
+        <div className="w-full h-full sm:max-h-[40rem] sm:my-auto relative [perspective:1200px]">
           <AnimatePresence mode="wait">
             <motion.div
               key={card.id}
@@ -336,8 +339,9 @@ function Practice() {
                     pointerEvents: flipped ? "none" : "auto",
                   }}
                 >
-                  <ScrollArea className="flex-1 h-full">
-                    <div className="p-8 min-h-full flex flex-col justify-center">
+                  {/* Radix wraps content in a table-like div; let it fill the card so the question centres. */}
+                  <ScrollArea className="flex-1 h-full [&_[data-radix-scroll-area-viewport]>div]:!flex [&_[data-radix-scroll-area-viewport]>div]:min-h-full [&_[data-radix-scroll-area-viewport]>div]:flex-col">
+                    <div className="p-8 flex-1 flex flex-col justify-center">
                       <div className="text-[11px] font-semibold uppercase tracking-widest text-primary/70 text-center mb-6">
                         {card.prompt}
                       </div>
@@ -490,14 +494,14 @@ function RatingButton({
   const bgCls = isDestructive
     ? active
       ? "bg-destructive text-white shadow-md border-transparent"
-      : "bg-destructive/15 text-destructive border-destructive/20 hover:bg-destructive/20"
+      : "bg-destructive/15 text-red-700 dark:text-red-300 border-destructive/30 hover:bg-destructive/20"
     : isWarning
       ? active
         ? "bg-warning text-white shadow-md border-transparent"
-        : "bg-warning/15 text-warning border-warning/20 hover:bg-warning/20"
+        : "bg-warning/15 text-amber-800 dark:text-amber-300 border-warning/30 hover:bg-warning/20"
       : active
         ? "bg-success text-white shadow-md border-transparent"
-        : "bg-success/15 text-success border-success/20 hover:bg-success/20";
+        : "bg-success/15 text-emerald-800 dark:text-emerald-300 border-success/30 hover:bg-success/20";
 
   const stateCls = disabled
     ? active

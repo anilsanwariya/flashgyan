@@ -572,7 +572,7 @@ function MainsBadges({ info }: { info: MainsMeta }) {
   const within =
     info.words !== undefined && Math.abs(info.words - info.wordLimit) <= info.wordLimit * 0.1;
   const chip =
-    "text-[11px] rounded-full bg-white/50 dark:bg-black/30 backdrop-blur-xl border border-border/30 px-2.5 py-0.5";
+    "text-xs rounded-full bg-white/50 dark:bg-black/30 backdrop-blur-xl border border-border/30 px-2.5 py-1";
   return (
     <div className="mb-2 flex flex-wrap items-center gap-1.5">
       <span className={`${chip} font-medium text-foreground`}>
@@ -853,7 +853,7 @@ function MessageBubble({
                 key={s.title}
                 type="button"
                 onClick={() => setOpenSource(s)}
-                className="text-[11px] rounded-full bg-white/50 dark:bg-black/30 backdrop-blur-xl border border-border/30 text-muted-foreground hover:text-foreground px-2.5 py-0.5 transition-colors"
+                className="text-xs rounded-full bg-white/50 dark:bg-black/30 backdrop-blur-xl border border-border/30 text-muted-foreground hover:text-foreground px-3 py-1.5 transition-colors"
                 title={`${s.subject} — tap to read the source`}
               >
                 📚 {s.title}
@@ -890,7 +890,7 @@ function MessageBubble({
                 type="button"
                 onClick={startQuiz}
                 disabled={quizLoading}
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline disabled:opacity-60"
+                className="inline-flex min-h-9 items-center gap-1.5 text-[13px] font-medium text-primary hover:underline disabled:opacity-60"
               >
                 <GraduationCap className="h-3.5 w-3.5" />
                 {quizLoading ? "Making your quiz…" : "Quiz me on this"}
@@ -900,7 +900,7 @@ function MessageBubble({
               {...(deck
                 ? { to: "/decks/$deckId" as const, params: { deckId: deck.id } }
                 : { to: "/flashcards" as const })}
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+              className="inline-flex min-h-9 items-center gap-1.5 text-[13px] font-medium text-primary hover:underline"
             >
               <Layers className="h-3.5 w-3.5" />
               {deck ? `Practise “${deck.name}” flashcards` : "Practise this with flashcards"}
@@ -936,7 +936,7 @@ function MessageBubble({
                 type="button"
                 disabled={busy}
                 onClick={() => onAsk(q)}
-                className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-left text-xs text-foreground hover:bg-primary/10 disabled:opacity-50 transition-colors"
+                className="rounded-full border border-primary/30 bg-primary/5 px-3.5 py-2 text-left text-[13px] text-foreground hover:bg-primary/10 disabled:opacity-50 transition-colors"
               >
                 {q}
               </button>
@@ -1041,7 +1041,7 @@ function IconButton({
       disabled={disabled}
       aria-label={label}
       title={label}
-      className={`h-7 w-7 grid place-items-center rounded-full transition-colors ${
+      className={`h-9 w-9 grid place-items-center rounded-full transition-colors ${
         active
           ? "text-primary bg-primary/10"
           : "text-muted-foreground hover:text-foreground hover:bg-muted/60"

@@ -483,7 +483,7 @@ function Row({
       <div className="flex items-baseline justify-between mb-3">
         <div className="font-bold text-[17px]">{label}</div>
         <div className="text-[13px] font-bold tabular-nums text-muted-foreground">
-          {value} items · {pct}%
+          {value} {value === 1 ? "item" : "items"} · {pct}%
         </div>
       </div>
       <div className="h-2.5 rounded-full bg-muted/40 overflow-hidden">

@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { z } from "zod";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
@@ -101,6 +101,17 @@ function PracticeMcq() {
 
   // Reveal immediately when answered — no artificial delay
   const isRevealed = answered;
+  // The explanation appears below the options inside the card; scroll it
+  // into view so it isn't hidden off the bottom on small screens.
+  const revealRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isRevealed) return;
+    const t = setTimeout(
+      () => revealRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }),
+      350,
+    );
+    return () => clearTimeout(t);
+  }, [isRevealed, index]);
 
   const stats = useMemo(() => {
     let correct = 0;
@@ -335,7 +346,7 @@ function PracticeMcq() {
               >
                 <ScrollArea className="h-full flex-1">
                   <div className="p-7 md:p-8 space-y-6">
-                    <p className="text-[20px] md:text-[24px] font-semibold leading-tight text-balance text-foreground/90 tracking-tight">
+                    <p className="text-[20px] md:text-[24px] font-semibold leading-snug text-foreground/90 tracking-tight whitespace-pre-line">
                       {q.question}
                     </p>
 
@@ -414,6 +425,7 @@ function PracticeMcq() {
                     {/* Renders only AFTER the 150ms delay, removing DOM thrashing */}
                     {isRevealed && (
                       <motion.div
+                        ref={revealRef}
                         initial={{ opacity: 0, y: 15 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.3, ease: "easeOut" }}
@@ -464,7 +476,7 @@ function PracticeMcq() {
               type="button"
               onClick={goPrev}
               aria-label="Previous question"
-              className="absolute -left-3 top-1/2 -translate-y-1/2 z-10 h-14 w-14 rounded-full bg-white/20 dark:bg-black/20 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] flex items-center justify-center active:scale-90 transition-all"
+              className="absolute -left-3 top-1/2 -translate-y-1/2 z-10 h-14 w-14 rounded-full bg-white/20 dark:bg-black/20 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] hidden sm:flex items-center justify-center active:scale-90 transition-all"
             >
               <ChevronLeft className="h-6 w-6 text-foreground/80 ml-[-2px]" />
             </button>
@@ -474,7 +486,7 @@ function PracticeMcq() {
               type="button"
               onClick={goNext}
               aria-label="Next question"
-              className="absolute -right-3 top-1/2 -translate-y-1/2 z-10 h-14 w-14 rounded-full bg-white/20 dark:bg-black/20 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] flex items-center justify-center active:scale-90 transition-all animate-in zoom-in duration-300"
+              className="absolute -right-3 top-1/2 -translate-y-1/2 z-10 h-14 w-14 rounded-full bg-white/20 dark:bg-black/20 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] hidden sm:flex items-center justify-center active:scale-90 transition-all animate-in zoom-in duration-300"
             >
               <ChevronRight className="h-6 w-6 text-foreground/80 mr-[-2px]" />
             </button>
@@ -482,11 +494,22 @@ function PracticeMcq() {
         </div>
       </main>
 
-      <footer className="shrink-0 px-5 pb-6 pt-2 max-w-2xl w-full mx-auto relative z-10 mb-2">
+      <footer className="shrink-0 px-5 pb-6 pt-2 max-w-2xl w-full mx-auto relative z-10 mb-2 flex gap-2">
+        {/* On phones the side arrows are hidden, so "previous" lives here. */}
+        {index > 0 && (
+          <button
+            type="button"
+            onClick={goPrev}
+            aria-label="Previous question"
+            className="sm:hidden shrink-0 h-[52px] w-[52px] rounded-[24px] bg-white/50 dark:bg-black/30 border border-border/40 backdrop-blur-xl flex items-center justify-center active:scale-95 transition-all"
+          >
+            <ChevronLeft className="h-5 w-5 text-foreground/80" />
+          </button>
+        )}
         <button
           onClick={goNext}
           disabled={!isRevealed}
-          className="w-full h-[52px] rounded-[24px] bg-primary/10 text-primary font-semibold text-[17px] border border-primary/20 backdrop-blur-xl hover:bg-primary/20 active:scale-[0.98] transition-all shadow-[0_4px_24px_rgba(var(--primary),0.1)] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
+          className="flex-1 w-full h-[52px] rounded-[24px] bg-primary/10 text-primary font-semibold text-[17px] border border-primary/20 backdrop-blur-xl hover:bg-primary/20 active:scale-[0.98] transition-all shadow-[0_4px_24px_rgba(var(--primary),0.1)] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
         >
           {!answered ? "Pick an answer" : index >= total - 1 ? "Finish Session" : "Next Question"}
         </button>

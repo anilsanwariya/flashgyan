@@ -285,7 +285,7 @@ function TakeTest() {
                       )}
                     </div>
 
-                    <p className="text-[20px] md:text-[24px] font-semibold leading-tight text-balance text-foreground/90 tracking-tight">
+                    <p className="text-[20px] md:text-[24px] font-semibold leading-snug text-foreground/90 tracking-tight whitespace-pre-line">
                       {q.question}
                     </p>
 
@@ -370,7 +370,7 @@ function TakeTest() {
               type="button"
               onClick={() => setIndex(index - 1)}
               aria-label="Previous question"
-              className="absolute -left-3 top-1/2 -translate-y-1/2 z-10 h-14 w-14 rounded-full bg-white/20 dark:bg-black/20 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] flex items-center justify-center active:scale-90 transition-all"
+              className="absolute -left-3 top-1/2 -translate-y-1/2 z-10 h-14 w-14 rounded-full bg-white/20 dark:bg-black/20 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] hidden sm:flex items-center justify-center active:scale-90 transition-all"
             >
               <ChevronLeft className="h-6 w-6 text-foreground/80 ml-[-2px]" />
             </button>
@@ -380,7 +380,7 @@ function TakeTest() {
               type="button"
               onClick={() => setIndex(index + 1)}
               aria-label="Next question"
-              className="absolute -right-3 top-1/2 -translate-y-1/2 z-10 h-14 w-14 rounded-full bg-white/20 dark:bg-black/20 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] flex items-center justify-center active:scale-90 transition-all"
+              className="absolute -right-3 top-1/2 -translate-y-1/2 z-10 h-14 w-14 rounded-full bg-white/20 dark:bg-black/20 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.1)] hidden sm:flex items-center justify-center active:scale-90 transition-all"
             >
               <ChevronRight className="h-6 w-6 text-foreground/80 mr-[-2px]" />
             </button>

@@ -82,7 +82,7 @@ function DeckCard({ deck, style }: { deck: DeckSummary; style: (typeof CARD_STYL
           <div className="text-[11px] font-bold uppercase tracking-widest text-foreground/50 mb-1 truncate">
             {deck.subject} · {deck.topic}
           </div>
-          <div className="text-[17px] font-bold text-foreground/90 tracking-tight drop-shadow-sm truncate">
+          <div className="text-[17px] font-bold text-foreground/90 tracking-tight leading-snug drop-shadow-sm line-clamp-2">
             {deck.name}
           </div>
           {deck.description && (
@@ -188,7 +188,7 @@ export function McqSection({ tests }: { tests: McqTestSummary[] }) {
                   <Timer className={`h-6 w-6 ${style.iconColor}`} />
                 </div>
                 <div className="min-w-0 flex-1 z-10">
-                  <div className="text-[17px] font-bold text-foreground/90 tracking-tight drop-shadow-sm truncate">
+                  <div className="text-[17px] font-bold text-foreground/90 tracking-tight leading-snug drop-shadow-sm line-clamp-2">
                     {t.name}
                   </div>
                   <div className="mt-1 flex items-center gap-2">
@@ -304,7 +304,7 @@ export function McqPracticeSection({ tests }: { tests: McqPracticeTestSummary[] 
                           {[t.subject, t.topic].filter(Boolean).join(" · ")}
                         </div>
                       )}
-                      <div className="text-[17px] font-bold text-foreground/90 tracking-tight drop-shadow-sm truncate">
+                      <div className="text-[17px] font-bold text-foreground/90 tracking-tight leading-snug drop-shadow-sm line-clamp-2">
                         {t.name}
                       </div>
                       <div className="mt-1.5 inline-flex items-center text-[12px] font-bold text-foreground/70 bg-white/50 border border-white/60 shadow-sm px-2.5 py-0.5 rounded-lg">

@@ -125,7 +125,7 @@ function DeckOverview() {
                     </span>
                     <span className="flex-1">
                       {card.prompt && (
-                        <span className="block text-[11px] font-bold uppercase text-primary">
+                        <span className="block text-xs font-bold uppercase text-primary">
                           {card.prompt}
                         </span>
                       )}
@@ -136,7 +136,7 @@ function DeckOverview() {
                     <ChevronDown className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
                   </summary>
                   <div className="mt-3 border-t border-border/30 pt-3 pl-6">
-                    <p className="text-[11px] font-bold uppercase text-success">Answer</p>
+                    <p className="text-xs font-bold uppercase text-success">Answer</p>
                     <p className="mt-1 text-[15px] font-medium leading-relaxed text-foreground/85">
                       {card.answer}
                     </p>
