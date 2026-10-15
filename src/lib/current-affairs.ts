@@ -458,6 +458,41 @@ export function applyChanges(
   return { facts: nextFacts, content: next };
 }
 
+// Removes one key point and the fact it was written from (points and facts
+// stay index-aligned for corrections and visuals). Says whether the visual
+// still shows it, so the admin can redo or remove the visual.
+export function removePoint(
+  facts: CaFact[],
+  content: CaContent | null,
+  index: number,
+): { facts: CaFact[]; content: CaContent | null; visualShowsIt: boolean } {
+  const nextFacts = facts.filter((_, i) => i !== index);
+  if (!content) return { facts: nextFacts, content, visualShowsIt: false };
+  const covers = content.visual_covers ?? [];
+  const visualShowsIt = Boolean(
+    content.visual &&
+    (covers.includes(index) || unverifiedNumbers(content.visual, nextFacts).length),
+  );
+  return {
+    facts: nextFacts,
+    content: {
+      ...content,
+      points: content.points.filter((_, i) => i !== index),
+      visual_covers: covers.filter((i) => i !== index).map((i) => (i > index ? i - 1 : i)),
+    },
+    visualShowsIt,
+  };
+}
+
+// Pending corrections point at facts by index: drop changes to the removed
+// fact and shift the rest. Returns null when no change is left.
+export function shiftChanges(changes: CaChange[], index: number): CaChange[] | null {
+  const next = changes
+    .filter((c) => c.fact !== index)
+    .map((c) => (c.fact > index ? { ...c, fact: c.fact - 1 } : c));
+  return next.length ? next : null;
+}
+
 // ---------- Scheduling ----------
 
 const IST_OFFSET_MIN = 330;
