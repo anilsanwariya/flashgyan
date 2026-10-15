@@ -5,7 +5,7 @@
 export const SAATHI_AI_GATEWAY = "https://ai.gateway.lovable.dev/v1";
 export const SAATHI_EMBED_MODEL = "google/gemini-embedding-001";
 export const SAATHI_EMBED_DIMS = 1536;
-export const SAATHI_CHAT_MODEL = "google/gemini-3-flash-preview";
+export const SAATHI_CHAT_MODEL = "claude-sonnet-5";
 
 // The model starts its reply with this token when the material can't answer the question.
 export const SAATHI_NO_ANSWER_MARKER = "[[NO_ANSWER]]";
@@ -159,30 +159,72 @@ async function embedBatch(apiKey: string, batch: string[]): Promise<number[][]> 
   return single;
 }
 
-export async function saathiComplete(apiKey: string, messages: ChatMessage[]): Promise<string> {
-  const res = await fetch(`${SAATHI_AI_GATEWAY}/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Lovable-API-Key": apiKey },
-    body: JSON.stringify({ model: SAATHI_CHAT_MODEL, messages }),
-  });
-  if (!res.ok) throw gatewayError(res.status, await res.text());
-  const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-  return json.choices?.[0]?.message?.content?.trim() ?? "";
+// Text answers run on Claude through the project's own Anthropic key. The apiKey
+// argument (Lovable key) is kept for callers and still powers embeddings.
+const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_MAX_TOKENS = 8000;
+
+function anthropicKey(): string {
+  const g = globalThis as {
+    process?: { env?: Record<string, string | undefined> };
+    Deno?: { env: { get(k: string): string | undefined } };
+  };
+  const key = g.process?.env?.ANTHROPIC_API_KEY ?? g.Deno?.env.get("ANTHROPIC_API_KEY");
+  if (!key) throw new SaathiAiError("ANTHROPIC_API_KEY is not configured", 500);
+  return key;
 }
 
-// Starts a streamed completion. Resolves once the gateway has accepted the request,
+// Anthropic takes the system prompt separately and needs alternating user/assistant turns.
+function toAnthropic(messages: ChatMessage[]) {
+  const system = messages
+    .filter((m) => m.role === "system")
+    .map((m) => m.content)
+    .join("\n\n");
+  const turns: { role: "user" | "assistant"; content: string }[] = [];
+  for (const m of messages) {
+    if (m.role === "system" || !m.content.trim()) continue;
+    const last = turns[turns.length - 1];
+    if (last && last.role === m.role) last.content += `\n\n${m.content}`;
+    else turns.push({ role: m.role, content: m.content });
+  }
+  if (!turns.length || turns[0].role !== "user") turns.unshift({ role: "user", content: "(start)" });
+  return { system: system || undefined, messages: turns };
+}
+
+function anthropicRequest(messages: ChatMessage[], signal?: AbortSignal) {
+  return fetch(ANTHROPIC_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": anthropicKey(),
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: SAATHI_CHAT_MODEL,
+      max_tokens: ANTHROPIC_MAX_TOKENS,
+      stream: true,
+      ...toAnthropic(messages),
+    }),
+    signal,
+  });
+}
+
+export async function saathiComplete(_apiKey: string, messages: ChatMessage[]): Promise<string> {
+  const res = await anthropicRequest(messages);
+  if (!res.ok || !res.body) throw gatewayError(res.status, await res.text());
+  let out = "";
+  for await (const d of readSseDeltas(res.body)) out += d;
+  return out.trim();
+}
+
+// Starts a streamed completion. Resolves once the provider has accepted the request,
 // so rate-limit and credit errors surface before any text is sent to the student.
 export async function saathiCompleteStream(
-  apiKey: string,
+  _apiKey: string,
   messages: ChatMessage[],
   signal?: AbortSignal,
 ): Promise<AsyncGenerator<string>> {
-  const res = await fetch(`${SAATHI_AI_GATEWAY}/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Lovable-API-Key": apiKey },
-    body: JSON.stringify({ model: SAATHI_CHAT_MODEL, messages, stream: true }),
-    signal,
-  });
+  const res = await anthropicRequest(messages, signal);
   if (!res.ok || !res.body) throw gatewayError(res.status, await res.text());
   return readSseDeltas(res.body);
 }
@@ -201,13 +243,23 @@ async function* readSseDeltas(body: ReadableStream<Uint8Array>): AsyncGenerator<
         const line = buffer.slice(0, nl).trim();
         buffer = buffer.slice(nl + 1);
         if (!line.startsWith("data:")) continue;
-        const payload = line.slice(5).trim();
-        if (payload === "[DONE]") return;
         try {
-          const json = JSON.parse(payload) as { choices?: { delta?: { content?: string } }[] };
-          const delta = json.choices?.[0]?.delta?.content;
-          if (delta) yield delta;
-        } catch {
+          const json = JSON.parse(line.slice(5).trim()) as {
+            type?: string;
+            delta?: { type?: string; text?: string; stop_reason?: string };
+            error?: { message?: string };
+          };
+          if (json.type === "content_block_delta" && json.delta?.type === "text_delta") {
+            if (json.delta.text) yield json.delta.text;
+          } else if (json.type === "message_delta" && json.delta?.stop_reason === "refusal") {
+            return;
+          } else if (json.type === "error") {
+            throw new SaathiAiError(json.error?.message ?? "AI stream error", 500);
+          } else if (json.type === "message_stop") {
+            return;
+          }
+        } catch (e) {
+          if (e instanceof SaathiAiError) throw e;
           // ignore keep-alives and partial frames
         }
       }
