@@ -10,10 +10,11 @@
 //   about 20 about Rajasthan.
 // - Sub-Inspector 2025 GK & GS, both shifts (held 5 and 6 Apr 2026): about 42
 //   and 33 of 100, with 23 and 18 about Rajasthan.
-// Also compared with a coaching institute's September 2026 monthly (about 266
-// stories, 73 on Rajasthan): it adds places in the news, numbered conferences,
-// a Rajasthan angle on national stories, helplines, capacities and index
-// scope, which RPSC also asks.
+// Also compared with two coaching institutes' September 2026 monthlies: about
+// 266 stories (73 on Rajasthan) in one; in the other's 80-question summary, 29
+// asked where or which district, 23 who, and 30 were about Rajasthan. They add
+// places in the news, numbered conferences, a Rajasthan angle on national
+// stories, helplines, capacities, index scope and awardees' home districts.
 // The newest questions were from 7-8 weeks before each exam, Economic Survey,
 // Rajasthan Economic Review and Budget figures gave 5-8 questions a paper and
 // stayed in use for over a year, and small Rajasthan items (a school prize, a
@@ -185,7 +186,7 @@ export const STORY_TYPES: StoryType[] = [
   {
     id: "appointment",
     label:
-      "Appointment to a constitutional, statutory, national or Rajasthan state post, Chief Minister, Governor or government brand ambassador",
+      "Appointment to a constitutional, statutory, national or Rajasthan state post, Chief Minister, Governor, head of a sports body or association, Indian-origin person appointed abroad, or government brand ambassador (state or district)",
     maxFacts: 4,
     slots: [
       slot("person", "who was appointed"),
@@ -221,7 +222,7 @@ export const STORY_TYPES: StoryType[] = [
     maxFacts: 6,
     slots: [
       slot("award", "name of the award and edition"),
-      slot("winner", "recipient and their country or state", true),
+      slot("winner", "recipient and their country, state or home district", true),
       slot("citation", "a winner's specific work, art form or category", true),
       slot("for", "work or field it is given for"),
       slot("by", "who gives it"),
@@ -233,13 +234,13 @@ export const STORY_TYPES: StoryType[] = [
   },
   {
     id: "culture",
-    label: "Festival, fair, exhibition, literature or art event",
+    label: "Festival, fair, exhibition, film or documentary, literature or art event",
     maxFacts: 5,
     slots: [
       slot("event", "event and edition"),
       slot("where", "where"),
       slot("date", "dates"),
-      slot("by", "organised by"),
+      slot("by", "organised, made or produced by"),
       slot("featured", "artists, works or performers featured", true),
       slot("theme", "theme"),
     ],
@@ -437,7 +438,7 @@ export const SKIP_STORIES = [
   "transfers and postings below the head of a department or state body",
   "plans, demands or proposals with no decision yet",
   "daily weather updates and forecasts (but keep IMD or state monsoon reports and rainfall or temperature records with years and figures)",
-  "film and TV gossip and celebrities' personal news (but keep major film, music and literature awards with category winners, art exhibitions, literature festivals and government brand ambassadors)",
+  "film and TV gossip and celebrities' personal news (but keep major film, music and literature awards with category winners, beauty pageant titles, art exhibitions, literature festivals and government brand ambassadors)",
   "local civic complaints, markets and stock tips, horoscopes (but keep new apps, portals and model initiatives of Rajasthan city bodies and villages)",
 ];
 
@@ -456,18 +457,18 @@ export const LONG_DOCUMENTS = `A Budget, Economic Survey, Economic Review, year-
 
 export const IMPORTANCE_GUIDE = `RPSC asks a lot about Rajasthan, including small items (a school prize, a village panchayat, a state team's captain), so Rajasthan news with a name, place or number is never 1.
 3 = very likely: Rajasthan government schemes, policies (their targets, slabs and validity), Budget announcements with their places, Economic Survey and Rajasthan Economic Review figures, Rajasthan departments' reports with district figures (forest, monsoon, agriculture), Rajasthan people's and institutions' firsts, records, awards and India-team selections, new industrial areas, parks and centres of excellence with their districts, conservation reserves and protected areas, state appointments and brand ambassadors, by-election data and Rajasthan's medals; national flagship schemes, new laws and rules, constitutional bodies' decisions and Supreme Court judgments; indices and reports giving India's or Rajasthan's rank; Nobel, Bharat Ratna, Padma and national awards; heads of national bodies, Chief Ministers and Governors of any state; DRDO, ISRO and science firsts ("India's first", "world's highest") and launches with their ordinals; India's summits, dialogues and agreements; new tiger reserves, Ramsar sites, biosphere reserves and GI tags.
-2 = possible: any other Rajasthan news with a name, place or number (apps, portals, model villages, city bodies' initiatives, MoUs signed by state departments, exhibitions and festivals with featured artists); other central schemes, reports, apps and decisions; Navratna, Miniratna and Maharatna status; foreign elections, international summits, disputes and peace talks with the envoys leading them; major international film, music and literature awards (Oscars, Grammy, Booker, Critics Choice); Khelo India, National Games, national championships and national events held by government bodies or the armed forces, world and junior world titles, any international title won by an Indian, tournaments hosted in India even with a foreign winner, olympiads and major tournaments' awards; defence exercises, missions and contracts; books released by top dignitaries; important days.
+2 = possible: any other Rajasthan news with a name, place or number (apps, portals, model villages, city bodies' initiatives, MoUs signed by state departments, exhibitions and festivals with featured artists); other central schemes, reports, apps and decisions; Navratna, Miniratna and Maharatna status; foreign elections, international summits, disputes and peace talks with the envoys leading them; major international film, music and literature awards (Oscars, Grammy, Booker, Critics Choice); Khelo India, National Games, national championships and national events held by government bodies or the armed forces, world and junior world titles, any international title won by an Indian, tournaments hosted in India even with a foreign winner, olympiads and major tournaments' awards; defence exercises, missions and contracts; books released by top dignitaries; beauty pageant titles; Indian-origin people appointed abroad; disease outbreaks by state; important days.
 1 = unlikely: minor tournaments abroad with no Indian or Rajasthan winner, routine appointments below the head of a body, follow-ups with nothing new (but totals "as on" a date from year-end reviews and reports are new).`;
 
 // The blueprint as prompt text.
 export function blueprintText(): string {
   const types = STORY_TYPES.map(
     (t) =>
-      `- "${t.id}" (${t.label}, at most ${t.maxFacts} facts): ${t.slots
-        .map((s) => `"${s.id}" = ${s.label}${s.many ? " (may repeat)" : ""}`)
-        .join("; ")}`,
+      `- ${t.id} (${t.label}; max ${t.maxFacts}): ${t.slots
+        .map((s) => `${s.id}${s.many ? "+" : ""}: ${s.label}`)
+        .join(" | ")}`,
   ).join("\n");
-  return `STORY TYPES and the only facts worth keeping for each (fact slots):
+  return `STORY TYPES and the only facts worth keeping for each, as "slot: what it holds" (a slot marked + may hold several facts; use the slot id without the +):
 ${types}
 ${LONG_DOCUMENTS}
 SKIP these stories entirely: ${SKIP_STORIES.join("; ")}.
@@ -497,7 +498,8 @@ export function keepSlotted<F extends { slot?: string }>(type: StoryType, facts:
   const used = new Set<string>();
   const out: F[] = [];
   for (const f of facts) {
-    const s = slots.get(norm(f.slot));
+    // "reach+" in the prompt marks a repeatable slot; the AI may copy the +.
+    const s = slots.get(norm(f.slot).replace(/\+$/, ""));
     if (!s || (!s.many && used.has(s.id))) continue;
     used.add(s.id);
     out.push({ ...f, slot: s.id });
