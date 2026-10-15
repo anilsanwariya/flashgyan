@@ -1,12 +1,10 @@
 // Server functions that turn parsed PDF markdown into flashcards / MCQs
-// using the Gemini API. Output rows exactly match the shape our existing
+// using Claude. Output rows exactly match the shape our existing
 // Excel importer produces, so the same bulk-import path is reused.
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-
-const GEMINI_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+import { parseJsonLoose, saathiComplete } from "../../supabase/functions/_shared/saathi-core.ts";
 
 const SYSTEM_PROMPT = `You are an expert item-writer for Indian competitive state exams (RAS, REET, PSI, Patwari, LDC, and similar).
 Your job is to transform the given study material into rigorous, high-quality ACTIVE-RECALL items.
@@ -118,51 +116,29 @@ async function assertAdmin(userId: string) {
   if (!data) throw new Error("Forbidden: admin role required");
 }
 
-async function callGemini(
+async function callClaude(
   markdown: string,
   userInstructions: string,
   responseSchema: unknown,
 ) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
-  // Cap the input to keep the request safe (~ well under 1M-token context).
+  // Runs on Claude via the project's ANTHROPIC_API_KEY (shared SAATHI helper).
   const truncated = markdown.length > 200_000 ? markdown.slice(0, 200_000) : markdown;
-  const body = {
-    system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { text: userInstructions },
-          { text: "\n---\nSOURCE MATERIAL (markdown):\n\n" + truncated },
-        ],
-      },
-    ],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema,
-      temperature: 0.4,
+  const text = await saathiComplete("", [
+    { role: "system", content: SYSTEM_PROMPT },
+    {
+      role: "user",
+      content:
+        userInstructions +
+        "\n\nReturn ONLY a JSON object (no prose, no code fences) matching this schema:\n" +
+        JSON.stringify(responseSchema) +
+        "\n---\nSOURCE MATERIAL (markdown):\n\n" +
+        truncated,
     },
-  };
-  const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`Gemini failed (${res.status}): ${txt.slice(0, 500)}`);
-  }
-  const json = (await res.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
-  };
-  const text = json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-  if (!text.trim()) throw new Error("Gemini returned empty output");
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error("Gemini returned non-JSON output");
-  }
+  ]);
+  if (!text.trim()) throw new Error("Claude returned empty output");
+  const parsed = parseJsonLoose<any>(text);
+  if (!parsed) throw new Error("Claude returned non-JSON output");
+  return parsed;
 }
 
 // ---------- Flashcards ----------
@@ -189,7 +165,7 @@ export const generateFlashcardsFromMarkdown = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<{ rows: GeneratedFcRow[] }> => {
     await assertAdmin(context.userId);
     const instructions = FLASHCARD_USER_INSTRUCTIONS.replace("${count}", String(data.count));
-    const parsed = await callGemini(data.markdown, instructions, flashcardSchema);
+    const parsed = await callClaude(data.markdown, instructions, flashcardSchema);
     const raw = Array.isArray(parsed?.cards) ? parsed.cards : [];
     const rows: GeneratedFcRow[] = [];
     let ord = data.startOrder;
@@ -208,7 +184,7 @@ export const generateFlashcardsFromMarkdown = createServerFn({ method: "POST" })
         : [];
       rows.push({ order_index: ord++, prompt, question, answer, sections });
     }
-    if (rows.length === 0) throw new Error("Gemini did not produce any usable cards");
+    if (rows.length === 0) throw new Error("Claude did not produce any usable cards");
     return { rows };
   });
 
@@ -240,7 +216,7 @@ export const generateMcqsFromMarkdown = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<{ rows: GeneratedMcqRow[] }> => {
     await assertAdmin(context.userId);
     const instructions = MCQ_USER_INSTRUCTIONS.replace("${count}", String(data.count));
-    const parsed = await callGemini(data.markdown, instructions, mcqSchema);
+    const parsed = await callClaude(data.markdown, instructions, mcqSchema);
     const raw = Array.isArray(parsed?.questions) ? parsed.questions : [];
     const rows: GeneratedMcqRow[] = [];
     let ord = data.startOrder;
@@ -272,6 +248,6 @@ export const generateMcqsFromMarkdown = createServerFn({ method: "POST" })
         explanation_sections: sections,
       });
     }
-    if (rows.length === 0) throw new Error("Gemini did not produce any usable questions");
+    if (rows.length === 0) throw new Error("Claude did not produce any usable questions");
     return { rows };
   });
