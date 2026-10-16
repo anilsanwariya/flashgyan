@@ -1507,6 +1507,7 @@ export type Database = {
           language: string | null
           medium: string
           parent_id: string | null
+          source: string | null
           source_file: string | null
           source_markdown: string | null
           subject: string
@@ -1525,6 +1526,7 @@ export type Database = {
           language?: string | null
           medium?: string
           parent_id?: string | null
+          source?: string | null
           source_file?: string | null
           source_markdown?: string | null
           subject: string
@@ -1543,6 +1545,7 @@ export type Database = {
           language?: string | null
           medium?: string
           parent_id?: string | null
+          source?: string | null
           source_file?: string | null
           source_markdown?: string | null
           subject?: string
@@ -1819,6 +1822,7 @@ export type Database = {
           language: string
           medium: string
           similarity: number
+          source: string
           source_file: string
           subject: string
           title: string
