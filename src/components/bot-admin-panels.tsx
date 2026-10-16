@@ -334,6 +334,7 @@ const BUILTINS: Record<NonNullable<BotCommandRow["builtin"]>, string> = {
   mcq: "MCQ quiz subjects",
   ask: "Ask SAATHI (text after the command)",
   answer: "SAATHI writes a Mains answer (marks, then the question)",
+  daily: "Daily current affairs quiz: pick a time, see the streak, take today's quiz",
   help: "List all commands",
 };
 
