@@ -23,6 +23,7 @@ import {
   type FeatureTopic,
 } from "@/lib/ca-feature";
 import {
+  matchLabel,
   relevantMatches,
   saathiComplete,
   saathiEmbed,
@@ -38,6 +39,9 @@ import {
   changeCheckMessages,
   dailyPostTime,
   dykMessages,
+  relatedMessages,
+  parseRelated,
+  type EarlierStory,
   parseDyk,
   type DykFact,
   type WebPage,
@@ -160,6 +164,8 @@ export type CaItem = {
   status: "included" | "dropped";
   position: number;
   created_at: string;
+  // The static textbook concept the background explains (older items: null).
+  concept?: string | null;
 };
 
 export type CaIssue = {
@@ -191,7 +197,7 @@ export type CaCorrection = {
 const SOURCE_COLS =
   "id,issue_date,section,source_name,title,chunks,chunks_done,status,error,created_at";
 const ITEM_COLS =
-  "id,issue_date,category,headline,facts,source_ids,importance,rajasthan,content,context_sources,syllabus_topic_id,unit,needs_enrich,enrich_error,related_item_id,status,position,created_at";
+  "id,issue_date,category,headline,facts,source_ids,importance,rajasthan,content,context_sources,syllabus_topic_id,unit,needs_enrich,enrich_error,related_item_id,status,position,created_at,concept";
 
 // ---------- Sources ----------
 
@@ -331,12 +337,12 @@ export async function extractSourceChunk(sourceId: string, index: number) {
       const same = await sameDayStory(item, embedding, src.issue_date, editorial);
       if (same) {
         const { data: existing } = await from("ca_items")
-          .select("facts,source_ids,importance,rajasthan")
+          .select("facts,source_ids,importance,rajasthan,concept")
           .eq("id", same)
           .single();
         const e = existing as unknown as Pick<
           CaItem,
-          "facts" | "source_ids" | "importance" | "rajasthan"
+          "facts" | "source_ids" | "importance" | "rajasthan" | "concept"
         >;
         const { error: uErr } = await from("ca_items")
           .update({
@@ -344,6 +350,7 @@ export async function extractSourceChunk(sourceId: string, index: number) {
             source_ids: [...new Set([...e.source_ids, src.id])],
             importance: Math.max(e.importance, item.importance),
             rajasthan: e.rajasthan || item.rajasthan,
+            concept: e.concept || item.concept,
             needs_enrich: true,
             updated_at: new Date().toISOString(),
           } as never)
@@ -380,6 +387,7 @@ export async function extractSourceChunk(sourceId: string, index: number) {
         source_ids: [src.id],
         importance: item.importance,
         rajasthan: item.rajasthan,
+        concept: item.concept,
         embedding: embedding as unknown as string,
         related_item_id: earlier?.id ?? null,
         position: 1000 + created,
@@ -673,14 +681,18 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
   item.category = normalizeCategory(item.category);
   const key = apiKey();
   try {
-    const query = `${item.headline}\n${item.facts.map((f) => f.text).join(" ")}`.slice(0, 1000);
+    // The background explains the story's static concept, so the books are
+    // searched for the concept, and for the headline in case the concept's
+    // words differ from the book's; older stories without one use the news.
+    const newsText = `${item.headline}\n${item.facts.map((f) => f.text).join(" ")}`.slice(0, 1000);
+    const search = item.concept
+      ? { standalone: item.concept.slice(0, 300), english: item.headline.slice(0, 300) }
+      : { standalone: newsText, english: null };
     const subjects = await studySubjects();
     // The visual comes first so the text can leave out what it shows.
     const [kbMatches, embedding, look, mainsSet] = await Promise.all([
       subjects.length
-        ? saathiSearchQuery(key, rpc, { standalone: query, english: null }, subjects).then((m) =>
-            relevantMatches(m).slice(0, 4),
-          )
+        ? saathiSearchQuery(key, rpc, search, subjects).then((m) => relevantMatches(m).slice(0, 4))
         : Promise.resolve([]),
       embedOne(storyText(item)),
       makeVisual(item),
@@ -690,7 +702,8 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
     const t = topic as { id: string; unit_id: string; similarity: number } | null;
     const syllabusId = t && t.similarity >= 0.5 ? t.id : null;
 
-    const kb = kbMatches.map((m) => ({ title: m.source_file || m.title, content: m.content }));
+    // Each passage is cited by its book and publisher ("NCERT · …").
+    const kb = kbMatches.map((m) => ({ title: matchLabel(m), content: m.content }));
     const raw = await saathiComplete(
       key,
       enrichMessages({
@@ -701,6 +714,7 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
         syllabus: syllabusId ? (TOPIC_LABELS.get(syllabusId) ?? null) : null,
         papers: PAPER_SUBJECTS,
         mainsSet,
+        concept: item.concept,
         visual: look.visual
           ? { type: VISUAL_LABELS[look.visual.type].toLowerCase(), covers: look.visual_covers }
           : null,
@@ -712,7 +726,7 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
       ...new Set(parsed.backgroundFrom.map((i) => kb[i]?.title).filter(Boolean) as string[]),
     ].map((title) => ({ title }));
 
-    const dyk = await findDidYouKnow(parsed.content.headline.en || item.headline, item.facts);
+    const dyk = await findDidYouKnow(item, embedding, parsed.content.headline.en || item.headline);
     const update = {
       content: { ...parsed.content, dyk, ...look },
       context_sources: contextSources,
@@ -778,7 +792,7 @@ async function featurePassages(query: string, count = 8) {
   );
   return relevantMatches(matches)
     .slice(0, count)
-    .map((m) => ({ title: m.source_file || m.title, content: m.content }));
+    .map((m) => ({ title: matchLabel(m), content: m.content }));
 }
 
 const NOT_COVERED =
@@ -915,19 +929,87 @@ export async function redoVisual(itemId: string): Promise<CaItem> {
 
 // Searches the trusted sites with Tavily and keeps only facts quoted from the
 // pages. Never fails the item: without a key or results the box is left out.
-export async function findDidYouKnow(headline: string, facts: CaFact[]): Promise<DykFact[]> {
-  const key = process.env.TAVILY_API_KEY;
+// Earlier stories this close are the same news again, not a related one.
+const RELATED_MAX_SIMILARITY = 0.92;
+const RELATED_MIN_SIMILARITY = 0.6;
+
+// "Did you know?": related recent developments of the same kind, first from
+// the magazine's own stories of the last 12 months, then from trusted websites.
+export async function findDidYouKnow(
+  item: Pick<CaItem, "id" | "issue_date" | "category" | "facts" | "concept">,
+  embedding: number[],
+  headline: string,
+): Promise<DykFact[]> {
   const settings = await getMagazineSettings();
-  if (!key || !settings.do_you_know || !settings.trusted_domains.length) return [];
+  if (!settings.do_you_know || item.category === "editorial") return [];
+  let found: DykFact[] = [];
+  try {
+    found = await relatedFromArchive(item, embedding, headline);
+  } catch (e) {
+    console.error("did you know (archive):", e);
+  }
+  if (found.length >= 2) return found;
+  const web = await relatedFromWeb(item, headline, settings.trusted_domains);
+  return [...found, ...web].slice(0, 3);
+}
+
+async function relatedFromArchive(
+  item: Pick<CaItem, "id" | "issue_date" | "facts">,
+  embedding: number[],
+  headline: string,
+): Promise<DykFact[]> {
+  const yearAgo = new Date(`${item.issue_date}T00:00:00Z`);
+  yearAgo.setUTCFullYear(yearAgo.getUTCFullYear() - 1);
+  const { data, error } = await rpc("ca_similar_items", {
+    p_embedding: embedding,
+    p_from: yearAgo.toISOString().slice(0, 10),
+    p_to: dayBefore(item.issue_date),
+    p_exclude: item.id,
+    p_count: 10,
+  });
+  fail(error);
+  const near = ((data ?? []) as Similar[]).filter(
+    (r) => r.similarity >= RELATED_MIN_SIMILARITY && r.similarity < RELATED_MAX_SIMILARITY,
+  );
+  if (!near.length) return [];
+  const { data: rows } = await from("ca_items")
+    .select("id,issue_date,headline,facts,category")
+    .in(
+      "id",
+      near.map((r) => r.id),
+    );
+  const byId = new Map(
+    ((rows ?? []) as Pick<CaItem, "id" | "issue_date" | "headline" | "facts" | "category">[])
+      .filter((r) => r.category !== "editorial")
+      .map((r) => [r.id, r]),
+  );
+  const stories: EarlierStory[] = near
+    .map((r) => byId.get(r.id))
+    .filter((r) => r !== undefined)
+    .map((r) => ({ date: r.issue_date, headline: r.headline, facts: r.facts.map((f) => f.text) }));
+  if (!stories.length) return [];
+  return parseRelated(
+    await saathiComplete(apiKey(), relatedMessages({ headline, facts: item.facts, stories })),
+    stories,
+  );
+}
+
+async function relatedFromWeb(
+  item: Pick<CaItem, "facts" | "concept">,
+  headline: string,
+  domains: string[],
+): Promise<DykFact[]> {
+  const key = process.env.TAVILY_API_KEY;
+  if (!key || !domains.length) return [];
   try {
     const res = await fetch("https://api.tavily.com/search", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({
-        query: headline.slice(0, 380),
+        query: (item.concept ? `recent ${item.concept} India` : headline).slice(0, 380),
         search_depth: "basic",
         max_results: 3,
-        include_domains: settings.trusted_domains,
+        include_domains: domains,
         include_raw_content: true,
       }),
     });
@@ -946,7 +1028,10 @@ export async function findDidYouKnow(headline: string, facts: CaFact[]): Promise
         content: (r.raw_content || r.content || "").slice(0, 12_000),
       }));
     if (!pages.length) return [];
-    return parseDyk(await saathiComplete(apiKey(), dykMessages({ headline, facts, pages })), pages);
+    return parseDyk(
+      await saathiComplete(apiKey(), dykMessages({ headline, facts: item.facts, pages })),
+      pages,
+    );
   } catch (e) {
     console.error("did you know:", e);
     return [];
@@ -1424,7 +1509,13 @@ export async function addDayToKnowledgeBase(date: string) {
   if (data?.id) await ingest.replaceDocument(data.id, text);
   else
     await ingest.createDocument(
-      { title, subject: CA_SUBJECT, topic: date.slice(0, 7), medium: "Bilingual" },
+      {
+        title,
+        subject: CA_SUBJECT,
+        topic: date.slice(0, 7),
+        medium: "Bilingual",
+        source: "FlashGyan Current Affairs",
+      },
       text,
     );
 }

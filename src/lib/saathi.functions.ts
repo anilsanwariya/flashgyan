@@ -26,6 +26,8 @@ export type SaathiDoc = {
   created_at: string;
   parent_id: string | null;
   chunk_index: number | null;
+  // Decks only: who published it (NCERT, IGNOU…).
+  source?: string | null;
 };
 
 function apiKey(): string {
@@ -61,6 +63,7 @@ async function assertAdmin(userId: string) {
 }
 
 const DOC_COLS = "id,title,subject,medium,topic,content,created_at,parent_id,chunk_index";
+const DECK_COLS = `${DOC_COLS},source`;
 
 // The database returns at most 1,000 rows per request, so lists are read in pages.
 const PAGE = 1000;
@@ -76,7 +79,7 @@ export const listSaathiDocs = createServerFn({ method: "GET" })
     for (let start = 0; ; start += PAGE) {
       const { data, error } = await admin
         .from("saathi_knowledge")
-        .select(`${DOC_COLS},chunks:saathi_knowledge!parent_id(count)`)
+        .select(`${DECK_COLS},chunks:saathi_knowledge!parent_id(count)`)
         .is("parent_id", null)
         .order("created_at", { ascending: false })
         .order("id")
@@ -117,6 +120,7 @@ const docMeta = {
   subject: z.string().trim().min(1).max(120),
   topic: z.string().trim().max(120).nullish(),
   medium: z.enum(["Hindi", "English", "Bilingual"]),
+  source: z.string().trim().max(120).nullish(),
 };
 
 export const createSaathiDoc = createServerFn({ method: "POST" })
@@ -128,7 +132,13 @@ export const createSaathiDoc = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     const { createDocument } = await ingest();
     return createDocument(
-      { title: data.title, subject: data.subject, topic: data.topic || null, medium: data.medium },
+      {
+        title: data.title,
+        subject: data.subject,
+        topic: data.topic || null,
+        medium: data.medium,
+        source: data.source || null,
+      },
       data.content,
     );
   });
@@ -187,9 +197,15 @@ export const updateSaathiDoc = createServerFn({ method: "POST" })
     const topic = data.topic || null;
     const { data: row, error } = await admin
       .from("saathi_knowledge")
-      .update({ title: data.title, subject, topic, medium: data.medium } as never)
+      .update({
+        title: data.title,
+        subject,
+        topic,
+        medium: data.medium,
+        ...(data.source !== undefined ? { source: data.source || null } : {}),
+      } as never)
       .eq("id", data.id)
-      .select(DOC_COLS)
+      .select(DECK_COLS)
       .single();
     if (error) throw new Error(error.message);
 
@@ -208,6 +224,33 @@ export const updateSaathiDoc = createServerFn({ method: "POST" })
       if (tErr) throw new Error(tErr.message);
     }
     return row as unknown as SaathiDoc;
+  });
+
+// Sets who published several decks at once (NCERT, IGNOU…); empty clears it.
+export const setSaathiSource = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        ids: z.array(z.string().uuid()).min(1).max(5000),
+        source: z.string().trim().max(120),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const admin = await assertAdmin(context.userId);
+    let updated = 0;
+    for (let i = 0; i < data.ids.length; i += 200) {
+      const { data: rows, error } = await admin
+        .from("saathi_knowledge")
+        .update({ source: data.source || null } as never)
+        .in("id", data.ids.slice(i, i + 200))
+        .is("parent_id", null)
+        .select("id");
+      if (error) throw new Error(error.message);
+      updated += (rows ?? []).length;
+    }
+    return { updated };
   });
 
 export const appendSaathiDoc = createServerFn({ method: "POST" })
@@ -535,6 +578,33 @@ export type SaathiKnowledgeGap = {
   last_asked_at: string;
   created_at: string;
 };
+
+// Static concepts behind the last 6 months' magazine stories that no book in
+// the knowledge base explained (the story printed without a background).
+export const listUncoveredConcepts = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const admin = await assertAdmin(context.userId);
+    const { uncoveredConcepts } = await import("@/lib/current-affairs");
+    const since = new Date(Date.now() - 183 * 86_400_000).toISOString().slice(0, 10);
+    const rows: Parameters<typeof uncoveredConcepts>[0] = [];
+    for (let start = 0; ; start += PAGE) {
+      const { data, error } = await admin
+        .from("ca_items" as never)
+        .select("concept,issue_date,headline,background:content->background")
+        .not("concept", "is", null)
+        .eq("status", "included")
+        .eq("needs_enrich", false)
+        .gte("issue_date", since)
+        .order("issue_date", { ascending: false })
+        .range(start, start + PAGE - 1);
+      if (error) throw new Error(error.message);
+      const page = (data ?? []) as unknown as typeof rows;
+      rows.push(...page);
+      if (page.length < PAGE) break;
+    }
+    return uncoveredConcepts(rows).slice(0, 100);
+  });
 
 export const listKnowledgeGaps = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])

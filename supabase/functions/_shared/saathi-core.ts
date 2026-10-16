@@ -1,6 +1,7 @@
 // SAATHI question answering, shared by the website (src/lib/saathi-ask.server.ts)
 // and the Telegram bot (supabase/functions/telegram-demo-bot). Keep this file free
 // of runtime-specific imports so both Node (Vite) and Deno can load it.
+import { sourceLabel } from "./saathi-source.ts";
 
 export const SAATHI_AI_GATEWAY = "https://ai.gateway.lovable.dev/v1";
 export const SAATHI_EMBED_MODEL = "google/gemini-embedding-001";
@@ -38,13 +39,18 @@ export type SaathiMatch = {
   language?: string | null;
   content: string;
   source_file: string | null;
+  // Who published the deck (NCERT, IGNOU…); missing before the sources migration.
+  source?: string | null;
   vector_score: number;
   keyword_score: number;
   similarity: number;
 };
 
 export type SaathiSource = {
+  // The book or deck the passages come from.
   title: string;
+  // Who published it (NCERT, IGNOU…), when known.
+  source?: string | null;
   subject: string;
   topic: string | null;
   passages: string[];
@@ -488,7 +494,7 @@ export async function saathiRerank(
   const list = matches
     .map((m, i) => {
       const lang = languageOf(m);
-      return `[${i + 1}]${lang ? ` (${lang})` : ""} ${m.source_file || m.title}\n${m.content.slice(0, 700)}`;
+      return `[${i + 1}]${lang ? ` (${lang})` : ""} ${matchLabel(m)}\n${m.content.slice(0, 700)}`;
     })
     .join("\n\n");
   const languageRule = preferLanguage
@@ -594,6 +600,12 @@ export function relevantMatches(matches: SaathiMatch[]): SaathiMatch[] {
   return matches.filter((m) => m.keyword_score > 0 || m.vector_score >= SAATHI_MIN_VECTOR_SCORE);
 }
 
+export { sourceLabel };
+
+export function matchLabel(m: SaathiMatch): string {
+  return sourceLabel({ title: m.source_file || m.title, source: m.source });
+}
+
 export function collectSources(matches: SaathiMatch[]): SaathiSource[] {
   const byTitle = new Map<string, SaathiSource>();
   for (const m of matches) {
@@ -603,6 +615,7 @@ export function collectSources(matches: SaathiMatch[]): SaathiSource[] {
     else
       byTitle.set(title, {
         title,
+        source: m.source ?? null,
         subject: m.subject,
         topic: m.topic ?? null,
         passages: [m.content],
@@ -641,7 +654,7 @@ export function saathiMessages(opts: {
   const material = opts.matches
     .map(
       (m, i) =>
-        `[Material ${i + 1}] ${m.source_file || m.title} (${[m.subject, m.topic].filter(Boolean).join(" › ")})\n${m.content}`,
+        `[Material ${i + 1}] ${matchLabel(m)} (${[m.subject, m.topic].filter(Boolean).join(" › ")})\n${m.content}`,
     )
     .join("\n\n---\n\n");
   return [
@@ -769,7 +782,7 @@ export function splitNextQuestions(text: string): { text: string; next: string[]
 
 export function saathiQuizMessages(question: string, matches: SaathiMatch[]): ChatMessage[] {
   const material = matches
-    .map((m, i) => `[Material ${i + 1}] ${m.source_file || m.title}\n${m.content}`)
+    .map((m, i) => `[Material ${i + 1}] ${matchLabel(m)}\n${m.content}`)
     .join("\n\n---\n\n");
   return [
     {

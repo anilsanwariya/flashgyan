@@ -84,7 +84,7 @@ function itemHtml(item: MagazineItem, number: number, showDate: boolean, accent:
   const background = c.background
     ? `<div class="box context"><div class="box-title">Background</div>${biBlock(c.background)}${
         item.context_sources.length
-          ? `<div class="src">FlashGyan notes: ${esc(item.context_sources.map((s) => s.title).join(", "))}</div>`
+          ? `<div class="src">Source: ${esc(item.context_sources.map((s) => s.title).join(", "))}</div>`
           : ""
       }</div>`
     : "";
@@ -277,7 +277,7 @@ function featurePage(f: CaFeature): string {
     })
     .join("");
   const sources = f.sources.length
-    ? `<p class="feat-src">From FlashGyan study notes: ${esc(f.sources.join(", "))}</p>`
+    ? `<p class="feat-src">Source: ${esc(f.sources.join(", "))}</p>`
     : "";
   return `<section class="section new-page feature"><div class="section-title"><h2>${icon("background")} Background Article</h2><span>Static topic behind this month's news</span></div><h2 class="feat-title"><span lang="hi">${esc(f.title.hi)}</span><br/><span class="en">${esc(f.title.en)}</span></h2><div class="bi feat-intro"><p lang="hi">${esc(f.intro.hi)}</p><p class="en">${esc(f.intro.en)}</p></div>${sections}${sources}</section>`;
 }

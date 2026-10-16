@@ -1232,7 +1232,7 @@ function SettingsPanel() {
       </section>
 
       <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
-        <h3 className="font-semibold">“Did you know?” facts from the web</h3>
+        <h3 className="font-semibold">“Did you know?”: related recent developments</h3>
         <label className="flex items-start gap-3">
           <Switch
             checked={Boolean(form.do_you_know)}
@@ -1241,10 +1241,12 @@ function SettingsPanel() {
           <span className="text-sm">
             <span className="font-medium">Add a “क्या आप जानते हैं? / Did you know?” box</span>
             <span className="block text-muted-foreground">
-              For each news item SAATHI searches the trusted websites below (Tavily) and adds up to
-              3 related facts, each quoted word for word from its page and credited to the site.
-              Facts whose quote isn't found on the page are dropped. Review them like everything
-              else.
+              For each news item SAATHI adds up to 3 developments of the same kind (other missiles
+              tested, other amendments, other new Ramsar sites): first from this magazine's own
+              stories of the last 12 months, credited to the issue's date, then from the trusted
+              websites below (Tavily). Each line is quoted word for word from its story or page; any
+              whose quote isn't found is dropped. The static concept itself goes in the Background
+              box, from your books.
             </span>
           </span>
         </label>

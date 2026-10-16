@@ -36,6 +36,7 @@ import type {
   SaathiSource,
   SaathiStreamEvent,
 } from "../../supabase/functions/_shared/saathi-core.ts";
+import { sourceLabel } from "../../supabase/functions/_shared/saathi-source.ts";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -857,7 +858,7 @@ function MessageBubble({
                 className="text-xs rounded-full bg-white/50 dark:bg-black/30 backdrop-blur-xl border border-border/30 text-muted-foreground hover:text-foreground px-3 py-1.5 transition-colors"
                 title={`${s.subject} — tap to read the source`}
               >
-                📚 {s.title}
+                📚 {sourceLabel(s)}
               </button>
             ))}
             <div className="ml-auto flex items-center gap-0.5">
@@ -948,7 +949,7 @@ function MessageBubble({
         <Dialog open={!!openSource} onOpenChange={(o) => !o && setOpenSource(null)}>
           <DialogContent className="max-w-2xl max-h-[85dvh] overflow-y-auto rounded-2xl">
             <DialogHeader>
-              <DialogTitle>{openSource?.title}</DialogTitle>
+              <DialogTitle>{openSource ? sourceLabel(openSource) : ""}</DialogTitle>
               <p className="text-xs text-muted-foreground">{openSource?.subject}</p>
             </DialogHeader>
             <div className="space-y-4">

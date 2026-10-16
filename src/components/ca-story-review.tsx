@@ -685,15 +685,21 @@ function StoryCard({
                       <li key={d.url + i} className="flex items-start gap-2">
                         <div className="min-w-0 flex-1">
                           <BiLine value={d} lang={lang} />
-                          <a
-                            href={d.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-xs text-primary hover:underline"
-                            title={`“${d.quote}”`}
-                          >
-                            {d.site}
-                          </a>
+                          {d.url ? (
+                            <a
+                              href={d.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-xs text-primary hover:underline"
+                              title={`“${d.quote}”`}
+                            >
+                              {d.site}
+                            </a>
+                          ) : (
+                            <span className="text-xs text-muted-foreground" title={`“${d.quote}”`}>
+                              {d.site}
+                            </span>
+                          )}
                         </div>
                         <IconButton
                           label="Remove this fact"

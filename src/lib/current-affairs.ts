@@ -122,7 +122,12 @@ export type RawItem = {
   importance: 1 | 2 | 3;
   rajasthan: boolean;
   facts: CaFact[];
+  // The static textbook concept behind the story, as a short search phrase.
+  concept: string | null;
 };
+
+// What the extraction prompt asks for as the story's static concept.
+const CONCEPT_FIELD = `"concept": the static textbook concept behind the story that an NCERT-level book explains, as a short search phrase naming it exactly (e.g. "ballistic missile", "Article 14 equality before law", "Article 368 amendment of the Constitution", "Ramsar Convention wetlands", "repo rate monetary policy"), or null when there is none (awards, appointments, sports results)`;
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
@@ -209,7 +214,7 @@ export function extractMessages(opts: {
 ${blueprintText()}
 Categories: "rajasthan" for anything about Rajasthan; "national" for India-wide polity, governance, schemes and judgments; "international"; "science" for science, technology, defence, space, health and environment; "economy"; "sports"; "misc" for awards, appointments, persons in news, important days, reports and indices that fit nowhere else; "editorial" only for editorials.
 Skip: advertisements, crime and accidents, purely local incidents, opinion without facts, market tips, entertainment.
-Reply with JSON only: [{"type": one story type id, "headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 as described above, "rajasthan": true if it concerns Rajasthan, "facts": [{"slot": the slot id this fact fills, "text": one short fact in English, "quote": the exact words from the source that state this fact, copied character for character (5 to 30 words, in the source's language)}]}].
+Reply with JSON only: [{"type": one story type id, "headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 as described above, "rajasthan": true if it concerns Rajasthan, ${CONCEPT_FIELD}, "facts": [{"slot": the slot id this fact fills, "text": one short fact in English, "quote": the exact words from the source that state this fact, copied character for character (5 to 30 words, in the source's language)}]}].
 Every fact must fill one slot of its story's type; leave a slot out if the source doesn't state it, and drop any fact that fits no slot. Use only facts stated in the source and keep every number, name and date exactly. Reply [] if nothing is exam-relevant.`,
     },
     {
@@ -231,7 +236,7 @@ function editorialExtractMessages(opts: {
       role: "system",
       content: `You are the editorials editor of a current affairs magazine for RAS (Rajasthan Administrative Service) Mains aspirants. From the newspaper editorial text, return one item per editorial on an issue RPSC asks in RAS Mains.
 ${editorialBlueprintText()}
-Reply with JSON only: [{"type": "editorial", "headline": a short factual headline in English naming the issue (not the editorial's figurative title), "category": "editorial", "importance": 2 or 3, "rajasthan": true if it concerns Rajasthan, "facts": [{"slot": the slot id this fact fills, "text": one short point in English, "quote": the exact words from the source that state it, copied character for character (5 to 30 words, in the source's language)}]}].
+Reply with JSON only: [{"type": "editorial", "headline": a short factual headline in English naming the issue (not the editorial's figurative title), "category": "editorial", "importance": 2 or 3, "rajasthan": true if it concerns Rajasthan, ${CONCEPT_FIELD}, "facts": [{"slot": the slot id this fact fills, "text": one short point in English, "quote": the exact words from the source that state it, copied character for character (5 to 30 words, in the source's language)}]}].
 Keep the editorial's own reasoning but drop rhetoric, quotes of politicians and vague lines. Use only what the editorial states, keeping every number, name and date exactly. Reply [] if no editorial is on an exam issue.`,
     },
     {
@@ -274,6 +279,7 @@ export function parseExtracted(raw: string, source: string, sourceId: string): R
         importance: (importance >= 1 && importance <= 3 ? importance : 2) as 1 | 2 | 3,
         rajasthan: o.rajasthan === true,
         facts,
+        concept: str(o.concept, 160) || null,
       };
     })
     .filter((i) => i.headline && i.facts.length > 0);
@@ -318,6 +324,8 @@ export function enrichMessages(opts: {
   // Mains questions the issue's other stories already have (English), so
   // the issue does not ask the same theme twice.
   mainsSet?: string[];
+  // The static concept the background explains, when known.
+  concept?: string | null;
   // The visual printed with the text, and the facts (0-based) it shows.
   visual?: { type: string; covers: number[] } | null;
 }): ChatMessage[] {
@@ -336,7 +344,7 @@ export function enrichMessages(opts: {
       content: `You write a bilingual (Hindi and English) current affairs magazine for RAS exam aspirants. Write one news item from the numbered facts.
 RULES: Use only the facts given. Never add a number, name, date or claim that is not in the facts. Hindi must be natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी), with the same numbers and official names (give the English name in brackets the first time if it helps).
 BE BRIEF: students revise from this, so less theory, more memorable facts. Say each fact once: the summary gives only the gist (what happened, who, where), the points carry the details, and nothing is repeated between summary, points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}
-"background" explains the static concept the news relates to (for example the scheme's origin and aim, the constitutional article, the institution), using ONLY the knowledge-base passages [K…]; set it to null if none of them is genuinely about this news. List the passages you used in "background_from".
+"background" explains the static concept behind the news (the "Static concept" in the message when given; otherwise the constitutional article, institution, technology or scheme the news is about) the way a textbook does: what it is, what the article says, how it works. Use ONLY knowledge-base passages [K…] that explain this concept, even if they never mention the news, and never add anything they don't state; do not retell the news. Set it to null if no passage explains the concept. List the passages you used in "background_from".
 Reply with JSON only:
 {"headline": {"en": "...", "hi": "..."},
  "summary": {"en": ${editorial ? '"3-4 short sentences: the issue, the main argument and the suggested way forward"' : opts.visual ? '"one sentence, at most 25 words"' : '"1-2 sentences, at most 40 words"'}, "hi": "..."},
@@ -369,7 +377,7 @@ PRACTICE QUESTIONS follow the RPSC (RAS) pattern and difficulty:
     },
     {
       role: "user",
-      content: `Category: ${opts.category}\nHeadline: ${opts.headline}\n${opts.syllabus ? `RAS syllabus topic: ${opts.syllabus}\n` : opts.papers ? `No syllabus topic matched; pick the paper and subject from: ${opts.papers}\n` : ""}${opts.mainsSet?.length ? `Mains questions already set for this issue:\n${opts.mainsSet.map((q) => `- ${q}`).join("\n")}\n` : ""}\nFacts:\n${facts}\n\nKnowledge-base passages:\n${kb}`,
+      content: `Category: ${opts.category}\nHeadline: ${opts.headline}\n${opts.syllabus ? `RAS syllabus topic: ${opts.syllabus}\n` : opts.papers ? `No syllabus topic matched; pick the paper and subject from: ${opts.papers}\n` : ""}${opts.concept ? `Static concept: ${opts.concept}\n` : ""}${opts.mainsSet?.length ? `Mains questions already set for this issue:\n${opts.mainsSet.map((q) => `- ${q}`).join("\n")}\n` : ""}\nFacts:\n${facts}\n\nKnowledge-base passages:\n${kb}`,
     },
   ];
 }
@@ -742,6 +750,85 @@ export function siteName(url: string): string {
   }
 }
 
+// Concepts the magazine's stories needed but the books did not explain:
+// stories with a concept and no background, grouped by concept, most first.
+export type UncoveredConcept = { concept: string; stories: number; last: string; example: string };
+
+export function uncoveredConcepts(
+  rows: { concept: string | null; issue_date: string; headline: string; background: unknown }[],
+): UncoveredConcept[] {
+  const by = new Map<string, UncoveredConcept>();
+  for (const r of rows) {
+    const concept = r.concept?.trim();
+    if (!concept || r.background) continue;
+    const key = concept.toLowerCase();
+    const cur = by.get(key);
+    if (!cur) by.set(key, { concept, stories: 1, last: r.issue_date, example: r.headline });
+    else {
+      cur.stories += 1;
+      if (r.issue_date > cur.last) {
+        cur.last = r.issue_date;
+        cur.example = r.headline;
+      }
+    }
+  }
+  return [...by.values()].sort((a, b) => b.stories - a.stories || b.last.localeCompare(a.last));
+}
+
+// "Did you know?" lists related recent developments of the same kind as the
+// news (other missile tests, other amendments, other new Ramsar sites), first
+// from the magazine's own earlier stories, then from trusted websites.
+export type EarlierStory = { date: string; headline: string; facts: string[] };
+
+export function relatedMessages(opts: {
+  headline: string;
+  facts: CaFact[];
+  stories: EarlierStory[];
+}): ChatMessage[] {
+  const stories = opts.stories
+    .map(
+      (st, i) => `[S${i + 1}] ${formatDate(st.date, "en")}: ${st.headline}\n${st.facts.join("\n")}`,
+    )
+    .join("\n\n");
+  return [
+    {
+      role: "system",
+      content: `You add a "Did you know?" box to a current affairs news item for RAS exam aspirants: related recent developments an examiner would link to this news. From the numbered earlier stories of the same magazine, pick at most 3 developments of the SAME KIND as the news (other missiles tested, other constitutional amendments, other Ramsar sites declared, other judgments on the same article…) and write each as one line that names it, with its month and year and one key detail. Skip stories of a different kind and anything about this same news. Use only what the stories state.
+Reply with JSON only: [{"en": one line in English, "hi": the same in standard exam Hindi, "story": "S1", "quote": the exact words from that story's text that state it (5 to 40 words, copied character for character)}]. Reply [] if none is of the same kind.`,
+    },
+    {
+      role: "user",
+      content: `News: ${opts.headline}\nNews facts: ${opts.facts.map((f) => f.text).join("; ")}\n\nEarlier stories:\n\n${stories}`,
+    },
+  ];
+}
+
+// Keeps only lines whose quote is in the story they cite; each is credited to
+// the magazine issue it appeared in.
+export function parseRelated(raw: string, stories: EarlierStory[]): DykFact[] {
+  const list = parseJson<unknown[]>(raw);
+  if (!Array.isArray(list)) return [];
+  const out: DykFact[] = [];
+  for (const x of list) {
+    const o = (x ?? {}) as Record<string, unknown>;
+    const st = stories[Number(String(o.story ?? "").replace(/\D/g, "")) - 1];
+    const en = str(o.en, 400);
+    const hi = str(o.hi, 400);
+    const quote = str(o.quote, 600);
+    if (!st || !en || !quote || !quoteInSource(quote, [st.headline, ...st.facts].join("\n")))
+      continue;
+    out.push({
+      en,
+      hi,
+      quote,
+      url: "",
+      site: `FlashGyan Current Affairs, ${formatDate(st.date, "en")}`,
+    });
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
 export function dykMessages(opts: {
   headline: string;
   facts: CaFact[];
@@ -753,7 +840,7 @@ export function dykMessages(opts: {
   return [
     {
       role: "system",
-      content: `You add a "Did you know?" box to a current affairs news item for RAS exam aspirants. Using ONLY the web pages given, write up to 3 short, interesting facts related to the news that are useful for the exam: background, records, firsts, origin, related places, institutions or numbers. Do not repeat the news facts. Skip anything the pages don't state clearly, and anything that may be outdated. Each fact must quote the page word for word.
+      content: `You add a "Did you know?" box to a current affairs news item for RAS exam aspirants: related recent developments an examiner would link to this news. Using ONLY the web pages given, write up to 3 developments of the SAME KIND as the news from roughly the last two years (other missiles tested, other constitutional amendments, other Ramsar sites declared…), each one line naming it with its month and year and one key detail. Do not repeat the news or explain its background. Skip anything undated, older, or not clearly stated. Each line must quote the page word for word.
 Reply with JSON only: [{"en": one sentence in English, "hi": the same in standard exam Hindi, "page": "W1", "quote": the exact words from that page that state it (8 to 40 words, copied character for character)}]. Reply [] if the pages have nothing suitable.`,
     },
     {
