@@ -680,6 +680,12 @@ export type MagazineSettings = {
   daily_stories: number;
   // Editorials a day picked from the websites marked "Editorials".
   daily_editorials: number;
+  // After each daily PDF, post its MCQs to the channel as quiz polls.
+  channel_quiz: boolean;
+  channel_quiz_count: number;
+  // Each approved daily issue's quick questions go into the month's
+  // "Current Affairs" flashcard deck in the app.
+  add_to_flashcards: boolean;
 };
 
 // Official and reference sites the "Did you know?" search may use. Subdomains
@@ -719,6 +725,9 @@ export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   visuals: true,
   daily_stories: DEFAULT_DAILY_STORIES,
   daily_editorials: 2,
+  channel_quiz: true,
+  channel_quiz_count: 5,
+  add_to_flashcards: true,
 };
 
 export function categoryLabel(id: string): { en: string; hi: string } {
@@ -748,6 +757,65 @@ export function siteName(url: string): string {
   } catch {
     return "";
   }
+}
+
+// ---------- Flashcards from an issue ----------
+
+// The month's deck in the app's flashcards ("Current Affairs – October 2026").
+// Its topic matches the month's SAATHI documents, so SAATHI can point to it.
+export function flashcardDeckFor(date: string) {
+  return {
+    name: `Current Affairs – ${formatDate(date, "en", false)}`,
+    subject: "Current Affairs",
+    topic: date.slice(0, 7),
+    description: "Quick revision questions from FlashGyan's daily current affairs magazine.",
+    // Newest month first.
+    order_index: -Number(date.slice(0, 7).replace("-", "")),
+  };
+}
+
+export type IssueCard = {
+  prompt: string;
+  question: string;
+  answer: string;
+  sections: { title: string; body: string }[];
+  order_index: number;
+};
+
+// A day's cards are numbered from day × 100, so re-approving a day replaces
+// exactly its own cards and the deck stays in date order.
+export function dayCardRange(date: string): [number, number] {
+  const day = Number(date.slice(8, 10));
+  return [day * 100, day * 100 + 99];
+}
+
+// One card per story with a quick revision question: Hindi on the card,
+// English and the headline on the back.
+export function issueCards(
+  date: string,
+  items: { category: string; content: Pick<CaContent, "headline" | "quick"> }[],
+): IssueCard[] {
+  const [start] = dayCardRange(date);
+  return items
+    .filter((i) => i.content.quick && (i.content.quick.q.hi || i.content.quick.q.en))
+    .slice(0, 99)
+    .map((i, n) => {
+      const { q, a } = i.content.quick!;
+      const english = [q.en && `Q: ${q.en}`, a.en && `A: ${a.en}`].filter(Boolean).join("\n");
+      return {
+        prompt: `${formatDate(date, "en")} · ${categoryLabel(i.category).en}`,
+        question: q.hi || q.en,
+        answer: a.hi || a.en,
+        sections: [
+          ...(english && q.hi ? [{ title: "In English", body: english }] : []),
+          {
+            title: "खबर / The news",
+            body: [i.content.headline.hi, i.content.headline.en].filter(Boolean).join("\n"),
+          },
+        ],
+        order_index: start + n + 1,
+      };
+    });
 }
 
 // Concepts the magazine's stories needed but the books did not explain:

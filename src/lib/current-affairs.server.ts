@@ -41,6 +41,9 @@ import {
   dykMessages,
   relatedMessages,
   parseRelated,
+  flashcardDeckFor,
+  issueCards,
+  dayCardRange,
   type EarlierStory,
   parseDyk,
   type DykFact,
@@ -1420,6 +1423,13 @@ export async function buildIssue(
       console.error("current affairs → knowledge base:", e);
     }
   }
+  if (opts.schedule && kind === "daily" && settings.add_to_flashcards) {
+    try {
+      await addDayToFlashcards(period);
+    } catch (e) {
+      console.error("current affairs → flashcards:", e);
+    }
+  }
   return issue;
 }
 
@@ -1492,6 +1502,55 @@ function itemMarkdown(i: MagazineItem): string {
 }
 
 // Saves an approved day as a SAATHI document, so students can ask about it.
+// Puts the day's quick revision questions in the month's flashcard deck,
+// replacing that day's cards if it was approved before.
+export async function addDayToFlashcards(date: string): Promise<number> {
+  const items = await magazineItems(date, date);
+  const cards = issueCards(date, items);
+  const deck = flashcardDeckFor(date);
+  const { data: found, error: fErr } = await supabaseAdmin
+    .from("flashcard_decks")
+    .select("id")
+    .eq("subject", deck.subject)
+    .eq("topic", deck.topic)
+    .limit(1)
+    .maybeSingle();
+  fail(fErr);
+  let deckId = (found as { id: string } | null)?.id;
+  if (!deckId) {
+    if (!cards.length) return 0;
+    const { data: made, error } = await supabaseAdmin
+      .from("flashcard_decks")
+      .insert(deck)
+      .select("id")
+      .single();
+    fail(error);
+    deckId = (made as { id: string }).id;
+  }
+  const [lo, hi] = dayCardRange(date);
+  fail(
+    (
+      await supabaseAdmin
+        .from("flashcards")
+        .delete()
+        .eq("deck_id", deckId)
+        .gte("order_index", lo)
+        .lte("order_index", hi)
+    ).error,
+  );
+  if (!cards.length) return 0;
+  const { error } = await supabaseAdmin.from("flashcards").insert(
+    cards.map((c) => ({
+      ...c,
+      deck_id: deckId,
+      subject: deck.subject,
+      topic: deck.topic,
+    })) as never,
+  );
+  fail(error);
+  return cards.length;
+}
+
 export async function addDayToKnowledgeBase(date: string) {
   const items = await magazineItems(date, date);
   if (!items.length) return;

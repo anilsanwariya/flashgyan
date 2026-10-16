@@ -110,6 +110,9 @@ export const saveMagazineSettings = createServerFn({ method: "POST" })
         visuals: z.boolean(),
         daily_stories: z.number().int().min(3).max(40),
         daily_editorials: z.number().int().min(0).max(6),
+        channel_quiz: z.boolean(),
+        channel_quiz_count: z.number().int().min(1).max(10),
+        add_to_flashcards: z.boolean(),
       })
       .parse(d),
   )

@@ -1011,6 +1011,7 @@ function SettingsPanel() {
         trusted_domains: q.data.trusted_domains.join("\n"),
         daily_stories: String(q.data.daily_stories),
         daily_editorials: String(q.data.daily_editorials),
+        channel_quiz_count: String(q.data.channel_quiz_count),
       });
     }
   }, [q.data, form]);
@@ -1035,6 +1036,12 @@ function SettingsPanel() {
           accent: text("accent"),
           test_chat_id: text("test_chat_id"),
           add_to_knowledge_base: Boolean(form!.add_to_knowledge_base),
+          add_to_flashcards: Boolean(form!.add_to_flashcards),
+          channel_quiz: Boolean(form!.channel_quiz),
+          channel_quiz_count: Math.min(
+            10,
+            Math.max(1, Math.round(Number(text("channel_quiz_count") || "5") || 5)),
+          ),
           do_you_know: Boolean(form!.do_you_know),
           trusted_domains: text("trusted_domains")
             .split(/[\s,]+/)
@@ -1113,6 +1120,30 @@ function SettingsPanel() {
             "Send /start to the bot, then find your id in Bot users.",
           )}
         </div>
+        <label className="flex items-start gap-3">
+          <Switch
+            checked={Boolean(form.channel_quiz)}
+            onCheckedChange={(v) => set("channel_quiz", v)}
+          />
+          <span className="text-sm">
+            <span className="font-medium">Post a quiz after each daily issue</span>
+            <span className="block text-muted-foreground">
+              Right after the PDF, the issue's MCQs go to the channel as Telegram quiz polls (Hindi
+              and English), so readers can test themselves and share them. The same questions reach
+              students who turned on the bot's daily quiz (/daily).
+            </span>
+          </span>
+        </label>
+        {form.channel_quiz && (
+          <div className="sm:max-w-xs">
+            {field(
+              "channel_quiz_count",
+              "Questions in the channel quiz",
+              "5",
+              "1 to 10; they go out about 3 seconds apart.",
+            )}
+          </div>
+        )}
       </section>
 
       <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
@@ -1194,6 +1225,20 @@ function SettingsPanel() {
             <span className="block text-muted-foreground">
               Each approved day becomes a “Current Affairs” document, so students can ask SAATHI
               about recent events.
+            </span>
+          </span>
+        </label>
+        <label className="flex items-start gap-3">
+          <Switch
+            checked={Boolean(form.add_to_flashcards)}
+            onCheckedChange={(v) => set("add_to_flashcards", v)}
+          />
+          <span className="text-sm">
+            <span className="font-medium">Add approved issues to the app's flashcards</span>
+            <span className="block text-muted-foreground">
+              Each story's quick revision question becomes a card in the month's “Current Affairs”
+              deck (e.g. “Current Affairs – October 2026”), so students revise current affairs like
+              any other subject. Approving a day again updates its cards.
             </span>
           </span>
         </label>

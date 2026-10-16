@@ -27,6 +27,20 @@ import {
   type MainsInfo,
 } from "../_shared/saathi-mains.ts";
 import {
+  DAILY_QUIZ_DEFAULT_HOUR,
+  DAILY_QUIZ_HOURS,
+  DAILY_QUIZ_SIZE,
+  hourLabel,
+  istNow,
+  quizMcqs,
+  quizPoll,
+  quizResultText,
+  streakOnDone,
+  streakOnSend,
+  type DailyQuizState,
+  type QuizMcq,
+} from "../_shared/ca-quiz.ts";
+import {
   BOT_DEFAULT_TEXTS,
   BROADCAST_DELAY_MS,
   clipHtml,
@@ -104,7 +118,7 @@ type BotCommand = {
   description_en: string;
   description_hi: string;
   action: "builtin" | "message";
-  builtin: "study" | "flashcards" | "mcq" | "ask" | "answer" | "help" | null;
+  builtin: "study" | "flashcards" | "mcq" | "ask" | "answer" | "daily" | "help" | null;
   response_text: string;
   media_url: string | null;
   media_type: "photo" | "document" | null;
@@ -312,6 +326,7 @@ async function sendMainMenu(chat_id: number) {
           { text: settings.flashcards_button, callback_data: "menu_flashcards" },
           { text: settings.mcq_button, callback_data: "menu_mcqs" },
         ],
+        [{ text: "🔥 Daily quiz / दैनिक क्विज़", callback_data: "daily_menu" }],
       ],
     },
   });
@@ -485,7 +500,10 @@ async function handlePollAnswer(pa: any) {
 
   const { data: sess } = await supabase.from("bot_sessions").select("*").eq("chat_id", chat_id).maybeSingle();
 
-  if (!sess || sess.active_poll_id !== poll_id) return;
+  if (!sess || sess.active_poll_id !== poll_id) {
+    if (option_ids.length) await handleDailyAnswer(chat_id, poll_id, option_ids[0]);
+    return;
+  }
 
   const picked = option_ids[0];
   const isCorrect = picked === sess.correct_option_id;
@@ -816,9 +834,71 @@ async function queueMainsAnswer(chat_id: number, user_id: number, args: string) 
 // Runs with every broadcast tick.
 type MagazineIssue = {
   id: string;
+  kind: "daily" | "monthly";
+  period: string;
   pdf_path: string;
   caption: string | null;
 };
+
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// The day's MCQs, in the magazine's order.
+async function issueMcqs(date: string, max: number): Promise<QuizMcq[]> {
+  const { data } = await supabase
+    .from("ca_items")
+    .select("mcq:content->mcq")
+    .eq("issue_date", date)
+    .eq("status", "included")
+    .order("position");
+  return quizMcqs((data ?? []) as { mcq?: QuizMcq | null }[], max);
+}
+
+// Sends MCQs as Telegram quiz polls (a long question goes in a message just
+// before its poll). Returns each poll's id and correct option, in order.
+async function sendQuizPolls(
+  chat_id: number | string,
+  mcqs: QuizMcq[],
+  anonymous: boolean,
+  gapMs: number,
+): Promise<{ id: string; correct: number }[]> {
+  const sent: { id: string; correct: number }[] = [];
+  for (let i = 0; i < mcqs.length; i++) {
+    const poll = quizPoll(mcqs[i], i + 1, mcqs.length);
+    if (poll.intro) {
+      await tg("sendMessage", { chat_id, text: poll.intro, parse_mode: "HTML" });
+      await pause(gapMs);
+    }
+    const r = await tg("sendPoll", {
+      chat_id,
+      question: poll.question,
+      options: poll.options,
+      type: "quiz",
+      correct_option_id: poll.correct,
+      explanation: poll.explanation || undefined,
+      is_anonymous: anonymous,
+    });
+    const j = await r.json().catch(() => ({}));
+    const id = j?.result?.poll?.id;
+    if (!j?.ok || !id) throw new Error(j?.description ?? `sendPoll failed (${r.status})`);
+    sent.push({ id: String(id), correct: poll.correct });
+    await pause(gapMs);
+  }
+  return sent;
+}
+
+// After the daily PDF: its MCQs as quiz polls on the channel.
+async function postChannelQuiz(channel: string, date: string, count: number) {
+  const mcqs = await issueMcqs(date, count);
+  if (!mcqs.length) return;
+  await tg("sendMessage", {
+    chat_id: channel,
+    text: `🧠 <b>आज का क्विज़ | Today's quiz</b>\n${mcqs.length} questions from today's magazine. Answer and check yourself! 👇`,
+    parse_mode: "HTML",
+  });
+  await pause(1500);
+  // Channels allow about 20 messages a minute.
+  await sendQuizPolls(channel, mcqs, true, 3000);
+}
 
 async function runMagazineTick() {
   const { data: claimed, error } = await supabase.rpc("ca_claim_due_issue");
@@ -834,7 +914,12 @@ async function runMagazineTick() {
       .select("value")
       .eq("key", "ca_magazine")
       .maybeSingle();
-    const channel = String((setting?.value as { channel?: string } | null)?.channel ?? "").trim();
+    const magazine = (setting?.value ?? {}) as {
+      channel?: string;
+      channel_quiz?: boolean;
+      channel_quiz_count?: number;
+    };
+    const channel = String(magazine.channel ?? "").trim();
     if (!channel) throw new Error("No channel set in Magazine settings");
     const { data: file, error: dErr } = await supabase.storage.from("ca-magazines").download(issue.pdf_path);
     if (dErr || !file) throw new Error(dErr?.message ?? "PDF not found");
@@ -857,6 +942,14 @@ async function runMagazineTick() {
         error: null,
       })
       .eq("id", issue.id);
+    // The quiz never fails the post: the PDF is already out.
+    if (issue.kind === "daily" && magazine.channel_quiz !== false) {
+      try {
+        await postChannelQuiz(channel, issue.period, Math.min(10, Math.max(1, magazine.channel_quiz_count ?? 5)));
+      } catch (e) {
+        console.error("channel quiz", e);
+      }
+    }
   } catch (e) {
     console.error("magazine post", e);
     await supabase
@@ -864,6 +957,199 @@ async function runMagazineTick() {
       .update({ status: "failed", error: e instanceof Error ? e.message : String(e) })
       .eq("id", issue.id);
   }
+}
+
+// ---------- Daily quiz with a streak ----------
+// Students who opt in get the latest issue's MCQs as quiz polls at the hour
+// they pick (India time). Finishing every quiz they are sent keeps the streak;
+// days without a new issue send nothing and never break it.
+type DailyRow = DailyQuizState & {
+  chat_id: number;
+  enabled: boolean;
+  send_hour: number;
+  quiz: {
+    issue: string;
+    date: string;
+    polls: { id: string; correct: number }[];
+    answered?: string[];
+    correct?: number;
+  } | null;
+};
+
+async function getDaily(chat_id: number): Promise<DailyRow | null> {
+  const { data, error } = await supabase.from("bot_daily_quiz").select("*").eq("chat_id", chat_id).maybeSingle();
+  if (error && !isMissingTable(error)) console.error("daily quiz", error.message);
+  return (data as DailyRow | null) ?? null;
+}
+
+// The newest daily issue already posted to the channel.
+async function latestPostedIssue(): Promise<string | null> {
+  const { data } = await supabase
+    .from("ca_issues")
+    .select("period")
+    .eq("kind", "daily")
+    .eq("status", "posted")
+    .order("period", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as { period?: string } | null)?.period ?? null;
+}
+
+function dailyMenu(row: DailyRow | null) {
+  const on = !!row?.enabled;
+  const hour = row?.send_hour ?? DAILY_QUIZ_DEFAULT_HOUR;
+  const text =
+    `🔥 <b>Daily Current Affairs Quiz</b>\n` +
+    `${DAILY_QUIZ_SIZE} questions from the latest FlashGyan magazine every day.\n` +
+    `रोज़ ${DAILY_QUIZ_SIZE} प्रश्न, नवीनतम FlashGyan पत्रिका से।\n\n` +
+    (on
+      ? `✅ On · every day at <b>${hourLabel(hour)}</b> (India time)\n`
+      : `⏸ Off. Pick a time to start:\n`) +
+    `🔥 Streak: <b>${row?.streak ?? 0}</b> day${(row?.streak ?? 0) === 1 ? "" : "s"}` +
+    (row?.best_streak ? ` · best ${row.best_streak}` : "");
+  const hours = DAILY_QUIZ_HOURS.map((h) => ({
+    text: `${on && h === hour ? "✓ " : ""}${hourLabel(h)}`,
+    callback_data: `daily_on_${h}`,
+  }));
+  const rows: { text: string; callback_data: string }[][] = [hours.slice(0, 3), hours.slice(3)];
+  rows.push([{ text: "▶️ Take today's quiz / आज का क्विज़", callback_data: "daily_now" }]);
+  if (on) rows.push([{ text: "⏹ Stop daily quiz", callback_data: "daily_off" }]);
+  return { text, reply_markup: { inline_keyboard: rows } };
+}
+
+async function sendDailyMenu(chat_id: number, message_id?: number) {
+  const menu = dailyMenu(await getDaily(chat_id));
+  if (message_id)
+    await tg("editMessageText", { chat_id, message_id, parse_mode: "HTML", ...menu });
+  else await tg("sendMessage", { chat_id, parse_mode: "HTML", ...menu });
+}
+
+async function setDaily(chat_id: number, patch: Partial<DailyRow>) {
+  const { error } = await supabase
+    .from("bot_daily_quiz")
+    .upsert({ chat_id, ...patch, updated_at: new Date().toISOString() }, { onConflict: "chat_id" });
+  if (error) throw new Error(error.message);
+}
+
+// Sends the latest issue's quiz to one student, once a day. Returns what
+// happened, for the student's own "take it now" request.
+async function deliverDailyQuiz(
+  row: DailyRow,
+  issue: string,
+  mcqs: QuizMcq[],
+): Promise<"sent" | "already" | "no_issue"> {
+  if (row.quiz?.issue === issue) return "no_issue";
+  const today = istNow().date;
+  // Claim today's send first, so two runs never send twice.
+  const { data: claimed, error } = await supabase.rpc("bot_daily_quiz_claim", {
+    p_chat_id: row.chat_id,
+    p_today: today,
+  });
+  if (error) throw new Error(error.message);
+  if (claimed !== true) return "already";
+  const streak = streakOnSend(row);
+  const res = await tg("sendMessage", {
+    chat_id: row.chat_id,
+    text:
+      `🧠 <b>Daily quiz</b> · ${mcqs.length} questions from the FlashGyan magazine of ${issue}\n` +
+      `🔥 Streak: <b>${streak}</b> · answer all ${mcqs.length} to keep it going`,
+    parse_mode: "HTML",
+  });
+  if (res.status === 403) {
+    // Blocked: stop sending to them.
+    await supabase.from("bot_users").update({ blocked: true }).eq("chat_id", row.chat_id);
+    await setDaily(row.chat_id, { enabled: false });
+    return "sent";
+  }
+  const polls = await sendQuizPolls(row.chat_id, mcqs, false, 60);
+  await setDaily(row.chat_id, {
+    streak,
+    quiz: { issue, date: today, polls, answered: [], correct: 0 },
+  });
+  return "sent";
+}
+
+async function takeDailyNow(chat_id: number) {
+  let row = await getDaily(chat_id);
+  if (!row) {
+    await setDaily(chat_id, { enabled: true, send_hour: DAILY_QUIZ_DEFAULT_HOUR });
+    row = await getDaily(chat_id);
+  }
+  const issue = await latestPostedIssue();
+  const mcqs = issue ? await issueMcqs(issue, DAILY_QUIZ_SIZE) : [];
+  if (!row || !issue || !mcqs.length) {
+    await tg("sendMessage", { chat_id, text: "No quiz is ready yet. It comes with the next magazine issue." });
+    return;
+  }
+  const result = await deliverDailyQuiz(row, issue, mcqs);
+  if (result === "no_issue")
+    await tg("sendMessage", {
+      chat_id,
+      text: "You already have the latest issue's quiz above 👆. The next one comes with tomorrow's magazine.",
+    });
+  else if (result === "already")
+    await tg("sendMessage", { chat_id, text: "Today's quiz is already above 👆. See you tomorrow!" });
+}
+
+// Sends due quizzes: students whose hour has come and who haven't had one today.
+async function runDailyQuizTick() {
+  const { date, hour } = istNow();
+  const { data, error } = await supabase
+    .from("bot_daily_quiz")
+    .select("*")
+    .eq("enabled", true)
+    .lte("send_hour", hour)
+    .or(`last_sent_date.is.null,last_sent_date.lt.${date}`)
+    .limit(40);
+  if (error) {
+    if (!isMissingTable(error)) console.error("daily quiz tick", error.message);
+    return;
+  }
+  const rows = (data ?? []) as DailyRow[];
+  if (!rows.length) return;
+  const issue = await latestPostedIssue();
+  if (!issue) return;
+  const mcqs = await issueMcqs(issue, DAILY_QUIZ_SIZE);
+  if (!mcqs.length) return;
+  const started = Date.now();
+  for (const row of rows) {
+    if (Date.now() - started > TICK_BUDGET_MS) break;
+    if (row.quiz?.issue === issue) continue;
+    try {
+      await deliverDailyQuiz(row, issue, mcqs);
+    } catch (e) {
+      console.error("daily quiz send", row.chat_id, e);
+    }
+  }
+}
+
+// One answer to a daily quiz poll; after the last one, the score and streak.
+async function handleDailyAnswer(chat_id: number, poll_id: string, option: number) {
+  const { data, error } = await supabase.rpc("bot_daily_quiz_answer", {
+    p_chat_id: chat_id,
+    p_poll_id: poll_id,
+    p_option: option,
+  });
+  if (error) {
+    if (!isMissingTable(error) && error.code !== "PGRST202") console.error("daily answer", error.message);
+    return;
+  }
+  const row = ((data ?? []) as DailyRow[])[0];
+  const quiz = row?.quiz;
+  if (!row || !quiz || (quiz.answered?.length ?? 0) < quiz.polls.length) return;
+  const done = streakOnDone(row, quiz.date);
+  await setDaily(chat_id, done);
+  await tg("sendMessage", {
+    chat_id,
+    text: quizResultText(quiz.correct ?? 0, quiz.polls.length, done.streak, done.best_streak),
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "📱 Download FlashGyan App", url: appUrl("daily_quiz") }],
+        [{ text: "⏰ Quiz time & streak", callback_data: "daily_menu" }],
+      ],
+    },
+  });
 }
 
 // ---------- Broadcasts ----------
@@ -1001,6 +1287,9 @@ async function runCommand(
       await supabase.from("bot_sessions").delete().eq("chat_id", ctx.chat_id);
       await sendSubjectPicker(ctx.chat_id, "mcq");
       return;
+    case "daily":
+      await sendDailyMenu(ctx.chat_id);
+      return;
     case "help":
       await sendHelp(ctx.chat_id, ctx.languageCode, ctx.commands);
       return;
@@ -1021,7 +1310,8 @@ async function handleTextLegacy(chat_id: number, user_id: number, text: string, 
     return;
   }
   if (isGroup) return;
-  if (text.startsWith("/start") || text.startsWith("/study")) await sendMainMenu(chat_id);
+  if (parsed?.name === "daily") await sendDailyMenu(chat_id);
+  else if (text.startsWith("/start") || text.startsWith("/study")) await sendMainMenu(chat_id);
   else await tg("sendMessage", { chat_id, text: DEFAULT_SETTINGS.fallback_text });
 }
 
@@ -1100,6 +1390,7 @@ Deno.serve(async (req) => {
     // at once; sending continues in the background.
     continueInBackground(runBroadcastTick());
     continueInBackground(runMagazineTick());
+    continueInBackground(runDailyQuizTick());
     return Response.json({ started: true });
   }
   if (req.method === "OPTIONS") return new Response("ok");
@@ -1118,6 +1409,7 @@ Deno.serve(async (req) => {
     lastTickAt = Date.now();
     continueInBackground(runBroadcastTick());
     continueInBackground(runMagazineTick());
+    continueInBackground(runDailyQuizTick());
   }
 
   try {
@@ -1134,7 +1426,23 @@ Deno.serve(async (req) => {
       await trackUser(cq.from, chat_id);
       await tg("answerCallbackQuery", { callback_query_id: cq.id });
 
-      if (data === "menu_flashcards") {
+      if (data === "daily_menu") {
+        await sendDailyMenu(chat_id);
+      } else if (data.startsWith("daily_on_")) {
+        const h = parseInt(data.slice(9), 10);
+        if (DAILY_QUIZ_HOURS.includes(h)) {
+          await logEvent(chat_id, "daily_quiz", `on ${h}`);
+          await setDaily(chat_id, { enabled: true, send_hour: h });
+          await sendDailyMenu(chat_id, message_id);
+        }
+      } else if (data === "daily_off") {
+        await logEvent(chat_id, "daily_quiz", "off");
+        await setDaily(chat_id, { enabled: false });
+        await sendDailyMenu(chat_id, message_id);
+      } else if (data === "daily_now") {
+        await logEvent(chat_id, "daily_quiz", "now");
+        await takeDailyNow(chat_id);
+      } else if (data === "menu_flashcards") {
         await editFlashcardSubjects(chat_id, message_id);
       } else if (data === "menu_mcqs") {
         // reset any prior session and show subjects
