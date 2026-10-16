@@ -1,0 +1,1 @@
+ALTER TABLE public.ca_items ADD COLUMN IF NOT EXISTS concept text;

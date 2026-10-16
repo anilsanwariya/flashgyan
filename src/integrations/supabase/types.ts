@@ -593,6 +593,7 @@ export type Database = {
       ca_items: {
         Row: {
           category: string
+          concept: string | null
           content: Json | null
           context_sources: Json
           created_at: string
@@ -615,6 +616,7 @@ export type Database = {
         }
         Insert: {
           category?: string
+          concept?: string | null
           content?: Json | null
           context_sources?: Json
           created_at?: string
@@ -637,6 +639,7 @@ export type Database = {
         }
         Update: {
           category?: string
+          concept?: string | null
           content?: Json | null
           context_sources?: Json
           created_at?: string
@@ -1507,6 +1510,7 @@ export type Database = {
           language: string | null
           medium: string
           parent_id: string | null
+          source: string | null
           source_file: string | null
           source_markdown: string | null
           subject: string
@@ -1525,6 +1529,7 @@ export type Database = {
           language?: string | null
           medium?: string
           parent_id?: string | null
+          source?: string | null
           source_file?: string | null
           source_markdown?: string | null
           subject: string
@@ -1543,6 +1548,7 @@ export type Database = {
           language?: string | null
           medium?: string
           parent_id?: string | null
+          source?: string | null
           source_file?: string | null
           source_markdown?: string | null
           subject?: string
@@ -1819,6 +1825,7 @@ export type Database = {
           language: string
           medium: string
           similarity: number
+          source: string
           source_file: string
           subject: string
           title: string
