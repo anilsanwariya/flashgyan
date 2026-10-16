@@ -7,6 +7,7 @@ import {
   DEFAULT_DAILY_STORIES,
   REPEATABLE_SLOTS,
   blueprintText,
+  editorialBlueprintText,
   keepSlotted,
   storyType,
 } from "@/lib/ca-blueprint";
@@ -200,17 +201,14 @@ export function extractMessages(opts: {
   date: string;
   text: string;
 }): ChatMessage[] {
-  const editorial =
-    opts.section === "editorial"
-      ? ' This is an editorial page: return one item per editorial, with category "editorial", a headline naming its subject, and facts covering its main arguments, data and suggestions.'
-      : "";
+  if (opts.section === "editorial") return editorialExtractMessages(opts);
   return [
     {
       role: "system",
       content: `You are the current affairs editor of a magazine for RAS (Rajasthan Administrative Service) exam aspirants. From the source text, extract only the news items RPSC is likely to ask about in the RAS Prelims or Mains exam. Be strict: students lose time on news that is never asked, so leave out anything that does not clearly fit a story type below or would not give at least two exam facts.
 ${blueprintText()}
 Categories: "rajasthan" for anything about Rajasthan; "national" for India-wide polity, governance, schemes and judgments; "international"; "science" for science, technology, defence, space, health and environment; "economy"; "sports"; "misc" for awards, appointments, persons in news, important days, reports and indices that fit nowhere else; "editorial" only for editorials.
-Skip: advertisements, crime and accidents, purely local incidents, opinion without facts, market tips, entertainment.${editorial}
+Skip: advertisements, crime and accidents, purely local incidents, opinion without facts, market tips, entertainment.
 Reply with JSON only: [{"type": one story type id, "headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 as described above, "rajasthan": true if it concerns Rajasthan, "facts": [{"slot": the slot id this fact fills, "text": one short fact in English, "quote": the exact words from the source that state this fact, copied character for character (5 to 30 words, in the source's language)}]}].
 Every fact must fill one slot of its story's type; leave a slot out if the source doesn't state it, and drop any fact that fits no slot. Use only facts stated in the source and keep every number, name and date exactly. Reply [] if nothing is exam-relevant.`,
     },
@@ -221,13 +219,36 @@ Every fact must fill one slot of its story's type; leave a slot out if the sourc
   ];
 }
 
+// Editorials are read for RAS Mains: the issue, the evidence and the way
+// forward rather than news facts.
+function editorialExtractMessages(opts: {
+  sourceName: string;
+  date: string;
+  text: string;
+}): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: `You are the editorials editor of a current affairs magazine for RAS (Rajasthan Administrative Service) Mains aspirants. From the newspaper editorial text, return one item per editorial on an issue RPSC asks in RAS Mains.
+${editorialBlueprintText()}
+Reply with JSON only: [{"type": "editorial", "headline": a short factual headline in English naming the issue (not the editorial's figurative title), "category": "editorial", "importance": 2 or 3, "rajasthan": true if it concerns Rajasthan, "facts": [{"slot": the slot id this fact fills, "text": one short point in English, "quote": the exact words from the source that state it, copied character for character (5 to 30 words, in the source's language)}]}].
+Keep the editorial's own reasoning but drop rhetoric, quotes of politicians and vague lines. Use only what the editorial states, keeping every number, name and date exactly. Reply [] if no editorial is on an exam issue.`,
+    },
+    {
+      role: "user",
+      content: `Source: ${opts.sourceName || SECTION_TEXT.editorial} (${SECTION_TEXT.editorial}), dated ${opts.date}.\n\n${opts.text}`,
+    },
+  ];
+}
+
 export function parseExtracted(raw: string, source: string, sourceId: string): RawItem[] {
   const list = parseJson<unknown[]>(raw);
   if (!Array.isArray(list)) return [];
   return list
     .map((x) => {
       const o = (x ?? {}) as Record<string, unknown>;
-      const type = storyType(o.type);
+      // An editorial always uses the editorial checklist, whatever type it was given.
+      const type = storyType(normalizeCategory(o.category) === "editorial" ? "editorial" : o.type);
       const all = (Array.isArray(o.facts) ? o.facts : [])
         .map((f) => {
           const fo = (f ?? {}) as Record<string, unknown>;
@@ -323,17 +344,27 @@ Reply with JSON only:
  "why": {"en": "a label, not a sentence: 'GS Paper <number> · <subject> · <topic in at most 6 words>' from the RAS syllabus topic given (e.g. 'GS Paper II · Earth Science · Climate of Rajasthan')", "hi": "the same label in Hindi (e.g. 'सामान्य अध्ययन प्रश्नपत्र II · भू-विज्ञान · राजस्थान की जलवायु')"},
  "background": {"en": "1-2 sentences, at most 40 words", "hi": "..."} or null,
  "background_from": ["K1", ...],
- "mcq": {"question": {"en": "...", "hi": "..."}, "options": [{"en": "...", "hi": "..."} x4], "answer": index 0-3, "explanation": {"en": "...", "hi": "..."}},
+ "mcq": {"question": {"en": "...", "hi": "..."}, "options": [{"en": "...", "hi": "..."} x4], "answer": index 0-3, "explanation": {"en": "...", "hi": "..."}}${editorial ? " or null" : ""},
  "mains": {"en": "...", "hi": "..."} or null}
 PRACTICE QUESTIONS follow the RPSC (RAS) pattern and difficulty:
-- "mcq" is a RAS Prelims question of moderate to hard difficulty, not a one-line recall question. Prefer statement-based ("Consider the following statements: 1. … 2. … 3. … Which of the statements given above is/are correct?" with options like "Only 1 and 2"), match-the-pairs, or "Which one of the following is NOT correct?" formats. Put each statement on its own line (use line breaks inside the string). Options must be plausible; the correct answer and every statement must be decidable from the facts. The Hindi version uses RPSC's Hindi phrasing (e.g. "निम्नलिखित कथनों पर विचार कीजिए", "उपर्युक्त में से कौन-सा/से कथन सही है/हैं?").
+- "mcq" is a RAS Prelims question written the way RPSC sets current affairs (RAS Pre 2024 and Sub-Inspector 2025 papers, 2026 Prelims syllabus). Test the exact detail an examiner picks (a name, number, district, rank, ordinal, date, host, winner, author or provision), not the story's general idea. Choose the format from the facts:
+  - several features, provisions or figures of one scheme, policy, law, budget or report: statements ("Consider the following statements: 1. … 2. … 3. … Which of the statements given above is/are correct?", options like "Only 1 and 2"); a wrong statement changes one number, date or name from the facts;
+  - several sites, winners or items each with its place, district or partner: "Which of the following pairs is NOT correctly matched?" with one pair per option;
+  - figures for several districts, states, years or items: arrange them in order, or ask which is highest or lowest;
+  - one key fact (who, where, which ordinal, host city, captain, author, venue): a direct question whose four options are all of the same kind (four Rajasthan districts, four cities, four people, four ordinals), with no option obviously out of place.
+  Bring in the static link when the facts or passages give it (the river a barrage is on, the district of a site, the state of a Ramsar site, a constitutional article, an acronym's full form). The answer and every statement must be decidable from the facts or passages; wrong options must be wrong by them yet plausible to someone who only skimmed the news. Never use "All of the above" or "None of the above", and never give the answer away in the question. Put each statement or pair on its own line (line breaks inside the string). The explanation states the correct fact and, for statements, what is wrong in each wrong one. The Hindi version uses RPSC's Hindi phrasing ("निम्नलिखित कथनों पर विचार कीजिए", "उपर्युक्त में से कौन-सा/से कथन सही है/हैं?", "निम्नलिखित में से कौन-सा युग्म सुमेलित नहीं है?", "निम्नलिखित को अवरोही क्रम में व्यवस्थित कीजिए").
 - "mains" is a RAS Mains question written the way RPSC sets current affairs questions (RAS Mains 2023 and 2024 papers, 2026 scheme). Set it only for news RPSC asks in Mains: a named scheme, mission, policy or act of India or Rajasthan (its objectives, targets, features); a budget's announcements for a sector; a commission's or committee's recommendations; a landmark court judgment; a new technology, mission or platform; a geopolitical development affecting India; a person in news; sports achievements and sports schemes of India or Rajasthan. Otherwise null: appointments, days, rankings and scores, MoUs, minor awards and routine events have no Mains value.
   - Name the exact subject with its full official title (and year, if the facts give it) and "of India" / "of Rajasthan"; never "a recent scheme" or "the recently launched initiative". One or two lines with no news preamble ("In light of recent reports…") and no quotation of the story.
   - Ask for concrete content the facts or passages answer, as RPSC does: "What is X? Write its main objectives.", "What are the aims/targets of X?", "Mention the main features/provisions of X.", "Describe the main recommendations of X.", "Who is X? Why was he/she in news recently?", "What specific measures were announced in X to boost Y?", "Describe the location and strategic importance of X in the present scenario." A count is fine ("any three").
   - 5 marks, 50 words by default. 10 marks, 150 words only when the facts give at least five answer points: join two tasks in one question (what it is and its features, or the measures and how they help Rajasthan), anchored to a static syllabus topic (the constitutional article, institution or concept behind the news). Never print marks for parts and never offer "OR".
   - Use What is/are, Who, Write, Mention, Explain, Describe, Differentiate, Enumerate; "Examine" or "Analyse" only at 10 marks. Never a vague "Discuss the role/significance/importance of X", never opinion or political judgment, never bare recall of a date, rank or figure.
   - Name Rajasthan in the question when the facts are about Rajasthan (the state scheme, act, district or project); do not tack "with special reference to Rajasthan" onto national news.
-  - Questions already set for this issue are listed in the message; never set one on the same scheme, event or theme again (use null).
+  - Questions already set for this issue are listed in the message; never set one on the same scheme, event or theme again (use null).${
+    editorial
+      ? `
+  - THIS IS AN EDITORIAL: set "mains" unless it is about party politics. Ask an analytical question on the issue, anchored to its static topic and naming the exact subject, as RPSC does: "What are the challenges in implementing X? Suggest measures.", "How will X affect Y?", "Examine the issues in X." 10 marks, 150 words when the points give at least five answer points, otherwise 5 marks, 50 words. Set "mcq" to null if the editorial gives no checkable fact.`
+      : ""
+  }
   - End with the marks and word limit: "(5 marks, 50 words)" or "(10 marks, 150 words)"; in Hindi "(5 अंक, 50 शब्द)" or "(10 अंक, 150 शब्द)", using RPSC's Hindi phrasing (e.g. "के प्रमुख उद्देश्य लिखिए", "की मुख्य विशेषताओं का उल्लेख कीजिए").`,
     },
     {
@@ -371,7 +402,16 @@ export function parseContent(
       .filter((x): x is Bi => !!x);
     const answer = Number(m.answer);
     const question = bi(m.question, 600);
-    if (question && options.length === 4 && Number.isInteger(answer) && answer >= 0 && answer < 4) {
+    // Four different options, or the question is unanswerable.
+    const distinct = new Set(options.map((x) => normalizeForMatch(x.en || x.hi))).size === 4;
+    if (
+      question &&
+      options.length === 4 &&
+      distinct &&
+      Number.isInteger(answer) &&
+      answer >= 0 &&
+      answer < 4
+    ) {
       mcq = {
         question,
         options,
@@ -630,6 +670,8 @@ export type MagazineSettings = {
   // Stories a day go into the issue; less important ones beyond this arrive
   // already dropped (must-know stories always go in).
   daily_stories: number;
+  // Editorials a day picked from the websites marked "Editorials".
+  daily_editorials: number;
 };
 
 // Official and reference sites the "Did you know?" search may use. Subdomains
@@ -668,6 +710,7 @@ export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   notify_when_ready: true,
   visuals: true,
   daily_stories: DEFAULT_DAILY_STORIES,
+  daily_editorials: 2,
 };
 
 export function categoryLabel(id: string): { en: string; hi: string } {

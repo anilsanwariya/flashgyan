@@ -121,11 +121,19 @@ export const deleteCaWatchSite = createServerFn({ method: "POST" })
 export const testCaWatchSite = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({ url: z.string().trim().url().max(500), name: z.string().trim().max(100) }).parse(d),
+    z
+      .object({
+        url: z.string().trim().url().max(500),
+        name: z.string().trim().max(100),
+        section: z.enum(["editorial", "news", "pib", "dipr", "other"]).optional(),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    const r = await (await server()).readSite({ url: data.url, name: data.name || data.url });
+    const r = await (
+      await server()
+    ).readSite({ url: data.url, name: data.name || data.url, section: data.section });
     return { method: r.method, error: r.error, count: r.links.length, links: r.links.slice(0, 15) };
   });
 

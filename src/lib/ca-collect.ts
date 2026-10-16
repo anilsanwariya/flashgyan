@@ -1,6 +1,12 @@
 // Automatic news collection: reading RSS feeds and news pages, and the AI
 // prompt that picks exam-relevant headlines. Pure helpers, no network here.
-import { IMPORTANCE_GUIDE, SKIP_STORIES, STORY_TYPES } from "@/lib/ca-blueprint";
+import {
+  EDITORIAL_SKIP,
+  EDITORIAL_TOPICS,
+  IMPORTANCE_GUIDE,
+  SKIP_STORIES,
+  STORY_TYPES,
+} from "@/lib/ca-blueprint";
 
 export type FoundLink = { url: string; title: string; published_at: string | null };
 
@@ -138,6 +144,23 @@ function dedupe(list: FoundLink[]): FoundLink[] {
   });
 }
 
+const OPINION_PATH =
+  /(opinion|editorial|edit-?page|columns?|sampadkiya|sampadakiya|vichar|blogs?)/i;
+
+// On an editorial site's page or search results, the links that are opinion
+// pieces (menus and sidebars also link to ordinary news). If no link looks
+// like one, the site keeps its own links.
+export function editorialLinks(links: FoundLink[]): FoundLink[] {
+  const opinion = links.filter((l) => {
+    try {
+      return OPINION_PATH.test(new URL(l.url).pathname);
+    } catch {
+      return false;
+    }
+  });
+  return opinion.length ? opinion : links;
+}
+
 // Feed items older than this are not today's news.
 export const MAX_AGE_HOURS = 30;
 
@@ -165,6 +188,25 @@ export function triageMessages(
 Skip: ${SKIP_STORIES.join("; ")}; opinion pieces; duplicate headlines about the same story (keep the most informative one).
 Rank by importance and leave out importance-1 headlines: ${IMPORTANCE_GUIDE}
 Reply with JSON only: an array of the chosen numbers, most exam-relevant first, at most ${max}. Reply [] if none.`,
+    },
+    {
+      role: "user",
+      content: list.map((l, i) => `${i + 1}. ${l.title} (${l.site})`).join("\n"),
+    },
+  ];
+}
+
+// Picks the day's editorials worth a RAS Mains aspirant's time.
+export function editorialTriageMessages(
+  list: { title: string; site: string }[],
+  max: number,
+): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: `You pick newspaper editorials for a current affairs magazine for RAS (Rajasthan Administrative Service) Mains aspirants. From the numbered headlines of editorial and opinion pages (Hindi or English), choose editorials on issues RPSC asks in RAS Mains: ${EDITORIAL_TOPICS}.
+Skip ${EDITORIAL_SKIP}. Editorial titles are often figurative: judge by the issue the title points to, and leave out titles you cannot place. Prefer Rajasthan issues and issues in the news that link to a law, scheme, institution or report; never pick two editorials on the same issue.
+Reply with JSON only: an array of the chosen numbers, best first, at most ${max}. Reply [] if none.`,
     },
     {
       role: "user",

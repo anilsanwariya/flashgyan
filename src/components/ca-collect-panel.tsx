@@ -647,7 +647,9 @@ function SiteEditor({
     setBusy("test");
     setTest(null);
     try {
-      setTest(await testFn({ data: { url: f.url.trim(), name: f.name.trim() } }));
+      setTest(
+        await testFn({ data: { url: f.url.trim(), name: f.name.trim(), section: f.section } }),
+      );
     } catch (e) {
       toast.error(errorText(e, "Test failed"));
     } finally {
