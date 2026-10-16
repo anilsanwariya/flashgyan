@@ -215,14 +215,17 @@ export function SaathiPanel() {
     setForm(empty);
   }
 
-  async function onSave(e: React.FormEvent) {
+  // Saves the form. The deck form passes its content with each file's box
+  // joined in; returns whether it saved.
+  async function onSave(e: React.FormEvent, merged?: string): Promise<boolean> {
     e.preventDefault();
+    const content = merged ?? form.content;
     setSaving(true);
     try {
       if (editKind.kind === "edit-chunk") {
         if (!form.title.trim() || !form.content.trim()) {
           toast.error("Title and content are required");
-          return;
+          return false;
         }
         await updateFn({
           data: {
@@ -239,7 +242,7 @@ export function SaathiPanel() {
       } else if (editKind.kind === "edit-parent") {
         if (!form.title.trim() || !form.subject.trim()) {
           toast.error("Title and subject are required");
-          return;
+          return false;
         }
         await updateFn({
           data: {
@@ -254,27 +257,27 @@ export function SaathiPanel() {
         });
         toast.success("Deck updated");
       } else if (editKind.kind === "replace") {
-        if (!form.content.trim()) {
+        if (!content.trim()) {
           toast.error("Add the new content");
-          return;
+          return false;
         }
         const res = await replaceFn({
-          data: { id: editKind.parentId, content: form.content.trim() },
+          data: { id: editKind.parentId, content: content.trim() },
         });
         toast.success(`Content replaced (${res.after} chunks)`);
       } else if (editKind.kind === "append") {
-        if (!form.content.trim()) {
+        if (!content.trim()) {
           toast.error("Add content to append");
-          return;
+          return false;
         }
         const res = await appendFn({
-          data: { parent_id: editKind.parentId, content: form.content.trim() },
+          data: { parent_id: editKind.parentId, content: content.trim() },
         });
         toast.success(`Appended ${res.added} chunk${res.added === 1 ? "" : "s"}`);
       } else {
-        if (!form.title.trim() || !form.subject.trim() || !form.content.trim()) {
+        if (!form.title.trim() || !form.subject.trim() || !content.trim()) {
           toast.error("Title, subject, and content are required");
-          return;
+          return false;
         }
         const res = await createFn({
           data: {
@@ -282,7 +285,7 @@ export function SaathiPanel() {
             subject: form.subject.trim(),
             topic: form.topic.trim() || null,
             medium: form.medium,
-            content: form.content.trim(),
+            content: content.trim(),
           },
         });
         toast.success(
@@ -294,8 +297,10 @@ export function SaathiPanel() {
       cancelEdit();
       qc.invalidateQueries({ queryKey: ["saathiDocs"] });
       qc.invalidateQueries({ queryKey: ["saathiHealth"] });
+      return true;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Save failed");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -661,7 +666,7 @@ function EntryForm({
   subjects: string[];
   saving: boolean;
   editKind: EditKind;
-  onSubmit: (e: React.FormEvent) => void;
+  onSubmit: (e: React.FormEvent, merged?: string) => Promise<boolean>;
   onCancel: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -724,7 +729,9 @@ function EntryForm({
   const blockFor = (file: File, text: string) =>
     isChunk ? text : textBlockForFile(file.name, text);
 
-  // Each file's text is appended as soon as it is read, in the order added.
+  // Files are read in the order added. A chunk takes its file's text straight
+  // into the content; a deck keeps each file's text in its own box, joined in
+  // that order (after any text typed here) when it is saved.
   const queue = useFileQueue({
     medium: form.medium,
     resetKey: editKind,
@@ -735,21 +742,46 @@ function EntryForm({
         .map((p) => p.trim())
         .filter(Boolean),
     },
-    onText: (file, text) => {
-      const block = blockFor(file, text);
-      setForm((prev) => ({
-        ...prev,
-        title: prev.title || file.name.replace(/\.[^.]+$/, ""),
-        content: prev.content.trim() ? `${prev.content.trimEnd()}\n\n${block}` : block,
-      }));
-      return block;
-    },
+    onText: isChunk
+      ? (file, text) => {
+          const block = blockFor(file, text);
+          setForm((prev) => ({
+            ...prev,
+            content: prev.content.trim() ? `${prev.content.trimEnd()}\n\n${block}` : block,
+          }));
+          return block;
+        }
+      : undefined,
+    onRead: (file) =>
+      setForm((prev) =>
+        prev.title ? prev : { ...prev, title: file.name.replace(/\.[^.]+$/, "") },
+      ),
   });
+  const fileBlocks = queue.items
+    .filter((i) => i.status === "done" && i.text !== undefined && i.text.trim())
+    .map((i) => blockFor(i.file, i.text!.trim()));
+  const merged = [form.content.trim(), ...fileBlocks].filter(Boolean).join("\n\n");
 
-  // Puts the uncleaned text back in place of the cleaned block, if that block
-  // hasn't been edited since it was added.
+  // Puts the uncleaned text back in place of the cleaned text, if it hasn't
+  // been edited since it was added (or the admin agrees to lose the edits).
   function undoCleanup(item: QueueItem) {
-    if (!item.block || !item.raw) return;
+    if (!item.raw) return;
+    if (item.text !== undefined) {
+      if (
+        item.text !== item.read &&
+        !confirm("Restore the original text? Your edits to this file will be lost.")
+      )
+        return;
+      queue.patch(item.id, {
+        cleanupUndone: true,
+        text: item.raw,
+        read: item.raw,
+        chars: item.raw.length,
+      });
+      toast.success("Original text restored");
+      return;
+    }
+    if (!item.block) return;
     if (!form.content.includes(item.block)) {
       toast.error("This file's text was edited, so the cleanup can't be undone automatically.");
       return;
@@ -760,7 +792,7 @@ function EntryForm({
     toast.success("Original text restored");
   }
   const maxChars = isChunk ? 200_000 : 500_000;
-  const tooLong = form.content.length > maxChars;
+  const tooLong = merged.length > maxChars;
 
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -807,12 +839,20 @@ function EntryForm({
   return (
     <form
       onSubmit={(e) => {
-        if (queue.busy || tooLong) {
-          e.preventDefault();
-          toast.error(queue.busy ? "Wait until all files are read" : "Content is too long");
+        e.preventDefault();
+        if (queue.busy || queue.failed || tooLong) {
+          toast.error(
+            queue.busy
+              ? "Wait until all files are read"
+              : queue.failed
+                ? `${queue.failed.file.name} couldn't be read: retry it or remove it`
+                : "Content is too long",
+          );
           return;
         }
-        onSubmit(e);
+        void onSubmit(e, isChunk ? undefined : merged).then((ok) => {
+          if (ok) queue.reset();
+        });
       }}
       className="rounded-2xl bg-card border border-border p-4 space-y-3"
     >
@@ -897,7 +937,11 @@ function EntryForm({
         <div>
           <div className="flex items-center justify-between mb-1 gap-2 flex-wrap">
             <Label htmlFor="s-content">
-              {isChunk ? "Chunk content (Markdown)" : "Content (Markdown)"}
+              {isChunk
+                ? "Chunk content (Markdown)"
+                : fileBlocks.length
+                  ? "Your own text (Markdown, optional; saved before the files)"
+                  : "Content (Markdown)"}
             </Label>
             <div className="flex gap-2">
               <input
@@ -986,7 +1030,7 @@ function EntryForm({
               ref={taRef}
               value={form.content}
               onChange={(e) => setForm((p) => ({ ...p, content: e.target.value }))}
-              rows={12}
+              rows={!isChunk && queue.items.length ? 4 : 12}
               placeholder={
                 isAppend
                   ? "Paste content or upload a PDF to add new chunks to this deck."
@@ -1001,10 +1045,10 @@ function EntryForm({
             <span>
               {isChunk
                 ? "Drag a file onto the box to import it."
-                : "Drag PDFs, DOCX, XLSX or TXT files onto the box. Several files are read one by one and added in order, each under its own heading."}
+                : "Drag PDFs, DOCX, XLSX or TXT files onto the box. Files are read one by one, in order, and each file's text opens in its own box above to edit. A file that fails is tried again; if it still fails, reading stops there until you retry or remove it. Saving joins them into one deck in this order, each under its own heading."}
             </span>
             <span className={tooLong ? "font-medium text-destructive" : ""}>
-              {form.content.length.toLocaleString()} / {maxChars.toLocaleString()} characters
+              {merged.length.toLocaleString()} / {maxChars.toLocaleString()} characters
               {tooLong ? " — too long, split into two decks" : ""}
             </span>
           </div>
@@ -1017,8 +1061,13 @@ function EntryForm({
             Cancel
           </Button>
         )}
-        <Button type="submit" disabled={saving || queue.busy || tooLong}>
-          <Plus className="h-4 w-4" /> {queue.busy ? "Reading files…" : submitLabel}
+        <Button type="submit" disabled={saving || queue.busy || !!queue.failed || tooLong}>
+          <Plus className="h-4 w-4" />{" "}
+          {queue.failed
+            ? "Retry or remove the failed file"
+            : queue.busy
+              ? "Reading files…"
+              : submitLabel}
         </Button>
       </div>
     </form>
