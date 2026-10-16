@@ -593,6 +593,7 @@ export type Database = {
       ca_items: {
         Row: {
           category: string
+          concept: string | null
           content: Json | null
           context_sources: Json
           created_at: string
@@ -615,6 +616,7 @@ export type Database = {
         }
         Insert: {
           category?: string
+          concept?: string | null
           content?: Json | null
           context_sources?: Json
           created_at?: string
@@ -637,6 +639,7 @@ export type Database = {
         }
         Update: {
           category?: string
+          concept?: string | null
           content?: Json | null
           context_sources?: Json
           created_at?: string
