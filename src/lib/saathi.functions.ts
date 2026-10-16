@@ -62,16 +62,54 @@ async function assertAdmin(userId: string) {
 
 const DOC_COLS = "id,title,subject,medium,topic,content,created_at,parent_id,chunk_index";
 
+// The database returns at most 1,000 rows per request, so lists are read in pages.
+const PAGE = 1000;
+
+export type SaathiDeck = SaathiDoc & { chunk_count: number };
+
+// Decks only, with how many chunks each has; chunks load when a deck is opened.
 export const listSaathiDocs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .handler(async ({ context }): Promise<SaathiDeck[]> => {
     const admin = await assertAdmin(context.userId);
-    const { data, error } = await admin
-      .from("saathi_knowledge")
-      .select(DOC_COLS)
-      .order("created_at", { ascending: false });
-    if (error) throw new Error(error.message);
-    return (data ?? []) as unknown as SaathiDoc[];
+    const out: SaathiDeck[] = [];
+    for (let start = 0; ; start += PAGE) {
+      const { data, error } = await admin
+        .from("saathi_knowledge")
+        .select(`${DOC_COLS},chunks:saathi_knowledge!parent_id(count)`)
+        .is("parent_id", null)
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(start, start + PAGE - 1);
+      if (error) throw new Error(error.message);
+      const rows = (data ?? []) as unknown as (SaathiDoc & { chunks: { count: number }[] })[];
+      for (const { chunks, ...doc } of rows)
+        out.push({ ...doc, chunk_count: chunks[0]?.count ?? 0 });
+      if (rows.length < PAGE) break;
+    }
+    return out;
+  });
+
+// One deck's chunks, in order.
+export const listSaathiChunks = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({ parent_id: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }): Promise<SaathiDoc[]> => {
+    const admin = await assertAdmin(context.userId);
+    const out: SaathiDoc[] = [];
+    for (let start = 0; ; start += PAGE) {
+      const { data: rows, error } = await admin
+        .from("saathi_knowledge")
+        .select(DOC_COLS)
+        .eq("parent_id", data.parent_id)
+        .order("chunk_index")
+        .order("id")
+        .range(start, start + PAGE - 1);
+      if (error) throw new Error(error.message);
+      out.push(...((rows ?? []) as unknown as SaathiDoc[]));
+      if ((rows ?? []).length < PAGE) break;
+    }
+    return out;
   });
 
 const docMeta = {

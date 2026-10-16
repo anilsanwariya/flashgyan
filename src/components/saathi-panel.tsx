@@ -36,6 +36,7 @@ import {
   listSaathiFeedback,
   replaceSaathiDoc,
   testSaathiRetrieval,
+  listSaathiChunks,
   listSaathiDocs,
   listSaathiEvals,
   addSaathiEval,
@@ -44,6 +45,7 @@ import {
   type SaathiEvalQuestion,
   type SaathiRetrievalResult,
   updateSaathiDoc,
+  type SaathiDeck,
   type SaathiDoc,
   type SaathiFeedback,
   type SaathiHealthRow,
@@ -101,7 +103,7 @@ export function SaathiPanel() {
   const replaceFn = useServerFn(replaceSaathiDoc);
   const [rebuilding, setRebuilding] = useState<string | null>(null);
 
-  const docsQ = useQuery<SaathiDoc[]>({
+  const docsQ = useQuery<SaathiDeck[]>({
     queryKey: ["saathiDocs"],
     queryFn: () => listFn(),
   });
@@ -113,22 +115,8 @@ export function SaathiPanel() {
   const [filter, setFilter] = useState<string>(ALL);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const docs = docsQ.data ?? [];
-  const parents = useMemo(() => docs.filter((d) => d.parent_id == null), [docs]);
-  const childrenByParent = useMemo(() => {
-    const m = new Map<string, SaathiDoc[]>();
-    for (const d of docs) {
-      if (d.parent_id) {
-        const arr = m.get(d.parent_id) ?? [];
-        arr.push(d);
-        m.set(d.parent_id, arr);
-      }
-    }
-    for (const arr of m.values()) {
-      arr.sort((a, b) => (a.chunk_index ?? 0) - (b.chunk_index ?? 0));
-    }
-    return m;
-  }, [docs]);
+  // Decks only; a deck's chunks load when it is opened (DeckChunks).
+  const parents = useMemo(() => docsQ.data ?? [], [docsQ.data]);
 
   const subjects = useMemo(
     () => Array.from(new Set(parents.map((d) => d.subject))).sort(),
@@ -332,7 +320,6 @@ export function SaathiPanel() {
 
   return (
     <div className="space-y-6">
-
       {!isEditing && (
         <div className="flex w-fit max-w-full overflow-x-auto no-scrollbar rounded-lg border border-border p-0.5 bg-muted/40">
           <button
@@ -460,7 +447,6 @@ export function SaathiPanel() {
           <ul className="space-y-1.5">
             {filteredParents.map((d) => {
               const isOpen = expanded.has(d.id);
-              const chunks = childrenByParent.get(d.id) ?? [];
               return (
                 <li key={d.id} className="rounded-lg bg-card border border-border overflow-hidden">
                   <div className="flex items-center gap-2 p-2">
@@ -484,8 +470,8 @@ export function SaathiPanel() {
                       <div className="font-medium text-sm truncate">{d.title}</div>
                       <div className="text-[11px] uppercase tracking-wide text-muted-foreground truncate">
                         {d.subject}
-                        {d.topic ? ` › ${d.topic}` : ""} · {d.medium} · {chunks.length} chunk
-                        {chunks.length === 1 ? "" : "s"}
+                        {d.topic ? ` › ${d.topic}` : ""} · {d.medium} · {d.chunk_count} chunk
+                        {d.chunk_count === 1 ? "" : "s"}
                       </div>
                       {d.content.trim() && (
                         <div className="text-[11px] font-medium text-destructive">
@@ -535,23 +521,11 @@ export function SaathiPanel() {
                     </button>
                   </div>
                   {isOpen && (
-                    <div className="border-t border-border bg-muted/20 px-2 py-2 space-y-1.5">
-                      {chunks.length === 0 ? (
-                        <p className="text-xs text-muted-foreground px-2 py-1">
-                          No chunks in this deck yet. Use the Append button to add content.
-                        </p>
-                      ) : (
-                        chunks.map((c) => (
-                          <ChunkRow
-                            key={c.id}
-                            chunk={c}
-                            parentTitle={d.title}
-                            onEdit={() => startEditChunk(c, d.title)}
-                            onDelete={() => onDelete(c, "chunk")}
-                          />
-                        ))
-                      )}
-                    </div>
+                    <DeckChunks
+                      deck={d}
+                      onEdit={(c) => startEditChunk(c, d.title)}
+                      onDelete={(c) => onDelete(c, "chunk")}
+                    />
                   )}
                 </li>
               );
@@ -559,6 +533,50 @@ export function SaathiPanel() {
           </ul>
         )}
       </section>
+    </div>
+  );
+}
+
+// A deck's chunks, fetched when the deck is opened. The query key starts with
+// "saathiDocs", so every change that refreshes the deck list refreshes it too.
+function DeckChunks({
+  deck,
+  onEdit,
+  onDelete,
+}: {
+  deck: SaathiDeck;
+  onEdit: (chunk: SaathiDoc) => void;
+  onDelete: (chunk: SaathiDoc) => void;
+}) {
+  const chunksFn = useServerFn(listSaathiChunks);
+  const q = useQuery({
+    queryKey: ["saathiDocs", "chunks", deck.id],
+    queryFn: () => chunksFn({ data: { parent_id: deck.id } }),
+  });
+  const chunks = q.data ?? [];
+  return (
+    <div className="border-t border-border bg-muted/20 px-2 py-2 space-y-1.5">
+      {q.isLoading ? (
+        <p className="text-xs text-muted-foreground px-2 py-1">Loading chunks…</p>
+      ) : q.error ? (
+        <p className="text-xs text-destructive px-2 py-1">
+          {q.error instanceof Error ? q.error.message : "Couldn't load the chunks"}
+        </p>
+      ) : chunks.length === 0 ? (
+        <p className="text-xs text-muted-foreground px-2 py-1">
+          No chunks in this deck yet. Use the Append button to add content.
+        </p>
+      ) : (
+        chunks.map((c) => (
+          <ChunkRow
+            key={c.id}
+            chunk={c}
+            parentTitle={deck.title}
+            onEdit={() => onEdit(c)}
+            onDelete={() => onDelete(c)}
+          />
+        ))
+      )}
     </div>
   );
 }
