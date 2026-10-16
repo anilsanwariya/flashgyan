@@ -3,6 +3,18 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { startsIncluded } from "@/lib/ca-blueprint";
 import {
+  MAX_PAIRS,
+  MAYBE_SAME,
+  SURELY_SAME,
+  candidatePairs,
+  duplicateGroups,
+  parseSameStory,
+  parseVector,
+  pickKeeper,
+  sameStoryMessages,
+  type StoryBrief,
+} from "@/lib/ca-duplicates";
+import {
   featureMessages,
   featureTopicMessages,
   parseFeature,
@@ -47,6 +59,7 @@ import {
   type CaChange,
   type CaContent,
   type CaQuick,
+  type RawItem,
   type CaFact,
   type Category,
   type MagazineSettings,
@@ -76,7 +89,7 @@ const fail = (e: { message: string } | null) => {
 };
 
 // Same story on the same day (merge) and on an earlier day (follow-up).
-export const SAME_DAY_SIMILARITY = 0.88;
+export const SAME_DAY_SIMILARITY = SURELY_SAME;
 export const FOLLOW_UP_SIMILARITY = 0.85;
 export const CA_SUBJECT = "Current Affairs";
 const BUCKET = "ca-magazines";
@@ -229,6 +242,44 @@ const dayBefore = (date: string) => {
   return d.toISOString().slice(0, 10);
 };
 
+// The same day's story a new item is the same news as, if any: a near-identical
+// one directly, otherwise the AI decides among the similar ones. A failed AI
+// check never blocks the source; the item is then saved as a new story.
+async function sameDayStory(
+  item: RawItem,
+  embedding: number[],
+  date: string,
+): Promise<string | null> {
+  const similar = await similarItems(embedding, date, date);
+  const sure = similar.find((s) => s.similarity >= SURELY_SAME);
+  if (sure) return sure.id;
+  const maybe = similar.filter((s) => s.similarity >= MAYBE_SAME);
+  if (!maybe.length) return null;
+  try {
+    const { data } = await from("ca_items")
+      .select("id,headline,facts")
+      .in(
+        "id",
+        maybe.map((m) => m.id),
+      );
+    const rows = new Map(
+      ((data ?? []) as Pick<CaItem, "id" | "headline" | "facts">[]).map((r) => [r.id, r]),
+    );
+    const others = maybe.map((m) => rows.get(m.id)).filter((r) => r !== undefined);
+    if (!others.length) return null;
+    const pairs = others.map((o) => [item, o] as [StoryBrief, StoryBrief]);
+    const yes = parseSameStory(
+      await saathiComplete(apiKey(), sameStoryMessages(pairs)),
+      pairs.length,
+    );
+    const first = [...yes].sort((a, b) => a - b)[0];
+    return first === undefined ? null : others[first].id;
+  } catch (e) {
+    console.error("same-story check:", e);
+    return null;
+  }
+}
+
 // Reads one part of a source and saves its news items. A story already found
 // in another source the same day gets this source's facts added instead of a
 // duplicate item.
@@ -260,13 +311,11 @@ export async function extractSourceChunk(sourceId: string, index: number) {
     for (const item of found) {
       const category: Category = src.section === "editorial" ? "editorial" : item.category;
       const embedding = await embedOne(storyText(item));
-      const same = (await similarItems(embedding, src.issue_date, src.issue_date)).find(
-        (s) => s.similarity >= SAME_DAY_SIMILARITY,
-      );
+      const same = await sameDayStory(item, embedding, src.issue_date);
       if (same) {
         const { data: existing } = await from("ca_items")
           .select("facts,source_ids,importance,rajasthan")
-          .eq("id", same.id)
+          .eq("id", same)
           .single();
         const e = existing as unknown as Pick<
           CaItem,
@@ -281,7 +330,7 @@ export async function extractSourceChunk(sourceId: string, index: number) {
             needs_enrich: true,
             updated_at: new Date().toISOString(),
           } as never)
-          .eq("id", same.id);
+          .eq("id", same);
         fail(uErr);
         merged++;
         continue;
@@ -393,6 +442,101 @@ export async function deleteSources(ids: string[]): Promise<number> {
 }
 
 // Deletes news items outright (dropping only hides them from the issue).
+type DupRow = Pick<
+  CaItem,
+  | "id"
+  | "headline"
+  | "facts"
+  | "importance"
+  | "rajasthan"
+  | "status"
+  | "position"
+  | "source_ids"
+  | "related_item_id"
+> & { embedding: unknown };
+
+// Finds the day's stories that are the same news and merges each group into
+// one story (facts and sources combined, written again). Returns the stories
+// kept, so the caller can write them.
+export async function mergeDayDuplicates(
+  date: string,
+): Promise<{ groups: number; removed: number; kept: string[] }> {
+  await assertDayEditable([date]);
+  const { data, error } = await from("ca_items")
+    .select(
+      "id,headline,facts,importance,rajasthan,status,position,source_ids,related_item_id,embedding",
+    )
+    .eq("issue_date", date)
+    .order("position");
+  fail(error);
+  const items = (data ?? []) as unknown as DupRow[];
+  const pairs = candidatePairs(items.map((i) => parseVector(i.embedding)));
+  const sure = pairs.filter((p) => p.similarity >= SURELY_SAME);
+  const doubtful = pairs.filter((p) => p.similarity < SURELY_SAME).slice(0, MAX_PAIRS);
+  let confirmed: { a: number; b: number }[] = [];
+  if (doubtful.length) {
+    const yes = parseSameStory(
+      await saathiComplete(
+        apiKey(),
+        sameStoryMessages(doubtful.map((p) => [items[p.a], items[p.b]])),
+      ),
+      doubtful.length,
+    );
+    confirmed = doubtful.filter((_, i) => yes.has(i));
+  }
+  const groups = duplicateGroups(items.length, [...sure, ...confirmed]);
+  const kept: string[] = [];
+  let removed = 0;
+  for (const g of groups) {
+    const members = g.map((i) => items[i]);
+    const keeper = members[pickKeeper(members)];
+    const others = members.filter((m) => m.id !== keeper.id);
+    const otherIds = others.map((o) => o.id);
+    const facts = others.reduce((acc, o) => mergeFacts(acc, o.facts, 10), keeper.facts);
+    fail(
+      (
+        await from("ca_items")
+          .update({
+            facts,
+            source_ids: [...new Set(members.flatMap((m) => m.source_ids))],
+            importance: Math.max(...members.map((m) => m.importance)),
+            rajasthan: members.some((m) => m.rajasthan),
+            status: members.some((m) => m.status === "included") ? "included" : keeper.status,
+            related_item_id:
+              keeper.related_item_id ??
+              others.find((o) => o.related_item_id && !otherIds.includes(o.related_item_id))
+                ?.related_item_id ??
+              null,
+            needs_enrich: true,
+            enrich_error: null,
+            updated_at: new Date().toISOString(),
+          } as never)
+          .eq("id", keeper.id)
+      ).error,
+    );
+    // Corrections and follow-ups that point at a removed story move to the kept one.
+    fail(
+      (
+        await from("ca_corrections")
+          .update({ item_id: keeper.id } as never)
+          .in("item_id", otherIds)
+      ).error,
+    );
+    fail(
+      (
+        await from("ca_items")
+          .update({ related_item_id: keeper.id } as never)
+          .in("related_item_id", otherIds)
+          .neq("id", keeper.id)
+      ).error,
+    );
+    fail((await from("ca_items").delete().in("id", otherIds)).error);
+    kept.push(keeper.id);
+    removed += others.length;
+  }
+  return { groups: groups.length, removed, kept };
+}
+
 export async function deleteItems(ids: string[]): Promise<number> {
   if (!ids.length) return 0;
   const { data } = await from("ca_items").select("id,issue_date").in("id", ids);

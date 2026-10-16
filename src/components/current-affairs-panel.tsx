@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Eye,
   FileText,
+  Layers,
   RefreshCw,
   Send,
   Trash2,
@@ -30,6 +31,7 @@ import {
   getCaDay,
   getCaMonth,
   getMagazineSettings,
+  mergeCaDuplicates,
   postCaIssueNow,
   previewCaIssue,
   saveMagazineSettings,
@@ -353,6 +355,7 @@ function DailyPanel() {
   const addFn = useServerFn(addCaSource);
   const extractFn = useServerFn(extractCaSourcePart);
   const enrichFn = useServerFn(enrichCaItem);
+  const mergeFn = useServerFn(mergeCaDuplicates);
   const [section, setSection] = useState<UploadSection>("news");
   const [sourceName, setSourceName] = useState("");
   const [pasted, setPasted] = useState("");
@@ -461,6 +464,31 @@ function DailyPanel() {
       await writeItems(date);
     } catch (e) {
       toast.error(errorText(e, "Failed"));
+    } finally {
+      working.current = false;
+      setWork(null);
+      refresh();
+    }
+  }
+
+  // Same news printed as several stories becomes one story, written again.
+  async function mergeDuplicates() {
+    if (working.current) return;
+    working.current = true;
+    try {
+      setWork("Looking for stories that are the same news…");
+      const r = await mergeFn({ data: { date } });
+      if (!r.removed) {
+        toast.success("No duplicate stories found");
+      } else {
+        toast.success(
+          `Merged ${r.removed + r.groups} stories into ${r.groups}. Writing the merged ${r.groups === 1 ? "story" : "stories"} again…`,
+        );
+        refresh();
+        await writeItems(date);
+      }
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't merge duplicates"));
     } finally {
       working.current = false;
       setWork(null);
@@ -613,7 +641,21 @@ function DailyPanel() {
           No news items for this day yet.
         </div>
       ) : (
-        <StoryList items={items} date={date} onChanged={refresh} />
+        <>
+          {items.length > 1 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3">
+              <Button size="sm" variant="outline" disabled={!!work} onClick={mergeDuplicates}>
+                <Layers className="mr-1 h-4 w-4" /> Merge duplicates
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Finds stories that are the same news (e.g. one scheme in several PIB releases) and
+                combines their facts into one story. New sources are checked this way as they
+                arrive.
+              </span>
+            </div>
+          )}
+          <StoryList items={items} date={date} onChanged={refresh} />
+        </>
       )}
     </div>
   );
