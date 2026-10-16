@@ -1010,6 +1010,7 @@ function SettingsPanel() {
         ...q.data,
         trusted_domains: q.data.trusted_domains.join("\n"),
         daily_stories: String(q.data.daily_stories),
+        daily_editorials: String(q.data.daily_editorials),
       });
     }
   }, [q.data, form]);
@@ -1043,6 +1044,10 @@ function SettingsPanel() {
           notify_when_ready: Boolean(form!.notify_when_ready),
           visuals: Boolean(form!.visuals),
           daily_stories: Number(text("daily_stories")) || 15,
+          daily_editorials: Math.min(
+            6,
+            Math.max(0, Math.round(Number(text("daily_editorials") || "2") || 0)),
+          ),
         },
       });
       toast.success("Saved");
@@ -1287,6 +1292,12 @@ function SettingsPanel() {
             "Collection time (IST)",
             "21:00",
             "Late evening catches the whole day's news.",
+          )}
+          {field(
+            "daily_editorials",
+            "Editorials per day",
+            "2",
+            "Picked from websites marked “Editorials”, on issues RPSC asks in Mains. 0 turns them off.",
           )}
         </div>
         <label className="flex items-start gap-3">

@@ -219,21 +219,36 @@ async function embedOne(text: string) {
 
 type Similar = { id: string; issue_date: string; headline: string; similarity: number };
 
+// The most similar included stories in a date range. An editorial is only
+// ever compared with editorials, and a news story with news stories.
 async function similarItems(
   embedding: number[],
   fromDate: string,
   toDate: string,
-  exclude?: string,
+  editorial: boolean,
 ) {
   const { data, error } = await rpc("ca_similar_items", {
     p_embedding: embedding,
     p_from: fromDate,
     p_to: toDate,
-    p_exclude: exclude ?? null,
-    p_count: 3,
+    p_exclude: null,
+    p_count: 8,
   });
   fail(error);
-  return (data ?? []) as Similar[];
+  const similar = (data ?? []) as Similar[];
+  if (!similar.length) return similar;
+  const { data: rows } = await from("ca_items")
+    .select("id,category")
+    .in(
+      "id",
+      similar.map((s) => s.id),
+    );
+  const sameKind = new Set(
+    ((rows ?? []) as { id: string; category: string }[])
+      .filter((r) => (r.category === "editorial") === editorial)
+      .map((r) => r.id),
+  );
+  return similar.filter((s) => sameKind.has(s.id)).slice(0, 3);
 }
 
 const dayBefore = (date: string) => {
@@ -249,8 +264,9 @@ async function sameDayStory(
   item: RawItem,
   embedding: number[],
   date: string,
+  editorial: boolean,
 ): Promise<string | null> {
-  const similar = await similarItems(embedding, date, date);
+  const similar = await similarItems(embedding, date, date, editorial);
   const sure = similar.find((s) => s.similarity >= SURELY_SAME);
   if (sure) return sure.id;
   const maybe = similar.filter((s) => s.similarity >= MAYBE_SAME);
@@ -311,7 +327,8 @@ export async function extractSourceChunk(sourceId: string, index: number) {
     for (const item of found) {
       const category: Category = src.section === "editorial" ? "editorial" : item.category;
       const embedding = await embedOne(storyText(item));
-      const same = await sameDayStory(item, embedding, src.issue_date);
+      const editorial = category === "editorial";
+      const same = await sameDayStory(item, embedding, src.issue_date, editorial);
       if (same) {
         const { data: existing } = await from("ca_items")
           .select("facts,source_ids,importance,rajasthan")
@@ -336,20 +353,23 @@ export async function extractSourceChunk(sourceId: string, index: number) {
         continue;
       }
       const monthStart = monthRange(src.issue_date).from;
+      // Editorials are opinion, so they are never follow-ups that correct facts.
       const earlier =
-        src.issue_date > monthStart
-          ? (await similarItems(embedding, monthStart, dayBefore(src.issue_date))).find(
+        !editorial && src.issue_date > monthStart
+          ? (await similarItems(embedding, monthStart, dayBefore(src.issue_date), false)).find(
               (s) => s.similarity >= FOLLOW_UP_SIMILARITY,
             )
           : undefined;
       // Unlikely stories, and less important non-Rajasthan ones once the day is
-      // full, arrive already dropped; an uploaded editorial always goes in.
+      // full, arrive already dropped; an editorial always goes in and does not
+      // count towards the day's stories.
       const { count: includedSoFar } = await from("ca_items")
         .select("id", { count: "exact", head: true })
         .eq("issue_date", src.issue_date)
-        .eq("status", "included");
+        .eq("status", "included")
+        .neq("category", "editorial");
       const included =
-        category === "editorial" ||
+        editorial ||
         startsIncluded(item.importance, includedSoFar ?? 0, daily_stories, item.rajasthan);
       const { error: iErr } = await from("ca_items").insert({
         issue_date: src.issue_date,
@@ -453,6 +473,7 @@ type DupRow = Pick<
   | "position"
   | "source_ids"
   | "related_item_id"
+  | "category"
 > & { embedding: unknown };
 
 // Finds the day's stories that are the same news and merges each group into
@@ -464,13 +485,17 @@ export async function mergeDayDuplicates(
   await assertDayEditable([date]);
   const { data, error } = await from("ca_items")
     .select(
-      "id,headline,facts,importance,rajasthan,status,position,source_ids,related_item_id,embedding",
+      "id,headline,facts,importance,rajasthan,status,position,source_ids,related_item_id,category,embedding",
     )
     .eq("issue_date", date)
     .order("position");
   fail(error);
   const items = (data ?? []) as unknown as DupRow[];
-  const pairs = candidatePairs(items.map((i) => parseVector(i.embedding)));
+  // An editorial and a news story on the same event are kept apart.
+  const editorial = (i: number) => items[i].category === "editorial";
+  const pairs = candidatePairs(items.map((i) => parseVector(i.embedding))).filter(
+    (p) => editorial(p.a) === editorial(p.b),
+  );
   const sure = pairs.filter((p) => p.similarity >= SURELY_SAME);
   const doubtful = pairs.filter((p) => p.similarity < SURELY_SAME).slice(0, MAX_PAIRS);
   let confirmed: { a: number; b: number }[] = [];

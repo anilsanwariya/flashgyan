@@ -431,6 +431,29 @@ export const STORY_TYPES: StoryType[] = [
   },
 ];
 
+// Editorials are read for Mains: the issue, its static anchor, the evidence
+// and the way forward. Not a news story type, so news never uses it.
+export const EDITORIAL_TYPE: StoryType = {
+  id: "editorial",
+  label: "Newspaper editorial",
+  maxFacts: 8,
+  slots: [
+    slot("issue", "the issue and the news that prompted it"),
+    slot("context", "the constitutional article, act, institution, scheme or report involved"),
+    slot("data", "a figure, date or finding it cites", true),
+    slot("argument", "a main argument, cause or consequence", true),
+    slot("challenge", "a problem or challenge it identifies", true),
+    slot("suggestion", "a measure or way forward it suggests", true),
+    slot("rajasthan", "Rajasthan's figures or role", true),
+  ],
+};
+
+// Editorials worth a Mains aspirant's time, and those that are not.
+export const EDITORIAL_TOPICS =
+  "governance and public policy, the Constitution, judgments and institutions, the economy and budgets, agriculture, environment and climate, science and technology, India's foreign relations and international affairs, social issues (education, health, women, children, tribes) and Rajasthan";
+export const EDITORIAL_SKIP =
+  "party politics and election campaigning, personal columns, letters to the editor, film, sports and book reviews, obituaries, and foreign countries' domestic politics with no bearing on India";
+
 export const SKIP_STORIES = [
   "crime, accidents and disasters reported only as casualty counts",
   "political statements, allegations, protests and party politics (but keep election results and data, and international disputes with the countries and heads of government involved)",
@@ -456,7 +479,7 @@ export const DROP_FACTS = [
 export const LONG_DOCUMENTS = `A Budget, Economic Survey, Economic Review, year-end review or departmental report holds many stories: write one story per topic or scheme (a scheme's facts in a "scheme" story, figures in an "economy" story, announcements in a "budget" story), and keep exact figures, dates, ordinals and complete lists of pairs.`;
 
 export const IMPORTANCE_GUIDE = `RPSC asks a lot about Rajasthan, including small items (a school prize, a village panchayat, a state team's captain), so Rajasthan news with a name, place or number is never 1.
-3 = very likely: Rajasthan government schemes, policies (their targets, slabs and validity), Budget announcements with their places, Economic Survey and Rajasthan Economic Review figures, Rajasthan departments' reports with district figures (forest, monsoon, agriculture), Rajasthan people's and institutions' firsts, records, awards and India-team selections, new industrial areas, parks and centres of excellence with their districts, conservation reserves and protected areas, state appointments and brand ambassadors, by-election data and Rajasthan's medals; national flagship schemes, new laws and rules, constitutional bodies' decisions and Supreme Court judgments; indices and reports giving India's or Rajasthan's rank; Nobel, Bharat Ratna, Padma and national awards; heads of national bodies, Chief Ministers and Governors of any state; DRDO, ISRO and science firsts ("India's first", "world's highest") and launches with their ordinals; India's summits, dialogues and agreements; new tiger reserves, Ramsar sites, biosphere reserves and GI tags.
+3 = very likely: Rajasthan government schemes, policies (their targets, slabs and validity), Budget announcements with their places, Economic Survey and Rajasthan Economic Review figures, Rajasthan departments' reports with district figures (forest, monsoon, agriculture), Rajasthan people's and institutions' firsts, records, awards and India-team selections, new industrial areas, parks and centres of excellence with their districts, conservation reserves and protected areas, state appointments and brand ambassadors, by-election data and Rajasthan's medals; national flagship schemes, new laws and rules (and any news on the Rajasthan Public Examination (Measures for Prevention of Unfair Means in Recruitment) Act, 2022, which the RAS Prelims syllabus names), constitutional bodies' decisions and Supreme Court judgments; indices and reports giving India's or Rajasthan's rank; Nobel, Bharat Ratna, Padma and national awards; heads of national bodies, Chief Ministers and Governors of any state; DRDO, ISRO and science firsts ("India's first", "world's highest") and launches with their ordinals; India's summits, dialogues and agreements; new tiger reserves, Ramsar sites, biosphere reserves and GI tags.
 2 = possible: any other Rajasthan news with a name, place or number (apps, portals, model villages, city bodies' initiatives, MoUs signed by state departments, exhibitions and festivals with featured artists); other central schemes, reports, apps and decisions; Navratna, Miniratna and Maharatna status; foreign elections, international summits, disputes and peace talks with the envoys leading them; major international film, music and literature awards (Oscars, Grammy, Booker, Critics Choice); Khelo India, National Games, national championships and national events held by government bodies or the armed forces, world and junior world titles, any international title won by an Indian, tournaments hosted in India even with a foreign winner, olympiads and major tournaments' awards; defence exercises, missions and contracts; books released by top dignitaries; beauty pageant titles; Indian-origin people appointed abroad; disease outbreaks by state; important days.
 1 = unlikely: minor tournaments abroad with no Indian or Rajasthan winner, routine appointments below the head of a body, follow-ups with nothing new (but totals "as on" a date from year-end reviews and reports are new).`;
 
@@ -476,12 +499,22 @@ NEVER keep these as facts: ${DROP_FACTS.join("; ")}.
 IMPORTANCE: ${IMPORTANCE_GUIDE}`;
 }
 
+// The editorial checklist as prompt text.
+export function editorialBlueprintText(): string {
+  const t = EDITORIAL_TYPE;
+  return `Keep editorials on ${EDITORIAL_TOPICS}. Skip ${EDITORIAL_SKIP}.
+Each editorial is one item of type "${t.id}" (max ${t.maxFacts} facts), with facts in these slots (a slot marked + may hold several facts; use the slot id without the +): ${t.slots
+    .map((s) => `${s.id}${s.many ? "+" : ""}: ${s.label}`)
+    .join(" | ")}.
+Importance: 3 for an issue RPSC asks often (a Rajasthan issue, a new law, judgment, scheme or policy, a constitutional institution, India's relations with a major power or neighbour), 2 for other exam topics.`;
+}
+
 // Slots that may hold several facts in some story type.
 export const REPEATABLE_SLOTS = new Set(
-  STORY_TYPES.flatMap((t) => t.slots.filter((s) => s.many).map((s) => s.id)),
+  [...STORY_TYPES, EDITORIAL_TYPE].flatMap((t) => t.slots.filter((s) => s.many).map((s) => s.id)),
 );
 
-const TYPES_BY_ID = new Map(STORY_TYPES.map((t) => [t.id, t]));
+const TYPES_BY_ID = new Map([...STORY_TYPES, EDITORIAL_TYPE].map((t) => [t.id, t]));
 const norm = (v: unknown) =>
   String(v ?? "")
     .trim()

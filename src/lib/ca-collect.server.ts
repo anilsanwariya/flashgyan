@@ -7,6 +7,8 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { saathiComplete, saathiErrorDetail } from "../../supabase/functions/_shared/saathi-core.ts";
 import {
   collectionDue,
+  editorialLinks,
+  editorialTriageMessages,
   extractLinks,
   feedLink,
   isRecent,
@@ -297,7 +299,7 @@ async function get(
   return { ok: res.ok, status: res.status, type: res.headers.get("content-type") ?? "", body };
 }
 
-async function tavilySearchSite(site: WatchSite): Promise<FoundLink[]> {
+async function tavilySearchSite(site: SiteRef): Promise<FoundLink[]> {
   const key = process.env.TAVILY_API_KEY;
   if (!key) return [];
   const host = new URL(site.url).hostname.replace(/^www\./, "");
@@ -305,7 +307,10 @@ async function tavilySearchSite(site: WatchSite): Promise<FoundLink[]> {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({
-      query: `${site.name} latest news Rajasthan India government`,
+      query:
+        site.section === "editorial"
+          ? `${site.name} editorial opinion`
+          : `${site.name} latest news Rajasthan India government`,
       include_domains: [host],
       topic: "news",
       time_range: "day",
@@ -326,10 +331,12 @@ async function tavilySearchSite(site: WatchSite): Promise<FoundLink[]> {
     }));
 }
 
+type SiteRef = Pick<WatchSite, "url" | "name"> & { section?: WatchSite["section"] };
+
 // Finds the site's latest article links: its RSS feed, the links on its
 // page, or (when the site can't be read) Tavily's news search for the site.
 export async function readSite(
-  site: Pick<WatchSite, "url" | "name">,
+  site: SiteRef,
 ): Promise<{ links: FoundLink[]; method: string; error: string | null }> {
   let links: FoundLink[] = [];
   let method = "page";
@@ -361,7 +368,7 @@ export async function readSite(
   }
   if (links.length < 3) {
     try {
-      const found = await tavilySearchSite(site as WatchSite);
+      const found = await tavilySearchSite(site);
       if (found.length) {
         links = found;
         method = "search";
@@ -370,6 +377,8 @@ export async function readSite(
       error = error ?? (e instanceof Error ? e.message : String(e));
     }
   }
+  // A feed is the editorial page's own; a page or search also links to news.
+  if (site.section === "editorial" && method !== "rss") links = editorialLinks(links);
   return { links: links.filter((l) => isRecent(l)).slice(0, 120), method, error };
 }
 
@@ -415,39 +424,61 @@ async function triage(run: CaRun, sites: WatchSite[]): Promise<number> {
     .limit(60);
   const batch = (data ?? []) as { id: string; title: string; site_id: string | null }[];
   if (!batch.length) return 0;
-  const { count: already } = await from("ca_articles")
-    .select("id", { count: "exact", head: true })
-    .eq("run_id", run.id)
-    .in("status", ["selected", "parsing", "fetched"]);
-  const room = Math.max(0, MAX_PER_RUN - (already ?? 0));
   const byId = new Map(sites.map((s) => [s.id, s]));
-  const key = process.env.LOVABLE_API_KEY;
-  if (!key) throw new Error("LOVABLE_API_KEY is not configured");
-  const picked = room
-    ? parseTriage(
-        await saathiComplete(
-          key,
-          triageMessages(
-            batch.map((a) => ({ title: a.title, site: byId.get(a.site_id ?? "")?.name ?? "" })),
-            Math.min(room, 25),
-          ),
-        ),
-        batch.length,
-        room,
-      )
-    : [];
-  // Respect each site's limit for this run.
+  const isEditorial = (siteId: string | null) => byId.get(siteId ?? "")?.section === "editorial";
   const { data: taken } = await from("ca_articles")
     .select("site_id")
     .eq("run_id", run.id)
     .in("status", ["selected", "parsing", "fetched"]);
+  const takenList = (taken ?? []) as { site_id: string | null }[];
   const perSite = new Map<string, number>();
-  for (const t of (taken ?? []) as { site_id: string | null }[]) {
+  for (const t of takenList) {
     if (t.site_id) perSite.set(t.site_id, (perSite.get(t.site_id) ?? 0) + 1);
   }
+  const editorialsTaken = takenList.filter((t) => isEditorial(t.site_id)).length;
+  const newsRoom = Math.max(0, MAX_PER_RUN - (takenList.length - editorialsTaken));
+  const { daily_editorials } = await CA.getMagazineSettings();
+  const editorialRoom = Math.max(0, daily_editorials - editorialsTaken);
+  const key = process.env.LOVABLE_API_KEY;
+  if (!key) throw new Error("LOVABLE_API_KEY is not configured");
+
+  // News and editorials are picked separately: news by the exam blueprint,
+  // editorials by Mains issues, up to the day's editorial limit.
+  type Found = (typeof batch)[number];
+  const pick = async (
+    list: Found[],
+    room: number,
+    messages: (
+      l: { title: string; site: string }[],
+      max: number,
+    ) => Parameters<typeof saathiComplete>[1],
+  ): Promise<Found[]> => {
+    if (!room || !list.length) return [];
+    const max = Math.min(room, 25);
+    const raw = await saathiComplete(
+      key,
+      messages(
+        list.map((a) => ({ title: a.title, site: byId.get(a.site_id ?? "")?.name ?? "" })),
+        max,
+      ),
+    );
+    return parseTriage(raw, list.length, max).map((i) => list[i]);
+  };
+  const picked = [
+    ...(await pick(
+      batch.filter((a) => !isEditorial(a.site_id)),
+      newsRoom,
+      triageMessages,
+    )),
+    ...(await pick(
+      batch.filter((a) => isEditorial(a.site_id)),
+      editorialRoom,
+      editorialTriageMessages,
+    )),
+  ];
+  // Respect each site's limit for this run.
   const chosen = new Set<string>();
-  for (const i of picked) {
-    const a = batch[i];
+  for (const a of picked) {
     const site = byId.get(a.site_id ?? "");
     const used = perSite.get(a.site_id ?? "") ?? 0;
     if (site && used >= site.max_articles) continue;

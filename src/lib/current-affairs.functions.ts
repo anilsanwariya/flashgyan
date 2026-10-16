@@ -109,6 +109,7 @@ export const saveMagazineSettings = createServerFn({ method: "POST" })
         notify_when_ready: z.boolean(),
         visuals: z.boolean(),
         daily_stories: z.number().int().min(3).max(40),
+        daily_editorials: z.number().int().min(0).max(6),
       })
       .parse(d),
   )
