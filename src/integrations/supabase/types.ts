@@ -176,6 +176,45 @@ export type Database = {
         }
         Relationships: []
       }
+      bot_daily_quiz: {
+        Row: {
+          best_streak: number
+          chat_id: number
+          created_at: string
+          enabled: boolean
+          last_done_date: string | null
+          last_sent_date: string | null
+          quiz: Json | null
+          send_hour: number
+          streak: number
+          updated_at: string
+        }
+        Insert: {
+          best_streak?: number
+          chat_id: number
+          created_at?: string
+          enabled?: boolean
+          last_done_date?: string | null
+          last_sent_date?: string | null
+          quiz?: Json | null
+          send_hour?: number
+          streak?: number
+          updated_at?: string
+        }
+        Update: {
+          best_streak?: number
+          chat_id?: number
+          created_at?: string
+          enabled?: boolean
+          last_done_date?: string | null
+          last_sent_date?: string | null
+          quiz?: Json | null
+          send_hour?: number
+          streak?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       bot_events: {
         Row: {
           chat_id: number
@@ -1728,6 +1767,31 @@ export type Database = {
           isOneToOne: false
           isSetofReturn: true
         }
+      }
+      bot_daily_quiz_answer: {
+        Args: { p_chat_id: number; p_option: number; p_poll_id: string }
+        Returns: {
+          best_streak: number
+          chat_id: number
+          created_at: string
+          enabled: boolean
+          last_done_date: string | null
+          last_sent_date: string | null
+          quiz: Json | null
+          send_hour: number
+          streak: number
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "bot_daily_quiz"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      bot_daily_quiz_claim: {
+        Args: { p_chat_id: number; p_today: string }
+        Returns: boolean
       }
       bot_segment_count: { Args: { segment: Json }; Returns: number }
       bot_segment_users: {

@@ -50,6 +50,13 @@
       "when": 1792170071807,
       "tag": "0006_ca_items_concept",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792175489115,
+      "tag": "0007_bot_daily_quiz",
+      "breakpoints": true
     }
   ]
 }
