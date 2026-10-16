@@ -12,6 +12,7 @@ import {
   saathiEmbedQuery,
   saathiPrepareQuery,
   saathiRetrieve,
+  matchLabel,
   type ChatMessage,
   type SaathiChannel,
   type SaathiMatch,
@@ -824,7 +825,7 @@ export function mainsMessages(opts: {
   const material = opts.plan.matches
     .map(
       (m, i) =>
-        `[Material ${i + 1}] ${m.source_file || m.title} (${[m.subject, m.topic].filter(Boolean).join(" › ")})\n${m.content}`,
+        `[Material ${i + 1}] ${matchLabel(m)} (${[m.subject, m.topic].filter(Boolean).join(" › ")})\n${m.content}`,
     )
     .join("\n\n---\n\n");
   const examples = opts.plan.exemplars

@@ -7,6 +7,7 @@ import {
   SaathiAiError,
   cleanHistory,
   collectSources,
+  sourceLabel,
   saathiComplete,
   saathiMessages,
   saathiNoMaterialReply,
@@ -640,7 +641,7 @@ async function handleSaathiAsk(
     if (cached) {
       answer = cached.answer;
       noAnswer = false;
-      sourceTitles = cached.sources.map((s) => s.title);
+      sourceTitles = cached.sources.map(sourceLabel);
       followups = cached.followups ?? [];
       info = cached.meta?.mains ?? null;
     } else if (mains) {
@@ -668,7 +669,7 @@ async function handleSaathiAsk(
         if (!noAnswer) {
           info = mainsInfo(plan, answer);
           const sources = collectSources(plan.matches);
-          sourceTitles = sources.map((s) => s.title);
+          sourceTitles = sources.map(sourceLabel);
           const { error } = await supabase.rpc("saathi_cache_put", {
             p_channel: channel,
             p_question: query.standalone,
@@ -710,7 +711,7 @@ async function handleSaathiAsk(
         answer = split.text || saathiNoMaterialReply(question);
         if (!noAnswer) {
           const sources = collectSources(matches);
-          sourceTitles = sources.map((s) => s.title);
+          sourceTitles = sources.map(sourceLabel);
           followups = split.next;
           const { error } = await supabase.rpc("saathi_cache_put", {
             p_channel: "telegram",

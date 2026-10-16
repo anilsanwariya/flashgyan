@@ -9,6 +9,8 @@ export type SaathiDocMeta = {
   subject: string;
   topic: string | null;
   medium: string;
+  // Who published it (NCERT, IGNOU…), shown with the title when it is cited.
+  source?: string | null;
 };
 
 type PreparedChunk = {
@@ -158,6 +160,7 @@ export async function createDocument(meta: SaathiDocMeta, text: string) {
       content: "",
       source_file: doc.title,
       source_markdown: text,
+      ...(doc.source ? { source: doc.source } : {}),
     } as never)
     .select("id")
     .single();

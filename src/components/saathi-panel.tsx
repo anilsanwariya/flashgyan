@@ -32,8 +32,10 @@ import {
   deleteSaathiDoc,
   deleteSaathiFeedback,
   getSaathiHealth,
+  listUncoveredConcepts,
   listKnowledgeGaps,
   listSaathiFeedback,
+  setSaathiSource,
   replaceSaathiDoc,
   testSaathiRetrieval,
   listSaathiChunks,
@@ -81,9 +83,27 @@ type FormState = {
   topic: string;
   medium: SaathiMedium;
   content: string;
+  // Who published the deck (NCERT, IGNOU…).
+  source: string;
 };
 
-const empty: FormState = { title: "", subject: "", topic: "", medium: "English", content: "" };
+// New decks start with the last source used in this browser.
+const SOURCE_KEY = "saathi.lastSource";
+function lastSource(): string {
+  try {
+    return localStorage.getItem(SOURCE_KEY) ?? "NCERT";
+  } catch {
+    return "NCERT";
+  }
+}
+const emptyForm = (): FormState => ({
+  title: "",
+  subject: "",
+  topic: "",
+  medium: "English",
+  content: "",
+  source: typeof window === "undefined" ? "NCERT" : lastSource(),
+});
 
 type Mode = "content" | "qna" | "gaps" | "test" | "evals" | "health";
 type EditKind =
@@ -101,6 +121,7 @@ export function SaathiPanel() {
   const appendFn = useServerFn(appendSaathiDoc);
   const deleteFn = useServerFn(deleteSaathiDoc);
   const replaceFn = useServerFn(replaceSaathiDoc);
+  const setSourceFn = useServerFn(setSaathiSource);
   const [rebuilding, setRebuilding] = useState<string | null>(null);
 
   const docsQ = useQuery<SaathiDeck[]>({
@@ -109,7 +130,7 @@ export function SaathiPanel() {
   });
 
   const [mode, setMode] = useState<Mode>("content");
-  const [form, setForm] = useState<FormState>(empty);
+  const [form, setForm] = useState<FormState>(emptyForm);
   const [editKind, setEditKind] = useState<EditKind>({ kind: "create" });
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState<string>(ALL);
@@ -126,6 +147,47 @@ export function SaathiPanel() {
     () => (filter === ALL ? parents : parents.filter((d) => d.subject === filter)),
     [parents, filter],
   );
+  // Publishers used so far, offered when typing a deck's source.
+  const sources = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...parents.map((d) => d.source ?? "").filter(Boolean),
+          "NCERT",
+          "IGNOU",
+          "NIOS",
+          "RBSE",
+        ]),
+      ).sort(),
+    [parents],
+  );
+  const [bulkSource, setBulkSource] = useState("");
+  const [settingSource, setSettingSource] = useState(false);
+
+  async function applySource() {
+    const ids = filteredParents.map((d) => d.id);
+    const label = bulkSource.trim();
+    if (
+      !ids.length ||
+      !confirm(
+        label
+          ? `Set the source of ${ids.length} deck${ids.length === 1 ? "" : "s"} to "${label}"?`
+          : `Clear the source of ${ids.length} deck${ids.length === 1 ? "" : "s"}?`,
+      )
+    )
+      return;
+    setSettingSource(true);
+    try {
+      const res = await setSourceFn({ data: { ids, source: label } });
+      toast.success(`Source updated on ${res.updated} deck${res.updated === 1 ? "" : "s"}`);
+      setBulkSource("");
+      qc.invalidateQueries({ queryKey: ["saathiDocs"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't set the source");
+    } finally {
+      setSettingSource(false);
+    }
+  }
 
   const isEditing = editKind.kind !== "create";
 
@@ -146,6 +208,7 @@ export function SaathiPanel() {
       subject: d.subject,
       topic: d.topic ?? "",
       medium: d.medium,
+      source: d.source ?? "",
       content: "",
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -159,6 +222,7 @@ export function SaathiPanel() {
       subject: d.subject,
       topic: d.topic ?? "",
       medium: d.medium,
+      source: d.source ?? "",
       content: "",
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -192,6 +256,7 @@ export function SaathiPanel() {
       subject: chunk.subject,
       topic: chunk.topic ?? "",
       medium: chunk.medium,
+      source: "",
       content: chunk.content,
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -205,6 +270,7 @@ export function SaathiPanel() {
       subject: parent.subject,
       topic: parent.topic ?? "",
       medium: parent.medium,
+      source: parent.source ?? "",
       content: "",
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -212,7 +278,7 @@ export function SaathiPanel() {
 
   function cancelEdit() {
     setEditKind({ kind: "create" });
-    setForm(empty);
+    setForm(emptyForm());
   }
 
   // Saves the form. The deck form passes its content with each file's box
@@ -251,6 +317,7 @@ export function SaathiPanel() {
             subject: form.subject.trim(),
             topic: form.topic.trim() || null,
             medium: form.medium,
+            source: form.source.trim() || null,
             content: "-",
             is_chunk: false,
           },
@@ -285,9 +352,15 @@ export function SaathiPanel() {
             subject: form.subject.trim(),
             topic: form.topic.trim() || null,
             medium: form.medium,
+            source: form.source.trim() || null,
             content: content.trim(),
           },
         });
+        try {
+          if (form.source.trim()) localStorage.setItem(SOURCE_KEY, form.source.trim());
+        } catch {
+          // storage unavailable
+        }
         toast.success(
           res.subject !== form.subject.trim()
             ? `Saved ${res.chunks} chunks under existing subject "${res.subject}"`
@@ -389,6 +462,7 @@ export function SaathiPanel() {
           form={form}
           setForm={setForm}
           subjects={subjects}
+          sources={sources}
           saving={saving}
           editKind={editKind}
           onSubmit={onSave}
@@ -438,6 +512,38 @@ export function SaathiPanel() {
           </div>
         </div>
 
+        {filteredParents.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-muted/20 p-2 text-sm">
+            <Label htmlFor="s-bulk-source" className="text-xs text-muted-foreground">
+              Source for the {filteredParents.length} deck
+              {filteredParents.length === 1 ? "" : "s"} shown
+              {filter === ALL ? "" : ` in ${filter}`}
+            </Label>
+            <Input
+              id="s-bulk-source"
+              value={bulkSource}
+              onChange={(e) => setBulkSource(e.target.value)}
+              placeholder="e.g. NCERT"
+              list="saathi-sources-bulk"
+              className="h-8 w-44 text-sm"
+            />
+            <datalist id="saathi-sources-bulk">
+              {sources.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={settingSource}
+              onClick={applySource}
+            >
+              {settingSource ? "Saving…" : "Set source"}
+            </Button>
+          </div>
+        )}
+
         {docsQ.isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : filteredParents.length === 0 ? (
@@ -474,6 +580,7 @@ export function SaathiPanel() {
                     >
                       <div className="font-medium text-sm truncate">{d.title}</div>
                       <div className="text-[11px] uppercase tracking-wide text-muted-foreground truncate">
+                        {d.source ? `${d.source} · ` : ""}
                         {d.subject}
                         {d.topic ? ` › ${d.topic}` : ""} · {d.medium} · {d.chunk_count} chunk
                         {d.chunk_count === 1 ? "" : "s"}
@@ -656,6 +763,7 @@ function EntryForm({
   form,
   setForm,
   subjects,
+  sources,
   saving,
   editKind,
   onSubmit,
@@ -664,6 +772,7 @@ function EntryForm({
   form: FormState;
   setForm: (f: FormState | ((p: FormState) => FormState)) => void;
   subjects: string[];
+  sources: string[];
   saving: boolean;
   editKind: EditKind;
   onSubmit: (e: React.FormEvent, merged?: string) => Promise<boolean>;
@@ -920,6 +1029,26 @@ function EntryForm({
               onChange={(e) => setForm((p) => ({ ...p, topic: e.target.value }))}
               placeholder="e.g. Fundamental Rights — use the same topic as the matching flashcard deck"
             />
+          </div>
+          <div className="col-span-2">
+            <Label htmlFor="s-source">Source (publisher)</Label>
+            <Input
+              id="s-source"
+              value={form.source}
+              onChange={(e) => setForm((p) => ({ ...p, source: e.target.value }))}
+              placeholder="e.g. NCERT, IGNOU, RBSE"
+              list="saathi-sources"
+            />
+            <datalist id="saathi-sources">
+              {sources.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Students see it with the title, e.g. “{form.source.trim() || "NCERT"} ·{" "}
+              {form.title.trim() || "Indian Constitution at Work"}”, wherever SAATHI, the Telegram
+              bot or the magazine cites this deck.
+            </p>
           </div>
         </div>
       )}
@@ -1233,6 +1362,63 @@ function QnABulkUpload({
   );
 }
 
+// Concepts behind recent magazine stories that no uploaded book explains, so
+// the admin knows which books to add.
+function UncoveredConceptsList() {
+  const listFn = useServerFn(listUncoveredConcepts);
+  const q = useQuery({ queryKey: ["saathiUncoveredConcepts"], queryFn: () => listFn() });
+  const rows = q.data ?? [];
+  return (
+    <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      <div>
+        <h3 className="font-semibold">Concepts your books don&apos;t cover yet</h3>
+        <p className="text-sm text-muted-foreground">
+          The static concept behind each magazine story (a missile type, a constitutional article, a
+          convention) is looked up in your books for its Background box. These concepts had no
+          matching passage in the last 6 months, so those stories printed without one. Upload a book
+          that explains them; stories written after that get their background.
+        </p>
+      </div>
+      {q.isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : q.error ? (
+        <p className="text-sm text-destructive">
+          {q.error instanceof Error ? q.error.message : "Failed to load"}
+        </p>
+      ) : rows.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border p-6 text-center">
+          <p className="text-sm text-muted-foreground">
+            Every story's concept was found in your books.
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2">Concept</th>
+                <th className="px-3 py-2 w-20 text-right">Stories</th>
+                <th className="px-3 py-2">Latest story</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.concept} className="border-t border-border align-top">
+                  <td className="px-3 py-2 font-medium">{r.concept}</td>
+                  <td className="px-3 py-2 text-right">{r.stories}</td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">
+                    {r.example} · {r.last}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function KnowledgeGapsPanel() {
   const qc = useQueryClient();
   const listGapsFn = useServerFn(listKnowledgeGaps);
@@ -1314,6 +1500,8 @@ function KnowledgeGapsPanel() {
           </div>
         )}
       </section>
+
+      <UncoveredConceptsList />
 
       <FeedbackPanel />
     </div>
