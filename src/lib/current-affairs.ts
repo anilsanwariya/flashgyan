@@ -3,6 +3,7 @@
 // corrections and schedule posts. No database or network access here.
 
 import { unverifiedNumbers, type Visual } from "@/lib/ca-visuals";
+import { DEFAULT_MIN_RAJASTHAN } from "@/lib/ca-report";
 import {
   DEFAULT_DAILY_STORIES,
   REPEATABLE_SLOTS,
@@ -686,6 +687,10 @@ export type MagazineSettings = {
   // Each approved daily issue's quick questions go into the month's
   // "Current Affairs" flashcard deck in the app.
   add_to_flashcards: boolean;
+  // Weekly quality report to the test chat on Telegram, Sundays from 9 AM.
+  weekly_report: boolean;
+  // A day's issue with fewer Rajasthan stories than this is flagged.
+  min_rajasthan: number;
 };
 
 // Official and reference sites the "Did you know?" search may use. Subdomains
@@ -728,6 +733,8 @@ export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   channel_quiz: true,
   channel_quiz_count: 5,
   add_to_flashcards: true,
+  weekly_report: true,
+  min_rajasthan: DEFAULT_MIN_RAJASTHAN,
 };
 
 export function categoryLabel(id: string): { en: string; hi: string } {
