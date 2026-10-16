@@ -291,6 +291,12 @@ export function enrichMessages(opts: {
   facts: CaFact[];
   kb: KbPassage[];
   syllabus: string | null;
+  // The syllabus's papers and their subjects, for the "why" label when no
+  // topic matched.
+  papers?: string;
+  // Mains questions the issue's other stories already have (English), so
+  // the issue does not ask the same theme twice.
+  mainsSet?: string[];
   // The visual printed with the text, and the facts (0-based) it shows.
   visual?: { type: string; covers: number[] } | null;
 }): ChatMessage[] {
@@ -314,18 +320,25 @@ Reply with JSON only:
 {"headline": {"en": "...", "hi": "..."},
  "summary": {"en": ${editorial ? '"3-4 short sentences: the issue, the main argument and the suggested way forward"' : opts.visual ? '"one sentence, at most 25 words"' : '"1-2 sentences, at most 40 words"'}, "hi": "..."},
  "points": [{"en": "...", "hi": "..."}] (exactly one per numbered fact, same order),
- "why": {"en": "one sentence, at most 25 words: why this matters for RAS (which exam paper or topic)", "hi": "..."},
+ "why": {"en": "a label, not a sentence: 'GS Paper <number> · <subject> · <topic in at most 6 words>' from the RAS syllabus topic given (e.g. 'GS Paper II · Earth Science · Climate of Rajasthan')", "hi": "the same label in Hindi (e.g. 'सामान्य अध्ययन प्रश्नपत्र II · भू-विज्ञान · राजस्थान की जलवायु')"},
  "background": {"en": "1-2 sentences, at most 40 words", "hi": "..."} or null,
  "background_from": ["K1", ...],
  "mcq": {"question": {"en": "...", "hi": "..."}, "options": [{"en": "...", "hi": "..."} x4], "answer": index 0-3, "explanation": {"en": "...", "hi": "..."}},
  "mains": {"en": "...", "hi": "..."} or null}
 PRACTICE QUESTIONS follow the RPSC (RAS) pattern and difficulty:
 - "mcq" is a RAS Prelims question of moderate to hard difficulty, not a one-line recall question. Prefer statement-based ("Consider the following statements: 1. … 2. … 3. … Which of the statements given above is/are correct?" with options like "Only 1 and 2"), match-the-pairs, or "Which one of the following is NOT correct?" formats. Put each statement on its own line (use line breaks inside the string). Options must be plausible; the correct answer and every statement must be decidable from the facts. The Hindi version uses RPSC's Hindi phrasing (e.g. "निम्नलिखित कथनों पर विचार कीजिए", "उपर्युक्त में से कौन-सा/से कथन सही है/हैं?").
-- "mains" is a RAS Mains question in the RPSC style, ending with the marks and word limit: "(5 marks, 50 words)" or "(10 marks, 150 words)" ("(5 अंक, 50 शब्द)" / "(10 अंक, 150 शब्द)" in Hindi); null if the news has no Mains value.`,
+- "mains" is a RAS Mains question written the way RPSC sets current affairs questions (RAS Mains 2023 and 2024 papers, 2026 scheme). Set it only for news RPSC asks in Mains: a named scheme, mission, policy or act of India or Rajasthan (its objectives, targets, features); a budget's announcements for a sector; a commission's or committee's recommendations; a landmark court judgment; a new technology, mission or platform; a geopolitical development affecting India; a person in news; sports achievements and sports schemes of India or Rajasthan. Otherwise null: appointments, days, rankings and scores, MoUs, minor awards and routine events have no Mains value.
+  - Name the exact subject with its full official title (and year, if the facts give it) and "of India" / "of Rajasthan"; never "a recent scheme" or "the recently launched initiative". One or two lines with no news preamble ("In light of recent reports…") and no quotation of the story.
+  - Ask for concrete content the facts or passages answer, as RPSC does: "What is X? Write its main objectives.", "What are the aims/targets of X?", "Mention the main features/provisions of X.", "Describe the main recommendations of X.", "Who is X? Why was he/she in news recently?", "What specific measures were announced in X to boost Y?", "Describe the location and strategic importance of X in the present scenario." A count is fine ("any three").
+  - 5 marks, 50 words by default. 10 marks, 150 words only when the facts give at least five answer points: join two tasks in one question (what it is and its features, or the measures and how they help Rajasthan), anchored to a static syllabus topic (the constitutional article, institution or concept behind the news). Never print marks for parts and never offer "OR".
+  - Use What is/are, Who, Write, Mention, Explain, Describe, Differentiate, Enumerate; "Examine" or "Analyse" only at 10 marks. Never a vague "Discuss the role/significance/importance of X", never opinion or political judgment, never bare recall of a date, rank or figure.
+  - Name Rajasthan in the question when the facts are about Rajasthan (the state scheme, act, district or project); do not tack "with special reference to Rajasthan" onto national news.
+  - Questions already set for this issue are listed in the message; never set one on the same scheme, event or theme again (use null).
+  - End with the marks and word limit: "(5 marks, 50 words)" or "(10 marks, 150 words)"; in Hindi "(5 अंक, 50 शब्द)" or "(10 अंक, 150 शब्द)", using RPSC's Hindi phrasing (e.g. "के प्रमुख उद्देश्य लिखिए", "की मुख्य विशेषताओं का उल्लेख कीजिए").`,
     },
     {
       role: "user",
-      content: `Category: ${opts.category}\nHeadline: ${opts.headline}\n${opts.syllabus ? `RAS syllabus topic: ${opts.syllabus}\n` : ""}\nFacts:\n${facts}\n\nKnowledge-base passages:\n${kb}`,
+      content: `Category: ${opts.category}\nHeadline: ${opts.headline}\n${opts.syllabus ? `RAS syllabus topic: ${opts.syllabus}\n` : opts.papers ? `No syllabus topic matched; pick the paper and subject from: ${opts.papers}\n` : ""}${opts.mainsSet?.length ? `Mains questions already set for this issue:\n${opts.mainsSet.map((q) => `- ${q}`).join("\n")}\n` : ""}\nFacts:\n${facts}\n\nKnowledge-base passages:\n${kb}`,
     },
   ];
 }
