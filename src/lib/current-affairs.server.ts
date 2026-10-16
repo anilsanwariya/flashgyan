@@ -485,6 +485,18 @@ const PAPER_SUBJECTS = [...new Set(syllabusTopics().map((t) => t.paper))]
   )
   .join(" | ");
 
+// Mains questions the issue's other kept stories already have (English).
+async function issueMainsQuestions(date: string, exceptId: string): Promise<string[]> {
+  const { data } = await from("ca_items")
+    .select("id,status,mains:content->mains")
+    .eq("issue_date", date)
+    .neq("id", exceptId);
+  return ((data ?? []) as unknown as { status: string; mains: Bi | null }[])
+    .filter((r) => r.status !== "dropped" && r.mains?.en)
+    .map((r) => r.mains!.en)
+    .slice(0, 30);
+}
+
 export async function enrichItem(itemId: string): Promise<CaItem> {
   const { data, error } = await from("ca_items").select(ITEM_COLS).eq("id", itemId).single();
   fail(error);
@@ -495,7 +507,7 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
     const query = `${item.headline}\n${item.facts.map((f) => f.text).join(" ")}`.slice(0, 1000);
     const subjects = await studySubjects();
     // The visual comes first so the text can leave out what it shows.
-    const [kbMatches, embedding, look] = await Promise.all([
+    const [kbMatches, embedding, look, mainsSet] = await Promise.all([
       subjects.length
         ? saathiSearchQuery(key, rpc, { standalone: query, english: null }, subjects).then((m) =>
             relevantMatches(m).slice(0, 4),
@@ -503,6 +515,7 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
         : Promise.resolve([]),
       embedOne(storyText(item)),
       makeVisual(item),
+      issueMainsQuestions(item.issue_date, itemId),
     ]);
     const { data: topic } = await rpc("saathi_nearest_syllabus_topic", { p_embedding: embedding });
     const t = topic as { id: string; unit_id: string; similarity: number } | null;
@@ -518,6 +531,7 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
         kb,
         syllabus: syllabusId ? (TOPIC_LABELS.get(syllabusId) ?? null) : null,
         papers: PAPER_SUBJECTS,
+        mainsSet,
         visual: look.visual
           ? { type: VISUAL_LABELS[look.visual.type].toLowerCase(), covers: look.visual_covers }
           : null,
