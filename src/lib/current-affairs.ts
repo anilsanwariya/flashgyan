@@ -317,7 +317,7 @@ Reply with JSON only:
 {"headline": {"en": "...", "hi": "..."},
  "summary": {"en": ${editorial ? '"3-4 short sentences: the issue, the main argument and the suggested way forward"' : opts.visual ? '"one sentence, at most 25 words"' : '"1-2 sentences, at most 40 words"'}, "hi": "..."},
  "points": [{"en": "...", "hi": "..."}] (exactly one per numbered fact, same order),
- "why": {"en": "a label, not a sentence: \"GS Paper <number> · <subject> · <topic in at most 6 words>\" from the RAS syllabus topic given (e.g. \"GS Paper II · Earth Science · Climate of Rajasthan\")", "hi": "the same label in Hindi (e.g. \"सामान्य अध्ययन प्रश्नपत्र II · भू-विज्ञान · राजस्थान की जलवायु\")"},
+ "why": {"en": "a label, not a sentence: 'GS Paper <number> · <subject> · <topic in at most 6 words>' from the RAS syllabus topic given (e.g. 'GS Paper II · Earth Science · Climate of Rajasthan')", "hi": "the same label in Hindi (e.g. 'सामान्य अध्ययन प्रश्नपत्र II · भू-विज्ञान · राजस्थान की जलवायु')"},
  "background": {"en": "1-2 sentences, at most 40 words", "hi": "..."} or null,
  "background_from": ["K1", ...],
  "mcq": {"question": {"en": "...", "hi": "..."}, "options": [{"en": "...", "hi": "..."} x4], "answer": index 0-3, "explanation": {"en": "...", "hi": "..."}},
