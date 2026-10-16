@@ -446,3 +446,11 @@ export const saveCaFeature = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await server()).saveFeature(data.month, data.feature);
   });
+
+export const mergeCaDuplicates = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ date: dateSchema }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).mergeDayDuplicates(data.date);
+  });
