@@ -291,6 +291,9 @@ export function enrichMessages(opts: {
   facts: CaFact[];
   kb: KbPassage[];
   syllabus: string | null;
+  // The syllabus's papers and their subjects, for the "why" label when no
+  // topic matched.
+  papers?: string;
   // The visual printed with the text, and the facts (0-based) it shows.
   visual?: { type: string; covers: number[] } | null;
 }): ChatMessage[] {
@@ -314,7 +317,7 @@ Reply with JSON only:
 {"headline": {"en": "...", "hi": "..."},
  "summary": {"en": ${editorial ? '"3-4 short sentences: the issue, the main argument and the suggested way forward"' : opts.visual ? '"one sentence, at most 25 words"' : '"1-2 sentences, at most 40 words"'}, "hi": "..."},
  "points": [{"en": "...", "hi": "..."}] (exactly one per numbered fact, same order),
- "why": {"en": "one sentence, at most 25 words: why this matters for RAS (which exam paper or topic)", "hi": "..."},
+ "why": {"en": "a label, not a sentence: \"GS Paper <number> · <subject> · <topic in at most 6 words>\" from the RAS syllabus topic given (e.g. \"GS Paper II · Earth Science · Climate of Rajasthan\")", "hi": "the same label in Hindi (e.g. \"सामान्य अध्ययन प्रश्नपत्र II · भू-विज्ञान · राजस्थान की जलवायु\")"},
  "background": {"en": "1-2 sentences, at most 40 words", "hi": "..."} or null,
  "background_from": ["K1", ...],
  "mcq": {"question": {"en": "...", "hi": "..."}, "options": [{"en": "...", "hi": "..."} x4], "answer": index 0-3, "explanation": {"en": "...", "hi": "..."}},
@@ -325,7 +328,7 @@ PRACTICE QUESTIONS follow the RPSC (RAS) pattern and difficulty:
     },
     {
       role: "user",
-      content: `Category: ${opts.category}\nHeadline: ${opts.headline}\n${opts.syllabus ? `RAS syllabus topic: ${opts.syllabus}\n` : ""}\nFacts:\n${facts}\n\nKnowledge-base passages:\n${kb}`,
+      content: `Category: ${opts.category}\nHeadline: ${opts.headline}\n${opts.syllabus ? `RAS syllabus topic: ${opts.syllabus}\n` : opts.papers ? `No syllabus topic matched; pick the paper and subject from: ${opts.papers}\n` : ""}\nFacts:\n${facts}\n\nKnowledge-base passages:\n${kb}`,
     },
   ];
 }

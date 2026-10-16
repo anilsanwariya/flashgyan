@@ -465,7 +465,25 @@ async function studySubjects(): Promise<string[]> {
   );
 }
 
-const TOPIC_LABELS = new Map(syllabusTopics().map((t) => [t.id, `${t.unit_title} › ${t.topic}`]));
+const TOPIC_LABELS = new Map(
+  syllabusTopics().map((t) => [
+    t.id,
+    `GS Paper ${t.paper} › ${t.unit_title} › ${t.part} › ${t.topic}`,
+  ]),
+);
+// "GS Paper I: History, Art & Culture; Economics; … | GS Paper II: …"
+const PAPER_SUBJECTS = [...new Set(syllabusTopics().map((t) => t.paper))]
+  .map(
+    (p) =>
+      `GS Paper ${p}: ${[
+        ...new Set(
+          syllabusTopics()
+            .filter((t) => t.paper === p)
+            .map((t) => t.unit_title),
+        ),
+      ].join("; ")}`,
+  )
+  .join(" | ");
 
 export async function enrichItem(itemId: string): Promise<CaItem> {
   const { data, error } = await from("ca_items").select(ITEM_COLS).eq("id", itemId).single();
@@ -499,6 +517,7 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
         facts: item.facts,
         kb,
         syllabus: syllabusId ? (TOPIC_LABELS.get(syllabusId) ?? null) : null,
+        papers: PAPER_SUBJECTS,
         visual: look.visual
           ? { type: VISUAL_LABELS[look.visual.type].toLowerCase(), covers: look.visual_covers }
           : null,
