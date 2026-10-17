@@ -57,6 +57,13 @@
       "when": 1792175489115,
       "tag": "0007_bot_daily_quiz",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792206007562,
+      "tag": "0008_bot_check_sessions",
+      "breakpoints": true
     }
   ]
 }
