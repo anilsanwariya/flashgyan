@@ -3,6 +3,7 @@
 // and quiz state in bot_sessions. Public webhook (Telegram calls it directly).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { runTelegramAnswerJob } from "../_shared/telegram-answer-job.ts";
+import { CHECK_PHOTO_MAX_BYTES, checkQuestionInput, pickCheckPhoto, validCheckAnswer, type CheckPhoto } from "../_shared/telegram-check-input.ts";
 import {
   SaathiAiError,
   cleanHistory,
@@ -29,7 +30,6 @@ import {
 import {
   CHECK_DAILY_LIMIT,
   CHECK_MAX_PHOTOS,
-  CHECK_MIN_WORDS,
   checkAnswer,
   checkCounterKey,
   checkResultTelegram,
@@ -842,7 +842,6 @@ async function queueMainsAnswer(chat_id: number, user_id: number, args: string) 
 // The student sends the question, then the answer typed or as photos of the
 // handwritten pages. Marking runs in the background like /answer; a check
 // counts towards the daily allowance only when it succeeds.
-type CheckPhoto = { file_id: string; mime: SaathiImage["media_type"] };
 type CheckSession = {
   chat_id: number;
   step: "question" | "answer";
@@ -853,8 +852,6 @@ type CheckSession = {
 };
 // A check left half-done for longer than this starts over.
 const CHECK_SESSION_MINUTES = 60;
-// Claude reads images up to 5 MB.
-const CHECK_PHOTO_MAX_BYTES = 4_500_000;
 const CHECK_CANCEL = { inline_keyboard: [[{ text: "✖️ Cancel", callback_data: "check_cancel" }]] };
 
 const checkKey = (chat_id: number) => checkCounterKey(`tg:${chat_id}`);
@@ -890,7 +887,7 @@ const askForAnswer = (marks: number | null) =>
   `अब अपना उत्तर भेजें: टाइप करें या हस्तलिखित पन्नों की फ़ोटो (अधिकतम ${CHECK_MAX_PHOTOS}) भेजें।`;
 
 async function startCheck(chat_id: number, args: string) {
-  if (!LOVABLE_API_KEY) {
+  if (!Deno.env.get("ANTHROPIC_API_KEY") || !Deno.env.get("GEMINI_API_KEY")) {
     await tg("sendMessage", { chat_id, text: "SAATHI is not configured." });
     return;
   }
@@ -901,7 +898,12 @@ async function startCheck(chat_id: number, args: string) {
     });
     return;
   }
-  const { marks, question } = parseAnswerArgs(args);
+  const input = args ? checkQuestionInput(args) : null;
+  if (args && !input) {
+    await tg("sendMessage", { chat_id, text: "Send a full question (up to 2,000 characters), optionally starting with its marks (1–50)." });
+    return;
+  }
+  const { marks, question } = input ?? { marks: null, question: "" };
   const ok = await saveCheckSession({
     chat_id,
     step: question ? "answer" : "question",
@@ -928,37 +930,29 @@ async function startCheck(chat_id: number, args: string) {
 async function handleCheckText(session: CheckSession, text: string) {
   const chat_id = session.chat_id;
   if (session.step === "question") {
-    const { marks, question } = parseAnswerArgs(text);
-    await saveCheckSession({ ...session, step: "answer", question: question.slice(0, 2000), marks: marks ?? session.marks });
+    const input = checkQuestionInput(text);
+    if (!input) {
+      await tg("sendMessage", { chat_id, text: "Please send the full question, with marks first if known (e.g. 10 Explain rainwater harvesting).", reply_markup: CHECK_CANCEL });
+      return;
+    }
+    const { marks, question } = input;
+    if (!await saveCheckSession({ ...session, step: "answer", question, marks: marks ?? session.marks })) {
+      await tg("sendMessage", { chat_id, text: "Couldn't save your question. Please send it again." });
+      return;
+    }
     await tg("sendMessage", { chat_id, text: askForAnswer(marks ?? session.marks), reply_markup: CHECK_CANCEL });
     return;
   }
   // A stray "ok" shouldn't use up the question; photos may still be on the way.
-  if (!session.photos?.length && text.split(/\s+/).filter(Boolean).length < CHECK_MIN_WORDS) {
+  if (!validCheckAnswer(text, session.photos?.length ?? 0)) {
     await tg("sendMessage", {
       chat_id,
-      text: "That's too short to check. Send your full answer, or photos of your pages.\nपूरा उत्तर या पन्नों की फ़ोटो भेजें।",
+      text: text.length > 12_000 ? "Please keep your answer under 12,000 characters." : "That's too short to check. Send your full answer, or photos of your pages.\nपूरा उत्तर या पन्नों की फ़ोटो भेजें।",
       reply_markup: CHECK_CANCEL,
     });
     return;
   }
   await runCheck(chat_id, text);
-}
-
-// The largest copy of a photo Claude accepts. Telegram sends a photo in
-// several sizes, smallest first.
-function pickPhoto(message: any): CheckPhoto | null {
-  if (Array.isArray(message.photo)) {
-    const sizes = message.photo.filter((p: any) => !p.file_size || p.file_size <= CHECK_PHOTO_MAX_BYTES);
-    const best = sizes[sizes.length - 1];
-    return best ? { file_id: best.file_id, mime: "image/jpeg" } : null;
-  }
-  const doc = message.document;
-  const mime = doc?.mime_type;
-  if (doc && (mime === "image/jpeg" || mime === "image/png" || mime === "image/webp")) {
-    return !doc.file_size || doc.file_size <= CHECK_PHOTO_MAX_BYTES ? { file_id: doc.file_id, mime } : null;
-  }
-  return null;
 }
 
 async function handleCheckPhoto(message: any) {
@@ -976,13 +970,17 @@ async function handleCheckPhoto(message: any) {
     await tg("sendMessage", { chat_id, text: "Please type the question first, then send the photos of your answer.\nपहले प्रश्न टाइप करें, फिर उत्तर की फ़ोटो भेजें।" });
     return;
   }
-  const photo = pickPhoto(message);
+  const photo = pickCheckPhoto(message);
   if (!photo) {
-    await tg("sendMessage", { chat_id, text: "I can't use this file. Please send the page as a photo (JPG or PNG under 4 MB)." });
+    await tg("sendMessage", { chat_id, text: "I can't use this file. Please send a JPG, PNG or WebP image under 4.5 MB." });
     return;
   }
   const { data, error } = await supabase.rpc("bot_check_add_photo", { p_chat_id: chat_id, p_photo: photo, p_max: CHECK_MAX_PHOTOS });
-  if (error) console.error("check photo", error.message);
+  if (error) {
+    console.error("check photo", error.message);
+    await tg("sendMessage", { chat_id, text: "Couldn't save this page. Please send the photo again." });
+    return;
+  }
   const count = data as number | null;
   if (!count) {
     await tg("sendMessage", {
@@ -1001,13 +999,16 @@ async function handleCheckPhoto(message: any) {
   });
 }
 
-async function telegramImage(photo: CheckPhoto): Promise<SaathiImage> {
+async function telegramImage(photo: CheckPhoto, signal: AbortSignal): Promise<SaathiImage> {
   const r = await tg("getFile", { file_id: photo.file_id });
   const path = r.ok ? (await r.json())?.result?.file_path : null;
   if (!path) throw new Error("telegram getFile failed");
-  const file = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${path}`);
+  if (signal.aborted) throw new Error("Check cancelled");
+  const file = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${path}`, { signal });
   if (!file.ok) throw new Error(`telegram file ${file.status}`);
+  if (Number(file.headers.get("content-length")) > CHECK_PHOTO_MAX_BYTES) throw new Error("Photo is too large");
   const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes.length > CHECK_PHOTO_MAX_BYTES) throw new Error("Photo is too large");
   let bin = "";
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return { media_type: photo.mime, data: btoa(bin) };
@@ -1015,12 +1016,14 @@ async function telegramImage(photo: CheckPhoto): Promise<SaathiImage> {
 
 // Takes the open check (so a double tap runs it once) and marks it in the background.
 async function runCheck(chat_id: number, text: string | null) {
-  const { data } = await supabase.from("bot_check_sessions").delete().eq("chat_id", chat_id).select();
-  const session = ((data ?? []) as CheckSession[])[0];
-  if (!session?.question) return;
-  const photos = session.photos ?? [];
+  const openSession = await getCheckSession(chat_id);
+  if (!openSession?.question) {
+    await tg("sendMessage", { chat_id, text: "This check has expired or is already running. Start a new one with /check." });
+    return;
+  }
+  const photos = openSession.photos ?? [];
   if (!text && !photos.length) {
-    await tg("sendMessage", { chat_id, text: "Send your answer first, then /check again." });
+    await tg("sendMessage", { chat_id, text: askForAnswer(openSession.marks), reply_markup: CHECK_CANCEL });
     return;
   }
   const used = await checksUsedToday(chat_id);
@@ -1028,6 +1031,14 @@ async function runCheck(chat_id: number, text: string | null) {
     await tg("sendMessage", { chat_id, text: `You've used today's ${CHECK_DAILY_LIMIT} answer checks. Come back tomorrow!` });
     return;
   }
+  // Claim only the version we validated; repeated taps cannot launch a second job.
+  const { data, error } = await supabase.from("bot_check_sessions").delete().eq("chat_id", chat_id).eq("updated_at", openSession.updated_at).select();
+  if (error) {
+    await tg("sendMessage", { chat_id, text: "Couldn't start checking. Please try again." });
+    return;
+  }
+  const session = ((data ?? []) as CheckSession[])[0];
+  if (!session?.question) return;
   const hindi = /[ऀ-ॿ]/.test(`${session.question} ${text ?? ""}`);
   await tg("sendMessage", {
     chat_id,
@@ -1061,14 +1072,17 @@ async function deliverCheck(
   used: number,
   signal: AbortSignal,
 ) {
+  const question = session.question;
+  if (!question || signal.aborted) return;
   const stopTyping = keepTyping(chat_id);
   signal.addEventListener("abort", stopTyping, { once: true });
   try {
-    const images = await Promise.all((session.photos ?? []).map(telegramImage));
+    const images = await Promise.all((session.photos ?? []).map((photo) => telegramImage(photo, signal)));
+    if (signal.aborted) return;
     const outcome = await checkAnswer({
       apiKey: LOVABLE_API_KEY,
       rpc: saathiRpc,
-      question: session.question!,
+      question,
       marks: session.marks,
       answer: text ?? undefined,
       images,
@@ -1086,8 +1100,6 @@ async function deliverCheck(
       await tg("sendMessage", { chat_id, text: why });
       return;
     }
-    await supabase.rpc("saathi_consume_rate_limit", { rl_key: checkKey(chat_id), window_seconds: 172_800, max_hits: CHECK_DAILY_LIMIT });
-    await logEvent(chat_id, "check", `${outcome.result.awarded}/${outcome.result.outOf}`);
     if (outcome.transcript) {
       const hi = outcome.result.language === "Hindi";
       await tg("sendMessage", {
@@ -1096,16 +1108,21 @@ async function deliverCheck(
         parse_mode: "HTML",
       });
     }
-    await tg("sendMessage", {
+    if (signal.aborted) return;
+    const delivered = await tg("sendMessage", {
       chat_id,
-      text: checkResultTelegram(outcome.result, {
+      text: clipHtml(checkResultTelegram(outcome.result, {
         left: Math.max(0, CHECK_DAILY_LIMIT - used - 1),
         transcribed: !!outcome.transcript,
-      }),
+      }), 3900),
       parse_mode: "HTML",
     });
+    if (!delivered.ok) throw new Error("Couldn't deliver check feedback");
+    await supabase.rpc("saathi_consume_rate_limit", { rl_key: checkKey(chat_id), window_seconds: 172_800, max_hits: CHECK_DAILY_LIMIT });
+    await logEvent(chat_id, "check", `${outcome.result.awarded}/${outcome.result.outOf}`);
   } finally {
     stopTyping();
+    signal.removeEventListener("abort", stopTyping);
   }
 }
 
@@ -1571,7 +1588,7 @@ async function runCommand(
       await sendDailyMenu(ctx.chat_id);
       return;
     case "check":
-      await startCheck(ctx.chat_id, args);
+      if (!ctx.isGroup) await startCheck(ctx.chat_id, args);
       return;
     case "help":
       await sendHelp(ctx.chat_id, ctx.languageCode, ctx.commands);
@@ -1593,6 +1610,10 @@ async function handleTextLegacy(chat_id: number, user_id: number, text: string, 
     return;
   }
   if (isGroup) return;
+  if (!parsed) {
+    const session = await getCheckSession(chat_id);
+    if (session) return handleCheckText(session, text);
+  }
   if (parsed?.name === "daily") await sendDailyMenu(chat_id);
   else if (parsed?.name === "check") await startCheck(chat_id, parsed.args);
   else if (text.startsWith("/start") || text.startsWith("/study")) await sendMainMenu(chat_id);
@@ -1605,6 +1626,12 @@ async function handleText(message: any) {
   const isGroup = chat_type === "group" || chat_type === "supergroup";
   const user_id: number = message.from?.id ?? chat_id;
   const text: string = message.text.trim();
+
+  if (!isGroup && /^\/cancel(?:@\S+)?$/i.test(text)) {
+    await supabase.from("bot_check_sessions").delete().eq("chat_id", chat_id);
+    await tg("sendMessage", { chat_id, text: "Answer check cancelled. Start again any time: /check" });
+    return;
+  }
 
   const commands = await getCommands();
   if (!commands) return handleTextLegacy(chat_id, user_id, text, isGroup);
