@@ -6,9 +6,9 @@ function equal(actual: unknown, expected: unknown) {
 
 Deno.test("Mains question accepts marks and Hindi text", () => {
   equal(checkQuestionInput("10 राजस्थान में जल संरक्षण की विधियाँ बताइए।"), {
-    marks: 10, question: "राजस्थान में जल संरक्षण की विधियाँ बताइए।",
+    question: "राजस्थान में जल संरक्षण की विधियाँ बताइए।", marks: 10,
   });
-  equal(checkQuestionInput("Explain rainwater harvesting."), { marks: null, question: "Explain rainwater harvesting." });
+  equal(checkQuestionInput("Explain rainwater harvesting."), { question: "Explain rainwater harvesting.", marks: null });
   equal(checkQuestionInput("ok"), null);
   equal(checkQuestionInput("0 Explain rainwater harvesting."), null);
 });
