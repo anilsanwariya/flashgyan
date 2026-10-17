@@ -89,6 +89,17 @@ export const getMagazineSettings = createServerFn({ method: "GET" })
     },
   );
 
+// Sends this week's quality report to the test chat now.
+export const sendCaWeeklyReport = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const origin = new URL(getRequest().url).origin;
+    const { sendWeeklyReport } = await import("@/lib/ca-report.server");
+    return sendWeeklyReport(origin);
+  });
+
 export const saveMagazineSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
@@ -113,6 +124,8 @@ export const saveMagazineSettings = createServerFn({ method: "POST" })
         channel_quiz: z.boolean(),
         channel_quiz_count: z.number().int().min(1).max(10),
         add_to_flashcards: z.boolean(),
+        weekly_report: z.boolean(),
+        min_rajasthan: z.number().int().min(0).max(20),
       })
       .parse(d),
   )

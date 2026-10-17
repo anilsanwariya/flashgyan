@@ -21,6 +21,7 @@ import {
   type FoundLink,
 } from "@/lib/ca-collect";
 import { formatDate, istDate, type UploadSection } from "@/lib/current-affairs";
+import { rajasthanBalance, rajasthanWarningLine } from "@/lib/ca-report";
 import * as CA from "@/lib/current-affairs.server";
 
 const from = (table: string) => supabaseAdmin.from(table as never);
@@ -116,6 +117,12 @@ export type TickResult = { run: string | null; steps: string[]; error?: string }
 
 export async function tick(origin?: string): Promise<TickResult> {
   const settings = await CA.getMagazineSettings();
+  // Sunday's weekly report rides on the same once-a-minute schedule.
+  try {
+    await (await import("@/lib/ca-report.server")).maybeSendWeeklyReport(origin);
+  } catch (e) {
+    console.error("weekly report:", e);
+  }
   if (settings.auto_collect && collectionDue(settings.collect_time)) {
     const today = istDate();
     const { data: existing } = await from("ca_runs")
@@ -261,7 +268,7 @@ async function finishRun(
   if (run.notified || !settings.notify_when_ready || !settings.test_chat_id) return;
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return;
-  const [{ count: stories }, { count: articles }] = await Promise.all([
+  const [{ count: stories }, { count: articles }, { data: dayItems }] = await Promise.all([
     from("ca_items")
       .select("id", { count: "exact", head: true })
       .eq("issue_date", run.issue_date)
@@ -270,14 +277,21 @@ async function finishRun(
       .select("id", { count: "exact", head: true })
       .eq("run_id", run.id)
       .eq("status", "fetched"),
+    from("ca_items").select("category,rajasthan,status").eq("issue_date", run.issue_date),
   ]);
+  const rajasthan = rajasthanWarningLine(
+    rajasthanBalance(
+      (dayItems ?? []) as { category: string; rajasthan: boolean; status: string }[],
+      settings.min_rajasthan,
+    ),
+  );
   const link = origin ? `\n\nReview: ${origin}/admin?section=ca.daily` : "";
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       chat_id: settings.test_chat_id,
-      text: `📰 Current affairs draft for ${formatDate(run.issue_date, "en")} is ready: ${stories ?? 0} stories from ${articles ?? 0} articles. Review and approve it before ${settings.post_time} tomorrow.${link}`,
+      text: `📰 Current affairs draft for ${formatDate(run.issue_date, "en")} is ready: ${stories ?? 0} stories from ${articles ?? 0} articles. Review and approve it before ${settings.post_time} tomorrow.${rajasthan}${link}`,
     }),
   }).catch(() => undefined);
   await from("ca_runs")

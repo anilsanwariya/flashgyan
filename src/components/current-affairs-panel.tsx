@@ -18,6 +18,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
+import { DEFAULT_MIN_RAJASTHAN, rajasthanBalance, type RajasthanBalance } from "@/lib/ca-report";
 import {
   addCaSource,
   buildCaIssue,
@@ -30,6 +31,7 @@ import {
   extractCaSourcePart,
   getCaDay,
   getCaMonth,
+  sendCaWeeklyReport,
   getMagazineSettings,
   mergeCaDuplicates,
   postCaIssueNow,
@@ -344,12 +346,37 @@ type PendingSource = {
   content: string;
 };
 
+// RPSC asks a lot about Rajasthan: flags a day with too few Rajasthan stories.
+function RajasthanWarning({ balance }: { balance: RajasthanBalance }) {
+  if (!balance.short) return null;
+  return (
+    <div className="flex items-start gap-2 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+      <div>
+        <p className="font-medium">
+          Only {balance.rajasthan} Rajasthan {balance.rajasthan === 1 ? "story" : "stories"} of{" "}
+          {balance.included} today (aim for at least {balance.min}).
+        </p>
+        <p className="text-muted-foreground">
+          {balance.droppedRajasthan > 0
+            ? `${balance.droppedRajasthan} Rajasthan ${balance.droppedRajasthan === 1 ? "story" : "stories"} arrived dropped: they are at the bottom of the list below; press “Include” to bring one back. `
+            : ""}
+          For more every day, add Rajasthan sources in Magazine settings → Websites to watch (DIPR
+          district pages, Rajasthan Patrika or Bhaskar city pages) or upload a Sujas summary.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function DailyPanel() {
   const qc = useQueryClient();
   const [date, setDate] = useState(() => istDate());
   const dayFn = useServerFn(getCaDay);
   const dayQ = useQuery({ queryKey: ["caDay", date], queryFn: () => dayFn({ data: { date } }) });
   const day = dayQ.data;
+  const daySettingsFn = useServerFn(getMagazineSettings);
+  const daySettingsQ = useQuery({ queryKey: ["caSettings"], queryFn: () => daySettingsFn() });
   const refresh = () => qc.invalidateQueries({ queryKey: ["caDay"] });
 
   const addFn = useServerFn(addCaSource);
@@ -642,6 +669,12 @@ function DailyPanel() {
         </div>
       ) : (
         <>
+          <RajasthanWarning
+            balance={rajasthanBalance(
+              items,
+              daySettingsQ.data?.min_rajasthan ?? DEFAULT_MIN_RAJASTHAN,
+            )}
+          />
           {items.length > 1 && (
             <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3">
               <Button size="sm" variant="outline" disabled={!!work} onClick={mergeDuplicates}>
@@ -998,6 +1031,20 @@ function AiServicesBox() {
 function SettingsPanel() {
   const qc = useQueryClient();
   const getFn = useServerFn(getMagazineSettings);
+  const reportFn = useServerFn(sendCaWeeklyReport);
+  const [reporting, setReporting] = useState(false);
+  async function sendReport() {
+    setReporting(true);
+    try {
+      const r = await reportFn();
+      if (r.sent) toast.success("Weekly report sent to your test chat");
+      else toast.error("Set your chat id for tests (and TELEGRAM_BOT_TOKEN) first");
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't send the report"));
+    } finally {
+      setReporting(false);
+    }
+  }
   const saveFn = useServerFn(saveMagazineSettings);
   const logoFn = useServerFn(uploadMagazineLogo);
   const q = useQuery({ queryKey: ["caSettings"], queryFn: () => getFn() });
@@ -1012,6 +1059,7 @@ function SettingsPanel() {
         daily_stories: String(q.data.daily_stories),
         daily_editorials: String(q.data.daily_editorials),
         channel_quiz_count: String(q.data.channel_quiz_count),
+        min_rajasthan: String(q.data.min_rajasthan),
       });
     }
   }, [q.data, form]);
@@ -1037,6 +1085,11 @@ function SettingsPanel() {
           test_chat_id: text("test_chat_id"),
           add_to_knowledge_base: Boolean(form!.add_to_knowledge_base),
           add_to_flashcards: Boolean(form!.add_to_flashcards),
+          weekly_report: Boolean(form!.weekly_report),
+          min_rajasthan: Math.min(
+            20,
+            Math.max(0, Math.round(Number(text("min_rajasthan") || "5") || 0)),
+          ),
           channel_quiz: Boolean(form!.channel_quiz),
           channel_quiz_count: Math.min(
             10,
@@ -1207,12 +1260,18 @@ function SettingsPanel() {
 
       <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
         <h3 className="font-semibold">SAATHI and PDF</h3>
-        <div className="sm:max-w-md">
+        <div className="grid gap-3 sm:grid-cols-2">
           {field(
             "daily_stories",
             "Stories per day",
             "15",
             "Must-know stories always go in, and Rajasthan stories up to twice this number. Others beyond it, and unlikely ones, arrive already dropped; you can bring any back.",
+          )}
+          {field(
+            "min_rajasthan",
+            "Minimum Rajasthan stories",
+            "5",
+            "RPSC asks a lot about Rajasthan. A day with fewer is flagged on its page and in the “draft ready” message. 0 turns the warning off.",
           )}
         </div>
         <label className="flex items-start gap-3">
@@ -1359,6 +1418,32 @@ function SettingsPanel() {
             </span>
           </span>
         </label>
+        <label className="flex items-start gap-3">
+          <Switch
+            checked={Boolean(form.weekly_report)}
+            onCheckedChange={(v) => set("weekly_report", v)}
+          />
+          <span className="text-sm">
+            <span className="font-medium">Send me a weekly report on Telegram</span>
+            <span className="block text-muted-foreground">
+              Every Sunday from 9 AM, to your chat id for tests: issues posted, stories kept and
+              dropped, Rajasthan share, facts not found in their source, stories without a book
+              background (and the books needed), SAATHI's 👍/👎 and unanswered questions, and the
+              daily quiz's students and streaks.
+            </span>
+          </span>
+        </label>
+        <div className="pl-12">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={reporting}
+            onClick={sendReport}
+          >
+            {reporting ? "Sending…" : "Send this week's report now"}
+          </Button>
+        </div>
         <WatchSitesSettings />
       </section>
 
