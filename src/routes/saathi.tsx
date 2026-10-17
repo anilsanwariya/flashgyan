@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   Check,
   ChevronDown,
+  ClipboardCheck,
   Copy,
   FileText,
   GraduationCap,
@@ -38,6 +39,7 @@ import type {
 } from "../../supabase/functions/_shared/saathi-core.ts";
 import { sourceLabel } from "../../supabase/functions/_shared/saathi-source.ts";
 import { Textarea } from "@/components/ui/textarea";
+import { SaathiCheckPanel } from "@/components/saathi-check-panel";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -69,7 +71,7 @@ type Msg = {
 };
 
 type MainsMeta = NonNullable<Extract<SaathiStreamEvent, { type: "done" }>["mains"]>;
-type AskMode = "chat" | "mains";
+type AskMode = "chat" | "mains" | "check";
 
 const DIRECTIVE_NAMES: Record<string, string> = {
   define: "Define",
@@ -191,6 +193,7 @@ function SaathiChat() {
   }, [formats, mode.marks]);
 
   const writing = mode.mode === "mains";
+  const checking = mode.mode === "check";
 
   useEffect(() => {
     if (sending) return;
@@ -403,7 +406,9 @@ function SaathiChat() {
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto relative z-10">
         <div className="max-w-3xl lg:max-w-4xl mx-auto px-5 py-6 space-y-5">
-          {locked ? (
+          {checking && !locked ? (
+            <SaathiCheckPanel marks={mode.marks} locked={locked} />
+          ) : locked ? (
             <div className="text-center py-16">
               <div className="mx-auto h-16 w-16 rounded-[24px] grad-lavender grid place-items-center mb-4">
                 <Lock className="h-7 w-7 text-foreground" />
@@ -445,15 +450,16 @@ function SaathiChat() {
             )
           )}
 
-          {messages.map((m) => (
-            <MessageBubble
-              key={m.id}
-              msg={m}
-              busy={sending}
-              onPatch={(patch) => patchMessage(m.id, patch)}
-              onAsk={(q) => send(q)}
-            />
-          ))}
+          {!checking &&
+            messages.map((m) => (
+              <MessageBubble
+                key={m.id}
+                msg={m}
+                busy={sending}
+                onPatch={(patch) => patchMessage(m.id, patch)}
+                onAsk={(q) => send(q)}
+              />
+            ))}
         </div>
       </div>
 
@@ -463,10 +469,12 @@ function SaathiChat() {
       >
         <div className="max-w-3xl lg:max-w-4xl mx-auto px-5 pt-3 pb-3 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <SubjectMultiSelect options={subjects} selected={selected} onChange={setSelected} />
+            {!checking && (
+              <SubjectMultiSelect options={subjects} selected={selected} onChange={setSelected} />
+            )}
             <ModePicker mode={mode} formats={formats} disabled={sending} onChange={setMode} />
           </div>
-          <div className="flex items-end gap-2">
+          <div className={checking ? "hidden" : "flex items-end gap-2"}>
             <Textarea
               ref={inputRef}
               value={input}
@@ -506,6 +514,12 @@ function SaathiChat() {
   );
 }
 
+// Marks offered for checking before the admin has set answer formats.
+const DEFAULT_FORMATS = [
+  { marks: 5, word_limit: 50 },
+  { marks: 10, word_limit: 150 },
+];
+
 function ModePicker({
   mode,
   formats,
@@ -544,13 +558,23 @@ function ModePicker({
       >
         <FileText className="h-3.5 w-3.5" /> Mains answer
       </button>
-      {mode.mode === "mains" &&
-        formats.map((f) => (
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange({ ...mode, mode: "check" })}
+        className={pill(mode.mode === "check")}
+        aria-pressed={mode.mode === "check"}
+        title="SAATHI checks your Mains answer, typed or handwritten"
+      >
+        <ClipboardCheck className="h-3.5 w-3.5" /> Check my answer
+      </button>
+      {mode.mode !== "chat" &&
+        (formats.length ? formats : DEFAULT_FORMATS).map((f) => (
           <button
             key={f.marks}
             type="button"
             disabled={disabled}
-            onClick={() => onChange({ mode: "mains", marks: f.marks })}
+            onClick={() => onChange({ mode: mode.mode, marks: f.marks })}
             className={pill(mode.marks === f.marks)}
             aria-pressed={mode.marks === f.marks}
             title={`${f.word_limit} words`}

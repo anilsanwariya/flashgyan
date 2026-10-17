@@ -125,7 +125,7 @@ export type BotCommandRow = {
   description_en: string;
   description_hi: string;
   action: "builtin" | "message";
-  builtin: "study" | "flashcards" | "mcq" | "ask" | "answer" | "daily" | "help" | null;
+  builtin: "study" | "flashcards" | "mcq" | "ask" | "answer" | "daily" | "check" | "help" | null;
   response_text: string;
   media_url: string | null;
   media_type: "photo" | "document" | null;
@@ -164,7 +164,9 @@ export const saveBotCommand = createServerFn({ method: "POST" })
         description_en: z.string().trim().max(256).default(""),
         description_hi: z.string().trim().max(256).default(""),
         action: z.enum(["builtin", "message"]),
-        builtin: z.enum(["study", "flashcards", "mcq", "ask", "answer", "daily", "help"]).nullish(),
+        builtin: z
+          .enum(["study", "flashcards", "mcq", "ask", "answer", "daily", "check", "help"])
+          .nullish(),
         ...messageSchema,
         show_in_menu: z.boolean(),
         scope: z.enum(["private", "all"]),

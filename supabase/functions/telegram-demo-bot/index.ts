@@ -27,6 +27,15 @@ import {
   type MainsInfo,
 } from "../_shared/saathi-mains.ts";
 import {
+  CHECK_DAILY_LIMIT,
+  CHECK_MAX_PHOTOS,
+  CHECK_MIN_WORDS,
+  checkAnswer,
+  checkCounterKey,
+  checkResultTelegram,
+} from "../_shared/saathi-check.ts";
+import type { SaathiImage } from "../_shared/saathi-core.ts";
+import {
   DAILY_QUIZ_DEFAULT_HOUR,
   DAILY_QUIZ_HOURS,
   DAILY_QUIZ_SIZE,
@@ -118,7 +127,7 @@ type BotCommand = {
   description_en: string;
   description_hi: string;
   action: "builtin" | "message";
-  builtin: "study" | "flashcards" | "mcq" | "ask" | "answer" | "daily" | "help" | null;
+  builtin: "study" | "flashcards" | "mcq" | "ask" | "answer" | "daily" | "check" | "help" | null;
   response_text: string;
   media_url: string | null;
   media_type: "photo" | "document" | null;
@@ -829,6 +838,277 @@ async function queueMainsAnswer(chat_id: number, user_id: number, args: string) 
   }));
 }
 
+// ---------- Mains answer checking (/check) ----------
+// The student sends the question, then the answer typed or as photos of the
+// handwritten pages. Marking runs in the background like /answer; a check
+// counts towards the daily allowance only when it succeeds.
+type CheckPhoto = { file_id: string; mime: SaathiImage["media_type"] };
+type CheckSession = {
+  chat_id: number;
+  step: "question" | "answer";
+  question: string | null;
+  marks: number | null;
+  photos: CheckPhoto[];
+  updated_at: string;
+};
+// A check left half-done for longer than this starts over.
+const CHECK_SESSION_MINUTES = 60;
+// Claude reads images up to 5 MB.
+const CHECK_PHOTO_MAX_BYTES = 4_500_000;
+const CHECK_CANCEL = { inline_keyboard: [[{ text: "✖️ Cancel", callback_data: "check_cancel" }]] };
+
+const checkKey = (chat_id: number) => checkCounterKey(`tg:${chat_id}`);
+
+async function checksUsedToday(chat_id: number): Promise<number> {
+  const { data } = await supabase.from("saathi_rate_limits").select("hits").eq("key", checkKey(chat_id)).maybeSingle();
+  return (data as { hits?: number } | null)?.hits ?? 0;
+}
+
+async function getCheckSession(chat_id: number): Promise<CheckSession | null> {
+  const { data, error } = await supabase.from("bot_check_sessions").select("*").eq("chat_id", chat_id).maybeSingle();
+  if (error && !isMissingTable(error)) console.error("check session", error.message);
+  const row = data as CheckSession | null;
+  if (!row) return null;
+  if (Date.now() - Date.parse(row.updated_at) > CHECK_SESSION_MINUTES * 60_000) {
+    await supabase.from("bot_check_sessions").delete().eq("chat_id", chat_id);
+    return null;
+  }
+  return row;
+}
+
+async function saveCheckSession(row: Omit<CheckSession, "updated_at">) {
+  const { error } = await supabase
+    .from("bot_check_sessions")
+    .upsert({ ...row, updated_at: new Date().toISOString() }, { onConflict: "chat_id" });
+  if (error) console.error("check session save", error.message);
+  return !error;
+}
+
+const askForAnswer = (marks: number | null) =>
+  `✍️ Now send your answer${marks ? ` (${marks} marks)` : ""}:\n` +
+  `• type it here, or\n• send clear photos of your handwritten pages (up to ${CHECK_MAX_PHOTOS}), then tap ✅ Check.\n\n` +
+  `अब अपना उत्तर भेजें: टाइप करें या हस्तलिखित पन्नों की फ़ोटो (अधिकतम ${CHECK_MAX_PHOTOS}) भेजें।`;
+
+async function startCheck(chat_id: number, args: string) {
+  if (!LOVABLE_API_KEY) {
+    await tg("sendMessage", { chat_id, text: "SAATHI is not configured." });
+    return;
+  }
+  if ((await checksUsedToday(chat_id)) >= CHECK_DAILY_LIMIT) {
+    await tg("sendMessage", {
+      chat_id,
+      text: `You've used today's ${CHECK_DAILY_LIMIT} answer checks. Come back tomorrow!\nआज की ${CHECK_DAILY_LIMIT} जाँच पूरी हो गईं। कल फिर आइए!`,
+    });
+    return;
+  }
+  const { marks, question } = parseAnswerArgs(args);
+  const ok = await saveCheckSession({
+    chat_id,
+    step: question ? "answer" : "question",
+    question: question || null,
+    marks,
+    photos: [],
+  });
+  if (!ok) {
+    await tg("sendMessage", { chat_id, text: "Answer checking isn't available yet. Please try again later." });
+    return;
+  }
+  await logEvent(chat_id, "check", "start");
+  await tg("sendMessage", {
+    chat_id,
+    text: question
+      ? askForAnswer(marks)
+      : "📝 Send the question you answered. Put the marks first, e.g.:\n10 राजस्थान में जल संरक्षण की पारंपरिक विधियों की विवेचना कीजिए।\n\n" +
+        "वह प्रश्न भेजें जिसका उत्तर आपने लिखा है (शुरू में अंक: 5 या 10)।",
+    reply_markup: CHECK_CANCEL,
+  });
+}
+
+// Text while a check is open: the question, then a typed answer.
+async function handleCheckText(session: CheckSession, text: string) {
+  const chat_id = session.chat_id;
+  if (session.step === "question") {
+    const { marks, question } = parseAnswerArgs(text);
+    await saveCheckSession({ ...session, step: "answer", question: question.slice(0, 2000), marks: marks ?? session.marks });
+    await tg("sendMessage", { chat_id, text: askForAnswer(marks ?? session.marks), reply_markup: CHECK_CANCEL });
+    return;
+  }
+  // A stray "ok" shouldn't use up the question; photos may still be on the way.
+  if (!session.photos?.length && text.split(/\s+/).filter(Boolean).length < CHECK_MIN_WORDS) {
+    await tg("sendMessage", {
+      chat_id,
+      text: "That's too short to check. Send your full answer, or photos of your pages.\nपूरा उत्तर या पन्नों की फ़ोटो भेजें।",
+      reply_markup: CHECK_CANCEL,
+    });
+    return;
+  }
+  await runCheck(chat_id, text);
+}
+
+// The largest copy of a photo Claude accepts. Telegram sends a photo in
+// several sizes, smallest first.
+function pickPhoto(message: any): CheckPhoto | null {
+  if (Array.isArray(message.photo)) {
+    const sizes = message.photo.filter((p: any) => !p.file_size || p.file_size <= CHECK_PHOTO_MAX_BYTES);
+    const best = sizes[sizes.length - 1];
+    return best ? { file_id: best.file_id, mime: "image/jpeg" } : null;
+  }
+  const doc = message.document;
+  const mime = doc?.mime_type;
+  if (doc && (mime === "image/jpeg" || mime === "image/png" || mime === "image/webp")) {
+    return !doc.file_size || doc.file_size <= CHECK_PHOTO_MAX_BYTES ? { file_id: doc.file_id, mime } : null;
+  }
+  return null;
+}
+
+async function handleCheckPhoto(message: any) {
+  const chat_id: number = message.chat.id;
+  if (message.chat.type !== "private") return;
+  const session = await getCheckSession(chat_id);
+  if (!session) {
+    await tg("sendMessage", {
+      chat_id,
+      text: "To get your handwritten answer checked, send /check first.\nहस्तलिखित उत्तर जँचवाने के लिए पहले /check भेजें।",
+    });
+    return;
+  }
+  if (session.step === "question") {
+    await tg("sendMessage", { chat_id, text: "Please type the question first, then send the photos of your answer.\nपहले प्रश्न टाइप करें, फिर उत्तर की फ़ोटो भेजें।" });
+    return;
+  }
+  const photo = pickPhoto(message);
+  if (!photo) {
+    await tg("sendMessage", { chat_id, text: "I can't use this file. Please send the page as a photo (JPG or PNG under 4 MB)." });
+    return;
+  }
+  const { data, error } = await supabase.rpc("bot_check_add_photo", { p_chat_id: chat_id, p_photo: photo, p_max: CHECK_MAX_PHOTOS });
+  if (error) console.error("check photo", error.message);
+  const count = data as number | null;
+  if (!count) {
+    await tg("sendMessage", {
+      chat_id,
+      text: `You can send up to ${CHECK_MAX_PHOTOS} pages. Tap ✅ Check to check them.`,
+      reply_markup: { inline_keyboard: [[{ text: "✅ Check", callback_data: "check_go" }]] },
+    });
+    return;
+  }
+  await tg("sendMessage", {
+    chat_id,
+    text: count < CHECK_MAX_PHOTOS
+      ? `📄 Page ${count} received. Send the next page, or tap ✅ Check.\nपेज ${count} मिला। अगला पेज भेजें या ✅ Check दबाएँ।`
+      : `📄 Page ${count} received. Tap ✅ Check.\nपेज ${count} मिला। ✅ Check दबाएँ।`,
+    reply_markup: { inline_keyboard: [[{ text: "✅ Check", callback_data: "check_go" }, { text: "✖️ Cancel", callback_data: "check_cancel" }]] },
+  });
+}
+
+async function telegramImage(photo: CheckPhoto): Promise<SaathiImage> {
+  const r = await tg("getFile", { file_id: photo.file_id });
+  const path = r.ok ? (await r.json())?.result?.file_path : null;
+  if (!path) throw new Error("telegram getFile failed");
+  const file = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${path}`);
+  if (!file.ok) throw new Error(`telegram file ${file.status}`);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return { media_type: photo.mime, data: btoa(bin) };
+}
+
+// Takes the open check (so a double tap runs it once) and marks it in the background.
+async function runCheck(chat_id: number, text: string | null) {
+  const { data } = await supabase.from("bot_check_sessions").delete().eq("chat_id", chat_id).select();
+  const session = ((data ?? []) as CheckSession[])[0];
+  if (!session?.question) return;
+  const photos = session.photos ?? [];
+  if (!text && !photos.length) {
+    await tg("sendMessage", { chat_id, text: "Send your answer first, then /check again." });
+    return;
+  }
+  const used = await checksUsedToday(chat_id);
+  if (used >= CHECK_DAILY_LIMIT) {
+    await tg("sendMessage", { chat_id, text: `You've used today's ${CHECK_DAILY_LIMIT} answer checks. Come back tomorrow!` });
+    return;
+  }
+  const hindi = /[ऀ-ॿ]/.test(`${session.question} ${text ?? ""}`);
+  await tg("sendMessage", {
+    chat_id,
+    text: photos.length
+      ? hindi
+        ? "🧐 आपकी लिखावट पढ़कर उत्तर जाँच रहा हूँ… लगभग एक मिनट लगेगा।"
+        : "🧐 Reading your handwriting and checking your answer… this takes about a minute."
+      : hindi
+        ? "🧐 आपका उत्तर जाँच रहा हूँ…"
+        : "🧐 Checking your answer…",
+  });
+  continueInBackground(runTelegramAnswerJob({
+    timeoutMs: 120_000,
+    process: (signal) => deliverCheck(chat_id, session, text, used, signal),
+    onFailure: async (timedOut) => {
+      console.error("telegram check job", timedOut ? "deadline exceeded" : "failed");
+      await tg("sendMessage", {
+        chat_id,
+        text: timedOut
+          ? "Checking took too long. It didn't count towards today's checks; please try /check again."
+          : "SAATHI couldn't check your answer. It didn't count towards today's checks; please try /check again.",
+      });
+    },
+  }));
+}
+
+async function deliverCheck(
+  chat_id: number,
+  session: CheckSession,
+  text: string | null,
+  used: number,
+  signal: AbortSignal,
+) {
+  const stopTyping = keepTyping(chat_id);
+  signal.addEventListener("abort", stopTyping, { once: true });
+  try {
+    const images = await Promise.all((session.photos ?? []).map(telegramImage));
+    const outcome = await checkAnswer({
+      apiKey: LOVABLE_API_KEY,
+      rpc: saathiRpc,
+      question: session.question!,
+      marks: session.marks,
+      answer: text ?? undefined,
+      images,
+      signal,
+    });
+    if (signal.aborted) return;
+    if (!outcome.ok) {
+      await logEvent(chat_id, "check", outcome.reason);
+      const why = {
+        unreadable:
+          "I couldn't read the photos. Please send clear, well-lit photos of each page (one page per photo, taken from above), then /check again.\nफ़ोटो पढ़ी नहीं जा सकीं। हर पेज की साफ़ फ़ोटो भेजें।",
+        too_short: "Your answer is too short to check. Write at least a few sentences, then /check again.\nउत्तर जाँचने के लिए बहुत छोटा है।",
+        failed: "SAATHI couldn't check your answer this time. It didn't count; please try /check again.",
+      }[outcome.reason];
+      await tg("sendMessage", { chat_id, text: why });
+      return;
+    }
+    await supabase.rpc("saathi_consume_rate_limit", { rl_key: checkKey(chat_id), window_seconds: 172_800, max_hits: CHECK_DAILY_LIMIT });
+    await logEvent(chat_id, "check", `${outcome.result.awarded}/${outcome.result.outOf}`);
+    if (outcome.transcript) {
+      const hi = outcome.result.language === "Hindi";
+      await tg("sendMessage", {
+        chat_id,
+        text: `📄 <b>${hi ? "आपके पन्नों से पढ़ा गया उत्तर" : "What I read from your pages"}</b>\n<blockquote expandable>${esc(truncate(outcome.transcript, 3500))}</blockquote>`,
+        parse_mode: "HTML",
+      });
+    }
+    await tg("sendMessage", {
+      chat_id,
+      text: checkResultTelegram(outcome.result, {
+        left: Math.max(0, CHECK_DAILY_LIMIT - used - 1),
+        transcribed: !!outcome.transcript,
+      }),
+      parse_mode: "HTML",
+    });
+  } finally {
+    stopTyping();
+  }
+}
+
 // ---------- Current affairs magazine ----------
 // Posts approved magazine issues (PDF) to the channel when they are due.
 // Runs with every broadcast tick.
@@ -1290,6 +1570,9 @@ async function runCommand(
     case "daily":
       await sendDailyMenu(ctx.chat_id);
       return;
+    case "check":
+      await startCheck(ctx.chat_id, args);
+      return;
     case "help":
       await sendHelp(ctx.chat_id, ctx.languageCode, ctx.commands);
       return;
@@ -1311,6 +1594,7 @@ async function handleTextLegacy(chat_id: number, user_id: number, text: string, 
   }
   if (isGroup) return;
   if (parsed?.name === "daily") await sendDailyMenu(chat_id);
+  else if (parsed?.name === "check") await startCheck(chat_id, parsed.args);
   else if (text.startsWith("/start") || text.startsWith("/study")) await sendMainMenu(chat_id);
   else await tg("sendMessage", { chat_id, text: DEFAULT_SETTINGS.fallback_text });
 }
@@ -1347,6 +1631,11 @@ async function handleText(message: any) {
   }
 
   if (isGroup) return;
+  const check = await getCheckSession(chat_id);
+  if (check) {
+    await handleCheckText(check, text);
+    return;
+  }
   const reply = findAutoReply(await getAutoReplies(), text);
   if (reply) {
     await logEvent(chat_id, "auto_reply", reply.keywords[0] ?? null);
@@ -1418,6 +1707,9 @@ Deno.serve(async (req) => {
     } else if (update.message?.text) {
       await trackUser(update.message.from, update.message.chat.id);
       await handleText(update.message);
+    } else if (update.message?.photo || update.message?.document) {
+      await trackUser(update.message.from, update.message.chat.id);
+      await handleCheckPhoto(update.message);
     } else if (update.callback_query) {
       const cq = update.callback_query;
       const chat_id = cq.message.chat.id;
@@ -1426,7 +1718,12 @@ Deno.serve(async (req) => {
       await trackUser(cq.from, chat_id);
       await tg("answerCallbackQuery", { callback_query_id: cq.id });
 
-      if (data === "daily_menu") {
+      if (data === "check_go") {
+        await runCheck(chat_id, null);
+      } else if (data === "check_cancel") {
+        await supabase.from("bot_check_sessions").delete().eq("chat_id", chat_id);
+        await tg("sendMessage", { chat_id, text: "Answer check cancelled. Start again any time: /check" });
+      } else if (data === "daily_menu") {
         await sendDailyMenu(chat_id);
       } else if (data.startsWith("daily_on_")) {
         const h = parseInt(data.slice(9), 10);

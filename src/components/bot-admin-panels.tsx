@@ -335,6 +335,7 @@ const BUILTINS: Record<NonNullable<BotCommandRow["builtin"]>, string> = {
   ask: "Ask SAATHI (text after the command)",
   answer: "SAATHI writes a Mains answer (marks, then the question)",
   daily: "Daily current affairs quiz: pick a time, see the streak, take today's quiz",
+  check: "SAATHI checks a Mains answer: question, then typed text or handwritten photos (3 a day)",
   help: "List all commands",
 };
 
