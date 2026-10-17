@@ -119,6 +119,33 @@ export type Database = {
         }
         Relationships: []
       }
+      bot_check_sessions: {
+        Row: {
+          chat_id: number
+          marks: number | null
+          photos: Json
+          question: string | null
+          step: string
+          updated_at: string
+        }
+        Insert: {
+          chat_id: number
+          marks?: number | null
+          photos?: Json
+          question?: string | null
+          step: string
+          updated_at?: string
+        }
+        Update: {
+          chat_id?: number
+          marks?: number | null
+          photos?: Json
+          question?: string | null
+          step?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       bot_commands: {
         Row: {
           action: string
@@ -1740,6 +1767,10 @@ export type Database = {
     }
     Functions: {
       bot_auto_reply_hit: { Args: { reply_id: string }; Returns: undefined }
+      bot_check_add_photo: {
+        Args: { p_chat_id: number; p_max: number; p_photo: Json }
+        Returns: number
+      }
       bot_claim_broadcast: {
         Args: { lock_seconds?: number }
         Returns: {
