@@ -30,7 +30,6 @@ import {
 import {
   CHECK_DAILY_LIMIT,
   CHECK_MAX_PHOTOS,
-  CHECK_MIN_WORDS,
   checkAnswer,
   checkCounterKey,
   checkResultTelegram,

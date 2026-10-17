@@ -4,6 +4,6 @@
 - [x] Test the command flow and deploy the existing bot.
 
 # Telegram /check
-- [ ] Validate question, text, and photo submissions; preserve sessions on invalid input.
-- [ ] Verify text/photo feedback, cancellation, and background delivery.
+- [x] Validate question, text, and photo submissions; preserve sessions on invalid input.
+- [x] Verify text/photo feedback, cancellation, and background delivery.
 - [ ] Deploy and check the live bot.
