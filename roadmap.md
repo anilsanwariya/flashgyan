@@ -6,4 +6,4 @@
 # Telegram /check
 - [x] Validate question, text, and photo submissions; preserve sessions on invalid input.
 - [x] Verify text/photo feedback, cancellation, and background delivery.
-- [ ] Deploy and check the live bot.
+- [x] Deploy and check the live bot.
