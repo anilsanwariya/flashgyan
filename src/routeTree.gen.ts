@@ -28,6 +28,7 @@ import { Route as PracticeMcqTestIdRouteImport } from './routes/practice-mcq.$te
 import { Route as PracticeDeckIdRouteImport } from './routes/practice.$deckId'
 import { Route as ApiCaTickRouteImport } from './routes/api.ca.tick'
 import { Route as ApiSaathiAskRouteImport } from './routes/api.saathi.ask'
+import { Route as ApiSaathiCheckRouteImport } from './routes/api.saathi.check'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -123,6 +124,11 @@ const ApiSaathiAskRoute = ApiSaathiAskRouteImport.update({
   path: '/api/saathi/ask',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSaathiCheckRoute = ApiSaathiCheckRouteImport.update({
+  id: '/api/saathi/check',
+  path: '/api/saathi/check',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -143,6 +149,7 @@ export interface FileRoutesByFullPath {
   '/practice/$deckId': typeof PracticeDeckIdRoute
   '/api/ca/tick': typeof ApiCaTickRoute
   '/api/saathi/ask': typeof ApiSaathiAskRoute
+  '/api/saathi/check': typeof ApiSaathiCheckRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -163,6 +170,7 @@ export interface FileRoutesByTo {
   '/practice/$deckId': typeof PracticeDeckIdRoute
   '/api/ca/tick': typeof ApiCaTickRoute
   '/api/saathi/ask': typeof ApiSaathiAskRoute
+  '/api/saathi/check': typeof ApiSaathiCheckRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -185,6 +193,7 @@ export interface FileRoutesById {
   '/practice/$deckId': typeof PracticeDeckIdRoute
   '/api/ca/tick': typeof ApiCaTickRoute
   '/api/saathi/ask': typeof ApiSaathiAskRoute
+  '/api/saathi/check': typeof ApiSaathiCheckRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -207,6 +216,7 @@ export interface FileRouteTypes {
     | '/practice/$deckId'
     | '/api/ca/tick'
     | '/api/saathi/ask'
+    | '/api/saathi/check'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -227,6 +237,7 @@ export interface FileRouteTypes {
     | '/practice/$deckId'
     | '/api/ca/tick'
     | '/api/saathi/ask'
+    | '/api/saathi/check'
   id:
     | '__root__'
     | '/'
@@ -248,6 +259,7 @@ export interface FileRouteTypes {
     | '/practice/$deckId'
     | '/api/ca/tick'
     | '/api/saathi/ask'
+    | '/api/saathi/check'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -269,6 +281,7 @@ export interface RootRouteChildren {
   PracticeDeckIdRoute: typeof PracticeDeckIdRoute
   ApiCaTickRoute: typeof ApiCaTickRoute
   ApiSaathiAskRoute: typeof ApiSaathiAskRoute
+  ApiSaathiCheckRoute: typeof ApiSaathiCheckRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -406,6 +419,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSaathiAskRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/saathi/check': {
+      id: '/api/saathi/check'
+      path: '/api/saathi/check'
+      fullPath: '/api/saathi/check'
+      preLoaderRoute: typeof ApiSaathiCheckRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -439,6 +459,7 @@ const rootRouteChildren: RootRouteChildren = {
   PracticeDeckIdRoute: PracticeDeckIdRoute,
   ApiCaTickRoute: ApiCaTickRoute,
   ApiSaathiAskRoute: ApiSaathiAskRoute,
+  ApiSaathiCheckRoute: ApiSaathiCheckRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

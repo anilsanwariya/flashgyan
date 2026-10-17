@@ -237,7 +237,27 @@ function toAnthropic(messages: ChatMessage[]) {
   return { system: system || undefined, messages: turns };
 }
 
-function anthropicRequest(messages: ChatMessage[], signal?: AbortSignal) {
+// A photo sent with a message (e.g. a page of a handwritten answer): base64 data,
+// ideally under about 1,600 pixels on the long side (5 MB at most).
+export type SaathiImage = {
+  media_type: "image/jpeg" | "image/png" | "image/webp" | "image/gif";
+  data: string;
+};
+
+function anthropicRequest(messages: ChatMessage[], signal?: AbortSignal, images?: SaathiImage[]) {
+  const body = toAnthropic(messages);
+  // Photos go first in the last user turn, before its text.
+  const turns: { role: "user" | "assistant"; content: unknown }[] = body.messages;
+  if (images?.length) {
+    const last = turns[turns.length - 1];
+    last.content = [
+      ...images.map((img) => ({
+        type: "image",
+        source: { type: "base64", media_type: img.media_type, data: img.data },
+      })),
+      { type: "text", text: last.content as string },
+    ];
+  }
   return fetch(ANTHROPIC_URL, {
     method: "POST",
     headers: {
@@ -249,14 +269,20 @@ function anthropicRequest(messages: ChatMessage[], signal?: AbortSignal) {
       model: SAATHI_CHAT_MODEL,
       max_tokens: ANTHROPIC_MAX_TOKENS,
       stream: true,
-      ...toAnthropic(messages),
+      system: body.system,
+      messages: turns,
     }),
     signal,
   });
 }
 
-export async function saathiComplete(_apiKey: string, messages: ChatMessage[]): Promise<string> {
-  const res = await anthropicRequest(messages);
+export async function saathiComplete(
+  _apiKey: string,
+  messages: ChatMessage[],
+  signal?: AbortSignal,
+  images?: SaathiImage[],
+): Promise<string> {
+  const res = await anthropicRequest(messages, signal, images);
   if (!res.ok || !res.body) throw gatewayError(res.status, await res.text(), "Anthropic (Claude)");
   let out = "";
   for await (const d of readSseDeltas(res.body)) out += d;

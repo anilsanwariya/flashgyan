@@ -1,5 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import { createHmac } from "crypto";
 
 export type TelegramProfile = {
   id: string;
@@ -10,29 +9,6 @@ export type TelegramProfile = {
   photo_url: string | null;
   language_code: string | null;
 };
-
-function verifyInitData(initData: string, botToken: string): Record<string, string> | null {
-  const params = new URLSearchParams(initData);
-  const hash = params.get("hash");
-  if (!hash) return null;
-  params.delete("hash");
-
-  const dataCheckString = Array.from(params.entries())
-    .map(([k, v]) => [k, v] as const)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([k, v]) => `${k}=${v}`)
-    .join("\n");
-
-  const secretKey = createHmac("sha256", "WebAppData").update(botToken).digest();
-  const computed = createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
-  if (computed !== hash) return null;
-
-  // Optional freshness check (24h)
-  const authDate = Number(params.get("auth_date") ?? 0);
-  if (!authDate || Date.now() / 1000 - authDate > 86400) return null;
-
-  return Object.fromEntries(params.entries());
-}
 
 export const verifyTelegram = createServerFn({ method: "POST" })
   .inputValidator((data: { initData: string }) => {
@@ -45,6 +21,7 @@ export const verifyTelegram = createServerFn({ method: "POST" })
     const token = process.env.TELEGRAM_BOT_TOKEN;
     if (!token) throw new Error("TELEGRAM_BOT_TOKEN not configured");
 
+    const { verifyInitData } = await import("@/lib/telegram-init-data.server");
     const verified = verifyInitData(data.initData, token);
     if (!verified) throw new Error("Invalid Telegram signature");
 
