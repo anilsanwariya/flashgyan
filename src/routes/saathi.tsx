@@ -141,11 +141,6 @@ function historyFrom(messages: Msg[]) {
   return turns.slice(-HISTORY_TURNS);
 }
 
-function pickStarters(topics: SaathiTopic[], selected: string[]): string[] {
-  const pool = topics.filter((t) => selected.length === 0 || selected.includes(t.subject));
-  const shuffled = [...pool].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, 4).map((t) => `Explain the key points of "${t.title}"`);
-}
 
 function SaathiChat() {
   const topicsFn = useServerFn(listSaathiTopics);
@@ -235,10 +230,6 @@ function SaathiChat() {
     el.scrollTo({ top: el.scrollHeight, behavior: sending ? "auto" : "smooth" });
   }, [messages, sending]);
 
-  const starters = useMemo(
-    () => pickStarters(topicsQ.data?.topics ?? [], selected),
-    [topicsQ.data, selected],
-  );
 
   const canSend = input.trim().length > 0 && !sending && !locked;
 
@@ -435,20 +426,6 @@ function SaathiChat() {
                     ? `Paste a RAS Mains question. SAATHI writes a ${mode.marks}-mark model answer in the exam structure, with facts from our study material.`
                     : "Ask in English or हिंदी. Answers come from our study material."}
                 </p>
-                {!writing && starters.length > 0 && (
-                  <div className="mt-6 grid gap-2 sm:grid-cols-2 max-w-xl mx-auto text-left">
-                    {starters.map((s) => (
-                      <button
-                        key={s}
-                        type="button"
-                        onClick={() => send(s)}
-                        className="rounded-2xl border border-border/40 bg-white/60 dark:bg-black/40 backdrop-blur-xl px-4 py-3 text-sm hover:bg-white/80 dark:hover:bg-black/60 transition-all active:scale-[0.99]"
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
             )
           )}
@@ -470,18 +447,30 @@ function SaathiChat() {
         className="relative z-10 border-t border-border/20 bg-white/50 dark:bg-black/40 backdrop-blur-2xl sticky bottom-0"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
-        <div className="max-w-3xl lg:max-w-4xl mx-auto px-5 pt-3 pb-3 space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="max-w-3xl lg:max-w-4xl mx-auto px-4 pt-2 pb-2.5 space-y-2">
+          <div className="flex items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden -mx-1 px-1">
             {!checking && (
               <SubjectMultiSelect options={subjects} selected={selected} onChange={setSelected} />
             )}
+            {!checking && <span className="h-4 w-px bg-border/50 shrink-0" aria-hidden />}
             <ModePicker mode={mode} formats={formats} disabled={sending} onChange={setMode} />
           </div>
-          <div className={checking ? "hidden" : "flex items-end gap-2"}>
+          <div
+            className={
+              checking
+                ? "hidden"
+                : "flex items-end gap-1.5 rounded-[26px] border border-border/40 bg-white/70 dark:bg-black/40 backdrop-blur-xl p-1.5 pl-2 focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15 transition-all"
+            }
+          >
             <Textarea
               ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                const el = e.target;
+                el.style.height = "auto";
+                el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+              }}
               onKeyDown={onKey}
               disabled={locked}
               placeholder={
@@ -490,21 +479,21 @@ function SaathiChat() {
                   : "Ask in English or हिंदी…"
               }
               rows={1}
-              className="resize-none min-h-[48px] max-h-40 rounded-2xl bg-white/60 dark:bg-black/40 backdrop-blur-xl border-border/40"
+              className="resize-none min-h-[40px] max-h-40 border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 px-2 py-2.5 text-[15px]"
             />
             {sending ? (
               <button
                 onClick={stop}
-                className="h-12 w-12 shrink-0 rounded-full bg-primary/10 text-primary border border-primary/20 backdrop-blur-xl grid place-items-center hover:bg-primary/20 active:scale-95 transition-all"
+                className="h-10 w-10 shrink-0 rounded-full bg-foreground text-background grid place-items-center active:scale-95 transition-all"
                 aria-label="Stop"
               >
-                <Square className="h-4 w-4 fill-current" />
+                <Square className="h-3.5 w-3.5 fill-current" />
               </button>
             ) : (
               <button
                 onClick={() => send()}
                 disabled={!canSend}
-                className="h-12 w-12 shrink-0 rounded-full bg-primary/10 text-primary border border-primary/20 backdrop-blur-xl grid place-items-center hover:bg-primary/20 active:scale-95 transition-all shadow-[0_4px_16px_rgba(var(--primary),0.15)] disabled:opacity-40 disabled:active:scale-100"
+                className="h-10 w-10 shrink-0 rounded-full bg-primary text-primary-foreground grid place-items-center active:scale-95 transition-all disabled:bg-muted disabled:text-muted-foreground disabled:active:scale-100"
                 aria-label="Send"
               >
                 <Send className="h-4 w-4" />
@@ -669,15 +658,17 @@ function SubjectMultiSelect({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="w-full h-11 rounded-2xl border border-border/40 px-4 text-sm flex items-center justify-between gap-2 bg-white/60 dark:bg-black/40 backdrop-blur-xl transition-all active:scale-[0.99]"
+          className="shrink-0 inline-flex items-center gap-1.5 h-8 max-w-[11rem] rounded-full border border-border/40 px-3 text-xs font-medium bg-white/60 dark:bg-black/40 backdrop-blur-xl transition-all active:scale-95"
         >
-          <span className="truncate text-left font-medium">{label}</span>
-          <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
+          <Layers className="h-3.5 w-3.5 shrink-0 opacity-70" />
+          <span className="truncate text-left">{label}</span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
         </button>
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        className="w-[--radix-popover-trigger-width] p-1.5 max-h-72 overflow-y-auto rounded-2xl bg-white/80 dark:bg-black/70 backdrop-blur-3xl border-border/40"
+        side="top"
+        className="w-64 p-1.5 max-h-72 overflow-y-auto rounded-2xl bg-white/80 dark:bg-black/70 backdrop-blur-3xl border-border/40"
       >
         {options.length === 0 ? (
           <div className="px-2 py-3 text-sm text-muted-foreground">No subjects yet.</div>
