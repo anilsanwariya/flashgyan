@@ -53,7 +53,7 @@ type CachedAnswer = {
   sources: SaathiSource[];
   followups: string[];
   english_query: string | null;
-  meta?: { mains?: MainsInfo } | null;
+  meta?: { mains?: MainsInfo; general?: boolean } | null;
 };
 
 // Cached answers are keyed by the standalone question and subjects, and are only
@@ -182,6 +182,7 @@ export async function handleSaathiAsk(request: Request): Promise<Response> {
         emit({
           type: "done",
           noAnswer: false,
+          general: !!hit.meta?.general,
           sources: hit.sources,
           followups: hit.followups,
           searchQuery: q.standalone,
@@ -203,14 +204,6 @@ export async function handleSaathiAsk(request: Request): Promise<Response> {
       return jsonError(e.message, 503);
     }
     return jsonError("SAATHI is having trouble right now. Please try again.", 502);
-  }
-
-  if (matches.length === 0) {
-    await recordKnowledgeGap(query.standalone);
-    return ndjson(async (emit) => {
-      emit({ type: "delta", text: saathiNoMaterialReply(input.question) });
-      emit({ type: "done", noAnswer: true, sources: [] });
-    });
   }
 
   let deltas: AsyncGenerator<string>;
@@ -243,17 +236,25 @@ export async function handleSaathiAsk(request: Request): Promise<Response> {
     write(nextFilter.push(noAnswerFilter.finish()));
     write(nextFilter.finish());
 
-    const noAnswer = noAnswerFilter.noAnswer || !answer.trim();
-    if (!answer.trim()) emit({ type: "delta", text: saathiNoMaterialReply(input.question) });
-    if (noAnswer) await recordKnowledgeGap(q.standalone);
-    const sources = noAnswer ? [] : collectSources(used);
+    const noAnswer = !answer.trim();
+    // Not in the books: answered from SAATHI's own knowledge, and a gap to fill.
+    const general = noAnswerFilter.noAnswer || used.length === 0;
+    if (noAnswer) emit({ type: "delta", text: saathiNoMaterialReply(input.question) });
+    if (noAnswer || general) await recordKnowledgeGap(q.standalone);
+    const sources = noAnswer || general ? [] : collectSources(used);
     const followups = noAnswer ? [] : nextFilter.questions;
     if (!noAnswer && !request.signal.aborted) {
-      await cachePut("web", q, subjects, { answer: answer.trimEnd(), sources, followups });
+      await cachePut("web", q, subjects, {
+        answer: answer.trimEnd(),
+        sources,
+        followups,
+        meta: general ? { general } : null,
+      });
     }
     emit({
       type: "done",
       noAnswer,
+      general: !noAnswer && general,
       sources,
       followups,
       searchQuery: q.standalone,
@@ -287,6 +288,7 @@ async function handleMains(
         emit({
           type: "done",
           noAnswer: false,
+          general: !!hit.meta?.general,
           sources: hit.sources,
           followups: [],
           searchQuery: query.standalone,
@@ -310,15 +312,6 @@ async function handleMains(
       return jsonError(e.message, 503);
     }
     return jsonError("SAATHI is having trouble right now. Please try again.", 502);
-  }
-
-  if (plan.matches.length === 0) {
-    await recordKnowledgeGap(plan.query.standalone);
-    const info = mainsInfo(plan);
-    return ndjson(async (emit) => {
-      emit({ type: "delta", text: mainsNoMaterialReply(input.question) });
-      emit({ type: "done", noAnswer: true, sources: [], mains: info });
-    });
   }
 
   let deltas: AsyncGenerator<string>;
@@ -349,22 +342,24 @@ async function handleMains(
     for await (const delta of deltas) write(noAnswerFilter.push(delta));
     write(noAnswerFilter.finish());
 
-    const noAnswer = noAnswerFilter.noAnswer || !answer.trim();
-    if (!answer.trim()) emit({ type: "delta", text: mainsNoMaterialReply(input.question) });
-    if (noAnswer) await recordKnowledgeGap(p.query.standalone);
-    const sources = noAnswer ? [] : collectSources(p.matches);
+    const noAnswer = !answer.trim();
+    const general = noAnswerFilter.noAnswer || p.matches.length === 0;
+    if (noAnswer) emit({ type: "delta", text: mainsNoMaterialReply(input.question) });
+    if (noAnswer || general) await recordKnowledgeGap(p.query.standalone);
+    const sources = noAnswer || general ? [] : collectSources(p.matches);
     const info = mainsInfo(p, noAnswer ? undefined : answer);
     if (!noAnswer && !request.signal.aborted) {
       await cachePut(cacheChannel, p.query, subjects, {
         answer: answer.trimEnd(),
         sources,
         followups: [],
-        meta: { mains: info },
+        meta: { mains: info, ...(general ? { general } : {}) },
       });
     }
     emit({
       type: "done",
       noAnswer,
+      general: !noAnswer && general,
       sources,
       followups: [],
       searchQuery: p.query.standalone,

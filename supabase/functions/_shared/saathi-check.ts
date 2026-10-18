@@ -108,7 +108,7 @@ Score each criterion from 0 to 10:
 - "presentation": clear, concise points or sub-headings, within the word limit (the answer has ${words} words), no filler.
 Then give "awarded": the marks out of ${plan.marks} (a multiple of 0.5) an RPSC examiner would give. Going well over the word limit loses marks.
 
-Judge facts against the study material: name in "missing" the important points from the material the answer leaves out (at most 4, each a short phrase with the exact fact), and point out any fact in the answer that contradicts the material. Do not reward or demand facts that are not in the material. If the material does not cover the question at all, begin your reply with ${SAATHI_NO_ANSWER_MARKER} and still mark on general exam standards, leaving "missing" empty.
+Judge facts with the study material (the student's own books) first and your own knowledge too. Reward correct, relevant facts and analysis whether or not they are in the material. In "missing", name the most important points a top answer would make that this one leaves out (at most 4, each a short phrase with the exact fact): points from the material first, then others an RPSC examiner expects; only facts you are sure of. Point out, in "improve", any fact in the answer that is wrong. If the material does not cover the question at all, begin your reply with ${SAATHI_NO_ANSWER_MARKER} and mark it with your own knowledge.
 
 Write all feedback in ${language === "Hindi" ? "Hindi (Devanagari), using the standard Hindi terms of RAS exams" : "English"}, addressed to the student ("you"), short and specific.
 Reply with JSON only: {"content": n, "structure": n, "specificity": n, "presentation": n, "awarded": n, "verdict": "one sentence on the answer as a whole", "strengths": ["what is good", ...at most 3], "missing": ["missing point", ...], "improve": ["a concrete change, e.g. 'Start with a one-line definition of X'", ...at most 4]}`,
@@ -168,7 +168,7 @@ export function parseCheck(
     wordLimit: opts.wordLimit,
     verdict: str(o.verdict, 400),
     strengths: list(o.strengths, 3),
-    missing: noMaterial ? [] : list(o.missing, 4),
+    missing: list(o.missing, 4),
     improve: list(o.improve, 4),
     language: questionLanguage(opts.answer),
     noMaterial,
@@ -271,7 +271,7 @@ export function checkResultTelegram(
   if (r.missing.length)
     lines.push(
       "",
-      `📚 <b>${hi ? "छूटे हुए बिंदु (आपकी पुस्तकों से)" : "Missing points (from your books)"}</b>`,
+      `📚 <b>${hi ? "छूटे हुए बिंदु" : "Missing points"}</b>`,
       ...r.missing.map((s) => `• ${esc(s)}`),
     );
   if (r.improve.length)
@@ -283,7 +283,7 @@ export function checkResultTelegram(
   if (r.noMaterial)
     lines.push(
       "",
-      `<i>${hi ? "इस प्रश्न की अध्ययन सामग्री अभी उपलब्ध नहीं है; जाँच सामान्य परीक्षा मानकों पर की गई है।" : "This topic isn't in the study material yet, so the answer was marked on general exam standards."}</i>`,
+      `<i>${hi ? "यह विषय अभी आपकी अध्ययन सामग्री में नहीं है; जाँच SAATHI के अपने ज्ञान से की गई है।" : "This topic isn't in your study material yet, so SAATHI checked it with its own knowledge."}</i>`,
     );
   if (opts.transcribed)
     lines.push(

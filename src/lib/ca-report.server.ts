@@ -25,6 +25,7 @@ type ItemRow = {
   concept: string | null;
   headline: string;
   background: unknown;
+  context_sources: { title: string }[] | null;
 };
 
 const count = async (q: PromiseLike<{ count: number | null }>) => (await q).count ?? 0;
@@ -38,7 +39,7 @@ export async function weeklyStats(fromDate: string, toDate: string): Promise<Wee
     await Promise.all([
       from("ca_items")
         .select(
-          "issue_date,category,rajasthan,status,facts,source_ids,concept,headline,background:content->background",
+          "issue_date,category,rajasthan,status,facts,source_ids,concept,headline,background:content->background,context_sources",
         )
         .gte("issue_date", fromDate)
         .lte("issue_date", toDate)
@@ -96,7 +97,8 @@ export async function weeklyStats(fromDate: string, toDate: string): Promise<Wee
     rajasthanShortDays,
     minRajasthan: settings.min_rajasthan,
     editorials: kept.length - news.length,
-    missingBackground: news.filter((i) => i.concept && !i.background).length,
+    // No book behind the background (none, or SAATHI's own knowledge).
+    missingBackground: news.filter((i) => i.concept && !i.context_sources?.length).length,
     uncoveredConcepts: uncoveredConcepts(news).map((c) => c.concept),
     unverifiedFacts: kept.reduce((n, i) => n + i.facts.filter((f) => !f.verified).length, 0),
     multiSource: news.filter((i) => i.source_ids.length > 1).length,

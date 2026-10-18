@@ -498,6 +498,8 @@ export async function activateBlueprint(id: string) {
 export type WrittenAnswer = {
   answer: string;
   noAnswer: boolean;
+  // Written from SAATHI's own knowledge: the books have nothing on it.
+  general: boolean;
   info: MainsInfo;
   guide: string;
   blueprintId: string | null;
@@ -527,15 +529,6 @@ export async function writeMainsAnswer(opts: {
     blueprintId: plan.blueprint?.id ?? null,
     exemplars: plan.exemplars.map((e) => ({ question: e.question, year: e.year, paper: e.paper })),
   };
-  if (plan.matches.length === 0) {
-    return {
-      ...base,
-      answer: mainsNoMaterialReply(opts.question),
-      noAnswer: true,
-      info: mainsInfo(plan),
-      sources: [],
-    };
-  }
   const raw = await saathiComplete(
     key,
     mainsMessages({ channel: "web", history: [], question: opts.question, plan }),
@@ -545,7 +538,8 @@ export async function writeMainsAnswer(opts: {
   return {
     ...base,
     answer: text || mainsNoMaterialReply(opts.question),
-    noAnswer: parsed.noAnswer || !text,
+    noAnswer: !text,
+    general: parsed.noAnswer || plan.matches.length === 0,
     info: mainsInfo(plan, text),
     sources: parsed.noAnswer ? [] : collectSources(plan.matches),
   };
@@ -589,7 +583,7 @@ export async function scoreModelAnswer(answerId: string): Promise<BlueprintScore
       presentation: 0,
       length: 0,
       total: 0,
-      feedback: "SAATHI found no study material for this question.",
+      feedback: "SAATHI couldn't write an answer to this question.",
     };
   } else {
     const raw = await saathiComplete(

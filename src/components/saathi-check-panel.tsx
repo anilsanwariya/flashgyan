@@ -337,20 +337,13 @@ function CheckResultCard({ done, onAgain }: { done: Done; onAgain: () => void })
           ))}
         </div>
         <List title={hi ? "✅ अच्छा है" : "✅ Good"} items={r.strengths} />
-        <List
-          title={
-            hi
-              ? "📚 छूटे हुए बिंदु (अध्ययन सामग्री से)"
-              : "📚 Missing points (from the study material)"
-          }
-          items={r.missing}
-        />
+        <List title={hi ? "📚 छूटे हुए बिंदु" : "📚 Missing points"} items={r.missing} />
         <List title={hi ? "🎯 सुधार कैसे करें" : "🎯 How to improve"} items={r.improve} />
         {r.noMaterial && (
           <p className="text-xs text-muted-foreground">
             {hi
-              ? "इस प्रश्न की अध्ययन सामग्री अभी उपलब्ध नहीं है; जाँच सामान्य परीक्षा मानकों पर की गई है।"
-              : "This topic isn't in our study material yet, so the answer was marked on general exam standards."}
+              ? "यह विषय अभी आपकी अध्ययन सामग्री में नहीं है; जाँच SAATHI के अपने ज्ञान से की गई है।"
+              : "This topic isn't in your study material yet, so SAATHI checked it with its own knowledge."}
           </p>
         )}
         {done.transcript && (

@@ -2,10 +2,12 @@
 // website and the Telegram bot. Model answers uploaded by admins are analysed
 // into a structure, the structures of many answers are combined into a
 // "blueprint" per marks and question type, and SAATHI follows the blueprint
-// (with the closest model answers as examples) while taking facts only from the
-// knowledge base. Keep this file free of runtime-specific imports.
+// (with the closest model answers as examples), building on the knowledge base
+// and SAATHI's own knowledge. Keep this file free of runtime-specific imports.
 
 import {
+  NO_MATERIAL,
+  SAATHI_KNOWLEDGE_RULES,
   SAATHI_NO_ANSWER_MARKER,
   parseJsonLoose,
   questionLanguage,
@@ -796,11 +798,13 @@ export function mainsSystemPrompt(channel: SaathiChannel, plan: MainsPlan): stri
       ? `\n\nSYLLABUS: RAS Mains Paper ${unit.paper}, Unit ${unit.unit} (${unit.title}) › ${plan.topic.part}: ${plan.topic.topic}. In this unit, good answers: ${unit.hint}`
       : "";
   const examples = plan.exemplars.length
-    ? `\n\nEXAMPLE ANSWERS: The model answers from previous years given with the question show the expected structure, depth and style. Learn from how they are organised. Do not copy their sentences, and do not take facts from them unless the study material states the same facts.`
+    ? `\n\nEXAMPLE ANSWERS: The model answers from previous years given with the question show the expected structure, depth and style. Learn from how they are organised. Do not copy their sentences.`
     : "";
   return `You are SAATHI, an answer-writing coach for students preparing for the RAS (Rajasthan Administrative Service) Mains exam. Write the answer a top-scoring student would write in the exam.
 
-FACTS: Use ONLY facts from the study material provided with the question. Do not use outside knowledge and do not guess. If the material does not cover the question at all, begin your reply with the exact token ${SAATHI_NO_ANSWER_MARKER} and then, in one or two short sentences, say that this topic isn't in the study material yet. If it covers only part of the question, write the best answer the material supports, then add a final line starting with "Note:" that says what is not covered.
+${SAATHI_KNOWLEDGE_RULES}
+- Write the complete answer the question deserves, using the material and your own knowledge together.
+- If the study material does not cover the question at all, begin your reply with the exact token ${SAATHI_NO_ANSWER_MARKER} and then write the full answer from your own knowledge (the app tells the student it is not from their books).
 
 QUESTION: ${plan.marks} marks, about ${plan.wordLimit} words. ${DIRECTIVE_HINTS[plan.directive]}${syllabus}
 
@@ -809,7 +813,7 @@ ${guide}
 
 LENGTH: Stay within about 10% of ${plan.wordLimit} words. Do not repeat the question, and do not state the marks or the word count.${examples}
 
-LANGUAGE: Write in the same language and script as the question: Hindi in Devanagari gets Hindi in Devanagari, English gets English, Hinglish gets Hindi in Devanagari. Translate the material faithfully when it is in another language. In Hindi answers, use the standard Hindi terms used in RAS and other Indian competitive exams. Keep names, article numbers, dates and figures exactly as in the material.
+LANGUAGE: Write in the same language and script as the question: Hindi in Devanagari gets Hindi in Devanagari, English gets English, Hinglish gets Hindi in Devanagari. Translate the material faithfully when it is in another language. In Hindi answers, use the standard Hindi terms used in RAS and other Indian competitive exams. Keep names, article numbers, dates and figures from the material exactly as written.
 
 ${MAINS_FORMAT[channel]}
 
@@ -845,11 +849,12 @@ export function mainsMessages(opts: {
     ...opts.history,
     {
       role: "user",
-      content: `Study material:\n\n${material}\n\n---\n\n${examples ? `Example answers (structure and style only):\n\n${examples}\n\n---\n\n` : ""}Write the answer (${opts.plan.marks} marks, about ${opts.plan.wordLimit} words) to: ${opts.question}`,
+      content: `Study material:\n\n${material || NO_MATERIAL}\n\n---\n\n${examples ? `Example answers (structure and style only):\n\n${examples}\n\n---\n\n` : ""}Write the answer (${opts.plan.marks} marks, about ${opts.plan.wordLimit} words) to: ${opts.question}`,
     },
   ];
 }
 
+// Shown when the model returns nothing.
 export function mainsNoMaterialReply(question: string): string {
   return questionLanguage(question) === "Hindi"
     ? "इस प्रश्न का उत्तर लिखने के लिए अभी अध्ययन सामग्री उपलब्ध नहीं है। कृपया कोई दूसरा प्रश्न पूछें।"

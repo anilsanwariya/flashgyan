@@ -1375,8 +1375,9 @@ function UncoveredConceptsList() {
         <p className="text-sm text-muted-foreground">
           The static concept behind each magazine story (a missile type, a constitutional article, a
           convention) is looked up in your books for its Background box. These concepts had no
-          matching passage in the last 6 months, so those stories printed without one. Upload a book
-          that explains them; stories written after that get their background.
+          matching passage in the last 6 months, so SAATHI wrote those backgrounds from its own
+          knowledge. Upload a book that explains them; stories written after that get their
+          background from the book.
         </p>
       </div>
       {q.isLoading ? (

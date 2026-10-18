@@ -554,7 +554,9 @@ function StoryCard({
             {item.unit && <Badge>{unitLabel(item.unit)}</Badge>}
             {c?.background ? (
               <Badge tone="good">
-                Background: {item.context_sources.map((s) => s.title).join(", ") || "your notes"}
+                Background:{" "}
+                {item.context_sources.map((s) => s.title).join(", ") ||
+                  "SAATHI's own knowledge (no book)"}
               </Badge>
             ) : (
               c && <Badge>No related notes</Badge>

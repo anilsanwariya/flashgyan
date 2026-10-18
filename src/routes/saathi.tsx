@@ -55,6 +55,8 @@ type Msg = {
   content: string;
   status?: "streaming" | "done" | "error";
   noAnswer?: boolean;
+  // Answered from SAATHI's own knowledge: the books have nothing on it.
+  general?: boolean;
   sources?: SaathiSource[];
   question?: string;
   rating?: 1 | -1;
@@ -309,6 +311,7 @@ function SaathiChat() {
             patchMessage(answerId, {
               status: "done",
               noAnswer: event.noAnswer,
+              general: event.general,
               sources: event.sources,
               followups: event.followups,
               searchQuery: event.searchQuery,
@@ -874,6 +877,14 @@ function MessageBubble({
 
         {answered && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {msg.general && (
+              <span
+                className="text-xs rounded-full bg-white/50 dark:bg-black/30 backdrop-blur-xl border border-border/30 text-muted-foreground px-3 py-1.5"
+                title="Your books don't cover this yet, so SAATHI answered from its own knowledge"
+              >
+                💡 Not from your books · SAATHI's own knowledge
+              </span>
+            )}
             {msg.sources?.map((s) => (
               <button
                 key={s.title}
@@ -909,7 +920,7 @@ function MessageBubble({
           </div>
         )}
 
-        {answered && msg.sources && msg.sources.length > 0 && (
+        {answered && ((msg.sources?.length ?? 0) > 0 || msg.general) && (
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
             {msg.searchQuery && !msg.quiz && (
               <button
@@ -922,15 +933,17 @@ function MessageBubble({
                 {quizLoading ? "Making your quiz…" : "Quiz me on this"}
               </button>
             )}
-            <Link
-              {...(deck
-                ? { to: "/decks/$deckId" as const, params: { deckId: deck.id } }
-                : { to: "/flashcards" as const })}
-              className="inline-flex min-h-9 items-center gap-1.5 text-[13px] font-medium text-primary hover:underline"
-            >
-              <Layers className="h-3.5 w-3.5" />
-              {deck ? `Practise “${deck.name}” flashcards` : "Practise this with flashcards"}
-            </Link>
+            {hasSources && (
+              <Link
+                {...(deck
+                  ? { to: "/decks/$deckId" as const, params: { deckId: deck.id } }
+                  : { to: "/flashcards" as const })}
+                className="inline-flex min-h-9 items-center gap-1.5 text-[13px] font-medium text-primary hover:underline"
+              >
+                <Layers className="h-3.5 w-3.5" />
+                {deck ? `Practise “${deck.name}” flashcards` : "Practise this with flashcards"}
+              </Link>
+            )}
           </div>
         )}
 
