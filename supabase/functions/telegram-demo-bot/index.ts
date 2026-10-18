@@ -584,7 +584,7 @@ type CachedAnswer = {
   answer: string;
   sources: { title: string }[];
   followups: string[];
-  meta?: { mains?: MainsInfo } | null;
+  meta?: { mains?: MainsInfo; general?: boolean } | null;
 };
 
 // "/answer 10 question" or "/answer question (10 marks)": marks come first or
@@ -643,6 +643,8 @@ async function handleSaathiAsk(
 
   let answer: string;
   let noAnswer = true;
+  // Answered from SAATHI's own knowledge: the books have nothing on it.
+  let general = false;
   let sourceTitles: string[] = [];
   let followups: string[] = [];
   let info: MainsInfo | null = null;
@@ -671,6 +673,7 @@ async function handleSaathiAsk(
       sourceTitles = cached.sources.map(sourceLabel);
       followups = cached.followups ?? [];
       info = cached.meta?.mains ?? null;
+      general = !!cached.meta?.general;
     } else if (mains) {
       const plan = await saathiMainsPlan({
         apiKey: LOVABLE_API_KEY,
@@ -682,20 +685,19 @@ async function handleSaathiAsk(
         query,
       });
       info = mainsInfo(plan);
-      if (plan.matches.length === 0) {
-        answer = mainsNoMaterialReply(question);
-      } else {
+      {
         const parsed = stripNoAnswer(
           await saathiComplete(
             LOVABLE_API_KEY,
             mainsMessages({ channel: "telegram", history, question, plan }),
           ),
         );
-        noAnswer = parsed.noAnswer || !parsed.text.trim();
+        noAnswer = !parsed.text.trim();
+        general = parsed.noAnswer || plan.matches.length === 0;
         answer = parsed.text.trim() || mainsNoMaterialReply(question);
         if (!noAnswer) {
           info = mainsInfo(plan, answer);
-          const sources = collectSources(plan.matches);
+          const sources = general ? [] : collectSources(plan.matches);
           sourceTitles = sources.map(sourceLabel);
           const { error } = await supabase.rpc("saathi_cache_put", {
             p_channel: channel,
@@ -705,12 +707,12 @@ async function handleSaathiAsk(
             p_sources: sources,
             p_followups: [],
             p_english_query: query.english,
-            p_meta: { mains: info },
+            p_meta: { mains: info, ...(general ? { general } : {}) },
           });
           if (error && error.code !== "PGRST202") console.error("cache put error", error.message);
         }
       }
-      if (noAnswer) {
+      if (noAnswer || general) {
         const { error } = await supabase.rpc("increment_knowledge_gap", {
           gap_question: query.standalone,
         });
@@ -725,19 +727,18 @@ async function handleSaathiAsk(
         subjects: null,
         query,
       });
-      if (matches.length === 0) {
-        answer = saathiNoMaterialReply(question);
-      } else {
+      {
         const raw = await saathiComplete(
           LOVABLE_API_KEY,
           saathiMessages({ channel: "telegram", history, question, matches }),
         );
         const parsed = stripNoAnswer(raw);
         const split = splitNextQuestions(parsed.text);
-        noAnswer = parsed.noAnswer || !split.text;
+        noAnswer = !split.text;
+        general = parsed.noAnswer || matches.length === 0;
         answer = split.text || saathiNoMaterialReply(question);
         if (!noAnswer) {
-          const sources = collectSources(matches);
+          const sources = general ? [] : collectSources(matches);
           sourceTitles = sources.map(sourceLabel);
           followups = split.next;
           const { error } = await supabase.rpc("saathi_cache_put", {
@@ -748,11 +749,12 @@ async function handleSaathiAsk(
             p_sources: sources,
             p_followups: followups,
             p_english_query: query.english,
+            ...(general ? { p_meta: { general } } : {}),
           });
           if (error && error.code !== "PGRST202") console.error("cache put error", error.message);
         }
       }
-      if (noAnswer) {
+      if (noAnswer || general) {
         const { error } = await supabase.rpc("increment_knowledge_gap", {
           gap_question: query.standalone,
         });
@@ -787,7 +789,9 @@ async function handleSaathiAsk(
 
   const srcLine = sourceTitles.length
     ? `\n\n📚 <i>Sources: ${sourceTitles.map(tgEsc).join(", ")}</i>`
-    : "";
+    : general && !noAnswer
+      ? `\n\nℹ️ <i>${/[\u0900-\u097F]/.test(question) ? "यह विषय अभी आपकी पुस्तकों में नहीं है; उत्तर SAATHI के अपने ज्ञान से है।" : "Not in your books yet: answered from SAATHI's own knowledge."}</i>`
+      : "";
   const nextLine = followups.length
     ? `\n\n💡 <i>You could also ask:</i>\n${followups.map((q) => `/ask ${tgEsc(q)}`).join("\n")}`
     : "";

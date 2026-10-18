@@ -8,7 +8,9 @@ export const SAATHI_EMBED_MODEL = "google/gemini-embedding-001";
 export const SAATHI_EMBED_DIMS = 1536;
 export const SAATHI_CHAT_MODEL = "claude-sonnet-5";
 
-// The model starts its reply with this token when the material can't answer the question.
+// The model starts its reply with this token when the study material doesn't
+// cover the question; it then answers from its own knowledge, and the app labels
+// the answer as not from the student's books.
 export const SAATHI_NO_ANSWER_MARKER = "[[NO_ANSWER]]";
 // The model ends an answer with this token followed by suggested follow-up questions.
 export const SAATHI_NEXT_MARKER = "[[NEXT]]";
@@ -63,7 +65,10 @@ export type SaathiStreamEvent =
   | { type: "delta"; text: string }
   | {
       type: "done";
+      // No answer text at all.
       noAnswer: boolean;
+      // Answered from SAATHI's own knowledge: the books have nothing on it.
+      general?: boolean;
       sources: SaathiSource[];
       followups?: string[];
       searchQuery?: string;
@@ -507,6 +512,23 @@ export async function saathiSearchQuery(
 
 // Asks the model which candidate chunks best answer the question, best first.
 // Keeps the search order if there are few candidates or the model's reply is unusable.
+// Passages ranked beyond those kept, so a helpful passage from another book can
+// take the last place.
+const EXTRA_RANKED = 3;
+
+const bookOf = (m: SaathiMatch) => m.source_file || m.title;
+
+// The top `keep` ranked passages; when they all come from one book but another
+// book also has a helpful passage, its best one replaces the last pick.
+export function mixBooks(ranked: SaathiMatch[], keep: number): SaathiMatch[] {
+  const top = ranked.slice(0, keep);
+  if (top.length < 2) return top;
+  const book = bookOf(top[0]);
+  if (top.some((m) => bookOf(m) !== book)) return top;
+  const other = ranked.slice(keep).find((m) => bookOf(m) !== book);
+  return other ? [...top.slice(0, -1), other] : top;
+}
+
 export async function saathiRerank(
   apiKey: string,
   question: string,
@@ -530,14 +552,14 @@ export async function saathiRerank(
     const raw = await saathiComplete(apiKey, [
       {
         role: "system",
-        content: `You rank study material for answering a student's question. Reply with a JSON array of the numbers of the passages that help answer it, most useful first, at most ${keep} numbers. Use [] if none help.${languageRule}`,
+        content: `You rank study material for answering a student's question. Reply with a JSON array of the numbers of the passages that help answer it, most useful first, at most ${keep + EXTRA_RANKED} numbers. Use [] if none help. When passages from different books add different facts, include the useful ones from each book.${languageRule}`,
       },
       { role: "user", content: `Question: ${question}\n\nPassages:\n\n${list}` },
     ]);
     const picked = parseJsonLoose<unknown[]>(raw);
     if (!Array.isArray(picked)) return matches.slice(0, keep);
     const seen = new Set<number>();
-    const out = picked
+    const ranked = picked
       .map((n) => Number(n) - 1)
       .filter(
         (i) =>
@@ -547,10 +569,9 @@ export async function saathiRerank(
           !seen.has(i) &&
           (seen.add(i), true),
       )
-      .slice(0, keep)
       .map((i) => matches[i]);
     // An empty pick from the model is not trusted over the search scores.
-    return out.length ? out : matches.slice(0, keep);
+    return ranked.length ? mixBooks(ranked, keep) : matches.slice(0, keep);
   } catch {
     return matches.slice(0, keep);
   }
@@ -657,18 +678,30 @@ DIAGRAMS: Only when a step-by-step process is genuinely clearer as a picture, yo
   telegram: `FORMAT: Well-formatted study notes for a Telegram chat. Start with a one-line direct answer in **bold**. Then give short "- " bullet points (or "1. " numbered steps for processes). Use **bold** for key terms, names, dates, articles and numbers, and *italic* for translations, book titles or side notes. Separate groups of points with a blank line. You may use one short heading line written in **bold** if it helps. No Markdown tables, # headings, code blocks or diagrams.`,
 };
 
+// How SAATHI combines the student's books with its own knowledge. Shared by
+// chat, Mains answers, answer checking and quizzes.
+export const SAATHI_KNOWLEDGE_RULES = `KNOWLEDGE: Give the best, most complete and accurate answer for a RAS/RPSC aspirant.
+- The study material comes from the student's own books (NCERT and others): base the answer on it first and keep its facts, terms and framing.
+- Add your own knowledge wherever it makes the answer better: explanation, analysis, causes and consequences, arguments for and against, examples (Rajasthan examples where relevant), constitutional and legal provisions, data and a way forward.
+- Never invent facts. State a figure, date, name, article number or scheme from your own knowledge only when you are sure of it; otherwise leave it out.
+- Things that change over time (office holders, numbers of districts, scheme details, rankings) may be newer than your knowledge: give the latest you know and say "as per the latest available information".
+- If your knowledge differs from the material (for example a figure updated later), give both briefly: the book's version with the book's name, then the newer one.
+- If two books in the material disagree, mention both with their book names.`;
+
 export function saathiSystemPrompt(channel: SaathiChannel): string {
-  return `You are SAATHI, a friendly study assistant for students preparing for exams.
+  return `You are SAATHI, a friendly study assistant for students preparing for competitive exams, especially RAS and other RPSC exams.
 
-GROUNDING: Answer ONLY from the study material provided with the question. Do not use outside knowledge and do not guess. If the material does not contain the answer, begin your reply with the exact token ${SAATHI_NO_ANSWER_MARKER} and then, in one or two short sentences, say that this topic isn't in the study material yet; if the material covers a closely related topic, suggest it. If the material answers only part of the question, answer that part, say clearly what is not covered, and do not use the token.
+${SAATHI_KNOWLEDGE_RULES}
+- If the study material does not cover the question at all, begin your reply with the exact token ${SAATHI_NO_ANSWER_MARKER} and then answer fully from your own knowledge (the app tells the student the answer is not from their books).
+- If the request has nothing to do with studies or exams, politely say in one sentence that you help with exam preparation, without using the token.
 
-LANGUAGE: Reply in the same language and script as the student's latest message: Hindi in Devanagari gets Hindi in Devanagari, Hinglish (Hindi in Latin letters) gets Hinglish, English gets English. This applies even when the material is in another language: translate it faithfully. In Hindi or Hinglish answers, use the standard Hindi terms used in Indian competitive exams (for example मौलिक अधिकार, नीति निदेशक तत्व, संसद) and give the English term in brackets the first time each appears, e.g. मौलिक अधिकार (Fundamental Rights). Keep names, article numbers, dates and figures exactly as in the material.
+LANGUAGE: Reply in the same language and script as the student's latest message: Hindi in Devanagari gets Hindi in Devanagari, Hinglish (Hindi in Latin letters) gets Hinglish, English gets English. This applies even when the material is in another language: translate it faithfully. In Hindi or Hinglish answers, use the standard Hindi terms used in Indian competitive exams (for example मौलिक अधिकार, नीति निदेशक तत्व, संसद) and give the English term in brackets the first time each appears, e.g. मौलिक अधिकार (Fundamental Rights). Keep names, article numbers, dates and figures from the material exactly as written.
 
 ${FORMAT_RULES[channel]}
 
 Do not add source citations; the app shows the sources separately.
 
-NEXT QUESTIONS: When you have answered (not when you used ${SAATHI_NO_ANSWER_MARKER}), end with one final line that starts with ${SAATHI_NEXT_MARKER} followed by 2 or 3 short follow-up questions the student could ask next, in the student's language, separated by " || ". Only suggest questions the study material can answer.`;
+NEXT QUESTIONS: When you have answered, end with one final line that starts with ${SAATHI_NEXT_MARKER} followed by 2 or 3 short follow-up questions the student could ask next, in the student's language, separated by " || ".`;
 }
 
 export function saathiMessages(opts: {
@@ -688,12 +721,15 @@ export function saathiMessages(opts: {
     ...opts.history,
     {
       role: "user",
-      content: `Study material:\n\n${material}\n\n---\n\nStudent's question: ${opts.question}`,
+      content: `Study material:\n\n${material || NO_MATERIAL}\n\n---\n\nStudent's question: ${opts.question}`,
     },
   ];
 }
 
-// Shown when nothing relevant was found, so no model call is made.
+// Sent in place of study material when the books have nothing on the question.
+export const NO_MATERIAL = "(none: the student's books have nothing on this question)";
+
+// Shown when the model returns nothing.
 export function saathiNoMaterialReply(question: string): string {
   return DEVANAGARI.test(question)
     ? "मेरे अध्ययन सामग्री में अभी इस विषय की जानकारी नहीं है। कृपया कोई दूसरा प्रश्न पूछें या अलग विषय चुनें।"
@@ -813,11 +849,11 @@ export function saathiQuizMessages(question: string, matches: SaathiMatch[]): Ch
   return [
     {
       role: "system",
-      content: `You write practice multiple-choice questions for exam students, using ONLY facts stated in the study material. Write 3 questions about the topic of the student's question, in the same language and script as the student's question (use standard exam Hindi terms for Hindi). Each has exactly 4 options and one correct answer. Reply with JSON only: [{"question": string, "options": [string, string, string, string], "answer": index 0-3 of the correct option, "explanation": one short sentence}].`,
+      content: `You write practice multiple-choice questions for RAS/RPSC exam students. Base them on the study material first; when it is thin or missing, use well-established facts you are sure of, never doubtful ones. Write 3 questions about the topic of the student's question, in the same language and script as the student's question (use standard exam Hindi terms for Hindi). Each has exactly 4 options and one correct answer. Reply with JSON only: [{"question": string, "options": [string, string, string, string], "answer": index 0-3 of the correct option, "explanation": one short sentence}].`,
     },
     {
       role: "user",
-      content: `Study material:\n\n${material}\n\n---\n\nStudent's question: ${question}`,
+      content: `Study material:\n\n${material || NO_MATERIAL}\n\n---\n\nStudent's question: ${question}`,
     },
   ];
 }

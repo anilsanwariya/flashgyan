@@ -3,7 +3,6 @@
 // defence technology…), written only from SAATHI's knowledge base. Pure
 // helpers: prompts, parsing and checks; no network here.
 import type { Bi } from "@/lib/current-affairs";
-import { numbersIn } from "@/lib/ca-visuals";
 
 export type FeatureSection = { heading: Bi; body: Bi };
 
@@ -100,7 +99,7 @@ export function featureMessages(opts: {
   return [
     {
       role: "system",
-      content: `You write the background article of a bilingual (Hindi and English) monthly current affairs magazine for RAS exam aspirants, on the topic given, using ONLY the knowledge-base passages [K…]. Never add a fact, number, name or date that the passages don't state. If the passages don't cover the topic well enough for a useful article, reply {"error": "not covered"}.
+      content: `You write the background article of a bilingual (Hindi and English) monthly current affairs magazine for RAS exam aspirants, on the topic given. Base it on the knowledge-base passages [K…] (the students' books) and list the ones you used in "from"; add well-established facts from your own knowledge to make it complete, but only facts you are sure of (no doubtful figures or dates). Reply {"error": "not covered"} only if you cannot write a reliable article on the topic.
 Write for revision, not prose: an intro of 1-2 sentences linking the topic to this month's news, then 3-5 sections with short headings; each section body is 2-5 short lines (separated by line breaks, not numbered), each line one exam fact (articles, years, members, powers, places, figures). Hindi must be natural standard Hindi as used in RPSC exams (मानक हिंदी), with the same numbers and official names.
 Reply with JSON only: {"title": {"en": "...", "hi": "..."}, "intro": {"en": "...", "hi": "..."}, "sections": [{"heading": {"en": "...", "hi": "..."}, "body": {"en": "...", "hi": "..."}}], "from": ["K1", ...]}`,
     },
@@ -142,16 +141,5 @@ export function parseFeature(raw: string, passages: Passage[]): ParsedFeature {
   const from = (Array.isArray(o.from) ? o.from : [])
     .map((k) => Number(String(k).replace(/\D/g, "")) - 1)
     .filter((n) => Number.isInteger(n) && n >= 0 && n < passages.length);
-  // Every number in the article must be in the passages.
-  const known = new Set(numbersIn(passages.map((p) => p.content).join(" ")));
-  const text = [title, intro, ...sections.flatMap((s) => [s.heading, s.body])]
-    .flatMap((b) => [b.en, b.hi])
-    .join(" ");
-  const bad = [...new Set(numbersIn(text).filter((n) => !known.has(n)))];
-  if (bad.length)
-    return {
-      ok: false,
-      reason: `These numbers are not in the passages: ${bad.slice(0, 8).join(", ")}.`,
-    };
   return { ok: true, title, intro, sections, from: [...new Set(from)] };
 }

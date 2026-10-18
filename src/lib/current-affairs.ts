@@ -345,7 +345,7 @@ export function enrichMessages(opts: {
       content: `You write a bilingual (Hindi and English) current affairs magazine for RAS exam aspirants. Write one news item from the numbered facts.
 RULES: Use only the facts given. Never add a number, name, date or claim that is not in the facts. Hindi must be natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी), with the same numbers and official names (give the English name in brackets the first time if it helps).
 BE BRIEF: students revise from this, so less theory, more memorable facts. Say each fact once: the summary gives only the gist (what happened, who, where), the points carry the details, and nothing is repeated between summary, points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}
-"background" explains the static concept behind the news (the "Static concept" in the message when given; otherwise the constitutional article, institution, technology or scheme the news is about) the way a textbook does: what it is, what the article says, how it works. Use ONLY knowledge-base passages [K…] that explain this concept, even if they never mention the news, and never add anything they don't state; do not retell the news. Set it to null if no passage explains the concept. List the passages you used in "background_from".
+"background" explains the static concept behind the news (the "Static concept" in the message when given; otherwise the constitutional article, institution, technology or scheme the news is about) the way a textbook does: what it is, what the article says, how it works. Base it on the knowledge-base passages [K…] that explain this concept, even if they never mention the news, and list them in "background_from". When no passage explains it, write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "background_from" empty. Do not retell the news. Set it to null only when the news has no static concept worth explaining.
 Reply with JSON only:
 {"headline": {"en": "...", "hi": "..."},
  "summary": {"en": ${editorial ? '"3-4 short sentences: the issue, the main argument and the suggested way forward"' : opts.visual ? '"one sentence, at most 25 words"' : '"1-2 sentences, at most 40 words"'}, "hi": "..."},
@@ -432,7 +432,7 @@ export function parseContent(
   const from = (Array.isArray(o.background_from) ? o.background_from : [])
     .map((k) => Number(String(k).replace(/\D/g, "")) - 1)
     .filter((n) => Number.isInteger(n) && n >= 0);
-  const background = from.length ? bi(o.background, 1500) : null;
+  const background = bi(o.background, 1500);
   return {
     content: {
       headline,
@@ -826,16 +826,22 @@ export function issueCards(
 }
 
 // Concepts the magazine's stories needed but the books did not explain:
-// stories with a concept and no background, grouped by concept, most first.
+// stories with a concept and no book behind the background (none, or written
+// from SAATHI's own knowledge), grouped by concept, most first.
 export type UncoveredConcept = { concept: string; stories: number; last: string; example: string };
 
 export function uncoveredConcepts(
-  rows: { concept: string | null; issue_date: string; headline: string; background: unknown }[],
+  rows: {
+    concept: string | null;
+    issue_date: string;
+    headline: string;
+    context_sources: { title: string }[] | null;
+  }[],
 ): UncoveredConcept[] {
   const by = new Map<string, UncoveredConcept>();
   for (const r of rows) {
     const concept = r.concept?.trim();
-    if (!concept || r.background) continue;
+    if (!concept || r.context_sources?.length) continue;
     const key = concept.toLowerCase();
     const cur = by.get(key);
     if (!cur) by.set(key, { concept, stories: 1, last: r.issue_date, example: r.headline });

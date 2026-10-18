@@ -503,7 +503,6 @@ export const saathiQuiz = createServerFn({ method: "POST" })
       data.subjects,
     );
     const matches = relevantMatches(candidates).slice(0, SAATHI_CONTEXT_CHUNKS);
-    if (matches.length === 0) throw new Error("Not enough study material for a quiz on this.");
     const quiz = parseQuiz(
       await saathiComplete(key, saathiQuizMessages(data.searchQuery, matches)),
     );
@@ -580,7 +579,7 @@ export type SaathiKnowledgeGap = {
 };
 
 // Static concepts behind the last 6 months' magazine stories that no book in
-// the knowledge base explained (the story printed without a background).
+// the knowledge base explained (the background, if any, is SAATHI's own).
 export const listUncoveredConcepts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -591,7 +590,7 @@ export const listUncoveredConcepts = createServerFn({ method: "GET" })
     for (let start = 0; ; start += PAGE) {
       const { data, error } = await admin
         .from("ca_items" as never)
-        .select("concept,issue_date,headline,background:content->background")
+        .select("concept,issue_date,headline,context_sources")
         .not("concept", "is", null)
         .eq("status", "included")
         .eq("needs_enrich", false)
