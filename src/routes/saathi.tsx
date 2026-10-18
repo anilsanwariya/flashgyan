@@ -27,7 +27,6 @@ import {
   listSaathiTopics,
   saathiQuiz,
   submitSaathiFeedback,
-  type SaathiTopic,
 } from "@/lib/saathi.functions";
 import { listSaathiAnswerFormats } from "@/lib/saathi-mains.functions";
 import { getHomeData } from "@/lib/home.functions";
