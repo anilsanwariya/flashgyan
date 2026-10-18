@@ -260,6 +260,7 @@ function SaathiChat() {
       },
     ]);
     setInput("");
+    if (inputRef.current) inputRef.current.style.height = "";
     setSending(true);
 
     const controller = new AbortController();
@@ -524,13 +525,13 @@ function ModePicker({
   onChange: (m: { mode: AskMode; marks: number }) => void;
 }) {
   const pill = (active: boolean) =>
-    `inline-flex items-center gap-1 h-8 rounded-full px-3 text-xs font-medium border transition-colors ${
+    `shrink-0 whitespace-nowrap inline-flex items-center gap-1 h-8 rounded-full px-3 text-xs font-medium border transition-colors ${
       active
         ? "bg-primary/15 text-primary border-primary/30"
         : "bg-white/50 dark:bg-black/30 border-border/40 text-muted-foreground hover:text-foreground"
     }`;
   return (
-    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Answer style">
+    <div className="flex shrink-0 items-center gap-1.5" role="group" aria-label="Answer style">
       <button
         type="button"
         disabled={disabled}
