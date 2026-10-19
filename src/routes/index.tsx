@@ -147,7 +147,7 @@ function Home() {
               {displayName ? `, ${displayName}` : ""}!
             </p>
             <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground drop-shadow-sm">
-              Smart flashcards &amp; MCQs for RAS, REET, PSI &amp; Patwari
+              Smart Flashcards for RAS, PSI and all competitive exams
             </h1>
             <p className="text-foreground/80 font-medium text-[15px] leading-relaxed max-w-md mx-auto lg:mx-0">
               Practise free right here, or get the FlashGyan Android app to study faster with offline access.
