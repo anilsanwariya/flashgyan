@@ -656,6 +656,41 @@ export type Database = {
         }
         Relationships: []
       }
+      ca_item_versions: {
+        Row: {
+          created_at: string
+          headline: string
+          id: string
+          item_id: string
+          reason: string
+          snapshot: Json
+        }
+        Insert: {
+          created_at?: string
+          headline?: string
+          id?: string
+          item_id: string
+          reason?: string
+          snapshot: Json
+        }
+        Update: {
+          created_at?: string
+          headline?: string
+          id?: string
+          item_id?: string
+          reason?: string
+          snapshot?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ca_item_versions_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "ca_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ca_items: {
         Row: {
           category: string

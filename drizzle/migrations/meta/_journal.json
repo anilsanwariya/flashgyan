@@ -64,6 +64,13 @@
       "when": 1792206007562,
       "tag": "0008_bot_check_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792438868623,
+      "tag": "0009_create_ca_item_versions",
+      "breakpoints": true
     }
   ]
 }
