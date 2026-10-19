@@ -743,7 +743,7 @@ export async function enrichItem(
         papers: PAPER_SUBJECTS,
         mainsSet,
         concept: item.concept,
-        context: context.map((f) => f.text),
+        context: context.map((f) => (f.note ? `${f.text} [Editor's note: ${f.note}]` : f.text)),
         note: opts.note,
         visual: look.visual
           ? { type: VISUAL_LABELS[look.visual.type].toLowerCase(), covers: look.visual_covers }

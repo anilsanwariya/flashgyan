@@ -14,7 +14,14 @@ export type Span = [start: number, end: number];
 // A highlight in the reader: words from one source, and whether they become a
 // key point or only guide the summary and "why it matters". "check" marks a
 // point the editor wants to verify: it shows as "to check" until marked checked.
-export type Highlight = { source_id: string; quote: string; point: boolean; check?: boolean };
+// "note" tells SAATHI how to use it ("use in the headline").
+export type Highlight = {
+  source_id: string;
+  quote: string;
+  point: boolean;
+  check?: boolean;
+  note?: string;
+};
 
 const HIDDEN = /^(?:!\[[^\]\n]*\]\([^)\n]*\)|\]\([^)\n]*\)|<\/?[a-zA-Z][^<>\n]*>)/;
 
@@ -61,6 +68,19 @@ function normalizedCached(text: string) {
     cache.set(text, hit);
   }
   return hit;
+}
+
+// Every place the words appear (ignoring case, punctuation and spacing), for
+// the reader's find bar.
+export function findAll(text: string, query: string, max = 500): Span[] {
+  const q = normalized(query).norm;
+  if (q.length < 2) return [];
+  const { norm, at } = normalizedCached(text);
+  const out: Span[] = [];
+  for (let i = norm.indexOf(q); i >= 0 && out.length < max; i = norm.indexOf(q, i + q.length)) {
+    out.push([at[i], at[i + q.length - 1] + 1]);
+  }
+  return out;
 }
 
 // Where the quote is in the text, or null.
@@ -164,6 +184,9 @@ export function factsFromHighlights(
     const fact: CaFact = same
       ? { ...same, source_id: h.source_id, verified: !h.check && (same.verified || found) }
       : { text: quote, quote, source_id: h.source_id, verified: !h.check && found };
+    const note = h.note?.trim();
+    if (note) fact.note = note.slice(0, 200);
+    else delete fact.note;
     (h.point ? facts : context).push(fact);
   }
   return { facts, context };

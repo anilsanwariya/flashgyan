@@ -82,6 +82,8 @@ export type CaFact = {
   // Which blueprint slot the fact fills (launch date, ministry, rank…);
   // missing on older facts.
   slot?: string;
+  // The editor's margin note on how to use it ("use in the headline").
+  note?: string;
 };
 
 export type CaMcq = { question: Bi; options: Bi[]; answer: number; explanation: Bi };
@@ -421,7 +423,9 @@ export function enrichMessages(opts: {
   // The editor's instruction for this story ("focus on the Rajasthan angle").
   note?: string | null;
 }): ChatMessage[] {
-  const facts = opts.facts.map((f, i) => `${i + 1}. ${f.text}`).join("\n");
+  const facts = opts.facts
+    .map((f, i) => `${i + 1}. ${f.text}${f.note ? ` [Editor's note: ${f.note}]` : ""}`)
+    .join("\n");
   const context = opts.context?.length
     ? `\n\nContext (use for the summary and "why" only; no points):\n${opts.context.map((f) => `- ${f}`).join("\n")}`
     : "";
@@ -438,7 +442,7 @@ export function enrichMessages(opts: {
     {
       role: "system",
       content: `You write a bilingual (Hindi and English) current affairs magazine for RAS exam aspirants. Write one news item from the numbered facts.
-RULES: Use only the facts given (numbered facts and any Context). Never add a number, name, date or claim that is not in them. Follow the editor's instruction when one is given, within these rules. Hindi must be natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी), with the same numbers and official names (give the English name in brackets the first time if it helps).
+RULES: Use only the facts given (numbered facts and any Context). Never add a number, name, date or claim that is not in them. Follow the editor's instruction when one is given, and an [Editor's note] on a fact (for example: put it in the headline, build the MCQ or the Mains question on it, keep it word for word), within these rules. Hindi must be natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी), with the same numbers and official names (give the English name in brackets the first time if it helps).
 BE BRIEF: students revise from this, so less theory, more memorable facts. Say each fact once: the summary gives only the gist (what happened, who, where), the points carry the details, and nothing is repeated between summary, points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}
 STATIC CONNECT links the news to the static syllabus. "keywords" lists up to ${MAX_KEYWORDS} static concepts the news links to that RPSC could ask about (constitutional articles, acts, institutions, technologies, schemes, places, conventions, terms), most important first (the "Static concept" in the message, when given), whether or not the passages explain them; each is a short name of at most 5 words. "statics" explains the first 1 or 2 keywords the way a textbook does: what it is, what it says, how it works, in 1-2 sentences of at most 40 words each, without retelling the news. Base each on the knowledge-base passages [K…] that explain it, even if they never mention the news, and list them in "from"; when no passage explains it, write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. Use [] for both when the news has no static concept worth explaining.
 Reply with JSON only:
