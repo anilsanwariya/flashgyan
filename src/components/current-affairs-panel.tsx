@@ -52,6 +52,7 @@ import {
 } from "@/lib/current-affairs";
 import { CollectionBox, WatchSitesSettings } from "@/components/ca-collect-panel";
 import { StoryList } from "@/components/ca-story-review";
+import { SkippedNews } from "@/components/ca-skipped-news";
 import { FeatureBox } from "@/components/ca-feature-box";
 import { Badge, BulkBar, errorText, useChosen } from "@/components/ca-ui";
 import { FileDropZone, FileQueueList, useFileQueue } from "@/components/saathi-file-queue";
@@ -654,6 +655,8 @@ function DailyPanel() {
       {day && day.corrections.length > 0 && (
         <CorrectionsBox corrections={day.corrections} onChanged={refresh} />
       )}
+
+      <SkippedNews date={date} sourceCount={day?.sources.length ?? 0} onChanged={refresh} />
 
       {/* Items */}
       {dayQ.isLoading ? (
