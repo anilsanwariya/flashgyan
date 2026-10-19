@@ -397,6 +397,23 @@ export const addCaPenKeywords = createServerFn({ method: "POST" })
     return s.withKeywords(item, data.keywords);
   });
 
+// "What's missing?" for the reader's highlights in one source.
+export const checkCaMissing = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        source_id: z.string().uuid(),
+        highlights: z.array(z.string().trim().min(2).max(2000)).max(40),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).checkMissing(data.id, data.source_id, data.highlights);
+  });
+
 export const setCaFactChecked = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>

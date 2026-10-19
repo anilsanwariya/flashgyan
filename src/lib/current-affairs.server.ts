@@ -84,8 +84,11 @@ import {
 } from "@/lib/current-affairs";
 import { VISUAL_LABELS, parseVisual, visualMessages, type Visual } from "@/lib/ca-visuals";
 import { isPaged, outline, type OutlineEntry } from "@/lib/ca-reader-format";
+import { missingMessages, parseMissing, type MissingCheck } from "@/lib/ca-missing";
 import {
   factsFromHighlights,
+  findQuote,
+  type Span,
   readerWindow,
   remapChanges,
   snapToLines,
@@ -1224,6 +1227,9 @@ export type ReaderSource = {
   total: number;
   // Headings and pages of the whole source, for jumping around in it.
   outline: OutlineEntry[];
+  // The day's other stories made from this source, with their quotes, so the
+  // reader can show which articles of a newspaper page have no story yet.
+  stories: { id: string; headline: string; dropped: boolean; quotes: string[] }[];
 };
 
 const READER_MAX = 30_000;
@@ -1237,9 +1243,18 @@ export async function itemReader(id: string): Promise<ReaderSource[]> {
     .in("id", item.source_ids);
   fail(error);
   const quotes = [...item.facts, ...(item.content?.context_facts ?? [])];
+  const { data: others } = await from("ca_items")
+    .select("id,headline,status,facts")
+    .overlaps("source_ids", item.source_ids)
+    .neq("id", id)
+    .limit(300);
+  const siblings = (others ?? []) as unknown as Pick<
+    CaItem,
+    "id" | "headline" | "status" | "facts"
+  >[];
   const rows = (data ?? []) as unknown as (Omit<
     ReaderSource,
-    "text" | "start" | "total" | "outline"
+    "text" | "start" | "total" | "outline" | "stories"
   > & {
     content: string;
   })[];
@@ -1255,8 +1270,56 @@ export async function itemReader(id: string): Promise<ReaderSource[]> {
         start: a,
         total: content.length,
         outline: outline(content, isPaged(r.url)),
+        stories: siblings
+          .map((o) => ({
+            id: o.id,
+            headline: o.headline,
+            dropped: o.status === "dropped",
+            quotes: o.facts.filter((f) => f.source_id === r.id).map((f) => f.quote),
+          }))
+          .filter((o) => o.quotes.length),
       };
     });
+}
+
+// "What's missing?": the facts an examiner asks for that the highlights don't
+// cover, with where this source states them. One AI call, on request.
+export async function checkMissing(
+  id: string,
+  sourceId: string,
+  highlights: string[],
+): Promise<MissingCheck> {
+  const item = await loadItem(id);
+  if (!item.source_ids.includes(sourceId)) throw new Error("That source isn't part of this story");
+  const texts = await sourceTexts([sourceId]);
+  const content = texts.get(sourceId) ?? "";
+  // The article around the highlights (and the story's facts), not a whole newspaper.
+  const anchors = [
+    ...highlights,
+    ...item.facts.filter((f) => f.source_id === sourceId).map((f) => f.quote),
+  ];
+  const spans = anchors.map((q) => findQuote(content, q)).filter((x): x is Span => !!x);
+  const from0 = spans.length ? Math.max(0, Math.min(...spans.map((x) => x[0])) - 5000) : 0;
+  const to0 = Math.min(
+    content.length,
+    spans.length ? Math.max(...spans.map((x) => x[1])) + 5000 : 16_000,
+    from0 + 16_000,
+  );
+  const [a, b] = snapToLines(content, from0, to0);
+  const slotOf = (q: string) =>
+    item.facts.find((f) => normalizeForMatch(f.quote) === normalizeForMatch(q))?.slot;
+  const raw = await saathiComplete(
+    apiKey(),
+    missingMessages({
+      headline: item.content?.headline.en || item.headline,
+      category: item.category,
+      highlights: highlights.map((quote) => ({ quote, slot: slotOf(quote) })),
+      article: content.slice(a, b),
+    }),
+  );
+  const parsed = parseMissing(raw, content, highlights);
+  if (!parsed) throw new Error("The AI's reply could not be read. Try again.");
+  return parsed;
 }
 
 // More of a long source, as the reader scrolls past what it has.

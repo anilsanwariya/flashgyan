@@ -285,3 +285,51 @@ export function snapToWords(text: string, a: number, b: number): [number, number
   while (e > s && EDGE.test(text[e - 1])) e--;
   return [s, e];
 }
+
+// A newspaper page's articles: each heading starts one, and so does each
+// page. Text before a page's first heading is an article too, named by its
+// first words.
+export type Article = { title: string; at: number; end: number; page: number };
+
+export function splitArticles(blocks: Block[], firstPage = 1): Article[] {
+  const out: Article[] = [];
+  let cur: Article | null = null;
+  let page = firstPage;
+  const close = () => {
+    if (cur) out.push(cur);
+    cur = null;
+  };
+  for (const b of blocks) {
+    if (b.clutter) continue;
+    if (b.kind === "page") {
+      close();
+      page = b.n;
+      continue;
+    }
+    if (b.kind === "heading") {
+      close();
+      const title = b.runs
+        .map((r) => r.text)
+        .join("")
+        .trim();
+      cur = { title: title.slice(0, 120), at: b.at, end: b.end, page };
+      continue;
+    }
+    if (!cur) {
+      const words = blockRuns(b)
+        .map((r) => r.text)
+        .join("")
+        .trim()
+        .split(/\s+/);
+      cur = {
+        title: words.slice(0, 8).join(" ") + (words.length > 8 ? "…" : ""),
+        at: b.at,
+        end: b.end,
+        page,
+      };
+    }
+    cur.end = b.end;
+  }
+  close();
+  return out;
+}

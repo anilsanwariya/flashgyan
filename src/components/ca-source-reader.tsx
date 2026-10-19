@@ -9,7 +9,12 @@
 // in Read mode, or right-clicking it) opens its actions: change the pen, add
 // a margin note for SAATHI ("use this in the headline"), remove it. Read mode
 // leaves taps alone and allows normal text selection. A find bar and
-// previous / next highlight buttons move around the article. Highlights are
+// previous / next highlight buttons move around the article. A newspaper page
+// (a PDF) is split into its articles and opens on the story's own article,
+// with the page's other articles listed and marked by their stories ("No
+// story yet" is news the AI skipped). "What's missing?" asks SAATHI which
+// exam facts the highlights don't cover and where the article says them.
+// Highlights are
 // kept as a draft on the device until the story is rewritten or a new story
 // is made from them.
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -27,6 +32,7 @@ import {
   Highlighter,
   ListTree,
   Minus,
+  Newspaper,
   Plus,
   Pencil,
   Redo2,
@@ -37,6 +43,7 @@ import {
 } from "lucide-react";
 import {
   addCaPenKeywords,
+  checkCaMissing,
   createCaFromHighlights,
   getCaReader,
   getCaReaderText,
@@ -45,16 +52,19 @@ import {
   type ReaderSource,
 } from "@/lib/current-affairs.functions";
 import { cleanQuote, findAll, findQuote, sentenceSpans, type Span } from "@/lib/ca-highlight";
+import { type MissingCheck, type MissingFact } from "@/lib/ca-missing";
 import {
   isPaged,
   parseBlocks,
+  splitArticles,
+  type Article,
   plainText,
   snapToWords,
   type Block,
   type OutlineEntry,
   type Run,
 } from "@/lib/ca-reader-format";
-import { errorText } from "@/components/ca-ui";
+import { Badge, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -202,6 +212,7 @@ export function SourceReader({
   const rewriteFn = useServerFn(rewriteCaFromHighlights);
   const createFn = useServerFn(createCaFromHighlights);
   const keywordsFn = useServerFn(addCaPenKeywords);
+  const missingFn = useServerFn(checkCaMissing);
   const q = useQuery({
     queryKey: ["caReader", item.id],
     queryFn: () => readerFn({ data: { id: item.id } }),
@@ -233,6 +244,12 @@ export function SourceReader({
   const [flash, setFlash] = useState<number | null>(null);
   // The highlight whose actions are open (its index in marks).
   const [sheet, setSheet] = useState<number | null>(null);
+  // The article shown alone (index in articles), on newspaper pages.
+  const [focus, setFocus] = useState<number | null>(null);
+  const [articlesOpen, setArticlesOpen] = useState(false);
+  const focusInit = useRef<Set<string>>(new Set());
+  const [missing, setMissing] = useState<MissingCheck | null>(null);
+  const [checking, setChecking] = useState(false);
   const [preview, setPreview] = useState<Span | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
@@ -254,6 +271,9 @@ export function SourceReader({
     setFuture([]);
     setTrayOpen(false);
     restoredPos.current = new Set();
+    focusInit.current = new Set();
+    setFocus(null);
+    setMissing(null);
     restoreDraft("rewrite");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, item.id]);
@@ -304,6 +324,11 @@ export function SourceReader({
   }, [open, mode, marks, note, item]);
 
   useEffect(() => write(SIZE_KEY, size), [size]);
+  // A different tab is a different source: its own articles.
+  useEffect(() => {
+    setFocus(null);
+    setMissing(null);
+  }, [tab]);
   useEffect(() => write(VIEW_KEY, view), [view]);
 
   // ---------- History ----------
@@ -348,10 +373,76 @@ export function SourceReader({
     if (preview && tool !== "eraser") out.push({ span: preview, pen: tool, preview: true });
     return out;
   }, [marks, part, source, preview, tool]);
+  // In "new story" mode the story's own facts show faintly.
+  const taken = useMemo<Span[]>(() => {
+    if (mode !== "new" || !part || !source) return [];
+    return storyMarks(item)
+      .filter((m) => m.source_id === source.id)
+      .map((m) => findQuote(part.text, m.quote))
+      .filter((s): s is Span => !!s);
+  }, [mode, part, source, item]);
+  const sentences = useMemo(() => (part ? sentenceSpans(part.text) : []), [part]);
+  const blocks = useMemo(() => {
+    if (!part || !source) return [];
+    // Pages before the loaded part, so page numbers match the whole source.
+    const firstPage =
+      source.outline.filter((e) => e.level === 0 && e.at > 0 && e.at < part.start).length + 1;
+    return parseBlocks(part.text, isPaged(source.url), firstPage);
+  }, [part, source]);
+  const hidden = blocks.filter((b) => b.clutter).length;
+
+  // ---------- A newspaper page's articles ----------
+  // A paged source (a PDF) is split into its articles; the reader opens on
+  // the story's own article and lists the others, with their stories.
+  const articles = useMemo<Article[]>(() => {
+    if (!part || !source || !isPaged(source.url)) return [];
+    const firstPage =
+      source.outline.filter((e) => e.level === 0 && e.at > 0 && e.at < part.start).length + 1;
+    const list = splitArticles(blocks, firstPage);
+    return list.length >= 2 ? list : [];
+  }, [blocks, part, source]);
+  const articleInfo = useMemo(() => {
+    if (!part || !source) return [];
+    const own = storyMarks(item).filter((m) => m.source_id === source.id);
+    return articles.map((a) => {
+      const inside = (q: string) => {
+        const sp = findQuote(part.text, q);
+        return !!sp && sp[0] >= a.at && sp[0] < a.end;
+      };
+      return {
+        mine: own.some((m) => inside(m.quote)),
+        marked: marks.some((m) => m.source_id === source.id && inside(m.quote)),
+        others: (source.stories ?? [])
+          .filter((o) => o.quotes.some(inside))
+          .map((o) => ({ headline: o.headline, dropped: o.dropped })),
+      };
+    });
+  }, [articles, part, source, item, marks]);
+  const art = focus !== null ? articles[focus] : undefined;
+  const inFocus = (at: number) => !art || (at >= art.at && at < art.end);
+  // Opening a newspaper page: straight to the story's article.
+  useEffect(() => {
+    if (!source || !articles.length || focusInit.current.has(source.id)) return;
+    focusInit.current.add(source.id);
+    const i = articleInfo.findIndex((x) => x.mine);
+    setFocus(i >= 0 ? i : 0);
+  }, [source, articles, articleInfo]);
+  function pickArticle(i: number | null) {
+    setFocus(i);
+    setArticlesOpen(false);
+    requestAnimationFrame(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    });
+  }
+
   // Find bar: every match in the loaded part, and the current one.
   const matches = useMemo<Span[]>(
-    () => (findOpen && part && query.trim().length >= 2 ? findAll(part.text, query) : []),
-    [findOpen, part, query],
+    () =>
+      findOpen && part && query.trim().length >= 2
+        ? findAll(part.text, query).filter(([x]) => inFocus(x))
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [findOpen, part, query, art],
   );
   const found = useMemo<Found[]>(
     () => matches.map((span, i) => ({ span, current: i === findIdx })),
@@ -372,10 +463,11 @@ export function SourceReader({
   const ordered = useMemo(
     () =>
       ranges
-        .filter((r) => !r.preview)
+        .filter((r) => !r.preview && inFocus(r.span[0]))
         .map((r) => r.span[0])
         .sort((a, b) => a - b),
-    [ranges],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ranges, art],
   );
   const hlCursor = useRef(-1);
   function stepHighlight(d: 1 | -1) {
@@ -391,24 +483,6 @@ export function SourceReader({
         ?.scrollIntoView({ block: "center", behavior: "smooth" }),
     );
   }
-
-  // In "new story" mode the story's own facts show faintly.
-  const taken = useMemo<Span[]>(() => {
-    if (mode !== "new" || !part || !source) return [];
-    return storyMarks(item)
-      .filter((m) => m.source_id === source.id)
-      .map((m) => findQuote(part.text, m.quote))
-      .filter((s): s is Span => !!s);
-  }, [mode, part, source, item]);
-  const sentences = useMemo(() => (part ? sentenceSpans(part.text) : []), [part]);
-  const blocks = useMemo(() => {
-    if (!part || !source) return [];
-    // Pages before the loaded part, so page numbers match the whole source.
-    const firstPage =
-      source.outline.filter((e) => e.level === 0 && e.at > 0 && e.at < part.start).length + 1;
-    return parseBlocks(part.text, isPaged(source.url), firstPage);
-  }, [part, source]);
-  const hidden = blocks.filter((b) => b.clutter).length;
 
   // ---------- Marking ----------
   const markIndexAt = (offset: number) =>
@@ -666,6 +740,13 @@ export function SourceReader({
     if (!part) return false;
     const rel = abs - part.start;
     if (rel < 0 || rel > part.text.length) return false;
+    // Outside the article shown alone: show the article it is in first.
+    if (art && (rel < art.at || rel >= art.end)) {
+      const i = articles.findIndex((x) => rel >= x.at && rel < x.end);
+      pendingJump.current = abs;
+      setFocus(i >= 0 ? i : null);
+      return true;
+    }
     const els = [...(textRef.current?.querySelectorAll<HTMLElement>("[data-at]") ?? [])];
     const el = els.filter((x) => Number(x.dataset.at) <= rel).pop() ?? els[0];
     el?.scrollIntoView({ block: "start" });
@@ -697,14 +778,15 @@ export function SourceReader({
       requestAnimationFrame(() => scrollToOffset(at));
       return;
     }
-    // Back to where reading stopped, once per opening.
-    if (!restoredPos.current.has(source.id)) {
+    // Back to where reading stopped, once per opening (newspaper pages
+    // open on the story's article instead).
+    if (!restoredPos.current.has(source.id) && !articles.length) {
       restoredPos.current.add(source.id);
       const at = read<number | null>(posKey(source.id), null);
       if (at !== null) requestAnimationFrame(() => scrollToOffset(at));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [part, source, view]);
+  }, [part, source, view, focus]);
 
   const lastTop = useRef(0);
   const posTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -771,6 +853,35 @@ export function SourceReader({
     }
   }
 
+  async function checkWhatsMissing() {
+    if (!source) return;
+    setChecking(true);
+    try {
+      const r = await missingFn({
+        data: {
+          id: item.id,
+          source_id: source.id,
+          highlights: marks
+            .filter((m) => m.source_id === source.id && m.pen !== "keyword")
+            .map((m) => m.quote),
+        },
+      });
+      setMissing(r);
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't check what's missing"));
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  function addMissing(f: MissingFact) {
+    if (!source || !f.quote) return;
+    const quote = f.quote;
+    commit((cur) => [...cur, { source_id: source.id, quote, pen: "point" }]);
+    setMissing((m) => m && { ...m, missing: m.missing.filter((x) => x !== f) });
+    toast.success(`Added: ${f.label}`);
+  }
+
   async function addKeywordsOnly() {
     setBusy(true);
     try {
@@ -815,6 +926,10 @@ export function SourceReader({
       onSubmit={() => void submit()}
       onAddKeywords={() => void addKeywordsOnly()}
       onEdit={(i) => openSheet(i)}
+      missing={mode === "rewrite" && source ? missing : undefined}
+      checking={checking}
+      onCheckMissing={() => void checkWhatsMissing()}
+      onAddMissing={addMissing}
       jump={wide && ordered.length > 1 ? <HighlightJump onStep={stepHighlight} /> : null}
     />
   );
@@ -843,6 +958,18 @@ export function SourceReader({
             >
               <Search className="h-4 w-4" />
             </Button>
+            {articles.length > 0 && view === "clean" && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 px-2"
+                aria-label="Articles on this page"
+                aria-expanded={articlesOpen}
+                onClick={() => setArticlesOpen((v) => !v)}
+              >
+                <Newspaper className="h-4 w-4" />
+              </Button>
+            )}
             {source && source.outline.length > 0 && (
               <Button
                 size="sm"
@@ -979,6 +1106,29 @@ export function SourceReader({
               Searching the part shown; use “Show more” to search further.
             </p>
           )}
+          {articlesOpen && articles.length > 0 && (
+            <nav
+              aria-label="Articles on this page"
+              className="max-h-[45dvh] overflow-y-auto border-t border-border px-2 py-1"
+            >
+              <button
+                type="button"
+                onClick={() => pickArticle(null)}
+                className={`block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${focus === null ? "font-semibold text-primary" : ""}`}
+              >
+                Whole page
+              </button>
+              {articles.map((a, i) => (
+                <ArticleRow
+                  key={a.at}
+                  article={a}
+                  info={articleInfo[i]}
+                  on={focus === i}
+                  onClick={() => pickArticle(i)}
+                />
+              ))}
+            </nav>
+          )}
           {contentsOpen && source && (
             <nav
               aria-label="Contents"
@@ -1056,15 +1206,39 @@ export function SourceReader({
                     className={`leading-[1.75] ${painting ? "cursor-text select-none [-webkit-touch-callout:none]" : ""}`}
                   >
                     {view === "clean" ? (
-                      blocks.map((b) =>
-                        b.clutter ? null : (
-                          <BlockView
-                            key={b.at}
-                            block={b}
-                            {...rangesFor(b, ranges, taken, found, flash)}
+                      <>
+                        {art && (
+                          <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>
+                              Page {art.page} · article {focus! + 1} of {articles.length}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => pickArticle(null)}
+                              className="ml-auto rounded-full border border-border px-2.5 py-0.5"
+                            >
+                              Whole page
+                            </button>
+                          </div>
+                        )}
+                        {blocks.map((b) =>
+                          b.clutter || !inFocus(b.at) ? null : (
+                            <BlockView
+                              key={b.at}
+                              block={b}
+                              {...rangesFor(b, ranges, taken, found, flash)}
+                            />
+                          ),
+                        )}
+                        {art && (
+                          <ArticleFoot
+                            articles={articles}
+                            info={articleInfo}
+                            focus={focus!}
+                            onPick={pickArticle}
                           />
-                        ),
-                      )
+                        )}
+                      </>
                     ) : (
                       <div data-at={0} className="whitespace-pre-wrap">
                         <Pieces
@@ -1336,6 +1510,173 @@ function Toolbar({
   );
 }
 
+type ArticleInfo = {
+  mine: boolean;
+  marked: boolean;
+  others: { headline: string; dropped: boolean }[];
+};
+
+function ArticleBadge({ info }: { info?: ArticleInfo }) {
+  if (!info) return null;
+  if (info.mine) return <Badge tone="primary">This story</Badge>;
+  const kept = info.others.find((o) => !o.dropped);
+  if (kept) return <Badge tone="good">Story: {kept.headline.slice(0, 40)}</Badge>;
+  // A story was made but dropped from the issue: include it rather than make another.
+  if (info.others.length) return <Badge>Dropped: {info.others[0].headline.slice(0, 36)}</Badge>;
+  if (info.marked) return <Badge tone="warn">Highlighted</Badge>;
+  return <Badge tone="warn">No story yet</Badge>;
+}
+
+function ArticleRow({
+  article: a,
+  info,
+  on,
+  onClick,
+}: {
+  article: Article;
+  info?: ArticleInfo;
+  on: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-current={on || undefined}
+      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${on ? "bg-muted font-semibold" : ""}`}
+    >
+      <span className="w-10 shrink-0 text-[11px] text-muted-foreground">p. {a.page}</span>
+      <span className="min-w-0 flex-1 truncate">{a.title}</span>
+      <ArticleBadge info={info} />
+    </button>
+  );
+}
+
+// Under an article shown alone: the previous and next article, and the
+// other articles of its page with their stories.
+function ArticleFoot({
+  articles,
+  info,
+  focus,
+  onPick,
+}: {
+  articles: Article[];
+  info: ArticleInfo[];
+  focus: number;
+  onPick: (i: number | null) => void;
+}) {
+  const page = articles[focus].page;
+  return (
+    <div className="mt-6 space-y-3 border-t border-border pt-3" data-testid="article-foot">
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          className="flex-1"
+          disabled={focus === 0}
+          onClick={() => onPick(focus - 1)}
+        >
+          ← Previous article
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="flex-1"
+          disabled={focus === articles.length - 1}
+          onClick={() => onPick(focus + 1)}
+        >
+          Next article →
+        </Button>
+      </div>
+      <div>
+        <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Other articles on page {page}
+        </div>
+        {articles.map((a, i) =>
+          a.page !== page || i === focus ? null : (
+            <ArticleRow
+              key={a.at}
+              article={a}
+              info={info[i]}
+              on={false}
+              onClick={() => onPick(i)}
+            />
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
+// "What's missing?": the exam facts the highlights don't cover yet, each with
+// the article's words for it, one tap from being a key point.
+function MissingBox({
+  missing,
+  checking,
+  onCheck,
+  onAdd,
+}: {
+  missing: MissingCheck | null;
+  checking: boolean;
+  onCheck: () => void;
+  onAdd: (f: MissingFact) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-background p-2" data-testid="missing-box">
+      <div className="flex items-center gap-2">
+        <span className="flex-1 text-sm font-semibold">What's missing?</span>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-xs"
+          disabled={checking}
+          onClick={onCheck}
+        >
+          {checking ? "Checking…" : missing ? "Check again" : "Check"}
+        </Button>
+      </div>
+      {!missing && !checking && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          SAATHI lists the facts an examiner asks for that your highlights don't cover, and where
+          the article says them. One AI check.
+        </p>
+      )}
+      {missing && (
+        <>
+          <p className="mt-1 text-[11px] text-muted-foreground">Story type: {missing.typeLabel}</p>
+          {missing.missing.length === 0 ? (
+            <p className="mt-1 text-xs">Nothing important is missing.</p>
+          ) : (
+            <ul className="mt-1.5 space-y-2">
+              {missing.missing.map((f) => (
+                <li key={f.slot} className="text-xs">
+                  <div className="font-medium first-letter:uppercase">{f.label}</div>
+                  {f.quote ? (
+                    <div className="mt-0.5 flex items-start gap-2">
+                      <span className="min-w-0 flex-1 italic text-muted-foreground">
+                        “{f.quote}”
+                      </span>
+                      <Button
+                        size="sm"
+                        className="h-7 shrink-0 px-2 text-xs"
+                        onClick={() => onAdd(f)}
+                      >
+                        Add
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="text-muted-foreground">Not in this article</div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function HighlightJump({ onStep }: { onStep: (d: 1 | -1) => void }) {
   const cls = "grid h-7 w-7 place-items-center rounded-full border border-border bg-background";
   return (
@@ -1475,6 +1816,10 @@ function Tray({
   onAddKeywords,
   onEdit,
   jump,
+  missing,
+  checking,
+  onCheckMissing,
+  onAddMissing,
 }: {
   marks: Mark[];
   mode: Mode;
@@ -1493,6 +1838,11 @@ function Tray({
   onEdit: (i: number) => void;
   // Previous / next highlight buttons, on wide screens.
   jump: React.ReactNode;
+  // "What's missing?": undefined when not offered (new story mode).
+  missing: MissingCheck | null | undefined;
+  checking: boolean;
+  onCheckMissing: () => void;
+  onAddMissing: (f: MissingFact) => void;
 }) {
   return (
     <div className="space-y-3 p-3">
@@ -1501,6 +1851,14 @@ function Tray({
           <span className="flex-1">Jump between highlights</span>
           {jump}
         </div>
+      )}
+      {missing !== undefined && (
+        <MissingBox
+          missing={missing}
+          checking={checking}
+          onCheck={onCheckMissing}
+          onAdd={onAddMissing}
+        />
       )}
       <ul className="space-y-1.5" data-testid="highlight-list">
         {marks.map((m, i) => (
