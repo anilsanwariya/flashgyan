@@ -1,14 +1,33 @@
-// Admin: the full source of a story, to highlight the facts it should have.
-// Tap a sentence to highlight it (tap again to remove), or select words and
-// press "Add selected words". Each highlight is a key point or only guides
-// the summary and "why it matters". The story is then rewritten from the
-// highlights, or the highlights become a new story (news the AI skipped).
-import { useEffect, useMemo, useRef, useState } from "react";
+// Admin: the full source of a story, to highlight the facts it should have,
+// like marking up a printout. The article opens full screen in a clean view
+// (headings, paragraphs, lists and tables; website clutter hidden), with a
+// toolbar of pens at the bottom:
+//   yellow = key point, blue = summary only, pink = key point to check,
+//   green = Static Connect keyword, and an eraser.
+// In Highlight mode a tap marks the whole sentence; press and hold (or drag
+// with a mouse) to paint just some words. Read mode leaves taps alone and
+// allows normal text selection. Highlights are kept as a draft on the device
+// until the story is rewritten or a new story is made from them.
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { ChevronDown, ChevronUp, ExternalLink, Highlighter, Plus, X } from "lucide-react";
 import {
+  BookOpen,
+  ChevronDown,
+  ChevronUp,
+  Eraser,
+  ExternalLink,
+  Highlighter,
+  ListTree,
+  Minus,
+  Plus,
+  Redo2,
+  Undo2,
+  X,
+} from "lucide-react";
+import {
+  addCaPenKeywords,
   createCaFromHighlights,
   getCaReader,
   getCaReaderText,
@@ -16,33 +35,141 @@ import {
   type CaItem,
   type ReaderSource,
 } from "@/lib/current-affairs.functions";
+import { cleanQuote, findQuote, sentenceSpans, type Span } from "@/lib/ca-highlight";
 import {
-  cleanQuote,
-  findQuote,
-  sentenceSpans,
-  type Highlight,
-  type Span,
-} from "@/lib/ca-highlight";
+  isPaged,
+  parseBlocks,
+  plainText,
+  snapToWords,
+  type Block,
+  type OutlineEntry,
+  type Run,
+} from "@/lib/ca-reader-format";
 import { errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 type Mode = "rewrite" | "new";
-// What part of each source is loaded.
+type Pen = "point" | "summary" | "check" | "keyword";
+type Tool = Pen | "eraser";
+// A highlight: words from one source and the pen they were marked with.
+type Mark = { source_id: string; quote: string; pen: Pen };
+// What part of each source is loaded (offsets are in the whole source).
 type Loaded = { text: string; start: number; total: number };
+type Range = { span: Span; pen: Pen; preview?: boolean };
+
+const PENS: { pen: Pen; label: string; dot: string; mark: string }[] = [
+  {
+    pen: "point",
+    label: "Key point",
+    dot: "bg-amber-400",
+    mark: "bg-amber-300/60 dark:bg-amber-500/40",
+  },
+  {
+    pen: "summary",
+    label: "Summary only",
+    dot: "bg-sky-400",
+    mark: "bg-sky-300/50 dark:bg-sky-500/35",
+  },
+  {
+    pen: "check",
+    label: "Key point to check",
+    dot: "bg-pink-400",
+    mark: "bg-pink-300/60 dark:bg-pink-500/40",
+  },
+  {
+    pen: "keyword",
+    label: "Static Connect keyword",
+    dot: "bg-emerald-400",
+    mark: "bg-emerald-300/55 dark:bg-emerald-500/35",
+  },
+];
+const PEN = Object.fromEntries(PENS.map((p) => [p.pen, p])) as Record<Pen, (typeof PENS)[number]>;
+const CYCLE: Pen[] = ["point", "summary", "check", "keyword"];
+const isPoint = (p: Pen) => p === "point" || p === "check";
 
 const overlaps = (a: Span, b: Span) => a[0] < b[1] && a[1] > b[0];
+const HOLD_MS = 300;
+const MOVE_PX = 8;
+const SIZE_KEY = "ca-reader-size";
+const VIEW_KEY = "ca-reader-view";
+const draftKey = (id: string, mode: Mode) => `ca-reader-draft:${id}:${mode}`;
+const posKey = (sourceId: string) => `ca-reader-pos:${sourceId}`;
 
-function storyHighlights(item: CaItem): Highlight[] {
+function read<T>(key: string, fallback: T): T {
+  try {
+    const v = localStorage.getItem(key);
+    return v ? (JSON.parse(v) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function write(key: string, value: unknown) {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // storage unavailable
+  }
+}
+
+// The story's own facts as marks: points (pink when they still need
+// checking) and summary-only context.
+function storyMarks(item: CaItem): Mark[] {
   return [
-    ...item.facts.map((f) => ({ source_id: f.source_id, quote: f.quote, point: true })),
+    ...item.facts.map((f) => ({
+      source_id: f.source_id,
+      quote: f.quote,
+      pen: (f.verified ? "point" : "check") as Pen,
+    })),
     ...(item.content?.context_facts ?? []).map((f) => ({
       source_id: f.source_id,
       quote: f.quote,
-      point: false,
+      pen: "summary" as Pen,
     })),
   ];
+}
+
+// Identifies the story's facts, so a saved draft is only restored onto the
+// story it was made for.
+const factsKey = (item: CaItem) =>
+  [...item.facts.map((f) => f.quote), ...(item.content?.context_facts ?? []).map((f) => f.quote)]
+    .join("|")
+    .slice(0, 4000);
+
+// The raw offset under a screen point, from the piece of text there.
+function offsetAt(x: number, y: number): number | null {
+  const doc = document as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+  };
+  let node: Node | null = null;
+  let offset = 0;
+  const pos = doc.caretPositionFromPoint?.(x, y);
+  if (pos) {
+    node = pos.offsetNode;
+    offset = pos.offset;
+  } else {
+    const r = document.caretRangeFromPoint?.(x, y);
+    if (r) {
+      node = r.startContainer;
+      offset = r.startOffset;
+    }
+  }
+  const el = (
+    node?.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element | null)
+  )?.closest?.("[data-raw]") as HTMLElement | null;
+  if (!el) return null;
+  return Number(el.dataset.raw) + (node?.nodeType === Node.TEXT_NODE ? offset : 0);
+}
+
+// The raw offset of a DOM selection end.
+function offsetOfNode(node: Node | null, offset: number): number | null {
+  const el = (
+    node?.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element | null)
+  )?.closest?.("[data-raw]") as HTMLElement | null;
+  if (!el) return null;
+  return Number(el.dataset.raw) + (node?.nodeType === Node.TEXT_NODE ? offset : 0);
 }
 
 export function SourceReader({
@@ -60,6 +187,7 @@ export function SourceReader({
   const moreFn = useServerFn(getCaReaderText);
   const rewriteFn = useServerFn(rewriteCaFromHighlights);
   const createFn = useServerFn(createCaFromHighlights);
+  const keywordsFn = useServerFn(addCaPenKeywords);
   const q = useQuery({
     queryKey: ["caReader", item.id],
     queryFn: () => readerFn({ data: { id: item.id } }),
@@ -70,22 +198,71 @@ export function SourceReader({
   const [mode, setMode] = useState<Mode>("rewrite");
   const [tab, setTab] = useState(0);
   const [loaded, setLoaded] = useState<Record<string, Loaded>>({});
-  const [highlights, setHighlights] = useState<Highlight[]>(() => storyHighlights(item));
+  const [marks, setMarks] = useState<Mark[]>(() => storyMarks(item));
+  const [past, setPast] = useState<Mark[][]>([]);
+  const [future, setFuture] = useState<Mark[][]>([]);
+  const [tool, setTool] = useState<Tool>("point");
+  const [painting, setPainting] = useState(true);
   const [note, setNote] = useState("");
-  const [selected, setSelected] = useState("");
   const [busy, setBusy] = useState(false);
-  const [listOpen, setListOpen] = useState(false);
-  const bodyRef = useRef<HTMLDivElement>(null);
+  const [trayOpen, setTrayOpen] = useState(false);
+  const [contentsOpen, setContentsOpen] = useState(false);
+  const [headerHidden, setHeaderHidden] = useState(false);
+  const [size, setSize] = useState(() => read<number>(SIZE_KEY, 16));
+  const [view, setView] = useState<"clean" | "original">(() =>
+    read<"clean" | "original">(VIEW_KEY, "clean"),
+  );
+  const [selection, setSelection] = useState<Span | null>(null);
+  const [preview, setPreview] = useState<Span | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLDivElement>(null);
+  const pendingJump = useRef<number | null>(null);
+  const dragFrom = useRef<number | null>(null);
+  const wide = useWide();
+  const restoredPos = useRef<Set<string>>(new Set());
 
-  // A fresh start each time the reader opens.
+  const sources = useMemo(() => q.data ?? [], [q.data]);
+  const source: ReaderSource | undefined = sources[Math.min(tab, sources.length - 1)];
+  const part = source ? loaded[source.id] : undefined;
+
+  // ---------- Opening: a fresh start, or the draft left on this device ----------
   useEffect(() => {
     if (!open) return;
     setMode("rewrite");
-    setHighlights(storyHighlights(item));
-    setNote("");
     setTab(0);
+    setPast([]);
+    setFuture([]);
+    setTrayOpen(false);
+    restoredPos.current = new Set();
+    restoreDraft("rewrite");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, item.id]);
+
+  function restoreDraft(m: Mode) {
+    const base = m === "new" ? [] : storyMarks(item);
+    const draft = read<{ marks: Mark[]; note: string; facts: string } | null>(
+      draftKey(item.id, m),
+      null,
+    );
+    if (draft && draft.facts === factsKey(item) && draft.marks.length) {
+      setMarks(draft.marks);
+      setNote(draft.note ?? "");
+      toast("Restored the highlights you hadn't used yet", {
+        action: {
+          label: "Discard",
+          onClick: () => {
+            write(draftKey(item.id, m), null);
+            setMarks(base);
+            setNote("");
+          },
+        },
+      });
+    } else {
+      setMarks(base);
+      setNote("");
+    }
+  }
+
   useEffect(() => {
     if (!q.data) return;
     setLoaded(
@@ -95,75 +272,273 @@ export function SourceReader({
     );
   }, [q.data]);
 
-  // Words selected inside the text, for "Add selected words".
+  // Keeps the draft on the device while it differs from the story.
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(() => {
+      const base = mode === "new" ? [] : storyMarks(item);
+      const same = JSON.stringify(marks) === JSON.stringify(base) && !note.trim();
+      write(draftKey(item.id, mode), same ? null : { marks, note, facts: factsKey(item) });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [open, mode, marks, note, item]);
+
+  useEffect(() => write(SIZE_KEY, size), [size]);
+  useEffect(() => write(VIEW_KEY, view), [view]);
+
+  // ---------- History ----------
+  const commit = useCallback((next: Mark[] | ((cur: Mark[]) => Mark[])) => {
+    setMarks((cur) => {
+      const value = typeof next === "function" ? next(cur) : next;
+      if (value === cur) return cur;
+      setPast((p) => [...p.slice(-49), cur]);
+      setFuture([]);
+      return value;
+    });
+  }, []);
+  const undo = () => {
+    if (!past.length) return;
+    setFuture((f) => [marks, ...f]);
+    setMarks(past[past.length - 1]);
+    setPast((p) => p.slice(0, -1));
+  };
+  const redo = () => {
+    if (!future.length) return;
+    setPast((p) => [...p, marks]);
+    setMarks(future[0]);
+    setFuture((f) => f.slice(1));
+  };
+
+  function switchMode(next: Mode) {
+    setMode(next);
+    setPast([]);
+    setFuture([]);
+    restoreDraft(next);
+  }
+
+  // ---------- Where the marks are in the loaded text ----------
+  const ranges = useMemo<Range[]>(() => {
+    if (!part || !source) return [];
+    const out: Range[] = [];
+    for (const m of marks) {
+      if (m.source_id !== source.id) continue;
+      const span = findQuote(part.text, m.quote);
+      if (span) out.push({ span, pen: m.pen });
+    }
+    if (preview && tool !== "eraser") out.push({ span: preview, pen: tool, preview: true });
+    return out;
+  }, [marks, part, source, preview, tool]);
+  // In "new story" mode the story's own facts show faintly.
+  const taken = useMemo<Span[]>(() => {
+    if (mode !== "new" || !part || !source) return [];
+    return storyMarks(item)
+      .filter((m) => m.source_id === source.id)
+      .map((m) => findQuote(part.text, m.quote))
+      .filter((s): s is Span => !!s);
+  }, [mode, part, source, item]);
+  const sentences = useMemo(() => (part ? sentenceSpans(part.text) : []), [part]);
+  const blocks = useMemo(() => {
+    if (!part || !source) return [];
+    // Pages before the loaded part, so page numbers match the whole source.
+    const firstPage =
+      source.outline.filter((e) => e.level === 0 && e.at > 0 && e.at < part.start).length + 1;
+    return parseBlocks(part.text, isPaged(source.url), firstPage);
+  }, [part, source]);
+  const hidden = blocks.filter((b) => b.clutter).length;
+
+  // ---------- Marking ----------
+  const markIndexAt = (offset: number) =>
+    marks.findIndex((m) => {
+      if (!part || !source || m.source_id !== source.id) return false;
+      const s = findQuote(part.text, m.quote);
+      return !!s && s[0] <= offset && offset < s[1];
+    });
+
+  function addMark(span: Span, pen: Pen) {
+    if (!part || !source) return;
+    const quote = cleanQuote(plainText(part.text, span[0], span[1]));
+    if (quote.length < (pen === "keyword" ? 2 : 8)) {
+      toast("Mark a little more text");
+      return;
+    }
+    commit((cur) => [
+      // Marks inside the new one are replaced by it.
+      ...cur.filter((m) => {
+        if (m.source_id !== source.id) return true;
+        const s = findQuote(part.text, m.quote);
+        return !(s && s[0] >= span[0] && s[1] <= span[1]);
+      }),
+      { source_id: source.id, quote, pen },
+    ]);
+  }
+
+  function erase(span: Span) {
+    if (!part || !source) return;
+    commit((cur) =>
+      cur.filter((m) => {
+        if (m.source_id !== source.id) return true;
+        const s = findQuote(part.text, m.quote);
+        return !(s && overlaps(s, span));
+      }),
+    );
+  }
+
+  // A tap: on a highlight it removes it (or recolours it with another pen);
+  // elsewhere it highlights the sentence.
+  function tapAt(offset: number) {
+    if (!part) return;
+    const hit = markIndexAt(offset);
+    if (hit >= 0) {
+      if (tool === "eraser" || marks[hit].pen === tool) {
+        commit((cur) => cur.filter((_, i) => i !== hit));
+      } else {
+        const pen = tool;
+        commit((cur) => cur.map((m, i) => (i === hit ? { ...m, pen } : m)));
+      }
+      return;
+    }
+    if (tool === "eraser") return;
+    const s = sentences.find(([a, b]) => a <= offset && offset < b);
+    if (s) addMark(s, tool);
+  }
+
+  // ---------- Pointer: tap, press-and-hold to paint, drag to paint with a mouse ----------
+  const gesture = useRef<{
+    id: number;
+    x: number;
+    y: number;
+    at: number | null;
+    mouse: boolean;
+    moved: boolean;
+    paint: boolean;
+    timer?: ReturnType<typeof setTimeout>;
+  } | null>(null);
+  const paintRef = useRef<{ anchor: number; focus: number } | null>(null);
+
+  const startPaint = (anchor: number) => {
+    paintRef.current = { anchor, focus: anchor };
+    setPreview(snapToWords(part!.text, anchor, anchor + 1));
+    try {
+      navigator.vibrate?.(8);
+    } catch {
+      // no vibration
+    }
+  };
+
+  function onPointerDown(e: React.PointerEvent) {
+    if (!painting || e.button !== 0 || !part) return;
+    const at = offsetAt(e.clientX, e.clientY);
+    const g = {
+      id: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      at,
+      mouse: e.pointerType === "mouse",
+      moved: false,
+      paint: false,
+    } as NonNullable<typeof gesture.current>;
+    gesture.current = g;
+    if (!g.mouse && at !== null) {
+      g.timer = setTimeout(() => {
+        if (gesture.current === g && !g.moved) {
+          g.paint = true;
+          startPaint(at);
+          textRef.current?.setPointerCapture?.(g.id);
+        }
+      }, HOLD_MS);
+    }
+  }
+
+  function onPointerMove(e: React.PointerEvent) {
+    const g = gesture.current;
+    if (!g || g.id !== e.pointerId || !part) return;
+    const far = Math.hypot(e.clientX - g.x, e.clientY - g.y) > (g.mouse ? 4 : MOVE_PX);
+    if (!g.paint) {
+      if (!far) return;
+      g.moved = true;
+      clearTimeout(g.timer);
+      // A mouse drag paints; a finger that moves before the hold scrolls.
+      if (g.mouse && g.at !== null) {
+        g.paint = true;
+        startPaint(g.at);
+        textRef.current?.setPointerCapture?.(g.id);
+      } else return;
+    }
+    const at = offsetAt(e.clientX, e.clientY);
+    if (at === null || !paintRef.current) return;
+    paintRef.current.focus = at;
+    setPreview(snapToWords(part.text, paintRef.current.anchor, at));
+    // Scroll along when painting near the top or bottom edge.
+    const box = scrollRef.current?.getBoundingClientRect();
+    if (box && scrollRef.current) {
+      if (e.clientY > box.bottom - 40) scrollRef.current.scrollTop += 12;
+      else if (e.clientY < box.top + 40) scrollRef.current.scrollTop -= 12;
+    }
+  }
+
+  function onPointerUp(e: React.PointerEvent) {
+    const g = gesture.current;
+    gesture.current = null;
+    if (!g || g.id !== e.pointerId || !part) return;
+    clearTimeout(g.timer);
+    if (g.paint && paintRef.current) {
+      const span = snapToWords(part.text, paintRef.current.anchor, paintRef.current.focus + 1);
+      paintRef.current = null;
+      setPreview(null);
+      if (span[1] > span[0]) {
+        if (tool === "eraser") erase(span);
+        else addMark(span, tool);
+      }
+      return;
+    }
+    if (!g.moved && g.at !== null) tapAt(g.at);
+  }
+
+  function onPointerCancel() {
+    if (gesture.current) clearTimeout(gesture.current.timer);
+    gesture.current = null;
+    paintRef.current = null;
+    setPreview(null);
+  }
+
+  // A finger painting must not scroll the page.
+  useEffect(() => {
+    const el = textRef.current;
+    if (!el) return;
+    const stop = (e: TouchEvent) => {
+      if (gesture.current?.paint) e.preventDefault();
+    };
+    el.addEventListener("touchmove", stop, { passive: false });
+    return () => el.removeEventListener("touchmove", stop);
+  });
+
+  // Read mode: words selected the usual way can be highlighted with the pen.
   useEffect(() => {
     if (!open) return;
     const onSelect = () => {
       const sel = window.getSelection();
-      const inside = sel && !sel.isCollapsed && bodyRef.current?.contains(sel.anchorNode ?? null);
-      const text = inside ? cleanQuote(sel!.toString()) : "";
-      setSelected(text.length >= 8 ? text : "");
+      if (!sel || sel.isCollapsed || !textRef.current?.contains(sel.anchorNode)) {
+        setSelection(null);
+        return;
+      }
+      const a = offsetOfNode(sel.anchorNode, sel.anchorOffset);
+      const b = offsetOfNode(sel.focusNode, sel.focusOffset);
+      setSelection(a !== null && b !== null && a !== b ? [Math.min(a, b), Math.max(a, b)] : null);
     };
     document.addEventListener("selectionchange", onSelect);
     return () => document.removeEventListener("selectionchange", onSelect);
   }, [open]);
 
-  const sources = q.data ?? [];
-  const source: ReaderSource | undefined = sources[Math.min(tab, sources.length - 1)];
-  const part = source ? loaded[source.id] : undefined;
-  const storyQuotes = useMemo(() => storyHighlights(item), [item]);
-
-  const ranges = useMemo(() => {
-    if (!part || !source) return [];
-    return highlights
-      .map((h, i) => ({
-        i,
-        point: h.point,
-        span: h.source_id === source.id ? findQuote(part.text, h.quote) : null,
-      }))
-      .filter((r): r is { i: number; point: boolean; span: Span } => !!r.span);
-  }, [highlights, part, source]);
-  // In "new story" mode the story's own facts are shown faintly.
-  const taken = useMemo(() => {
-    if (mode !== "new" || !part || !source) return [];
-    return storyQuotes
-      .filter((h) => h.source_id === source.id)
-      .map((h) => findQuote(part.text, h.quote))
-      .filter((s): s is Span => !!s);
-  }, [mode, part, source, storyQuotes]);
-  const sentences = useMemo(() => (part ? sentenceSpans(part.text) : []), [part]);
-
-  function switchMode(next: Mode) {
-    setMode(next);
-    setHighlights(next === "new" ? [] : storyHighlights(item));
-  }
-
-  function toggleSentence(s: Span) {
-    if (!part || !source) return;
-    // A long press that selected words is not a tap.
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) return;
-    const hit = ranges.filter((r) => overlaps(r.span, s)).map((r) => r.i);
-    if (hit.length) {
-      setHighlights((cur) => cur.filter((_, i) => !hit.includes(i)));
-      return;
-    }
-    const quote = cleanQuote(part.text.slice(s[0], s[1]));
-    if (quote.length < 8) return;
-    setHighlights((cur) => [...cur, { source_id: source.id, quote, point: true }]);
-  }
-
-  function addSelection() {
-    if (!source || !selected) return;
-    setHighlights((cur) =>
-      cur.some((h) => h.source_id === source.id && h.quote === selected)
-        ? cur
-        : [...cur, { source_id: source.id, quote: selected, point: true }],
-    );
+  function markSelection() {
+    if (!selection || !part) return;
+    const span = snapToWords(part.text, selection[0], selection[1]);
+    if (tool === "eraser") erase(span);
+    else addMark(span, tool);
     window.getSelection()?.removeAllRanges();
-    setSelected("");
+    setSelection(null);
   }
 
+  // ---------- Loading more, jumping, remembering the place ----------
   async function loadMore(dir: "up" | "down") {
     if (!source || !part) return;
     const end = part.start + part.text.length;
@@ -189,9 +564,77 @@ export function SourceReader({
     }
   }
 
+  function scrollToOffset(abs: number) {
+    if (!part) return false;
+    const rel = abs - part.start;
+    if (rel < 0 || rel > part.text.length) return false;
+    const els = [...(textRef.current?.querySelectorAll<HTMLElement>("[data-at]") ?? [])];
+    const el = els.filter((x) => Number(x.dataset.at) <= rel).pop() ?? els[0];
+    el?.scrollIntoView({ block: "start" });
+    return true;
+  }
+
+  async function jumpTo(entry: OutlineEntry) {
+    setContentsOpen(false);
+    if (scrollToOffset(entry.at) || !source) return;
+    try {
+      const r = await moreFn({
+        data: { source_id: source.id, start: Math.max(0, entry.at - 400), end: entry.at + 24_000 },
+      });
+      pendingJump.current = entry.at;
+      setLoaded((cur) => ({
+        ...cur,
+        [source.id]: { text: r.text, start: r.start, total: r.total },
+      }));
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't open that part"));
+    }
+  }
+
+  useEffect(() => {
+    if (!part || !source) return;
+    if (pendingJump.current !== null) {
+      const at = pendingJump.current;
+      pendingJump.current = null;
+      requestAnimationFrame(() => scrollToOffset(at));
+      return;
+    }
+    // Back to where reading stopped, once per opening.
+    if (!restoredPos.current.has(source.id)) {
+      restoredPos.current.add(source.id);
+      const at = read<number | null>(posKey(source.id), null);
+      if (at !== null) requestAnimationFrame(() => scrollToOffset(at));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [part, source, view]);
+
+  const lastTop = useRef(0);
+  const posTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  function onScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    const top = el.scrollTop;
+    if (top > lastTop.current + 8 && top > 60) setHeaderHidden(true);
+    else if (top < lastTop.current - 8 || top < 20) setHeaderHidden(false);
+    lastTop.current = top;
+    clearTimeout(posTimer.current);
+    posTimer.current = setTimeout(() => {
+      if (!source || !part) return;
+      const box = el.getBoundingClientRect();
+      const first = [...(textRef.current?.querySelectorAll<HTMLElement>("[data-at]") ?? [])].find(
+        (x) => x.getBoundingClientRect().bottom > box.top + 8,
+      );
+      if (first) write(posKey(source.id), part.start + Number(first.dataset.at));
+    }, 300);
+  }
+
+  // ---------- Sending ----------
+  const points = marks.filter((m) => isPoint(m.pen)).length;
+  const keywordMarks = marks.filter((m) => m.pen === "keyword");
+
   async function submit() {
-    if (!highlights.some((h) => h.point)) {
-      toast.error("Mark at least one highlight as a key point.");
+    if (!points) {
+      toast.error("Mark at least one key point (yellow or pink).");
       return;
     }
     if (
@@ -204,9 +647,21 @@ export function SourceReader({
       return;
     setBusy(true);
     try {
-      const data = { highlights, note: note.trim() || null };
+      const data = {
+        highlights: marks
+          .filter((m) => m.pen !== "keyword")
+          .map((m) => ({
+            source_id: m.source_id,
+            quote: m.quote,
+            point: isPoint(m.pen),
+            check: m.pen === "check",
+          })),
+        keywords: keywordMarks.map((m) => m.quote),
+        note: note.trim() || null,
+      };
       if (mode === "rewrite") await rewriteFn({ data: { id: item.id, ...data } });
       else await createFn({ data: { from_id: item.id, ...data } });
+      write(draftKey(item.id, mode), null);
       toast.success(mode === "rewrite" ? "Story rewritten" : "New story added after this one");
       onChanged();
       onOpenChange(false);
@@ -217,34 +672,117 @@ export function SourceReader({
     }
   }
 
-  const points = highlights.filter((h) => h.point).length;
+  async function addKeywordsOnly() {
+    setBusy(true);
+    try {
+      await keywordsFn({ data: { id: item.id, keywords: keywordMarks.map((m) => m.quote) } });
+      commit((cur) => cur.filter((m) => m.pen !== "keyword"));
+      toast.success("Added to Static Connect");
+      onChanged();
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't add the keywords"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const tray = (
+    <Tray
+      marks={marks}
+      mode={mode}
+      note={note}
+      busy={busy}
+      points={points}
+      keywords={keywordMarks.length}
+      canAddKeywords={mode === "rewrite" && !!item.content}
+      story={wide && mode === "rewrite" ? item : null}
+      onNote={setNote}
+      onCycle={(i) =>
+        commit((cur) =>
+          cur.map((m, j) =>
+            j === i ? { ...m, pen: CYCLE[(CYCLE.indexOf(m.pen) + 1) % CYCLE.length] } : m,
+          ),
+        )
+      }
+      onRemove={(i) => commit((cur) => cur.filter((_, j) => j !== i))}
+      onShow={(m) => {
+        if (!part || !source) return;
+        const i = sources.findIndex((s) => s.id === m.source_id);
+        if (i >= 0 && i !== tab) setTab(i);
+        const s = m.source_id === source.id ? findQuote(part.text, m.quote) : null;
+        if (s) scrollToOffset(part.start + s[0]);
+        setTrayOpen(false);
+      }}
+      onSubmit={() => void submit()}
+      onAddKeywords={() => void addKeywordsOnly()}
+    />
+  );
 
   return (
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
-      <DialogContent className="flex h-[92dvh] max-w-3xl flex-col gap-0 p-0">
-        <DialogHeader className="space-y-2 border-b border-border p-3 text-left">
-          <DialogTitle className="pr-8 text-base">Read the full article</DialogTitle>
-          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Mode">
+      <DialogContent className="left-0 top-0 flex h-[100dvh] max-h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-0 p-0 sm:rounded-none">
+        {/* Top bar: hides while scrolling down. */}
+        <header
+          className={`overflow-hidden border-b border-border bg-background transition-all duration-200 ${headerHidden ? "max-h-0 border-b-0 opacity-0" : "max-h-72"}`}
+        >
+          <div className="flex items-center gap-1.5 p-2 pr-11">
+            <DialogTitle className="min-w-0 flex-1 truncate text-sm font-semibold">
+              {source?.title ?? "Full article"}
+            </DialogTitle>
+            {source && source.outline.length > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 px-2"
+                aria-label="Contents"
+                aria-expanded={contentsOpen}
+                onClick={() => setContentsOpen((v) => !v)}
+              >
+                <ListTree className="h-4 w-4" />
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 w-8 p-0"
+              aria-label="Smaller text"
+              disabled={size <= 13}
+              onClick={() => setSize((s) => s - 1)}
+            >
+              <Minus className="h-4 w-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 w-8 p-0"
+              aria-label="Larger text"
+              disabled={size >= 24}
+              onClick={() => setSize((s) => s + 1)}
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2">
             {(
               [
                 ["rewrite", "Rewrite this story"],
-                ["new", "New story from highlights"],
+                ["new", "New story"],
               ] as const
             ).map(([m, label]) => (
-              <button
-                key={m}
-                type="button"
-                aria-pressed={mode === m}
-                disabled={busy}
-                onClick={() => switchMode(m)}
-                className={`rounded-full border px-3 py-1 text-xs font-medium ${mode === m ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-muted-foreground"}`}
-              >
+              <Chip key={m} on={mode === m} disabled={busy} onClick={() => switchMode(m)}>
                 {label}
-              </button>
+              </Chip>
             ))}
+            <span className="mx-1 h-4 w-px bg-border" />
+            <Chip on={view === "clean"} onClick={() => setView("clean")}>
+              Clean
+            </Chip>
+            <Chip on={view === "original"} onClick={() => setView("original")}>
+              Original text
+            </Chip>
           </div>
           {sources.length > 1 && (
-            <div className="flex gap-1 overflow-x-auto" role="tablist">
+            <div className="flex gap-1 overflow-x-auto px-2 pb-2" role="tablist">
               {sources.map((s, i) => (
                 <button
                   key={s.id}
@@ -259,214 +797,567 @@ export function SourceReader({
               ))}
             </div>
           )}
-          <p className="text-xs text-muted-foreground">
-            {mode === "rewrite"
-              ? "Tap a sentence to highlight it, tap again to remove it. To take only some words, select them and press “Add selected words”."
-              : "Highlight the facts of news this story leaves out; they become a new story placed after this one. Faint lines are already in this story."}
-          </p>
-        </DialogHeader>
-
-        <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
-          {q.isLoading && <p className="text-sm text-muted-foreground">Loading the article…</p>}
-          {q.isError && (
-            <p className="text-sm text-destructive">{errorText(q.error, "Couldn't load")}</p>
-          )}
-          {source && part && (
-            <>
-              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">{source.title}</span>
-                {source.url && (
-                  <a
-                    href={source.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-0.5 text-primary hover:underline"
-                  >
-                    Open page <ExternalLink className="h-3 w-3" />
-                  </a>
-                )}
-              </div>
-              {part.start > 0 && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="mb-2 w-full"
-                  onClick={() => void loadMore("up")}
+          {contentsOpen && source && (
+            <nav
+              aria-label="Contents"
+              className="max-h-[40dvh] overflow-y-auto border-t border-border px-2 py-1"
+            >
+              {source.outline.map((e, i) => (
+                <button
+                  key={`${e.at}-${i}`}
+                  type="button"
+                  onClick={() => void jumpTo(e)}
+                  className={`block w-full truncate rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${e.level === 0 ? "font-semibold text-primary" : e.level > 1 ? "pl-5 text-muted-foreground" : ""}`}
                 >
-                  <ChevronUp className="mr-1 h-4 w-4" /> Show more above
-                </Button>
-              )}
-              <div
-                ref={bodyRef}
-                data-testid="reader-text"
-                className="whitespace-pre-wrap text-[15px] leading-relaxed sm:text-sm"
-              >
-                <ReaderText
-                  text={part.text}
-                  sentences={sentences}
-                  ranges={ranges}
-                  taken={taken}
-                  onTap={toggleSentence}
-                />
-              </div>
-              {part.start + part.text.length < part.total && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="mt-2 w-full"
-                  onClick={() => void loadMore("down")}
-                >
-                  <ChevronDown className="mr-1 h-4 w-4" /> Show more below
-                </Button>
-              )}
-            </>
+                  {e.title}
+                </button>
+              ))}
+            </nav>
           )}
-          {q.data && sources.length === 0 && (
-            <p className="text-sm text-muted-foreground">This story has no source text to read.</p>
-          )}
-        </div>
+        </header>
 
-        <div className="space-y-2 border-t border-border bg-muted/30 p-3">
-          {selected && (
-            <Button size="sm" className="w-full" onClick={addSelection}>
-              <Plus className="mr-1 h-4 w-4" /> Add selected words
-            </Button>
-          )}
-          <button
-            type="button"
-            onClick={() => setListOpen((v) => !v)}
-            className="flex w-full items-center gap-1 text-sm font-medium"
-            aria-expanded={listOpen}
+        <div className="flex min-h-0 flex-1">
+          <div
+            ref={scrollRef}
+            onScroll={onScroll}
+            className="min-h-0 min-w-0 flex-1 overflow-y-auto"
           >
-            <Highlighter className="h-4 w-4 text-amber-600" />
-            Your highlights ({highlights.length}) · {points} key point{points === 1 ? "" : "s"}
-            <ChevronDown
-              className={`ml-auto h-4 w-4 transition-transform ${listOpen ? "rotate-180" : ""}`}
-            />
-          </button>
-          {listOpen && (
-            <ul className="max-h-48 space-y-1.5 overflow-y-auto" data-testid="highlight-list">
-              {highlights.map((h, i) => {
-                const inText = part && source?.id === h.source_id;
-                const missing = inText && !findQuote(part!.text, h.quote);
-                return (
-                  <li key={`${h.source_id}-${h.quote}`} className="flex items-start gap-2 text-xs">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setHighlights((cur) =>
-                          cur.map((x, j) => (j === i ? { ...x, point: !x.point } : x)),
-                        )
-                      }
-                      className={`shrink-0 rounded-full px-2 py-0.5 font-medium ${h.point ? "bg-amber-500/20 text-amber-800 dark:text-amber-300" : "bg-sky-500/15 text-sky-800 dark:text-sky-300"}`}
-                      title="Tap to switch"
-                    >
-                      {h.point ? "Key point" : "Summary only"}
-                    </button>
-                    <span className="line-clamp-2 min-w-0 flex-1">
-                      {h.quote}
-                      {missing && <span className="text-amber-700"> (not in the text shown)</span>}
-                    </span>
-                    <button
-                      type="button"
-                      aria-label="Remove highlight"
-                      onClick={() => setHighlights((cur) => cur.filter((_, j) => j !== i))}
-                      className="shrink-0 text-muted-foreground hover:text-foreground"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </li>
-                );
-              })}
-              {highlights.length === 0 && (
-                <li className="text-xs text-muted-foreground">Nothing highlighted yet.</li>
+            <div className="mx-auto max-w-2xl px-4 py-3">
+              {q.isLoading && <p className="text-sm text-muted-foreground">Loading the article…</p>}
+              {q.isError && (
+                <p className="text-sm text-destructive">{errorText(q.error, "Couldn't load")}</p>
               )}
-            </ul>
+              {q.data && sources.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  This story has no source text to read.
+                </p>
+              )}
+              {source && part && (
+                <>
+                  <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span>{source.source_name || source.section.toUpperCase()}</span>
+                    {source.url && (
+                      <a
+                        href={source.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-0.5 text-primary hover:underline"
+                      >
+                        Open page <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                    {view === "clean" && hidden > 0 && (
+                      <span>· {hidden} menu or ad lines hidden</span>
+                    )}
+                  </div>
+                  {part.start > 0 && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="mb-2 w-full"
+                      onClick={() => void loadMore("up")}
+                    >
+                      <ChevronUp className="mr-1 h-4 w-4" /> Show more above
+                    </Button>
+                  )}
+                  <div
+                    ref={textRef}
+                    data-testid="reader-text"
+                    data-mode={painting ? "highlight" : "read"}
+                    onPointerDown={onPointerDown}
+                    onPointerMove={onPointerMove}
+                    onPointerUp={onPointerUp}
+                    onPointerCancel={onPointerCancel}
+                    onContextMenu={(e) => painting && e.preventDefault()}
+                    style={{ fontSize: size }}
+                    className={`leading-[1.75] ${painting ? "cursor-text select-none [-webkit-touch-callout:none]" : ""}`}
+                  >
+                    {view === "clean" ? (
+                      blocks.map((b) =>
+                        b.clutter ? null : (
+                          <BlockView key={b.at} block={b} {...rangesFor(b, ranges, taken)} />
+                        ),
+                      )
+                    ) : (
+                      <div data-at={0} className="whitespace-pre-wrap">
+                        <Pieces run={{ text: part.text, at: 0 }} ranges={ranges} taken={taken} />
+                      </div>
+                    )}
+                  </div>
+                  {part.start + part.text.length < part.total && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="mt-2 w-full"
+                      onClick={() => void loadMore("down")}
+                    >
+                      <ChevronDown className="mr-1 h-4 w-4" /> Show more below
+                    </Button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+          {/* Wide screens: highlights beside the article. */}
+          {wide && (
+            <aside className="flex w-96 shrink-0 flex-col overflow-y-auto border-l border-border bg-muted/20">
+              {tray}
+            </aside>
           )}
-          <Textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            maxLength={500}
-            rows={1}
-            placeholder="Note for SAATHI (optional), e.g. focus on the Rajasthan angle"
-            className="min-h-[40px] resize-none text-sm"
-          />
-          <Button className="w-full" disabled={busy || points === 0} onClick={() => void submit()}>
-            {busy
-              ? "Writing…"
-              : mode === "rewrite"
-                ? `Rewrite story from ${highlights.length} highlight${highlights.length === 1 ? "" : "s"}`
-                : `Create new story from ${highlights.length} highlight${highlights.length === 1 ? "" : "s"}`}
-          </Button>
         </div>
+
+        <footer className="border-t border-border bg-background">
+          {selection && !painting && (
+            <div className="px-2 pt-2">
+              <Button size="sm" className="w-full" onClick={markSelection}>
+                {tool === "eraser"
+                  ? "Erase selected words"
+                  : `Mark selected words · ${PEN[tool].label}`}
+              </Button>
+            </div>
+          )}
+          {/* Phones: the highlights tray, opened from its handle. */}
+          <div className={wide ? "hidden" : ""}>
+            <button
+              type="button"
+              className="flex w-full items-center gap-1.5 px-3 pt-2 text-sm font-medium"
+              aria-expanded={trayOpen}
+              onClick={() => setTrayOpen((v) => !v)}
+              onPointerDown={(e) => (dragFrom.current = e.clientY)}
+              onPointerUp={(e) => {
+                const from = dragFrom.current;
+                dragFrom.current = null;
+                if (from === null) return;
+                if (from - e.clientY > 30) setTrayOpen(true);
+                else if (e.clientY - from > 30) setTrayOpen(false);
+              }}
+            >
+              <span className="mx-auto mb-1 block h-1 w-10 rounded-full bg-muted-foreground/30" />
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center gap-1.5 px-3 pb-1 text-sm font-medium"
+              onClick={() => setTrayOpen((v) => !v)}
+            >
+              <Highlighter className="h-4 w-4 text-amber-600" />
+              Highlights ({marks.length}) · {points} key point{points === 1 ? "" : "s"}
+              <ChevronUp
+                className={`ml-auto h-4 w-4 transition-transform ${trayOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+            {trayOpen && !wide && <div className="max-h-[55dvh] overflow-y-auto">{tray}</div>}
+          </div>
+          <Toolbar
+            painting={painting}
+            keepMode={!!selection}
+            tool={tool}
+            canUndo={past.length > 0}
+            canRedo={future.length > 0}
+            onPainting={setPainting}
+            onTool={setTool}
+            onUndo={undo}
+            onRedo={redo}
+          />
+        </footer>
       </DialogContent>
     </Dialog>
   );
 }
 
-// The text as tappable sentences, with highlights marked: yellow for key
-// points, blue for summary-only, faint for facts already in the story.
-function ReaderText({
-  text,
-  sentences,
-  ranges,
-  taken,
-  onTap,
+function Chip({
+  on,
+  disabled,
+  onClick,
+  children,
 }: {
-  text: string;
-  sentences: Span[];
-  ranges: { point: boolean; span: Span }[];
-  taken: Span[];
-  onTap: (s: Span) => void;
+  on: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
 }) {
-  const out: React.ReactNode[] = [];
-  let at = 0;
-  sentences.forEach((s, n) => {
-    if (s[0] > at) out.push(text.slice(at, s[0]));
-    const inside = ranges.filter((r) => overlaps(r.span, s));
-    const faint = taken.some((t) => overlaps(t, s));
-    // Cut the sentence where highlights start and end.
-    const cuts = [
-      ...new Set([
-        s[0],
-        s[1],
-        ...inside.flatMap((r) => r.span).filter((x) => x > s[0] && x < s[1]),
-      ]),
-    ].sort((a, b) => a - b);
-    const pieces = cuts.slice(0, -1).map((a, k) => {
-      const b = cuts[k + 1];
-      const mark = inside.find((r) => r.span[0] <= a && r.span[1] >= b);
-      return mark ? (
-        <mark
-          key={k}
-          className={`rounded-sm px-0.5 text-inherit [box-decoration-break:clone] ${mark.point ? "bg-amber-300/60 dark:bg-amber-500/40" : "bg-sky-300/50 dark:bg-sky-500/30"}`}
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      disabled={disabled}
+      onClick={onClick}
+      className={`rounded-full border px-3 py-1 text-xs font-medium ${on ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-muted-foreground"}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+// Wide screens (laptops) show the highlights beside the article.
+function useWide() {
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const on = () => setWide(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return wide;
+}
+
+// The bottom toolbar: Read / Highlight, the pens, the eraser, undo and redo.
+function Toolbar({
+  painting,
+  keepMode,
+  tool,
+  canUndo,
+  canRedo,
+  onPainting,
+  onTool,
+  onUndo,
+  onRedo,
+}: {
+  painting: boolean;
+  // Words are selected in Read mode: a pen only picks the colour for them.
+  keepMode: boolean;
+  tool: Tool;
+  canUndo: boolean;
+  canRedo: boolean;
+  onPainting: (v: boolean) => void;
+  onTool: (t: Tool) => void;
+  onUndo: () => void;
+  onRedo: () => void;
+}) {
+  const [hint, setHint] = useState<string | null>(null);
+  const pick = (t: Tool) => {
+    onTool(t);
+    if (!keepMode) onPainting(true);
+    setHint(t === "eraser" ? "Eraser" : PEN[t].label);
+    setTimeout(() => setHint(null), 1200);
+  };
+  return (
+    <div className="relative flex items-center gap-1 px-2 py-2" role="toolbar" aria-label="Pens">
+      {hint && (
+        <span className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 rounded-full bg-foreground px-2.5 py-0.5 text-xs text-background">
+          {hint}
+        </span>
+      )}
+      <div className="flex rounded-full border border-border p-0.5">
+        <button
+          type="button"
+          aria-pressed={!painting}
+          aria-label="Read"
+          title="Read: taps do nothing, select text as usual"
+          onClick={() => onPainting(false)}
+          className={`grid h-9 w-9 place-items-center rounded-full ${!painting ? "bg-muted" : ""}`}
         >
-          {text.slice(a, b)}
-        </mark>
-      ) : (
-        <span key={k}>{text.slice(a, b)}</span>
-      );
-    });
-    out.push(
-      <span
-        key={`s${n}`}
-        role="button"
-        tabIndex={0}
-        data-highlighted={inside.length > 0 || undefined}
-        onClick={() => onTap(s)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onTap(s);
-          }
-        }}
-        className={`cursor-pointer rounded-sm hover:bg-muted/60 ${faint && !inside.length ? "text-muted-foreground/60 underline decoration-dotted" : ""}`}
+          <BookOpen className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          aria-pressed={painting}
+          aria-label="Highlight"
+          title="Highlight: tap a sentence, or press and hold then drag over words"
+          onClick={() => onPainting(true)}
+          className={`grid h-9 w-9 place-items-center rounded-full ${painting ? "bg-muted" : ""}`}
+        >
+          <Highlighter className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="flex flex-1 items-center justify-center gap-1.5">
+        {PENS.map((p) => (
+          <button
+            key={p.pen}
+            type="button"
+            aria-label={p.label}
+            aria-pressed={tool === p.pen}
+            title={p.label}
+            onClick={() => pick(p.pen)}
+            className={`grid h-9 w-9 place-items-center rounded-full ${tool === p.pen ? "ring-2 ring-foreground/60 ring-offset-1 ring-offset-background" : ""}`}
+          >
+            <span className={`h-6 w-6 rounded-full ${p.dot}`} />
+          </button>
+        ))}
+        <button
+          type="button"
+          aria-label="Eraser"
+          aria-pressed={tool === "eraser"}
+          title="Eraser"
+          onClick={() => pick("eraser")}
+          className={`grid h-9 w-9 place-items-center rounded-full ${tool === "eraser" ? "bg-muted ring-2 ring-foreground/60" : ""}`}
+        >
+          <Eraser className="h-4 w-4" />
+        </button>
+      </div>
+      <button
+        type="button"
+        aria-label="Undo"
+        disabled={!canUndo}
+        onClick={onUndo}
+        className="grid h-9 w-9 place-items-center rounded-full disabled:opacity-30"
       >
-        {pieces}
-      </span>,
-    );
-    at = s[1];
-  });
-  if (at < text.length) out.push(text.slice(at));
-  return <>{out}</>;
+        <Undo2 className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        aria-label="Redo"
+        disabled={!canRedo}
+        onClick={onRedo}
+        className="grid h-9 w-9 place-items-center rounded-full disabled:opacity-30"
+      >
+        <Redo2 className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+// The highlights: each with its pen (tap to switch), the note, and the actions.
+function Tray({
+  marks,
+  mode,
+  note,
+  busy,
+  points,
+  keywords,
+  canAddKeywords,
+  story,
+  onNote,
+  onCycle,
+  onRemove,
+  onShow,
+  onSubmit,
+  onAddKeywords,
+}: {
+  marks: Mark[];
+  mode: Mode;
+  note: string;
+  busy: boolean;
+  points: number;
+  keywords: number;
+  canAddKeywords: boolean;
+  story: CaItem | null;
+  onNote: (v: string) => void;
+  onCycle: (i: number) => void;
+  onRemove: (i: number) => void;
+  onShow: (m: Mark) => void;
+  onSubmit: () => void;
+  onAddKeywords: () => void;
+}) {
+  return (
+    <div className="space-y-3 p-3">
+      <ul className="space-y-1.5" data-testid="highlight-list">
+        {marks.map((m, i) => (
+          <li key={`${m.source_id}-${m.quote}-${i}`} className="flex items-start gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => onCycle(i)}
+              title="Tap to switch pen"
+              className="flex shrink-0 items-center gap-1 rounded-full border border-border px-2 py-0.5 font-medium"
+            >
+              <span className={`h-2.5 w-2.5 rounded-full ${PEN[m.pen].dot}`} />
+              {PEN[m.pen].label}
+            </button>
+            <button
+              type="button"
+              onClick={() => onShow(m)}
+              className="line-clamp-2 min-w-0 flex-1 text-left"
+            >
+              {m.quote}
+            </button>
+            <button
+              type="button"
+              aria-label="Remove highlight"
+              onClick={() => onRemove(i)}
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </li>
+        ))}
+        {marks.length === 0 && (
+          <li className="text-xs text-muted-foreground">
+            Nothing highlighted yet. Pick a pen below and tap a sentence.
+          </li>
+        )}
+      </ul>
+      <Textarea
+        value={note}
+        onChange={(e) => onNote(e.target.value)}
+        maxLength={500}
+        rows={2}
+        placeholder="Note for SAATHI (optional), e.g. focus on the Rajasthan angle"
+        className="min-h-[44px] resize-none text-sm"
+      />
+      <Button className="w-full" disabled={busy || points === 0} onClick={onSubmit}>
+        {busy
+          ? "Writing…"
+          : mode === "rewrite"
+            ? `Rewrite story from ${points} key point${points === 1 ? "" : "s"}`
+            : `Create new story from ${points} key point${points === 1 ? "" : "s"}`}
+      </Button>
+      {keywords > 0 && canAddKeywords && (
+        <Button variant="outline" className="w-full" disabled={busy} onClick={onAddKeywords}>
+          Only add {keywords} keyword{keywords === 1 ? "" : "s"} to Static Connect
+        </Button>
+      )}
+      {story?.content && (
+        <div className="rounded-lg border border-border bg-background p-2 text-xs">
+          <div className="mb-1 font-semibold text-muted-foreground">This story now</div>
+          <ul className="list-disc space-y-0.5 pl-4">
+            {story.content.points.map((p, i) => (
+              <li key={i}>{p.en || p.hi}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The marks that fall in a block, with a key so unchanged blocks skip
+// re-rendering while a highlight is painted elsewhere.
+function rangesFor(b: Block, ranges: Range[], taken: Span[]) {
+  const span: Span = [b.at, b.end];
+  const mine = ranges.filter((r) => overlaps(r.span, span));
+  const faint = taken.filter((t) => overlaps(t, span));
+  return {
+    ranges: mine,
+    taken: faint,
+    marksKey: [...mine.map((r) => `${r.pen}${r.preview ? "~" : ""}${r.span}`), ...faint].join("|"),
+  };
+}
+
+const BlockView = memo(
+  function BlockView({
+    block: b,
+    ranges,
+    taken,
+  }: {
+    block: Block;
+    ranges: Range[];
+    taken: Span[];
+    marksKey: string;
+  }) {
+    const runs = (rs: Run[]) =>
+      rs.map((r, i) =>
+        r.at < 0 ? (
+          <span key={i}> </span>
+        ) : (
+          <Pieces key={i} run={r} ranges={ranges} taken={taken} />
+        ),
+      );
+    switch (b.kind) {
+      case "heading":
+        return (
+          <div
+            data-at={b.at}
+            role="heading"
+            aria-level={b.level + 1}
+            className={
+              b.level === 1
+                ? "mb-2 mt-4 text-[1.3em] font-bold leading-snug"
+                : b.level === 2
+                  ? "mb-1.5 mt-4 text-[1.15em] font-semibold leading-snug"
+                  : "mb-1 mt-3 font-semibold"
+            }
+          >
+            {runs(b.runs)}
+          </div>
+        );
+      case "para":
+        return (
+          <p data-at={b.at} className="my-3">
+            {runs(b.runs)}
+          </p>
+        );
+      case "item":
+        return (
+          <div data-at={b.at} className="my-1.5 flex gap-2">
+            <span className="shrink-0 text-muted-foreground">{b.marker}</span>
+            <div className="min-w-0">{runs(b.runs)}</div>
+          </div>
+        );
+      case "quote":
+        return (
+          <blockquote
+            data-at={b.at}
+            className="my-3 border-l-4 border-border pl-3 italic text-muted-foreground"
+          >
+            {runs(b.runs)}
+          </blockquote>
+        );
+      case "table":
+        return (
+          <div data-at={b.at} className="my-3 overflow-x-auto">
+            <table className="w-full border-collapse text-[0.9em]">
+              <tbody>
+                {b.rows.map((row, i) => (
+                  <tr key={i} className={i === 0 ? "bg-muted/60 font-semibold" : ""}>
+                    {row.map((cell, j) => (
+                      <td key={j} className="border border-border px-2 py-1 align-top">
+                        {runs(cell)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      case "page":
+        return (
+          <div
+            data-at={b.at}
+            className="my-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+          >
+            <span className="h-px flex-1 bg-border" /> Page {b.n}{" "}
+            <span className="h-px flex-1 bg-border" />
+          </div>
+        );
+      default:
+        return <hr data-at={b.at} className="my-4 border-border" />;
+    }
+  },
+  (a, b) => a.block === b.block && a.marksKey === b.marksKey,
+);
+
+// One run of text cut where highlights start and end. Every piece carries
+// its raw offset, so a touch can be turned back into a position.
+function Pieces({ run, ranges, taken }: { run: Run; ranges: Range[]; taken: Span[] }) {
+  const span: Span = [run.at, run.at + run.text.length];
+  const inside = ranges.filter((r) => overlaps(r.span, span));
+  const faint = taken.filter((t) => overlaps(t, span));
+  const cuts = [
+    ...new Set([
+      span[0],
+      span[1],
+      ...[...inside.map((r) => r.span), ...faint].flat().filter((x) => x > span[0] && x < span[1]),
+    ]),
+  ].sort((a, b) => a - b);
+  const cls = run.bold ? "font-semibold" : "";
+  return (
+    <>
+      {cuts.slice(0, -1).map((a, k) => {
+        const b = cuts[k + 1];
+        const text = run.text.slice(a - run.at, b - run.at);
+        // The latest mark wins where two overlap; a painting preview on top.
+        const mark = [...inside].reverse().find((r) => r.span[0] <= a && r.span[1] >= b);
+        const dim = !mark && faint.some((t) => t[0] <= a && t[1] >= b);
+        return mark ? (
+          <mark
+            key={k}
+            data-raw={a}
+            data-pen={mark.pen}
+            className={`text-inherit [box-decoration-break:clone] ${mark.span[0] === a ? "rounded-l-sm pl-0.5" : ""} ${mark.span[1] === b ? "rounded-r-sm pr-0.5" : ""} ${PEN[mark.pen].mark} ${mark.preview ? "outline-dashed outline-1 outline-foreground/40" : ""} ${cls}`}
+          >
+            {text}
+          </mark>
+        ) : (
+          <span
+            key={k}
+            data-raw={a}
+            className={`${cls} ${dim ? "text-muted-foreground/60 underline decoration-dotted" : ""}`}
+          >
+            {text}
+          </span>
+        );
+      })}
+    </>
+  );
 }
