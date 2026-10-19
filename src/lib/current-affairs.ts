@@ -93,8 +93,16 @@ export type CaContent = {
   // One point per fact, in the same order.
   points: Bi[];
   why: Bi;
-  // Background from the SAATHI knowledge base, or null when nothing related.
+  // The single background paragraph of older items; newer items use statics.
   background: Bi | null;
+  // Static Connect: textbook facts on the static concepts the news links to.
+  statics?: StaticFact[];
+  // Keywords the news links to, offered for more Static Connect facts.
+  keywords?: Bi[];
+  // The admin chose the Static Connect facts; rewriting the story keeps them.
+  statics_edited?: boolean;
+  // Facts the editor highlighted for the summary and "why" only (not points).
+  context_facts?: CaFact[];
   mcq: CaMcq | null;
   mains: Bi | null;
   // "Did you know?" facts from trusted websites (missing on older items).
@@ -111,6 +119,46 @@ export type CaContent = {
 };
 
 export type CaQuick = { q: Bi; a: Bi };
+
+// One Static Connect fact: a static concept the news links to, explained the
+// way a textbook does. "source" is the book it came from ("NCERT · …"), or
+// null when SAATHI wrote it from its own knowledge.
+export type StaticFact = { keyword: Bi; text: Bi; source: string | null };
+
+export const STATIC_CONNECT = { en: "Static Connect", hi: "स्टैटिक कनेक्ट" };
+export const MAX_KEYWORDS = 8;
+export const MAX_STATICS = 6;
+
+// The books behind a story's Static Connect, for its sources line.
+export function staticSources(statics: StaticFact[] | undefined): { title: string }[] {
+  return [
+    ...new Set(
+      (statics ?? []).flatMap((s) => (s.source ? s.source.split(" | ") : [])).filter(Boolean),
+    ),
+  ].map((title) => ({ title }));
+}
+
+const sameKeyword = (a: Bi, b: Bi) =>
+  (!!a.en && normalizeForMatch(a.en) === normalizeForMatch(b.en)) ||
+  (!!a.hi && normalizeForMatch(a.hi) === normalizeForMatch(b.hi));
+
+// Adds or replaces Static Connect facts by keyword, keeping the order.
+export function mergeStatics(cur: StaticFact[], add: StaticFact[]): StaticFact[] {
+  const out = [...cur];
+  for (const f of add) {
+    const at = out.findIndex((x) => sameKeyword(x.keyword, f.keyword));
+    if (at >= 0) out[at] = f;
+    else out.push(f);
+  }
+  return out.slice(0, MAX_STATICS);
+}
+
+// Keywords plus any Static Connect keyword not among them.
+export function mergeKeywords(keywords: Bi[], statics: StaticFact[]): Bi[] {
+  const out = [...keywords];
+  for (const f of statics) if (!out.some((k) => sameKeyword(k, f.keyword))) out.push(f.keyword);
+  return out.slice(0, MAX_KEYWORDS + MAX_STATICS);
+}
 
 // A fact from the web, with the page it came from and the exact passage.
 export type DykFact = Bi & { url: string; site: string; quote: string };
@@ -173,6 +221,38 @@ export function splitSource(text: string, max = CHUNK_CHARS): string[] {
   }
   if (cur) chunks.push(cur);
   return chunks.length ? chunks : [text.slice(0, max)];
+}
+
+// ---------- A new story from facts the editor highlighted ----------
+
+export function newStoryMessages(facts: string[], note?: string | null): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: `You are the current affairs editor of a magazine for RAS exam aspirants. The editor highlighted these facts in a news source as one new story. Classify it.
+Categories: "rajasthan" for anything about Rajasthan; "national" for India-wide polity, governance, schemes and judgments; "international"; "science" for science, technology, defence, space, health and environment; "economy"; "sports"; "misc" for awards, appointments, persons in news, important days, reports and indices; "editorial" only for an editorial's arguments.
+Reply with JSON only: {"headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 (3 = very likely in the RAS exam), "rajasthan": true if it concerns Rajasthan, ${CONCEPT_FIELD}}`,
+    },
+    {
+      role: "user",
+      content: `${facts.map((f, i) => `${i + 1}. ${f}`).join("\n")}${note?.trim() ? `\n\nEditor's note: ${note.trim()}` : ""}`,
+    },
+  ];
+}
+
+export function parseNewStory(
+  raw: string,
+  fallback: string,
+): Pick<RawItem, "headline" | "category" | "importance" | "rajasthan" | "concept"> {
+  const o = parseJson<Record<string, unknown>>(raw) ?? {};
+  const importance = Math.round(Number(o.importance));
+  return {
+    headline: str(o.headline, 300) || fallback.slice(0, 300),
+    category: normalizeCategory(o.category),
+    importance: (importance >= 1 && importance <= 3 ? importance : 2) as 1 | 2 | 3,
+    rajasthan: o.rajasthan === true,
+    concept: str(o.concept, 300) || null,
+  };
 }
 
 // ---------- Verifying facts against the source ----------
@@ -329,8 +409,16 @@ export function enrichMessages(opts: {
   concept?: string | null;
   // The visual printed with the text, and the facts (0-based) it shows.
   visual?: { type: string; covers: number[] } | null;
+  // Facts the editor picked for the summary and "why" only, not as points.
+  context?: string[];
+  // The editor's instruction for this story ("focus on the Rajasthan angle").
+  note?: string | null;
 }): ChatMessage[] {
   const facts = opts.facts.map((f, i) => `${i + 1}. ${f.text}`).join("\n");
+  const context = opts.context?.length
+    ? `\n\nContext (use for the summary and "why" only; no points):\n${opts.context.map((f) => `- ${f}`).join("\n")}`
+    : "";
+  const note = opts.note?.trim() ? `\n\nEditor's instruction: ${opts.note.trim()}` : "";
   const kb = opts.kb.length
     ? opts.kb.map((p, i) => `[K${i + 1}] ${p.title}\n${p.content.slice(0, 1500)}`).join("\n\n")
     : "(none)";
@@ -343,16 +431,16 @@ export function enrichMessages(opts: {
     {
       role: "system",
       content: `You write a bilingual (Hindi and English) current affairs magazine for RAS exam aspirants. Write one news item from the numbered facts.
-RULES: Use only the facts given. Never add a number, name, date or claim that is not in the facts. Hindi must be natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी), with the same numbers and official names (give the English name in brackets the first time if it helps).
+RULES: Use only the facts given (numbered facts and any Context). Never add a number, name, date or claim that is not in them. Follow the editor's instruction when one is given, within these rules. Hindi must be natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी), with the same numbers and official names (give the English name in brackets the first time if it helps).
 BE BRIEF: students revise from this, so less theory, more memorable facts. Say each fact once: the summary gives only the gist (what happened, who, where), the points carry the details, and nothing is repeated between summary, points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}
-"background" explains the static concept behind the news (the "Static concept" in the message when given; otherwise the constitutional article, institution, technology or scheme the news is about) the way a textbook does: what it is, what the article says, how it works. Base it on the knowledge-base passages [K…] that explain this concept, even if they never mention the news, and list them in "background_from". When no passage explains it, write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "background_from" empty. Do not retell the news. Set it to null only when the news has no static concept worth explaining.
+STATIC CONNECT links the news to the static syllabus. "keywords" lists up to ${MAX_KEYWORDS} static concepts the news links to that RPSC could ask about (constitutional articles, acts, institutions, technologies, schemes, places, conventions, terms), most important first (the "Static concept" in the message, when given), whether or not the passages explain them; each is a short name of at most 5 words. "statics" explains the first 1 or 2 keywords the way a textbook does: what it is, what it says, how it works, in 1-2 sentences of at most 40 words each, without retelling the news. Base each on the knowledge-base passages [K…] that explain it, even if they never mention the news, and list them in "from"; when no passage explains it, write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. Use [] for both when the news has no static concept worth explaining.
 Reply with JSON only:
 {"headline": {"en": "...", "hi": "..."},
  "summary": {"en": ${editorial ? '"3-4 short sentences: the issue, the main argument and the suggested way forward"' : opts.visual ? '"one sentence, at most 25 words"' : '"1-2 sentences, at most 40 words"'}, "hi": "..."},
  "points": [{"en": "...", "hi": "..."}] (exactly one per numbered fact, same order),
  "why": {"en": "a label, not a sentence: 'GS Paper <number> · <subject> · <topic in at most 6 words>' from the RAS syllabus topic given (e.g. 'GS Paper II · Earth Science · Climate of Rajasthan')", "hi": "the same label in Hindi (e.g. 'सामान्य अध्ययन प्रश्नपत्र II · भू-विज्ञान · राजस्थान की जलवायु')"},
- "background": {"en": "1-2 sentences, at most 40 words", "hi": "..."} or null,
- "background_from": ["K1", ...],
+ "keywords": [{"en": "...", "hi": "..."}],
+ "statics": [{"keyword": its number in "keywords" (1 = first), "en": "...", "hi": "...", "from": ["K1", ...]}],
  "mcq": {"question": {"en": "...", "hi": "..."}, "options": [{"en": "...", "hi": "..."} x4], "answer": index 0-3, "explanation": {"en": "...", "hi": "..."}}${editorial ? " or null" : ""},
  "mains": {"en": "...", "hi": "..."} or null}
 PRACTICE QUESTIONS follow the RPSC (RAS) pattern and difficulty:
@@ -378,7 +466,7 @@ PRACTICE QUESTIONS follow the RPSC (RAS) pattern and difficulty:
     },
     {
       role: "user",
-      content: `Category: ${opts.category}\nHeadline: ${opts.headline}\n${opts.syllabus ? `RAS syllabus topic: ${opts.syllabus}\n` : opts.papers ? `No syllabus topic matched; pick the paper and subject from: ${opts.papers}\n` : ""}${opts.concept ? `Static concept: ${opts.concept}\n` : ""}${opts.mainsSet?.length ? `Mains questions already set for this issue:\n${opts.mainsSet.map((q) => `- ${q}`).join("\n")}\n` : ""}\nFacts:\n${facts}\n\nKnowledge-base passages:\n${kb}`,
+      content: `Category: ${opts.category}\nHeadline: ${opts.headline}\n${opts.syllabus ? `RAS syllabus topic: ${opts.syllabus}\n` : opts.papers ? `No syllabus topic matched; pick the paper and subject from: ${opts.papers}\n` : ""}${opts.concept ? `Static concept: ${opts.concept}\n` : ""}${opts.mainsSet?.length ? `Mains questions already set for this issue:\n${opts.mainsSet.map((q) => `- ${q}`).join("\n")}\n` : ""}\nFacts:\n${facts}${context}${note}\n\nKnowledge-base passages:\n${kb}`,
     },
   ];
 }
@@ -390,10 +478,49 @@ const bi = (v: unknown, max = 2000): Bi | null => {
   return en || hi ? { en, hi } : null;
 };
 
+// Keywords and Static Connect facts from a reply; "from" names passages
+// [K1]…, which become the facts' book labels.
+function parseStatics(
+  rawKeywords: unknown,
+  rawStatics: unknown,
+  kbTitles: string[],
+): { keywords: Bi[]; statics: StaticFact[] } {
+  const keywords = (Array.isArray(rawKeywords) ? rawKeywords : [])
+    .map((k) => bi(k, 80))
+    .filter((k): k is Bi => !!k)
+    .slice(0, MAX_KEYWORDS);
+  const statics = (Array.isArray(rawStatics) ? rawStatics : [])
+    .map((x) => {
+      const o = (x ?? {}) as Record<string, unknown>;
+      const n = Number(o.keyword) - 1;
+      return staticFact(o, Number.isInteger(n) ? keywords[n] : bi(o.keyword, 80), kbTitles);
+    })
+    .filter((f): f is StaticFact => !!f);
+  return { keywords, statics: mergeStatics([], statics) };
+}
+
+function staticFact(
+  o: Record<string, unknown>,
+  keyword: Bi | null | undefined,
+  kbTitles: string[],
+): StaticFact | null {
+  const text = bi(o, 1000);
+  if (!text || !keyword || (!keyword.en && !keyword.hi)) return null;
+  const books = [
+    ...new Set(
+      (Array.isArray(o.from) ? o.from : [])
+        .map((k) => kbTitles[Number(String(k).replace(/\D/g, "")) - 1])
+        .filter(Boolean),
+    ),
+  ];
+  return { keyword, text, source: books.length ? books.join(" | ") : null };
+}
+
 export function parseContent(
   raw: string,
   factCount: number,
-): { content: CaContent; backgroundFrom: number[] } | null {
+  kbTitles: string[] = [],
+): { content: CaContent } | null {
   const o = parseJson<Record<string, unknown>>(raw);
   if (!o || typeof o !== "object" || Array.isArray(o)) return null;
   const headline = bi(o.headline, 300);
@@ -429,22 +556,70 @@ export function parseContent(
       };
     }
   }
-  const from = (Array.isArray(o.background_from) ? o.background_from : [])
-    .map((k) => Number(String(k).replace(/\D/g, "")) - 1)
-    .filter((n) => Number.isInteger(n) && n >= 0);
-  const background = bi(o.background, 1500);
+  const { keywords, statics } = parseStatics(o.keywords, o.statics, kbTitles);
   return {
     content: {
       headline,
       summary,
       points,
       why: bi(o.why, 800) ?? { en: "", hi: "" },
-      background,
+      background: null,
+      statics,
+      keywords: mergeKeywords(keywords, statics),
       mcq,
       mains: bi(o.mains, 600),
     },
-    backgroundFrom: background ? from : [],
   };
+}
+
+// More Static Connect facts, for keywords the admin picked. Each keyword
+// comes with the passages its search found.
+export function staticFactsMessages(opts: {
+  headline: string;
+  facts: string[];
+  keywords: { keyword: Bi; passages: KbPassage[] }[];
+}): { messages: ChatMessage[]; kbTitles: string[] } {
+  const kbTitles: string[] = [];
+  const blocks = opts.keywords.map((k, i) => {
+    const passages = k.passages.map((p) => {
+      kbTitles.push(p.title);
+      return `[K${kbTitles.length}] ${p.title}\n${p.content.slice(0, 1500)}`;
+    });
+    return `Keyword ${i + 1}: ${k.keyword.en}${k.keyword.hi ? ` / ${k.keyword.hi}` : ""}\n${passages.join("\n\n") || "(no passages)"}`;
+  });
+  return {
+    kbTitles,
+    messages: [
+      {
+        role: "system",
+        content: `You write the "Static Connect" box of a bilingual (Hindi and English) current affairs magazine for RAS exam aspirants: textbook facts on the static concepts a news item links to. For each keyword, explain the concept the way a textbook does (what it is, what it says, how it works), linked to the news where it helps, in 1-2 sentences of at most 40 words, without retelling the news. Base it on that keyword's knowledge-base passages [K…] when they explain it and list them in "from"; otherwise write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. Hindi must be natural standard Hindi as used in RPSC exams (मानक हिंदी).
+Reply with JSON only: [{"keyword": the keyword's number, "keyword_hi": the keyword in Hindi, "keyword_en": the keyword in English, "en": "...", "hi": "...", "from": ["K1", ...]}], one per keyword.`,
+      },
+      {
+        role: "user",
+        content: `News: ${opts.headline}\n${opts.facts.map((f) => `- ${f}`).join("\n")}\n\n${blocks.join("\n\n---\n\n")}`,
+      },
+    ],
+  };
+}
+
+export function parseStaticFacts(raw: string, keywords: Bi[], kbTitles: string[]): StaticFact[] {
+  const rows = parseJson<unknown[]>(raw);
+  if (!Array.isArray(rows)) return [];
+  const out = rows
+    .map((x) => {
+      const o = (x ?? {}) as Record<string, unknown>;
+      const n = Number(o.keyword) - 1;
+      const given = Number.isInteger(n) ? keywords[n] : undefined;
+      // The model fills in the language the admin's keyword was missing.
+      const keyword = given && {
+        en: given.en || str(o.keyword_en, 80),
+        hi: given.hi || str(o.keyword_hi, 80),
+      };
+      return staticFact(o, keyword, kbTitles);
+    })
+    .filter((f): f is StaticFact => !!f);
+  return mergeStatics([], out);
 }
 
 // ---------- 3) Corrections: a later report changes an earlier fact ----------
@@ -826,8 +1001,8 @@ export function issueCards(
 }
 
 // Concepts the magazine's stories needed but the books did not explain:
-// stories with a concept and no book behind the background (none, or written
-// from SAATHI's own knowledge), grouped by concept, most first.
+// Static Connect keywords SAATHI wrote from its own knowledge (older stories:
+// a concept with no book behind the background), grouped, most first.
 export type UncoveredConcept = { concept: string; stories: number; last: string; example: string };
 
 export function uncoveredConcepts(
@@ -836,20 +1011,27 @@ export function uncoveredConcepts(
     issue_date: string;
     headline: string;
     context_sources: { title: string }[] | null;
+    statics?: StaticFact[] | null;
   }[],
 ): UncoveredConcept[] {
   const by = new Map<string, UncoveredConcept>();
   for (const r of rows) {
-    const concept = r.concept?.trim();
-    if (!concept || r.context_sources?.length) continue;
-    const key = concept.toLowerCase();
-    const cur = by.get(key);
-    if (!cur) by.set(key, { concept, stories: 1, last: r.issue_date, example: r.headline });
-    else {
-      cur.stories += 1;
-      if (r.issue_date > cur.last) {
-        cur.last = r.issue_date;
-        cur.example = r.headline;
+    const concepts = r.statics?.length
+      ? r.statics.filter((f) => !f.source).map((f) => f.keyword.en || f.keyword.hi)
+      : r.concept?.trim() && !r.context_sources?.length
+        ? [r.concept.trim()]
+        : [];
+    for (const concept of concepts) {
+      const key = normalizeForMatch(concept);
+      if (!key) continue;
+      const cur = by.get(key);
+      if (!cur) by.set(key, { concept, stories: 1, last: r.issue_date, example: r.headline });
+      else {
+        cur.stories += 1;
+        if (r.issue_date > cur.last) {
+          cur.last = r.issue_date;
+          cur.example = r.headline;
+        }
       }
     }
   }

@@ -99,7 +99,7 @@ export function weeklyReportText(s: WeeklyStats, adminUrl?: string): string {
     `✍️ Editorials: ${s.editorials}`,
     `🔗 Built from 2+ sources: ${s.multiSource}`,
     `${s.unverifiedFacts ? "⚠️" : "✅"} Facts not found word for word in their source: ${s.unverifiedFacts}`,
-    `📚 Stories without a book background: ${s.missingBackground}`,
+    `📚 Stories whose Static Connect has no book: ${s.missingBackground}`,
   ];
   if (s.uncoveredConcepts.length)
     lines.push(`   Books needed for: ${esc(s.uncoveredConcepts.slice(0, 5).join(", "))}`);

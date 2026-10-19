@@ -1373,11 +1373,11 @@ function UncoveredConceptsList() {
       <div>
         <h3 className="font-semibold">Concepts your books don&apos;t cover yet</h3>
         <p className="text-sm text-muted-foreground">
-          The static concept behind each magazine story (a missile type, a constitutional article, a
-          convention) is looked up in your books for its Background box. These concepts had no
-          matching passage in the last 6 months, so SAATHI wrote those backgrounds from its own
-          knowledge. Upload a book that explains them; stories written after that get their
-          background from the book.
+          Each magazine story&apos;s Static Connect explains the static concepts it links to (a
+          missile type, a constitutional article, a convention), from your books when they cover
+          them. These keywords had no matching book in the last 6 months, so SAATHI wrote those
+          facts from its own knowledge. Upload a book that explains them; facts written after that
+          come from the book.
         </p>
       </div>
       {q.isLoading ? (

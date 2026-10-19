@@ -58,6 +58,15 @@ import {
   parseChanges,
   parseContent,
   parseExtracted,
+  mergeKeywords,
+  mergeStatics,
+  newStoryMessages,
+  parseNewStory,
+  parseStaticFacts,
+  staticFactsMessages,
+  staticSources,
+  type StaticFact,
+  normalizeForMatch,
   removePoint,
   shiftChanges,
   splitSource,
@@ -73,6 +82,13 @@ import {
   type UploadSection,
 } from "@/lib/current-affairs";
 import { VISUAL_LABELS, parseVisual, visualMessages, type Visual } from "@/lib/ca-visuals";
+import {
+  factsFromHighlights,
+  readerWindow,
+  remapChanges,
+  snapToLines,
+  type Highlight,
+} from "@/lib/ca-highlight";
 import {
   footerTemplate,
   renderMagazine,
@@ -677,11 +693,18 @@ async function issueMainsQuestions(date: string, exceptId: string): Promise<stri
     .slice(0, 30);
 }
 
-export async function enrichItem(itemId: string): Promise<CaItem> {
+// opts.context: facts for the summary and "why" only (from the reader's
+// highlights; otherwise the story's saved ones). opts.note: the editor's
+// instruction for this writing.
+export async function enrichItem(
+  itemId: string,
+  opts: { context?: CaFact[]; note?: string | null } = {},
+): Promise<CaItem> {
   const { data, error } = await from("ca_items").select(ITEM_COLS).eq("id", itemId).single();
   fail(error);
   const item = data as unknown as CaItem;
   item.category = normalizeCategory(item.category);
+  const context = opts.context ?? item.content?.context_facts ?? [];
   const key = apiKey();
   try {
     // The background explains the story's static concept, so the books are
@@ -718,21 +741,40 @@ export async function enrichItem(itemId: string): Promise<CaItem> {
         papers: PAPER_SUBJECTS,
         mainsSet,
         concept: item.concept,
+        context: context.map((f) => f.text),
+        note: opts.note,
         visual: look.visual
           ? { type: VISUAL_LABELS[look.visual.type].toLowerCase(), covers: look.visual_covers }
           : null,
       }),
     );
-    const parsed = parseContent(raw, item.facts.length);
+    const parsed = parseContent(
+      raw,
+      item.facts.length,
+      kb.map((k) => k.title),
+    );
     if (!parsed) throw new Error("The AI's reply could not be read. Try again.");
-    const contextSources = [
-      ...new Set(parsed.backgroundFrom.map((i) => kb[i]?.title).filter(Boolean) as string[]),
-    ].map((title) => ({ title }));
+    // Static Connect facts the admin chose survive rewriting the story.
+    const kept = item.content?.statics_edited ? item.content : null;
+    const statics = kept ? (kept.statics ?? []) : (parsed.content.statics ?? []);
 
     const dyk = await findDidYouKnow(item, embedding, parsed.content.headline.en || item.headline);
     const update = {
-      content: { ...parsed.content, dyk, ...look },
-      context_sources: contextSources,
+      content: {
+        ...parsed.content,
+        ...(kept
+          ? {
+              background: kept.background,
+              statics,
+              keywords: mergeKeywords(kept.keywords ?? [], statics),
+              statics_edited: true,
+            }
+          : {}),
+        context_facts: context,
+        dyk,
+        ...look,
+      },
+      context_sources: staticSources(statics),
       syllabus_topic_id: syllabusId,
       unit: syllabusId ? t!.unit_id : null,
       embedding: embedding as unknown as string,
@@ -1144,13 +1186,252 @@ export async function updateItem(
   patch: Partial<Pick<CaItem, "category" | "status" | "position" | "content" | "importance">>,
 ) {
   if (patch.category && !isCategory(patch.category)) throw new Error("Unknown section");
+  // The Static Connect's books are its sources line.
+  const sources =
+    patch.content?.statics !== undefined
+      ? { context_sources: staticSources(patch.content.statics) }
+      : {};
   const { data, error } = await from("ca_items")
-    .update({ ...patch, updated_at: new Date().toISOString() } as never)
+    .update({ ...patch, ...sources, updated_at: new Date().toISOString() } as never)
     .eq("id", id)
     .select(ITEM_COLS)
     .single();
   fail(error);
   return data as unknown as CaItem;
+}
+
+async function loadItem(id: string): Promise<CaItem> {
+  const { data, error } = await from("ca_items").select(ITEM_COLS).eq("id", id).single();
+  fail(error);
+  return data as unknown as CaItem;
+}
+
+// ---------- The article reader: highlighting facts in the full source ----------
+
+export type ReaderSource = {
+  id: string;
+  title: string;
+  source_name: string;
+  section: UploadSection;
+  url: string | null;
+  // The part of the text shown first, where it starts, and the full length.
+  text: string;
+  start: number;
+  total: number;
+};
+
+const READER_MAX = 30_000;
+
+// The story's sources, each opened around the story's quotes (short ones whole).
+export async function itemReader(id: string): Promise<ReaderSource[]> {
+  const item = await loadItem(id);
+  if (!item.source_ids.length) return [];
+  const { data, error } = await from("ca_sources")
+    .select("id,title,source_name,section,url,content")
+    .in("id", item.source_ids);
+  fail(error);
+  const quotes = [...item.facts, ...(item.content?.context_facts ?? [])];
+  const rows = (data ?? []) as unknown as (Omit<ReaderSource, "text" | "start" | "total"> & {
+    content: string;
+  })[];
+  return item.source_ids
+    .map((sid) => rows.find((r) => r.id === sid))
+    .filter((r): r is NonNullable<typeof r> => !!r)
+    .map(({ content, ...r }) => {
+      const own = quotes.filter((f) => f.source_id === r.id).map((f) => f.quote);
+      const [a, b] = readerWindow(content, own);
+      return { ...r, text: content.slice(a, b), start: a, total: content.length };
+    });
+}
+
+// More of a long source, as the reader scrolls past what it has.
+export async function readerText(
+  sourceId: string,
+  start: number,
+  end: number,
+): Promise<{ text: string; start: number; end: number; total: number }> {
+  const { data, error } = await from("ca_sources").select("content").eq("id", sourceId).single();
+  fail(error);
+  const content = (data as unknown as { content: string }).content;
+  const from0 = Math.max(0, Math.min(start, content.length));
+  const to0 = Math.min(content.length, Math.max(from0, end), from0 + READER_MAX);
+  const [a, b] = snapToLines(content, from0, to0);
+  return { text: content.slice(a, b), start: a, end: b, total: content.length };
+}
+
+async function sourceTexts(ids: string[]): Promise<Map<string, string>> {
+  if (!ids.length) return new Map();
+  const { data, error } = await from("ca_sources").select("id,content").in("id", ids);
+  fail(error);
+  return new Map(((data ?? []) as { id: string; content: string }[]).map((r) => [r.id, r.content]));
+}
+
+const uniq = <T>(xs: T[]) => [...new Set(xs)];
+
+// Rewrites a story from the facts the editor highlighted in its sources:
+// "point" highlights become its key points, the rest only guide the summary
+// and "why it matters".
+export async function rewriteFromHighlights(
+  id: string,
+  highlights: Highlight[],
+  note: string | null,
+): Promise<CaItem> {
+  const item = await loadItem(id);
+  await assertDayEditable([item.issue_date]);
+  const allowed = highlights.filter((h) => item.source_ids.includes(h.source_id));
+  const texts = await sourceTexts(uniq(allowed.map((h) => h.source_id)));
+  const { facts, context } = factsFromHighlights(allowed, texts, [
+    ...item.facts,
+    ...(item.content?.context_facts ?? []),
+  ]);
+  if (!facts.length) throw new Error("Mark at least one highlight as a key point.");
+
+  // Pending corrections follow their facts to the new positions.
+  const { data: pending } = await from("ca_corrections")
+    .select("id,changes")
+    .eq("item_id", id)
+    .eq("status", "pending");
+  for (const c of (pending ?? []) as Pick<CaCorrection, "id" | "changes">[]) {
+    const changes = remapChanges(c.changes, item.facts, facts);
+    fail(
+      (
+        await from("ca_corrections")
+          .update((changes ? { changes } : { status: "rejected" }) as never)
+          .eq("id", c.id)
+      ).error,
+    );
+  }
+
+  const { error } = await from("ca_items")
+    .update({
+      facts,
+      source_ids: uniq([...facts, ...context].map((f) => f.source_id)),
+      needs_enrich: true,
+      enrich_error: null,
+      ...(item.content ? { content: { ...item.content, context_facts: context } } : {}),
+      updated_at: new Date().toISOString(),
+    } as never)
+    .eq("id", id);
+  fail(error);
+  return enrichItem(id, { context, note });
+}
+
+// A new story from highlights in another story's sources (news the AI
+// skipped), placed right after that story and written at once.
+export async function createFromHighlights(
+  fromItemId: string,
+  highlights: Highlight[],
+  note: string | null,
+): Promise<CaItem> {
+  const origin = await loadItem(fromItemId);
+  await assertDayEditable([origin.issue_date]);
+  const allowed = highlights.filter((h) => origin.source_ids.includes(h.source_id));
+  const texts = await sourceTexts(uniq(allowed.map((h) => h.source_id)));
+  const { facts, context } = factsFromHighlights(allowed, texts, []);
+  if (!facts.length) throw new Error("Mark at least one highlight as a key point.");
+  const story = parseNewStory(
+    await saathiComplete(
+      apiKey(),
+      newStoryMessages(
+        facts.map((f) => f.text),
+        note,
+      ),
+    ),
+    facts[0].text,
+  );
+
+  // Make room right after the story it came from.
+  const { data: later } = await from("ca_items")
+    .select("id,position")
+    .eq("issue_date", origin.issue_date)
+    .gt("position", origin.position);
+  for (const r of (later ?? []) as { id: string; position: number }[]) {
+    fail(
+      (
+        await from("ca_items")
+          .update({ position: r.position + 1 } as never)
+          .eq("id", r.id)
+      ).error,
+    );
+  }
+  const { data: created, error } = await from("ca_items")
+    .insert({
+      issue_date: origin.issue_date,
+      status: "included",
+      ...story,
+      facts,
+      source_ids: uniq([...facts, ...context].map((f) => f.source_id)),
+      position: origin.position + 1,
+    } as never)
+    .select("id")
+    .single();
+  fail(error);
+  return enrichItem((created as unknown as { id: string }).id, { context, note });
+}
+
+// ---------- Static Connect ----------
+
+async function keywordPassages(key: string, keyword: Bi, subjects: string[]) {
+  if (!subjects.length) return [];
+  const query = {
+    standalone: (keyword.en || keyword.hi).slice(0, 300),
+    english: keyword.en ? keyword.en.slice(0, 300) : null,
+  };
+  const matches = relevantMatches(await saathiSearchQuery(key, rpc, query, subjects));
+  return matches.slice(0, 3);
+}
+
+// Writes Static Connect facts for the keywords the admin picked (from the
+// books when they explain them, otherwise SAATHI's own knowledge).
+export async function addStaticFacts(id: string, keywords: Bi[]): Promise<CaItem> {
+  const item = await loadItem(id);
+  const c = item.content;
+  if (!c) throw new Error("Write the story first.");
+  const key = apiKey();
+  const subjects = await studySubjects();
+  const found = await Promise.all(
+    keywords.map(async (keyword) => ({
+      keyword,
+      passages: (await keywordPassages(key, keyword, subjects)).map((m) => ({
+        title: matchLabel(m),
+        content: m.content,
+      })),
+    })),
+  );
+  const { messages, kbTitles } = staticFactsMessages({
+    headline: c.headline.en || item.headline,
+    facts: item.facts.map((f) => f.text),
+    keywords: found,
+  });
+  const added = parseStaticFacts(await saathiComplete(key, messages), keywords, kbTitles);
+  if (!added.length) throw new Error("The AI's reply could not be read. Try again.");
+  const statics = mergeStatics(c.statics ?? [], added);
+  return updateItem(id, {
+    content: {
+      ...c,
+      statics,
+      keywords: mergeKeywords(c.keywords ?? [], statics),
+      statics_edited: true,
+    },
+  });
+}
+
+// For each suggested keyword, the book that covers it, if any: a passage
+// from the search that names the keyword.
+export async function keywordBooks(id: string): Promise<{ keyword: Bi; book: string | null }[]> {
+  const item = await loadItem(id);
+  const keywords = item.content?.keywords ?? [];
+  const key = apiKey();
+  const subjects = await studySubjects();
+  return Promise.all(
+    keywords.map(async (keyword) => {
+      const names = [keyword.en, keyword.hi].map(normalizeForMatch).filter((n) => n.length >= 3);
+      const hit = (await keywordPassages(key, keyword, subjects)).find((m) =>
+        names.some((n) => normalizeForMatch(m.content).includes(n)),
+      );
+      return { keyword, book: hit ? matchLabel(hit) : null };
+    }),
+  );
 }
 
 // Deletes one key point together with its fact (both languages).
