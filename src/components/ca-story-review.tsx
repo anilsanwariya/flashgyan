@@ -27,6 +27,7 @@ import {
   deleteCaItems,
   deleteCaPoint,
   enrichCaItem,
+  setCaFactChecked,
   getCaKeywordBooks,
   redoCaVisual,
   updateCaItem,
@@ -340,6 +341,7 @@ function StoryCard({
   const updateFn = useServerFn(updateCaItem);
   const enrichFn = useServerFn(enrichCaItem);
   const redoFn = useServerFn(redoCaVisual);
+  const checkFn = useServerFn(setCaFactChecked);
   const deletePointFn = useServerFn(deleteCaPoint);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -890,9 +892,25 @@ function StoryCard({
                     </div>
                     <div className="mt-1 pl-5 italic text-muted-foreground">“{f.quote}”</div>
                     {!f.verified && (
-                      <div className="pl-5 text-amber-700 dark:text-amber-400">
-                        This quote wasn't found word-for-word in the source. Check the fact before
-                        approving.
+                      <div className="flex flex-wrap items-center gap-2 pl-5 text-amber-700 dark:text-amber-400">
+                        <span className="min-w-0 flex-1">
+                          Marked to check: the quote wasn't found word-for-word in the source, or
+                          you marked it with the pink pen. Check the fact, then mark it checked.
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-xs"
+                          disabled={busy}
+                          onClick={() =>
+                            act(
+                              () => checkFn({ data: { id: item.id, text: f.text, checked: true } }),
+                              "Marked checked",
+                            )
+                          }
+                        >
+                          <Check className="mr-1 h-3.5 w-3.5" /> Mark checked
+                        </Button>
                       </div>
                     )}
                   </li>

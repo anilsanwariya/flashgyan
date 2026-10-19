@@ -12,8 +12,11 @@ import {
 export type Span = [start: number, end: number];
 
 // A highlight in the reader: words from one source, and whether they become a
-// key point or only guide the summary and "why it matters".
-export type Highlight = { source_id: string; quote: string; point: boolean };
+// key point or only guide the summary and "why it matters". "check" marks a
+// point the editor wants to verify: it shows as "to check" until marked checked.
+export type Highlight = { source_id: string; quote: string; point: boolean; check?: boolean };
+
+const HIDDEN = /^(?:!\[[^\]\n]*\]\([^)\n]*\)|\]\([^)\n]*\)|<\/?[a-zA-Z][^<>\n]*>)/;
 
 // The text lowered and reduced to letters (with Devanagari vowel signs) and
 // digits, single-spaced, with each character's position in the original.
@@ -23,6 +26,16 @@ function normalized(text: string): { norm: string; at: number[] } {
   let gap = false;
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
+    // Markdown the reader doesn't show (images, link targets, HTML tags) is
+    // not part of any quote.
+    if (ch === "!" || ch === "]" || ch === "<") {
+      const hidden = HIDDEN.exec(text.slice(i, i + 600));
+      if (hidden) {
+        i += hidden[0].length - 1;
+        gap = true;
+        continue;
+      }
+    }
     if (/[\u200b-\u200d\ufeff]/.test(ch)) continue;
     if (/[\p{L}\p{M}\p{N}]/u.test(ch)) {
       if (gap && norm) {
@@ -145,9 +158,12 @@ export function factsFromHighlights(
     seen.add(key);
     const same = existing.find((f) => normalizeForMatch(f.quote) === key);
     const text = sources.get(h.source_id) ?? "";
+    // A pink (to check) highlight stays unverified; otherwise a fact is
+    // verified when its words are in the source (or were checked before).
+    const found = quoteInSource(same?.quote ?? quote, text);
     const fact: CaFact = same
-      ? { ...same, source_id: h.source_id }
-      : { text: quote, quote, source_id: h.source_id, verified: quoteInSource(quote, text) };
+      ? { ...same, source_id: h.source_id, verified: !h.check && (same.verified || found) }
+      : { text: quote, quote, source_id: h.source_id, verified: !h.check && found };
     (h.point ? facts : context).push(fact);
   }
   return { facts, context };

@@ -266,9 +266,16 @@ export function normalizeForMatch(s: string): string {
     .trim();
 }
 
+// Markdown that is never quoted: images, link targets and HTML tags.
+const stripMarkdownTargets = (s: string) =>
+  s
+    .replace(/!\[[^\]\n]*\]\([^)\n]*\)/g, " ")
+    .replace(/\]\([^)\n]*\)/g, "] ")
+    .replace(/<\/?[a-zA-Z][^<>\n]*>/g, " ");
+
 export function quoteInSource(quote: string, source: string): boolean {
   const q = normalizeForMatch(quote);
-  return q.length >= 8 && normalizeForMatch(source).includes(q);
+  return q.length >= 8 && normalizeForMatch(stripMarkdownTargets(source)).includes(q);
 }
 
 // ---------- 1) Extracting items from a source ----------

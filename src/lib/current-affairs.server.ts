@@ -58,6 +58,7 @@ import {
   parseChanges,
   parseContent,
   parseExtracted,
+  MAX_STATICS,
   mergeKeywords,
   mergeStatics,
   newStoryMessages,
@@ -82,6 +83,7 @@ import {
   type UploadSection,
 } from "@/lib/current-affairs";
 import { VISUAL_LABELS, parseVisual, visualMessages, type Visual } from "@/lib/ca-visuals";
+import { isPaged, outline, type OutlineEntry } from "@/lib/ca-reader-format";
 import {
   factsFromHighlights,
   readerWindow,
@@ -1200,6 +1202,8 @@ export async function updateItem(
   return data as unknown as CaItem;
 }
 
+export const getItem = (id: string) => loadItem(id);
+
 async function loadItem(id: string): Promise<CaItem> {
   const { data, error } = await from("ca_items").select(ITEM_COLS).eq("id", id).single();
   fail(error);
@@ -1218,6 +1222,8 @@ export type ReaderSource = {
   text: string;
   start: number;
   total: number;
+  // Headings and pages of the whole source, for jumping around in it.
+  outline: OutlineEntry[];
 };
 
 const READER_MAX = 30_000;
@@ -1231,16 +1237,25 @@ export async function itemReader(id: string): Promise<ReaderSource[]> {
     .in("id", item.source_ids);
   fail(error);
   const quotes = [...item.facts, ...(item.content?.context_facts ?? [])];
-  const rows = (data ?? []) as unknown as (Omit<ReaderSource, "text" | "start" | "total"> & {
+  const rows = (data ?? []) as unknown as (Omit<
+    ReaderSource,
+    "text" | "start" | "total" | "outline"
+  > & {
     content: string;
   })[];
   return item.source_ids
     .map((sid) => rows.find((r) => r.id === sid))
     .filter((r): r is NonNullable<typeof r> => !!r)
-    .map(({ content, ...r }) => {
+    .map(({ content, ...r }): ReaderSource => {
       const own = quotes.filter((f) => f.source_id === r.id).map((f) => f.quote);
       const [a, b] = readerWindow(content, own);
-      return { ...r, text: content.slice(a, b), start: a, total: content.length };
+      return {
+        ...r,
+        text: content.slice(a, b),
+        start: a,
+        total: content.length,
+        outline: outline(content, isPaged(r.url)),
+      };
     });
 }
 
@@ -1275,6 +1290,7 @@ export async function rewriteFromHighlights(
   id: string,
   highlights: Highlight[],
   note: string | null,
+  keywords: string[] = [],
 ): Promise<CaItem> {
   const item = await loadItem(id);
   await assertDayEditable([item.issue_date]);
@@ -1313,7 +1329,7 @@ export async function rewriteFromHighlights(
     } as never)
     .eq("id", id);
   fail(error);
-  return enrichItem(id, { context, note });
+  return withKeywords(await enrichItem(id, { context, note }), keywords);
 }
 
 // A new story from highlights in another story's sources (news the AI
@@ -1322,6 +1338,7 @@ export async function createFromHighlights(
   fromItemId: string,
   highlights: Highlight[],
   note: string | null,
+  keywords: string[] = [],
 ): Promise<CaItem> {
   const origin = await loadItem(fromItemId);
   await assertDayEditable([origin.issue_date]);
@@ -1366,10 +1383,35 @@ export async function createFromHighlights(
     .select("id")
     .single();
   fail(error);
-  return enrichItem((created as unknown as { id: string }).id, { context, note });
+  return withKeywords(
+    await enrichItem((created as unknown as { id: string }).id, { context, note }),
+    keywords,
+  );
 }
 
 // ---------- Static Connect ----------
+
+const keywordBi = (k: string): Bi =>
+  /[\u0900-\u097F]/.test(k) ? { en: "", hi: k } : { en: k, hi: "" };
+
+// Keywords the editor marked with the green pen: written as Static Connect
+// facts while there is room, the rest offered as keywords. A failure here
+// never undoes the story that was just written.
+export async function withKeywords(item: CaItem, keywords: string[]): Promise<CaItem> {
+  const list = [...new Set(keywords.map((k) => k.trim()).filter(Boolean))].map(keywordBi);
+  if (!list.length || !item.content) return item;
+  const room = MAX_STATICS - (item.content.statics?.length ?? 0);
+  try {
+    if (room > 0) item = await addStaticFacts(item.id, list.slice(0, room));
+  } catch (e) {
+    console.error("static connect keywords:", saathiErrorDetail(e));
+  }
+  const c = item.content!;
+  const keywordsNow = mergeKeywords([...(c.keywords ?? []), ...list], c.statics ?? []);
+  return keywordsNow.length === (c.keywords ?? []).length
+    ? item
+    : updateItem(item.id, { content: { ...c, keywords: keywordsNow } });
+}
 
 async function keywordPassages(key: string, keyword: Bi, subjects: string[]) {
   if (!subjects.length) return [];
@@ -1432,6 +1474,25 @@ export async function keywordBooks(id: string): Promise<{ keyword: Bi; book: str
       return { keyword, book: hit ? matchLabel(hit) : null };
     }),
   );
+}
+
+// The editor checked a fact against the source (or wants it checked again).
+export async function setFactChecked(
+  id: string,
+  factText: string,
+  checked: boolean,
+): Promise<CaItem> {
+  const item = await loadItem(id);
+  const index = item.facts.findIndex((f) => f.text === factText);
+  if (index < 0) throw new Error("That fact is no longer in the story");
+  const facts = item.facts.map((f, i) => (i === index ? { ...f, verified: checked } : f));
+  const { data, error } = await from("ca_items")
+    .update({ facts, updated_at: new Date().toISOString() } as never)
+    .eq("id", id)
+    .select(ITEM_COLS)
+    .single();
+  fail(error);
+  return data as unknown as CaItem;
 }
 
 // Deletes one key point together with its fact (both languages).

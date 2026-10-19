@@ -300,11 +300,14 @@ const highlightsSchema = z
       source_id: z.string().uuid(),
       quote: z.string().trim().min(8).max(2000),
       point: z.boolean(),
+      check: z.boolean().optional(),
     }),
   )
   .min(1)
   .max(40);
 const noteSchema = z.string().trim().max(500).nullish();
+// Green-pen highlights: keywords for Static Connect.
+const penKeywords = z.array(z.string().trim().min(2).max(80)).max(10).optional();
 
 export const getCaReader = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -333,23 +336,75 @@ export const getCaReaderText = createServerFn({ method: "POST" })
 export const rewriteCaFromHighlights = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({ id: z.string().uuid(), highlights: highlightsSchema, note: noteSchema }).parse(d),
+    z
+      .object({
+        id: z.string().uuid(),
+        highlights: highlightsSchema,
+        note: noteSchema,
+        keywords: penKeywords,
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }): Promise<CaItem> => {
     await assertAdmin(context.userId);
-    return (await server()).rewriteFromHighlights(data.id, data.highlights, data.note ?? null);
+    return (await server()).rewriteFromHighlights(
+      data.id,
+      data.highlights,
+      data.note ?? null,
+      data.keywords,
+    );
   });
 
 export const createCaFromHighlights = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
     z
-      .object({ from_id: z.string().uuid(), highlights: highlightsSchema, note: noteSchema })
+      .object({
+        from_id: z.string().uuid(),
+        highlights: highlightsSchema,
+        note: noteSchema,
+        keywords: penKeywords,
+      })
       .parse(d),
   )
   .handler(async ({ data, context }): Promise<CaItem> => {
     await assertAdmin(context.userId);
-    return (await server()).createFromHighlights(data.from_id, data.highlights, data.note ?? null);
+    return (await server()).createFromHighlights(
+      data.from_id,
+      data.highlights,
+      data.note ?? null,
+      data.keywords,
+    );
+  });
+
+// Green-pen keywords added to Static Connect without rewriting the story.
+export const addCaPenKeywords = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        keywords: z.array(z.string().trim().min(2).max(80)).min(1).max(10),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<CaItem> => {
+    await assertAdmin(context.userId);
+    const s = await server();
+    const item = await s.getItem(data.id);
+    return s.withKeywords(item, data.keywords);
+  });
+
+export const setCaFactChecked = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({ id: z.string().uuid(), text: z.string().min(1).max(4000), checked: z.boolean() })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<CaItem> => {
+    await assertAdmin(context.userId);
+    return (await server()).setFactChecked(data.id, data.text, data.checked);
   });
 
 export const addCaStaticFacts = createServerFn({ method: "POST" })
