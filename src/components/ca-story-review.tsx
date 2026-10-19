@@ -10,6 +10,8 @@ import {
   ArrowDown,
   ArrowUp,
   BarChart3,
+  BookOpen,
+  Plus,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -21,14 +23,28 @@ import {
   XCircle,
 } from "lucide-react";
 import {
+  addCaStaticFacts,
   deleteCaItems,
   deleteCaPoint,
   enrichCaItem,
+  getCaKeywordBooks,
   redoCaVisual,
   updateCaItem,
   type CaItem,
 } from "@/lib/current-affairs.functions";
-import { CATEGORIES, categoryLabel, type Bi, type CaContent } from "@/lib/current-affairs";
+import {
+  CATEGORIES,
+  MAX_STATICS,
+  STATIC_CONNECT,
+  categoryLabel,
+  normalizeForMatch,
+  type Bi,
+  type CaContent,
+  type StaticFact,
+} from "@/lib/current-affairs";
+import { SourceReader } from "@/components/ca-source-reader";
+import { useQuery } from "@tanstack/react-query";
+import { Input } from "@/components/ui/input";
 import { VISUAL_LABELS } from "@/lib/ca-visuals";
 import { visualPreviewHtml } from "@/lib/current-affairs-html";
 import { unitLabel } from "../../supabase/functions/_shared/ras-syllabus.ts";
@@ -188,7 +204,8 @@ export function StoryList({
           </Badge>
         )}
         <Badge tone="good">
-          {items.filter((i) => i.content?.background).length} with background from your notes
+          {items.filter((i) => i.context_sources.length > 0).length} with {STATIC_CONNECT.en} from
+          your books
         </Badge>
       </div>
       {items.length - included > 0 && (
@@ -327,6 +344,7 @@ function StoryCard({
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [showFacts, setShowFacts] = useState(false);
+  const [reading, setReading] = useState(false);
   const c = item.content;
   const dropped = item.status === "dropped";
   const unverified = item.facts.filter((f) => !f.verified).length;
@@ -552,14 +570,14 @@ function StoryCard({
             </button>
             {item.rajasthan && <Badge tone="warn">Rajasthan</Badge>}
             {item.unit && <Badge>{unitLabel(item.unit)}</Badge>}
-            {c?.background ? (
-              <Badge tone="good">
-                Background:{" "}
+            {c?.background || c?.statics?.length ? (
+              <Badge tone={item.context_sources.length ? "good" : "muted"}>
+                {STATIC_CONNECT.en}:{" "}
                 {item.context_sources.map((s) => s.title).join(", ") ||
                   "SAATHI's own knowledge (no book)"}
               </Badge>
             ) : (
-              c && <Badge>No related notes</Badge>
+              c && <Badge>No {STATIC_CONNECT.en}</Badge>
             )}
             {item.enrich_error && (
               <span className="w-full text-xs text-destructive">{item.enrich_error}</span>
@@ -668,17 +686,15 @@ function StoryCard({
                 </Part>
               )}
 
-              {c.background && (
-                <Part title="Background · पृष्ठभूमि" tone="background">
-                  <BiLine
-                    value={c.background}
-                    lang={lang}
-                    editing={editing}
-                    onSave={(v) => save({ background: v })}
-                    onDelete={() => act(() => save({ background: null }), "Background removed")}
-                  />
-                </Part>
-              )}
+              <StaticConnect
+                item={item}
+                content={c}
+                lang={lang}
+                editing={editing}
+                busy={busy}
+                save={save}
+                act={act}
+              />
 
               {c.dyk && c.dyk.length > 0 && (
                 <Part title="Did you know? · क्या आप जानते हैं?" tone="dyk">
@@ -838,6 +854,22 @@ function StoryCard({
               Facts and source quotes ({item.facts.length})
               {unverified > 0 && <span className="text-amber-600"> · {unverified} to check</span>}
             </button>
+            {item.source_ids.length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-2 h-7 px-2 text-xs"
+                onClick={() => setReading(true)}
+              >
+                <BookOpen className="mr-1 h-3.5 w-3.5" /> Read full article
+              </Button>
+            )}
+            <SourceReader
+              item={item}
+              open={reading}
+              onOpenChange={setReading}
+              onChanged={onChanged}
+            />
             {showFacts && (
               <ul className="mt-2 space-y-1.5 text-xs">
                 {item.facts.map((f, i) => (
@@ -938,6 +970,217 @@ function StoryCard({
 }
 
 // ====================== Pieces ======================
+
+const keyOf = (k: Bi) => normalizeForMatch(k.en || k.hi);
+const keywordLabel = (k: Bi, lang: Lang) =>
+  lang === "en"
+    ? k.en || k.hi
+    : lang === "hi"
+      ? k.hi || k.en
+      : [k.hi, k.en].filter(Boolean).join(" · ");
+
+// Static Connect: textbook facts on the concepts the news links to. Each fact
+// can be edited or removed; more are written for keywords the admin picks
+// from SAATHI's suggestions or types in.
+function StaticConnect({
+  item,
+  content: c,
+  lang,
+  editing,
+  busy,
+  save,
+  act,
+}: {
+  item: CaItem;
+  content: CaContent;
+  lang: Lang;
+  editing: boolean;
+  busy: boolean;
+  save: (patch: Partial<CaContent>) => Promise<void>;
+  act: (fn: () => Promise<unknown>, ok?: string) => Promise<void>;
+}) {
+  const addFn = useServerFn(addCaStaticFacts);
+  const booksFn = useServerFn(getCaKeywordBooks);
+  const [picking, setPicking] = useState(false);
+  const [chosen, setChosen] = useState<Bi[]>([]);
+  const [own, setOwn] = useState("");
+  const statics = c.statics ?? [];
+  const used = new Set(statics.map((f) => keyOf(f.keyword)));
+  const offered = (c.keywords ?? []).filter((k) => !used.has(keyOf(k)));
+  const room = MAX_STATICS - statics.length;
+  const books = useQuery({
+    queryKey: ["caKeywordBooks", item.id, offered.map(keyOf).join("|")],
+    queryFn: () => booksFn({ data: { id: item.id } }),
+    enabled: picking && offered.length > 0,
+    staleTime: 5 * 60_000,
+  });
+  const bookFor = (k: Bi) => books.data?.find((b) => keyOf(b.keyword) === keyOf(k))?.book;
+  const isChosen = (k: Bi) => chosen.some((x) => keyOf(x) === keyOf(k));
+  const toggle = (k: Bi) =>
+    setChosen((cur) =>
+      cur.some((x) => keyOf(x) === keyOf(k))
+        ? cur.filter((x) => keyOf(x) !== keyOf(k))
+        : cur.length < room
+          ? [...cur, k]
+          : cur,
+    );
+  const setStatics = (next: StaticFact[]) => save({ statics: next, statics_edited: true });
+  const addOwn = () => {
+    const t = own.trim();
+    if (!t) return;
+    const k = /[\u0900-\u097F]/.test(t) ? { en: "", hi: t } : { en: t, hi: "" };
+    if (!isChosen(k)) toggle(k);
+    setOwn("");
+  };
+  const custom = chosen.filter((k) => !offered.some((o) => keyOf(o) === keyOf(k)));
+
+  return (
+    <Part title={`${STATIC_CONNECT.en} · ${STATIC_CONNECT.hi}`} tone="background">
+      {c.background && (
+        <BiLine
+          value={c.background}
+          lang={lang}
+          editing={editing}
+          onSave={(v) => save({ background: v })}
+          onDelete={() => act(() => save({ background: null }), "Removed")}
+        />
+      )}
+      {statics.length > 0 && (
+        <ul className="space-y-2" data-testid="static-facts">
+          {statics.map((f, i) => (
+            <li key={`${keyOf(f.keyword)}-${i}`} className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                  {keywordLabel(f.keyword, lang)}
+                </div>
+                <BiLine
+                  value={f.text}
+                  lang={lang}
+                  editing={editing}
+                  onSave={(v) =>
+                    setStatics(statics.map((x, j) => (j === i ? { ...x, text: v } : x)))
+                  }
+                />
+                <div className="text-[11px] text-muted-foreground">
+                  {f.source
+                    ? `📚 ${f.source.split(" | ").join(", ")}`
+                    : "💡 SAATHI's own knowledge"}
+                </div>
+              </div>
+              <IconButton
+                label="Remove this fact"
+                disabled={busy}
+                onClick={() =>
+                  act(() => setStatics(statics.filter((_, j) => j !== i)), "Fact removed")
+                }
+              >
+                <X className="h-4 w-4" />
+              </IconButton>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!statics.length && !c.background && (
+        <p className="text-xs text-muted-foreground">No facts yet. Add them from the keywords.</p>
+      )}
+
+      {!picking ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="mt-1 h-8 px-2 text-xs"
+          disabled={busy || room <= 0}
+          onClick={() => setPicking(true)}
+          title={room <= 0 ? `Up to ${MAX_STATICS} facts; remove one to add another` : undefined}
+        >
+          <Plus className="mr-1 h-3.5 w-3.5" /> Add facts from keywords
+        </Button>
+      ) : (
+        <div className="mt-2 space-y-2 rounded-lg border border-emerald-500/30 bg-background/70 p-2">
+          <p className="text-xs text-muted-foreground">
+            Pick up to {room}. 📚 your books explain it · 💡 SAATHI writes it from its own
+            knowledge.
+          </p>
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Keywords">
+            {[...offered, ...custom].map((k) => {
+              const on = isChosen(k);
+              const mark = custom.includes(k)
+                ? "＋"
+                : books.isLoading
+                  ? "…"
+                  : bookFor(k)
+                    ? "📚"
+                    : "💡";
+              return (
+                <button
+                  key={keyOf(k)}
+                  type="button"
+                  aria-pressed={on}
+                  title={bookFor(k) ?? undefined}
+                  onClick={() => toggle(k)}
+                  className={`rounded-full border px-2.5 py-1 text-xs ${on ? "border-emerald-600 bg-emerald-600 text-white" : "border-border bg-background"}`}
+                >
+                  {mark} {keywordLabel(k, lang)}
+                </button>
+              );
+            })}
+            {offered.length === 0 && custom.length === 0 && (
+              <span className="text-xs text-muted-foreground">
+                No more suggestions; type a keyword below.
+              </span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Input
+              value={own}
+              onChange={(e) => setOwn(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addOwn();
+                }
+              }}
+              maxLength={80}
+              placeholder="Your own keyword, e.g. Article 21"
+              className="h-8 text-sm"
+            />
+            <Button size="sm" variant="outline" className="h-8" onClick={addOwn}>
+              Add
+            </Button>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              disabled={busy || chosen.length === 0}
+              onClick={() =>
+                act(async () => {
+                  await addFn({ data: { id: item.id, keywords: chosen } });
+                  setChosen([]);
+                  setPicking(false);
+                }, `${STATIC_CONNECT.en} updated`)
+              }
+            >
+              {busy
+                ? "Writing…"
+                : `Write ${chosen.length || ""} fact${chosen.length === 1 ? "" : "s"}`}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => {
+                setPicking(false);
+                setChosen([]);
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </Part>
+  );
+}
 
 function IconButton({
   label,

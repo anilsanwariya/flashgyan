@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   CATEGORIES,
+  MAX_STATICS,
   UPLOAD_SECTIONS,
   cleanDomains,
   type MagazineSettings,
@@ -14,9 +15,10 @@ import type {
   CaItem,
   CaSource,
   DayData,
+  ReaderSource,
 } from "@/lib/current-affairs.server";
 
-export type { CaCorrection, CaIssue, CaItem, CaSource, DayData };
+export type { CaCorrection, CaIssue, CaItem, CaSource, DayData, ReaderSource };
 
 async function server() {
   return import("@/lib/current-affairs.server");
@@ -39,12 +41,28 @@ const kindSchema = z.enum(["daily", "monthly"]);
 const sectionIds = UPLOAD_SECTIONS.map((s) => s.id) as [string, ...string[]];
 const categoryIds = CATEGORIES.map((c) => c.id) as [string, ...string[]];
 const bi = z.object({ en: z.string().max(4000), hi: z.string().max(4000) });
+const keyword = z.object({ en: z.string().trim().max(80), hi: z.string().trim().max(80) });
+const factSchema = z.object({
+  text: z.string().max(4000),
+  quote: z.string().max(4000),
+  source_id: z.string().uuid(),
+  verified: z.boolean(),
+  corrected: z.boolean().optional(),
+  slot: z.string().max(80).optional(),
+});
 const contentSchema = z.object({
   headline: bi,
   summary: bi,
   points: z.array(bi).max(20),
   why: bi,
   background: bi.nullable(),
+  statics: z
+    .array(z.object({ keyword, text: bi, source: z.string().max(500).nullable() }))
+    .max(MAX_STATICS)
+    .optional(),
+  keywords: z.array(keyword).max(20).optional(),
+  statics_edited: z.boolean().optional(),
+  context_facts: z.array(factSchema).max(40).optional(),
   mcq: z
     .object({
       question: bi,
@@ -272,6 +290,92 @@ export const updateCaItem = createServerFn({ method: "POST" })
       id,
       patch as Parameters<Awaited<ReturnType<typeof server>>["updateItem"]>[1],
     );
+  });
+
+// ---------- Article reader and Static Connect ----------
+
+const highlightsSchema = z
+  .array(
+    z.object({
+      source_id: z.string().uuid(),
+      quote: z.string().trim().min(8).max(2000),
+      point: z.boolean(),
+    }),
+  )
+  .min(1)
+  .max(40);
+const noteSchema = z.string().trim().max(500).nullish();
+
+export const getCaReader = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<ReaderSource[]> => {
+    await assertAdmin(context.userId);
+    return (await server()).itemReader(data.id);
+  });
+
+export const getCaReaderText = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        source_id: z.string().uuid(),
+        start: z.number().int().min(0),
+        end: z.number().int().min(0),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).readerText(data.source_id, data.start, data.end);
+  });
+
+export const rewriteCaFromHighlights = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), highlights: highlightsSchema, note: noteSchema }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<CaItem> => {
+    await assertAdmin(context.userId);
+    return (await server()).rewriteFromHighlights(data.id, data.highlights, data.note ?? null);
+  });
+
+export const createCaFromHighlights = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({ from_id: z.string().uuid(), highlights: highlightsSchema, note: noteSchema })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<CaItem> => {
+    await assertAdmin(context.userId);
+    return (await server()).createFromHighlights(data.from_id, data.highlights, data.note ?? null);
+  });
+
+export const addCaStaticFacts = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        keywords: z
+          .array(keyword.refine((k) => k.en || k.hi, "Empty keyword"))
+          .min(1)
+          .max(MAX_STATICS),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<CaItem> => {
+    await assertAdmin(context.userId);
+    return (await server()).addStaticFacts(data.id, data.keywords);
+  });
+
+export const getCaKeywordBooks = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).keywordBooks(data.id);
   });
 
 export const deleteCaPoint = createServerFn({ method: "POST" })

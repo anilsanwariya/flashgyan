@@ -3,6 +3,7 @@
 // the same HTML as a preview.
 import {
   CATEGORIES,
+  STATIC_CONNECT,
   categoryLabel,
   formatDate,
   type Bi,
@@ -81,13 +82,22 @@ function itemHtml(item: MagazineItem, number: number, showDate: boolean, accent:
       ? `<span class="tag src-tag">Source: ${esc(item.source_names.join(", "))}</span>`
       : "",
   ].join("");
-  const background = c.background
-    ? `<div class="box context"><div class="box-title">Background</div>${biBlock(c.background)}${
-        item.context_sources.length
-          ? `<div class="src">Source: ${esc(item.context_sources.map((s) => s.title).join(", "))}</div>`
-          : ""
-      }</div>`
-    : "";
+  // Static Connect: textbook facts on the concepts the news links to, each
+  // led by its keyword (older stories: one background paragraph).
+  const statics = (c.statics ?? [])
+    .map((f) => {
+      const line = (k: string, t: string) => (k ? `<b>${esc(k)}:</b> ${esc(t)}` : esc(t));
+      return `<div class="bi"><div class="hi" lang="hi">${line(f.keyword.hi || f.keyword.en, f.text.hi)}</div><div class="en" lang="en">${line(f.keyword.en, f.text.en)}</div></div>`;
+    })
+    .join("");
+  const background =
+    c.background || statics
+      ? `<div class="box context"><div class="box-title">${STATIC_CONNECT.en}</div>${biBlock(c.background)}${statics}${
+          item.context_sources.length
+            ? `<div class="src">Source: ${esc(item.context_sources.map((s) => s.title).join(", "))}</div>`
+            : ""
+        }</div>`
+      : "";
   const why =
     c.why.en || c.why.hi
       ? `<div class="box why"><div class="box-title">Why it matters</div>${biBlock(c.why)}</div>`
