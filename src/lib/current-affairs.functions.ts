@@ -14,11 +14,22 @@ import type {
   CaIssue,
   CaItem,
   CaSource,
+  CaVersion,
   DayData,
   ReaderSource,
+  SkippedArticle,
 } from "@/lib/current-affairs.server";
 
-export type { CaCorrection, CaIssue, CaItem, CaSource, DayData, ReaderSource };
+export type {
+  CaCorrection,
+  CaIssue,
+  CaItem,
+  CaSource,
+  CaVersion,
+  DayData,
+  ReaderSource,
+  SkippedArticle,
+};
 
 async function server() {
   return import("@/lib/current-affairs.server");
@@ -357,22 +368,26 @@ export const rewriteCaFromHighlights = createServerFn({ method: "POST" })
     );
   });
 
+// A new story, from another story's sources (from_id) or from a source no
+// story uses yet (source_id).
 export const createCaFromHighlights = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
     z
       .object({
-        from_id: z.string().uuid(),
+        from_id: z.string().uuid().optional(),
+        source_id: z.string().uuid().optional(),
         highlights: highlightsSchema,
         note: noteSchema,
         keywords: penKeywords,
       })
+      .refine((o) => !!o.from_id !== !!o.source_id, "Give a story or a source")
       .parse(d),
   )
   .handler(async ({ data, context }): Promise<CaItem> => {
     await assertAdmin(context.userId);
     return (await server()).createFromHighlights(
-      data.from_id,
+      data.from_id ? { itemId: data.from_id } : { sourceId: data.source_id! },
       data.highlights,
       data.note ?? null,
       data.keywords,
@@ -395,6 +410,68 @@ export const addCaPenKeywords = createServerFn({ method: "POST" })
     const s = await server();
     const item = await s.getItem(data.id);
     return s.withKeywords(item, data.keywords);
+  });
+
+// A story's earlier versions (before each rewrite), and putting one back.
+export const listCaVersions = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<CaVersion[]> => {
+    await assertAdmin(context.userId);
+    return (await server()).listVersions(data.id);
+  });
+
+export const restoreCaVersion = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), version_id: z.string().uuid().optional() }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<CaItem> => {
+    await assertAdmin(context.userId);
+    return (await server()).restoreVersion(data.id, data.version_id);
+  });
+
+// "What's missing?" for the reader's highlights in one source.
+export const checkCaMissing = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid().nullish(),
+        source_id: z.string().uuid(),
+        highlights: z.array(z.string().trim().min(2).max(2000)).max(40),
+        // The article shown, as [start, end) in the whole source.
+        article: z.tuple([z.number().int().min(0), z.number().int().min(0)]).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).checkMissing(
+      data.id ?? null,
+      data.source_id,
+      data.highlights,
+      data.article,
+    );
+  });
+
+// Skipped news: the day's articles no story uses, and reading one of them.
+export const getCaSkipped = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ date: dateSchema }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).skippedNews(data.date);
+  });
+
+export const getCaSourceReader = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ source_id: z.string().uuid(), at: z.number().int().min(0) }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<ReaderSource[]> => {
+    await assertAdmin(context.userId);
+    return (await server()).sourceReader(data.source_id, data.at);
   });
 
 export const setCaFactChecked = createServerFn({ method: "POST" })

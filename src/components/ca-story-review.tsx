@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  History,
   Pencil,
   RefreshCw,
   Trash2,
@@ -44,6 +45,7 @@ import {
   type StaticFact,
 } from "@/lib/current-affairs";
 import { SourceReader } from "@/components/ca-source-reader";
+import { StoryHistory } from "@/components/ca-story-history";
 import { useQuery } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { VISUAL_LABELS } from "@/lib/ca-visuals";
@@ -347,6 +349,7 @@ function StoryCard({
   const [editing, setEditing] = useState(false);
   const [showFacts, setShowFacts] = useState(false);
   const [reading, setReading] = useState(false);
+  const [history, setHistory] = useState(false);
   const c = item.content;
   const dropped = item.status === "dropped";
   const unverified = item.facts.filter((f) => !f.verified).length;
@@ -963,6 +966,18 @@ function StoryCard({
                 </>
               )}
             </Button>
+            {c && (
+              <Button size="sm" variant="ghost" onClick={() => setHistory(true)}>
+                <History className="mr-1 h-4 w-4" /> History
+              </Button>
+            )}
+            <StoryHistory
+              item={item}
+              lang={lang}
+              open={history}
+              onOpenChange={setHistory}
+              onChanged={onChanged}
+            />
             <IconButton label="Move up" disabled={busy || !above} onClick={() => swap(above)}>
               <ArrowUp className="h-4 w-4" />
             </IconButton>

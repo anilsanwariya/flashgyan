@@ -84,8 +84,16 @@ import {
 } from "@/lib/current-affairs";
 import { VISUAL_LABELS, parseVisual, visualMessages, type Visual } from "@/lib/ca-visuals";
 import { isPaged, outline, type OutlineEntry } from "@/lib/ca-reader-format";
+import { missingMessages, parseMissing, type MissingCheck } from "@/lib/ca-missing";
+import { uncoveredArticles, type SkippedArticle } from "@/lib/ca-skipped";
+
+export type { SkippedArticle };
 import {
   factsFromHighlights,
+  findQuote,
+  type Span,
+  READER_PAD,
+  READER_WHOLE,
   readerWindow,
   remapChanges,
   snapToLines,
@@ -697,15 +705,22 @@ async function issueMainsQuestions(date: string, exceptId: string): Promise<stri
 
 // opts.context: facts for the summary and "why" only (from the reader's
 // highlights; otherwise the story's saved ones). opts.note: the editor's
-// instruction for this writing.
+// instruction for this writing. opts.before: the story as it was before the
+// caller changed its facts, saved as a version once the new one is written.
 export async function enrichItem(
   itemId: string,
-  opts: { context?: CaFact[]; note?: string | null } = {},
+  opts: {
+    context?: CaFact[];
+    note?: string | null;
+    before?: CaSnapshot | null;
+    reason?: CaVersion["reason"];
+  } = {},
 ): Promise<CaItem> {
   const { data, error } = await from("ca_items").select(ITEM_COLS).eq("id", itemId).single();
   fail(error);
   const item = data as unknown as CaItem;
   item.category = normalizeCategory(item.category);
+  const before = opts.before !== undefined ? opts.before : snapshotOf(item);
   const context = opts.context ?? item.content?.context_facts ?? [];
   const key = apiKey();
   try {
@@ -790,6 +805,7 @@ export async function enrichItem(
       .select(ITEM_COLS)
       .single();
     fail(uErr);
+    if (before) await saveVersion(itemId, before, opts.reason ?? "write");
     if (item.related_item_id) await checkForCorrections(item.related_item_id, itemId);
     return saved as unknown as CaItem;
   } catch (e) {
@@ -1224,39 +1240,170 @@ export type ReaderSource = {
   total: number;
   // Headings and pages of the whole source, for jumping around in it.
   outline: OutlineEntry[];
+  // The day's other stories made from this source, with their quotes, so the
+  // reader can show which articles of a newspaper page have no story yet.
+  stories: { id: string; headline: string; dropped: boolean; quotes: string[] }[];
 };
 
 const READER_MAX = 30_000;
+
+type SourceRow = Omit<ReaderSource, "text" | "start" | "total" | "outline" | "stories"> & {
+  content: string;
+};
+const READER_SOURCE_COLS = "id,title,source_name,section,url,content";
+
+// The stories made from these sources (except one), with their quotes.
+async function storiesOn(sourceIds: string[], except: string | null) {
+  let q = from("ca_items").select("id,headline,status,facts").overlaps("source_ids", sourceIds);
+  if (except) q = q.neq("id", except);
+  const { data } = await q.limit(300);
+  return (data ?? []) as unknown as Pick<CaItem, "id" | "headline" | "status" | "facts">[];
+}
+
+function readerSource(
+  { content, ...r }: SourceRow,
+  [a, b]: Span,
+  stories: Pick<CaItem, "id" | "headline" | "status" | "facts">[],
+): ReaderSource {
+  return {
+    ...r,
+    text: content.slice(a, b),
+    start: a,
+    total: content.length,
+    outline: outline(content, isPaged(r.url)),
+    stories: stories
+      .map((o) => ({
+        id: o.id,
+        headline: o.headline,
+        dropped: o.status === "dropped",
+        quotes: o.facts.filter((f) => f.source_id === r.id).map((f) => f.quote),
+      }))
+      .filter((o) => o.quotes.length),
+  };
+}
 
 // The story's sources, each opened around the story's quotes (short ones whole).
 export async function itemReader(id: string): Promise<ReaderSource[]> {
   const item = await loadItem(id);
   if (!item.source_ids.length) return [];
   const { data, error } = await from("ca_sources")
-    .select("id,title,source_name,section,url,content")
+    .select(READER_SOURCE_COLS)
     .in("id", item.source_ids);
   fail(error);
   const quotes = [...item.facts, ...(item.content?.context_facts ?? [])];
-  const rows = (data ?? []) as unknown as (Omit<
-    ReaderSource,
-    "text" | "start" | "total" | "outline"
-  > & {
-    content: string;
-  })[];
+  const siblings = await storiesOn(item.source_ids, id);
+  const rows = (data ?? []) as unknown as SourceRow[];
   return item.source_ids
     .map((sid) => rows.find((r) => r.id === sid))
-    .filter((r): r is NonNullable<typeof r> => !!r)
-    .map(({ content, ...r }): ReaderSource => {
+    .filter((r): r is SourceRow => !!r)
+    .map((r) => {
       const own = quotes.filter((f) => f.source_id === r.id).map((f) => f.quote);
-      const [a, b] = readerWindow(content, own);
-      return {
-        ...r,
-        text: content.slice(a, b),
-        start: a,
-        total: content.length,
-        outline: outline(content, isPaged(r.url)),
-      };
+      return readerSource(r, readerWindow(r.content, own), siblings);
     });
+}
+
+// A source no story uses yet (skipped news), opened at one of its articles.
+export async function sourceReader(sourceId: string, at: number): Promise<ReaderSource[]> {
+  const { data, error } = await from("ca_sources")
+    .select(READER_SOURCE_COLS)
+    .eq("id", sourceId)
+    .single();
+  fail(error);
+  const row = data as unknown as SourceRow;
+  const len = row.content.length;
+  const span: Span =
+    len <= READER_WHOLE
+      ? [0, len]
+      : snapToLines(row.content, Math.max(0, at - READER_PAD), Math.min(len, at + 2 * READER_PAD));
+  return [readerSource(row, span, await storiesOn([sourceId], null))];
+}
+
+// The day's articles that no story uses: what the AI left out. Sources still
+// being read are counted, not checked.
+export async function skippedNews(
+  date: string,
+): Promise<{ articles: SkippedArticle[]; reading: number }> {
+  const { data, error } = await from("ca_sources")
+    .select(`${READER_SOURCE_COLS},status`)
+    .eq("issue_date", date)
+    .order("created_at");
+  fail(error);
+  const all = (data ?? []) as unknown as (SourceRow & { status: CaSource["status"] })[];
+  const rows = all.filter((r) => (r.status === "done" || r.status === "error") && r.content.trim());
+  const reading = all.filter((r) => r.status === "new" || r.status === "extracting").length;
+  if (!rows.length) return { articles: [], reading };
+  const { data: its, error: iErr } = await from("ca_items")
+    .select("facts,source_ids,context_facts:content->context_facts")
+    .overlaps(
+      "source_ids",
+      rows.map((r) => r.id),
+    );
+  fail(iErr);
+  const items = (its ?? []) as unknown as (Pick<CaItem, "facts" | "source_ids"> & {
+    context_facts: CaFact[] | null;
+  })[];
+  const articles = rows.flatMap((r) => {
+    const using = items.filter((i) => i.source_ids.includes(r.id));
+    const quotes = using
+      .flatMap((i) => [...i.facts, ...(i.context_facts ?? [])])
+      .filter((f) => f.source_id === r.id)
+      .map((f) => f.quote);
+    return uncoveredArticles(r, quotes, using.length > 0, r.section === "dipr");
+  });
+  return { articles: articles.slice(0, 300), reading };
+}
+
+// "What's missing?": the facts an examiner asks for that the highlights don't
+// cover, with where this source states them. One AI call, on request.
+// With no story (skipped news), the source's article is checked on its own.
+// `article`: the part of the source the reader shows as one article.
+export async function checkMissing(
+  id: string | null,
+  sourceId: string,
+  highlights: string[],
+  article?: Span,
+): Promise<MissingCheck> {
+  const item = id ? await loadItem(id) : null;
+  if (item && !item.source_ids.includes(sourceId)) {
+    throw new Error("That source isn't part of this story");
+  }
+  const { data, error } = await from("ca_sources")
+    .select("title,content")
+    .eq("id", sourceId)
+    .single();
+  fail(error);
+  const { title, content } = data as unknown as { title: string; content: string };
+  // The article around the highlights (and the story's facts), not a whole newspaper.
+  const anchors = [
+    ...highlights,
+    ...(item?.facts ?? []).filter((f) => f.source_id === sourceId).map((f) => f.quote),
+  ];
+  const spans = anchors.map((q) => findQuote(content, q)).filter((x): x is Span => !!x);
+  let from0 = spans.length ? Math.max(0, Math.min(...spans.map((x) => x[0])) - 5000) : 0;
+  let to0 = Math.min(
+    content.length,
+    spans.length ? Math.max(...spans.map((x) => x[1])) + 5000 : 16_000,
+    from0 + 16_000,
+  );
+  if (article) {
+    from0 = Math.max(0, Math.min(article[0], content.length));
+    to0 = Math.min(content.length, Math.max(from0, article[1]), from0 + 16_000);
+  }
+  const [a, b] = snapToLines(content, from0, to0);
+  const slotOf = (q: string) =>
+    item?.facts.find((f) => normalizeForMatch(f.quote) === normalizeForMatch(q))?.slot;
+  const raw = await saathiComplete(
+    apiKey(),
+    missingMessages({
+      headline: item ? item.content?.headline.en || item.headline : title,
+      category: item?.category ?? "news",
+      highlights: highlights.map((quote) => ({ quote, slot: slotOf(quote) })),
+      article: content.slice(a, b),
+    }),
+  );
+  const parsed = parseMissing(raw, content, highlights);
+  if (!parsed) throw new Error("The AI's reply could not be read. Try again.");
+  return parsed;
 }
 
 // More of a long source, as the reader scrolls past what it has.
@@ -1329,18 +1476,38 @@ export async function rewriteFromHighlights(
     } as never)
     .eq("id", id);
   fail(error);
-  return withKeywords(await enrichItem(id, { context, note }), keywords);
+  return withKeywords(
+    await enrichItem(id, { context, note, before: snapshotOf(item), reason: "rewrite" }),
+    keywords,
+  );
 }
 
-// A new story from highlights in another story's sources (news the AI
-// skipped), placed right after that story and written at once.
+// A new story from highlights in another story's sources, or in a source no
+// story uses (news the AI skipped), written at once. It goes right after the
+// story it came from, or at the end of the source's day.
 export async function createFromHighlights(
-  fromItemId: string,
+  from0: { itemId: string } | { sourceId: string },
   highlights: Highlight[],
   note: string | null,
   keywords: string[] = [],
 ): Promise<CaItem> {
-  const origin = await loadItem(fromItemId);
+  let origin: { issue_date: string; position: number; source_ids: string[] };
+  if ("itemId" in from0) origin = await loadItem(from0.itemId);
+  else {
+    const { data, error } = await from("ca_sources")
+      .select("issue_date")
+      .eq("id", from0.sourceId)
+      .single();
+    fail(error);
+    const date = (data as unknown as { issue_date: string }).issue_date;
+    const { data: last } = await from("ca_items")
+      .select("position")
+      .eq("issue_date", date)
+      .order("position", { ascending: false })
+      .limit(1);
+    const top = ((last ?? []) as { position: number }[])[0]?.position ?? -1;
+    origin = { issue_date: date, position: top, source_ids: [from0.sourceId] };
+  }
   await assertDayEditable([origin.issue_date]);
   const allowed = highlights.filter((h) => origin.source_ids.includes(h.source_id));
   const texts = await sourceTexts(uniq(allowed.map((h) => h.source_id)));
@@ -1387,6 +1554,133 @@ export async function createFromHighlights(
     await enrichItem((created as unknown as { id: string }).id, { context, note }),
     keywords,
   );
+}
+
+// ---------- Story versions: undoing a rewrite ----------
+
+// What writing a story changes, saved before each rewrite so it can be undone.
+export type CaSnapshot = Pick<
+  CaItem,
+  "facts" | "source_ids" | "content" | "context_sources" | "syllabus_topic_id" | "unit"
+>;
+export type CaVersion = {
+  id: string;
+  created_at: string;
+  // "write": written again; "rewrite": from the reader's highlights;
+  // "restore": the story as it was before an older version was restored.
+  reason: "write" | "rewrite" | "restore";
+  headline: string;
+  snapshot: CaSnapshot;
+};
+export const VERSIONS_KEPT = 5;
+
+const snapshotOf = (item: CaItem): CaSnapshot | null =>
+  item.content
+    ? {
+        facts: item.facts,
+        source_ids: item.source_ids,
+        content: item.content,
+        context_sources: item.context_sources,
+        syllabus_topic_id: item.syllabus_topic_id,
+        unit: item.unit,
+      }
+    : null;
+
+// Keeps the story as it was, and only the latest few versions. Versions are a
+// safety net: a failure here (the table not created yet) never stops the
+// rewrite itself.
+async function saveVersion(itemId: string, snap: CaSnapshot, reason: CaVersion["reason"]) {
+  try {
+    fail(
+      (
+        await from("ca_item_versions").insert({
+          item_id: itemId,
+          reason,
+          headline: snap.content?.headline.en || snap.content?.headline.hi || "",
+          snapshot: snap,
+        } as never)
+      ).error,
+    );
+    const { data } = await from("ca_item_versions")
+      .select("id")
+      .eq("item_id", itemId)
+      .order("created_at", { ascending: false })
+      .range(VERSIONS_KEPT, VERSIONS_KEPT + 100);
+    const old = ((data ?? []) as { id: string }[]).map((r) => r.id);
+    if (old.length) await from("ca_item_versions").delete().in("id", old);
+  } catch (e) {
+    console.error("story version not saved:", (e instanceof Error && e.message) || e);
+  }
+}
+
+// The story's earlier versions, newest first.
+export async function listVersions(itemId: string): Promise<CaVersion[]> {
+  const { data, error } = await from("ca_item_versions")
+    .select("id,created_at,reason,headline,snapshot")
+    .eq("item_id", itemId)
+    .order("created_at", { ascending: false })
+    .limit(VERSIONS_KEPT);
+  if (error) {
+    console.error("story versions:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as CaVersion[];
+}
+
+// Puts an earlier version back (the latest one when no id is given). The
+// story as it is now becomes a version, so a restore can be undone too.
+export async function restoreVersion(itemId: string, versionId?: string): Promise<CaItem> {
+  const item = await loadItem(itemId);
+  await assertDayEditable([item.issue_date]);
+  let q = from("ca_item_versions").select("id,snapshot").eq("item_id", itemId);
+  q = versionId ? q.eq("id", versionId) : q.order("created_at", { ascending: false }).limit(1);
+  const { data, error } = await q.maybeSingle();
+  if (error) throw new Error("Story history isn't available yet.");
+  if (!data) throw new Error("That version is no longer saved.");
+  const v = data as unknown as Pick<CaVersion, "id" | "snapshot">;
+  const snap = v.snapshot;
+
+  // Pending corrections follow their facts back.
+  const { data: pending } = await from("ca_corrections")
+    .select("id,changes")
+    .eq("item_id", itemId)
+    .eq("status", "pending");
+  for (const c of (pending ?? []) as Pick<CaCorrection, "id" | "changes">[]) {
+    const changes = remapChanges(c.changes, item.facts, snap.facts);
+    fail(
+      (
+        await from("ca_corrections")
+          .update((changes ? { changes } : { status: "rejected" }) as never)
+          .eq("id", c.id)
+      ).error,
+    );
+  }
+
+  // The search embedding follows the facts; a failure keeps the old one.
+  const embedding = await embedOne(storyText({ headline: item.headline, facts: snap.facts })).catch(
+    () => null,
+  );
+  const { data: saved, error: uErr } = await from("ca_items")
+    .update({
+      facts: snap.facts,
+      source_ids: snap.source_ids,
+      content: snap.content,
+      context_sources: snap.context_sources,
+      syllabus_topic_id: snap.syllabus_topic_id,
+      unit: snap.unit,
+      ...(embedding ? { embedding: embedding as unknown as string } : {}),
+      needs_enrich: false,
+      enrich_error: null,
+      updated_at: new Date().toISOString(),
+    } as never)
+    .eq("id", itemId)
+    .select(ITEM_COLS)
+    .single();
+  fail(uErr);
+  await from("ca_item_versions").delete().eq("id", v.id);
+  const now = snapshotOf(item);
+  if (now) await saveVersion(itemId, now, "restore");
+  return saved as unknown as CaItem;
 }
 
 // ---------- Static Connect ----------
