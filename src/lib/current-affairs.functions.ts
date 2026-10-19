@@ -49,6 +49,7 @@ const factSchema = z.object({
   verified: z.boolean(),
   corrected: z.boolean().optional(),
   slot: z.string().max(80).optional(),
+  note: z.string().max(200).optional(),
 });
 const contentSchema = z.object({
   headline: bi,
@@ -301,6 +302,7 @@ const highlightsSchema = z
       quote: z.string().trim().min(8).max(2000),
       point: z.boolean(),
       check: z.boolean().optional(),
+      note: z.string().trim().max(200).optional(),
     }),
   )
   .min(1)

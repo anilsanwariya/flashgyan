@@ -5,14 +5,20 @@
 //   yellow = key point, blue = summary only, pink = key point to check,
 //   green = Static Connect keyword, and an eraser.
 // In Highlight mode a tap marks the whole sentence; press and hold (or drag
-// with a mouse) to paint just some words. Read mode leaves taps alone and
-// allows normal text selection. Highlights are kept as a draft on the device
-// until the story is rewritten or a new story is made from them.
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+// with a mouse) to paint just some words. Holding a highlight (or tapping it
+// in Read mode, or right-clicking it) opens its actions: change the pen, add
+// a margin note for SAATHI ("use this in the headline"), remove it. Read mode
+// leaves taps alone and allows normal text selection. A find bar and
+// previous / next highlight buttons move around the article. Highlights are
+// kept as a draft on the device until the story is rewritten or a new story
+// is made from them.
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import {
+  ArrowDown,
+  ArrowUp,
   BookOpen,
   ChevronDown,
   ChevronUp,
@@ -22,7 +28,10 @@ import {
   ListTree,
   Minus,
   Plus,
+  Pencil,
   Redo2,
+  Search,
+  StickyNote,
   Undo2,
   X,
 } from "lucide-react";
@@ -35,7 +44,7 @@ import {
   type CaItem,
   type ReaderSource,
 } from "@/lib/current-affairs.functions";
-import { cleanQuote, findQuote, sentenceSpans, type Span } from "@/lib/ca-highlight";
+import { cleanQuote, findAll, findQuote, sentenceSpans, type Span } from "@/lib/ca-highlight";
 import {
   isPaged,
   parseBlocks,
@@ -47,6 +56,7 @@ import {
 } from "@/lib/ca-reader-format";
 import { errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
@@ -54,10 +64,12 @@ type Mode = "rewrite" | "new";
 type Pen = "point" | "summary" | "check" | "keyword";
 type Tool = Pen | "eraser";
 // A highlight: words from one source and the pen they were marked with.
-type Mark = { source_id: string; quote: string; pen: Pen };
+type Mark = { source_id: string; quote: string; pen: Pen; note?: string };
 // What part of each source is loaded (offsets are in the whole source).
 type Loaded = { text: string; start: number; total: number };
-type Range = { span: Span; pen: Pen; preview?: boolean };
+type Range = { span: Span; pen: Pen; preview?: boolean; note?: string };
+// A find-bar match; "current" is the one jumped to.
+type Found = { span: Span; current: boolean };
 
 const PENS: { pen: Pen; label: string; dot: string; mark: string }[] = [
   {
@@ -122,11 +134,13 @@ function storyMarks(item: CaItem): Mark[] {
       source_id: f.source_id,
       quote: f.quote,
       pen: (f.verified ? "point" : "check") as Pen,
+      ...(f.note ? { note: f.note } : {}),
     })),
     ...(item.content?.context_facts ?? []).map((f) => ({
       source_id: f.source_id,
       quote: f.quote,
       pen: "summary" as Pen,
+      ...(f.note ? { note: f.note } : {}),
     })),
   ];
 }
@@ -213,6 +227,12 @@ export function SourceReader({
     read<"clean" | "original">(VIEW_KEY, "clean"),
   );
   const [selection, setSelection] = useState<Span | null>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [findIdx, setFindIdx] = useState(0);
+  const [flash, setFlash] = useState<number | null>(null);
+  // The highlight whose actions are open (its index in marks).
+  const [sheet, setSheet] = useState<number | null>(null);
   const [preview, setPreview] = useState<Span | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
@@ -323,11 +343,55 @@ export function SourceReader({
     for (const m of marks) {
       if (m.source_id !== source.id) continue;
       const span = findQuote(part.text, m.quote);
-      if (span) out.push({ span, pen: m.pen });
+      if (span) out.push({ span, pen: m.pen, note: m.note });
     }
     if (preview && tool !== "eraser") out.push({ span: preview, pen: tool, preview: true });
     return out;
   }, [marks, part, source, preview, tool]);
+  // Find bar: every match in the loaded part, and the current one.
+  const matches = useMemo<Span[]>(
+    () => (findOpen && part && query.trim().length >= 2 ? findAll(part.text, query) : []),
+    [findOpen, part, query],
+  );
+  const found = useMemo<Found[]>(
+    () => matches.map((span, i) => ({ span, current: i === findIdx })),
+    [matches, findIdx],
+  );
+  useEffect(() => {
+    if (!matches.length) return;
+    requestAnimationFrame(() =>
+      textRef.current
+        ?.querySelector("[data-find-current]")
+        ?.scrollIntoView({ block: "center", behavior: "smooth" }),
+    );
+  }, [matches, findIdx]);
+  const stepFind = (d: 1 | -1) =>
+    matches.length && setFindIdx((i) => (i + d + matches.length) % matches.length);
+
+  // Jumping from highlight to highlight, in reading order.
+  const ordered = useMemo(
+    () =>
+      ranges
+        .filter((r) => !r.preview)
+        .map((r) => r.span[0])
+        .sort((a, b) => a - b),
+    [ranges],
+  );
+  const hlCursor = useRef(-1);
+  function stepHighlight(d: 1 | -1) {
+    if (!ordered.length) return;
+    hlCursor.current = (hlCursor.current + d + ordered.length) % ordered.length;
+    const at = ordered[hlCursor.current];
+    setTrayOpen(false);
+    setFlash(at);
+    setTimeout(() => setFlash((f) => (f === at ? null : f)), 1200);
+    requestAnimationFrame(() =>
+      textRef.current
+        ?.querySelector(`[data-mark-start="${at}"]`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" }),
+    );
+  }
+
   // In "new story" mode the story's own facts show faintly.
   const taken = useMemo<Span[]>(() => {
     if (mode !== "new" || !part || !source) return [];
@@ -440,11 +504,17 @@ export function SourceReader({
     gesture.current = g;
     if (!g.mouse && at !== null) {
       g.timer = setTimeout(() => {
-        if (gesture.current === g && !g.moved) {
-          g.paint = true;
-          startPaint(at);
-          textRef.current?.setPointerCapture?.(g.id);
+        if (gesture.current !== g || g.moved) return;
+        // Holding a highlight opens its actions; elsewhere it starts painting.
+        const hit = markIndexAt(at);
+        if (hit >= 0) {
+          gesture.current = null;
+          openSheet(hit);
+          return;
         }
+        g.paint = true;
+        startPaint(at);
+        textRef.current?.setPointerCapture?.(g.id);
       }, HOLD_MS);
     }
   }
@@ -492,6 +562,34 @@ export function SourceReader({
       return;
     }
     if (!g.moved && g.at !== null) tapAt(g.at);
+  }
+
+  function openSheet(i: number) {
+    try {
+      navigator.vibrate?.(8);
+    } catch {
+      // no vibration
+    }
+    window.getSelection()?.removeAllRanges();
+    setSheet(i);
+  }
+
+  // Read mode: a tap on a highlight opens its actions. With a mouse in
+  // Highlight mode, a right-click does.
+  function onTextClick(e: React.MouseEvent) {
+    if (painting) return;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+    const at = offsetAt(e.clientX, e.clientY);
+    const hit = at === null ? -1 : markIndexAt(at);
+    if (hit >= 0) openSheet(hit);
+  }
+  function onTextMenu(e: React.MouseEvent) {
+    if (!painting) return;
+    e.preventDefault();
+    const at = offsetAt(e.clientX, e.clientY);
+    const hit = at === null ? -1 : markIndexAt(at);
+    if (hit >= 0) openSheet(hit);
   }
 
   function onPointerCancel() {
@@ -614,7 +712,7 @@ export function SourceReader({
     const el = scrollRef.current;
     if (!el) return;
     const top = el.scrollTop;
-    if (top > lastTop.current + 8 && top > 60) setHeaderHidden(true);
+    if (top > lastTop.current + 8 && top > 60 && !findOpen) setHeaderHidden(true);
     else if (top < lastTop.current - 8 || top < 20) setHeaderHidden(false);
     lastTop.current = top;
     clearTimeout(posTimer.current);
@@ -655,6 +753,7 @@ export function SourceReader({
             quote: m.quote,
             point: isPoint(m.pen),
             check: m.pen === "check",
+            ...(m.note ? { note: m.note } : {}),
           })),
         keywords: keywordMarks.map((m) => m.quote),
         note: note.trim() || null,
@@ -715,6 +814,8 @@ export function SourceReader({
       }}
       onSubmit={() => void submit()}
       onAddKeywords={() => void addKeywordsOnly()}
+      onEdit={(i) => openSheet(i)}
+      jump={wide && ordered.length > 1 ? <HighlightJump onStep={stepHighlight} /> : null}
     />
   );
 
@@ -729,6 +830,19 @@ export function SourceReader({
             <DialogTitle className="min-w-0 flex-1 truncate text-sm font-semibold">
               {source?.title ?? "Full article"}
             </DialogTitle>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 px-2"
+              aria-label="Find in article"
+              aria-expanded={findOpen}
+              onClick={() => {
+                setFindOpen((v) => !v);
+                setFindIdx(0);
+              }}
+            >
+              <Search className="h-4 w-4" />
+            </Button>
             {source && source.outline.length > 0 && (
               <Button
                 size="sm"
@@ -796,6 +910,74 @@ export function SourceReader({
                 </button>
               ))}
             </div>
+          )}
+          {findOpen && (
+            <div className="flex items-center gap-1 border-t border-border px-2 py-1.5">
+              <Input
+                autoFocus
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setFindIdx(0);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    stepFind(e.shiftKey ? -1 : 1);
+                  }
+                }}
+                placeholder="Find a word, name or number…"
+                aria-label="Find"
+                className="h-8 min-w-0 flex-1 text-sm"
+              />
+              <span
+                className="w-14 shrink-0 text-center text-xs text-muted-foreground"
+                aria-live="polite"
+              >
+                {query.trim().length < 2
+                  ? ""
+                  : matches.length
+                    ? `${findIdx + 1} of ${matches.length}`
+                    : "None"}
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 w-8 p-0"
+                aria-label="Previous match"
+                disabled={!matches.length}
+                onClick={() => stepFind(-1)}
+              >
+                <ChevronUp className="h-4 w-4" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 w-8 p-0"
+                aria-label="Next match"
+                disabled={!matches.length}
+                onClick={() => stepFind(1)}
+              >
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 w-8 p-0"
+                aria-label="Close find"
+                onClick={() => {
+                  setFindOpen(false);
+                  setQuery("");
+                }}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+          {findOpen && part && (part.start > 0 || part.start + part.text.length < part.total) && (
+            <p className="px-3 pb-1.5 text-[11px] text-muted-foreground">
+              Searching the part shown; use “Show more” to search further.
+            </p>
           )}
           {contentsOpen && source && (
             <nav
@@ -868,19 +1050,30 @@ export function SourceReader({
                     onPointerMove={onPointerMove}
                     onPointerUp={onPointerUp}
                     onPointerCancel={onPointerCancel}
-                    onContextMenu={(e) => painting && e.preventDefault()}
+                    onContextMenu={onTextMenu}
+                    onClick={onTextClick}
                     style={{ fontSize: size }}
                     className={`leading-[1.75] ${painting ? "cursor-text select-none [-webkit-touch-callout:none]" : ""}`}
                   >
                     {view === "clean" ? (
                       blocks.map((b) =>
                         b.clutter ? null : (
-                          <BlockView key={b.at} block={b} {...rangesFor(b, ranges, taken)} />
+                          <BlockView
+                            key={b.at}
+                            block={b}
+                            {...rangesFor(b, ranges, taken, found, flash)}
+                          />
                         ),
                       )
                     ) : (
                       <div data-at={0} className="whitespace-pre-wrap">
-                        <Pieces run={{ text: part.text, at: 0 }} ranges={ranges} taken={taken} />
+                        <Pieces
+                          run={{ text: part.text, at: 0 }}
+                          ranges={ranges}
+                          taken={taken}
+                          found={found}
+                          flash={flash}
+                        />
                       </div>
                     )}
                   </div>
@@ -934,17 +1127,27 @@ export function SourceReader({
             >
               <span className="mx-auto mb-1 block h-1 w-10 rounded-full bg-muted-foreground/30" />
             </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-1.5 px-3 pb-1 text-sm font-medium"
-              onClick={() => setTrayOpen((v) => !v)}
-            >
-              <Highlighter className="h-4 w-4 text-amber-600" />
-              Highlights ({marks.length}) · {points} key point{points === 1 ? "" : "s"}
-              <ChevronUp
-                className={`ml-auto h-4 w-4 transition-transform ${trayOpen ? "rotate-180" : ""}`}
-              />
-            </button>
+            <div className="flex items-center gap-1 px-3 pb-1">
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-center gap-1.5 text-sm font-medium"
+                onClick={() => setTrayOpen((v) => !v)}
+              >
+                <Highlighter className="h-4 w-4 shrink-0 text-amber-600" />
+                Highlights ({marks.length}) · {points} key point{points === 1 ? "" : "s"}
+              </button>
+              {ordered.length > 1 && <HighlightJump onStep={stepHighlight} />}
+              <button
+                type="button"
+                aria-label={trayOpen ? "Close highlights" : "Open highlights"}
+                onClick={() => setTrayOpen((v) => !v)}
+                className="grid h-7 w-7 place-items-center"
+              >
+                <ChevronUp
+                  className={`h-4 w-4 transition-transform ${trayOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+            </div>
             {trayOpen && !wide && <div className="max-h-[55dvh] overflow-y-auto">{tray}</div>}
           </div>
           <Toolbar
@@ -959,6 +1162,32 @@ export function SourceReader({
             onRedo={redo}
           />
         </footer>
+        {sheet !== null && marks[sheet] && (
+          <MarkSheet
+            mark={marks[sheet]}
+            onClose={() => setSheet(null)}
+            onPen={(pen) => {
+              const i = sheet;
+              commit((cur) => cur.map((m, j) => (j === i ? { ...m, pen } : m)));
+            }}
+            onNote={(text) => {
+              const i = sheet;
+              commit((cur) =>
+                cur.map((m, j) => {
+                  if (j !== i) return m;
+                  const { note: _old, ...rest } = m;
+                  return text ? { ...rest, note: text } : rest;
+                }),
+              );
+              setSheet(null);
+            }}
+            onRemove={() => {
+              const i = sheet;
+              commit((cur) => cur.filter((_, j) => j !== i));
+              setSheet(null);
+            }}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -1107,6 +1336,127 @@ function Toolbar({
   );
 }
 
+function HighlightJump({ onStep }: { onStep: (d: 1 | -1) => void }) {
+  const cls = "grid h-7 w-7 place-items-center rounded-full border border-border bg-background";
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Previous highlight"
+        className={cls}
+        onClick={() => onStep(-1)}
+      >
+        <ArrowUp className="h-3.5 w-3.5" />
+      </button>
+      <button type="button" aria-label="Next highlight" className={cls} onClick={() => onStep(1)}>
+        <ArrowDown className="h-3.5 w-3.5" />
+      </button>
+    </>
+  );
+}
+
+// Margin notes the editor often writes, one tap away.
+const QUICK_NOTES = [
+  "Use this in the headline",
+  "Make the MCQ on this",
+  "Ask the Mains question on this",
+  "Keep the exact words",
+  "Use in “Why it matters”",
+];
+
+// A highlight's actions: its pen, a margin note for SAATHI, removing it.
+function MarkSheet({
+  mark,
+  onClose,
+  onPen,
+  onNote,
+  onRemove,
+}: {
+  mark: Mark;
+  onClose: () => void;
+  onPen: (pen: Pen) => void;
+  onNote: (note: string) => void;
+  onRemove: () => void;
+}) {
+  const [text, setText] = useState(mark.note ?? "");
+  // Lifting the finger after a long press clicks where it was; that click
+  // must not land on the backdrop and close the sheet at once.
+  const openedAt = useRef(Date.now());
+  return (
+    <>
+      <div
+        className="absolute inset-0 z-40 bg-black/30"
+        onClick={() => Date.now() - openedAt.current > 500 && onClose()}
+        aria-hidden
+      />
+      <div
+        role="dialog"
+        aria-label="Highlight actions"
+        className="absolute inset-x-0 bottom-0 z-50 max-h-[85dvh] overflow-y-auto rounded-t-2xl border-t border-border bg-background p-4 shadow-2xl lg:bottom-20 lg:left-auto lg:right-4 lg:w-96 lg:rounded-2xl lg:border"
+      >
+        <div className="mb-3 flex items-start gap-2">
+          <p className="line-clamp-3 min-w-0 flex-1 text-sm">“{mark.quote}”</p>
+          <button type="button" aria-label="Close" onClick={onClose} className="shrink-0">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="mb-3 flex flex-wrap gap-1.5" role="group" aria-label="Pen">
+          {PENS.map((p) => (
+            <button
+              key={p.pen}
+              type="button"
+              aria-pressed={mark.pen === p.pen}
+              onClick={() => onPen(p.pen)}
+              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${mark.pen === p.pen ? "border-foreground/50 bg-muted" : "border-border"}`}
+            >
+              <span className={`h-3 w-3 rounded-full ${p.dot}`} />
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {mark.pen !== "keyword" && (
+          <>
+            <label htmlFor="mark-note" className="text-xs font-semibold text-muted-foreground">
+              Note for SAATHI
+            </label>
+            <div className="my-1.5 flex flex-wrap gap-1.5">
+              {QUICK_NOTES.map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  onClick={() => setText(q)}
+                  className={`rounded-full border px-2.5 py-1 text-xs ${text === q ? "border-primary/50 bg-primary/10 text-primary" : "border-border"}`}
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+            <Textarea
+              id="mark-note"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              maxLength={200}
+              rows={2}
+              placeholder="How should SAATHI use this?"
+              className="text-sm"
+            />
+            <Button className="mt-2 w-full" onClick={() => onNote(text.trim())}>
+              {mark.note && !text.trim() ? "Remove note" : "Save note"}
+            </Button>
+          </>
+        )}
+        <Button
+          variant="ghost"
+          className="mt-2 w-full text-destructive hover:text-destructive"
+          onClick={onRemove}
+        >
+          <Eraser className="mr-1 h-4 w-4" /> Remove highlight
+        </Button>
+      </div>
+    </>
+  );
+}
+
 // The highlights: each with its pen (tap to switch), the note, and the actions.
 function Tray({
   marks,
@@ -1123,6 +1473,8 @@ function Tray({
   onShow,
   onSubmit,
   onAddKeywords,
+  onEdit,
+  jump,
 }: {
   marks: Mark[];
   mode: Mode;
@@ -1138,9 +1490,18 @@ function Tray({
   onShow: (m: Mark) => void;
   onSubmit: () => void;
   onAddKeywords: () => void;
+  onEdit: (i: number) => void;
+  // Previous / next highlight buttons, on wide screens.
+  jump: React.ReactNode;
 }) {
   return (
     <div className="space-y-3 p-3">
+      {jump && (
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <span className="flex-1">Jump between highlights</span>
+          {jump}
+        </div>
+      )}
       <ul className="space-y-1.5" data-testid="highlight-list">
         {marks.map((m, i) => (
           <li key={`${m.source_id}-${m.quote}-${i}`} className="flex items-start gap-2 text-xs">
@@ -1153,12 +1514,23 @@ function Tray({
               <span className={`h-2.5 w-2.5 rounded-full ${PEN[m.pen].dot}`} />
               {PEN[m.pen].label}
             </button>
+            <div className="min-w-0 flex-1">
+              <button type="button" onClick={() => onShow(m)} className="line-clamp-2 text-left">
+                {m.quote}
+              </button>
+              {m.note && (
+                <div className="mt-0.5 flex items-start gap-1 italic text-primary">
+                  <StickyNote className="mt-0.5 h-3 w-3 shrink-0" /> {m.note}
+                </div>
+              )}
+            </div>
             <button
               type="button"
-              onClick={() => onShow(m)}
-              className="line-clamp-2 min-w-0 flex-1 text-left"
+              aria-label="Edit highlight"
+              onClick={() => onEdit(i)}
+              className="shrink-0 text-muted-foreground hover:text-foreground"
             >
-              {m.quote}
+              <Pencil className="h-4 w-4" />
             </button>
             <button
               type="button"
@@ -1212,14 +1584,23 @@ function Tray({
 
 // The marks that fall in a block, with a key so unchanged blocks skip
 // re-rendering while a highlight is painted elsewhere.
-function rangesFor(b: Block, ranges: Range[], taken: Span[]) {
+function rangesFor(b: Block, ranges: Range[], taken: Span[], found: Found[], flash: number | null) {
   const span: Span = [b.at, b.end];
   const mine = ranges.filter((r) => overlaps(r.span, span));
   const faint = taken.filter((t) => overlaps(t, span));
+  const finds = found.filter((f) => overlaps(f.span, span));
+  const lit = flash !== null && mine.some((r) => r.span[0] === flash) ? flash : null;
   return {
     ranges: mine,
     taken: faint,
-    marksKey: [...mine.map((r) => `${r.pen}${r.preview ? "~" : ""}${r.span}`), ...faint].join("|"),
+    found: finds,
+    flash: lit,
+    marksKey: [
+      ...mine.map((r) => `${r.pen}${r.preview ? "~" : ""}${r.note ? "n" : ""}${r.span}`),
+      ...faint,
+      ...finds.map((f) => `${f.current ? "!" : "?"}${f.span}`),
+      lit ?? "",
+    ].join("|"),
   };
 }
 
@@ -1228,10 +1609,14 @@ const BlockView = memo(
     block: b,
     ranges,
     taken,
+    found,
+    flash,
   }: {
     block: Block;
     ranges: Range[];
     taken: Span[];
+    found: Found[];
+    flash: number | null;
     marksKey: string;
   }) {
     const runs = (rs: Run[]) =>
@@ -1239,7 +1624,7 @@ const BlockView = memo(
         r.at < 0 ? (
           <span key={i}> </span>
         ) : (
-          <Pieces key={i} run={r} ranges={ranges} taken={taken} />
+          <Pieces key={i} run={r} ranges={ranges} taken={taken} found={found} flash={flash} />
         ),
       );
     switch (b.kind) {
@@ -1319,15 +1704,30 @@ const BlockView = memo(
 
 // One run of text cut where highlights start and end. Every piece carries
 // its raw offset, so a touch can be turned back into a position.
-function Pieces({ run, ranges, taken }: { run: Run; ranges: Range[]; taken: Span[] }) {
+function Pieces({
+  run,
+  ranges,
+  taken,
+  found = [],
+  flash = null,
+}: {
+  run: Run;
+  ranges: Range[];
+  taken: Span[];
+  found?: Found[];
+  flash?: number | null;
+}) {
   const span: Span = [run.at, run.at + run.text.length];
   const inside = ranges.filter((r) => overlaps(r.span, span));
   const faint = taken.filter((t) => overlaps(t, span));
+  const finds = found.filter((f) => overlaps(f.span, span));
   const cuts = [
     ...new Set([
       span[0],
       span[1],
-      ...[...inside.map((r) => r.span), ...faint].flat().filter((x) => x > span[0] && x < span[1]),
+      ...[...inside.map((r) => r.span), ...faint, ...finds.map((f) => f.span)]
+        .flat()
+        .filter((x) => x > span[0] && x < span[1]),
     ]),
   ].sort((a, b) => a - b);
   const cls = run.bold ? "font-semibold" : "";
@@ -1339,23 +1739,48 @@ function Pieces({ run, ranges, taken }: { run: Run; ranges: Range[]; taken: Span
         // The latest mark wins where two overlap; a painting preview on top.
         const mark = [...inside].reverse().find((r) => r.span[0] <= a && r.span[1] >= b);
         const dim = !mark && faint.some((t) => t[0] <= a && t[1] >= b);
-        return mark ? (
-          <mark
-            key={k}
-            data-raw={a}
-            data-pen={mark.pen}
-            className={`text-inherit [box-decoration-break:clone] ${mark.span[0] === a ? "rounded-l-sm pl-0.5" : ""} ${mark.span[1] === b ? "rounded-r-sm pr-0.5" : ""} ${PEN[mark.pen].mark} ${mark.preview ? "outline-dashed outline-1 outline-foreground/40" : ""} ${cls}`}
-          >
-            {text}
-          </mark>
-        ) : (
-          <span
-            key={k}
-            data-raw={a}
-            className={`${cls} ${dim ? "text-muted-foreground/60 underline decoration-dotted" : ""}`}
-          >
-            {text}
-          </span>
+        const hit = finds.find((f) => f.span[0] <= a && f.span[1] >= b);
+        const findCls = hit
+          ? hit.current
+            ? "rounded-sm bg-orange-300/80 outline outline-2 outline-orange-500 dark:bg-orange-500/50"
+            : "underline decoration-orange-500 decoration-2 underline-offset-4"
+          : "";
+        const findAttr = hit?.current && hit.span[0] === a ? { "data-find-current": "" } : {};
+        if (!mark) {
+          return (
+            <span
+              key={k}
+              data-raw={a}
+              {...findAttr}
+              className={`${cls} ${findCls} ${dim ? "text-muted-foreground/60 underline decoration-dotted" : ""}`}
+            >
+              {text}
+            </span>
+          );
+        }
+        const first = mark.span[0] === a;
+        const last = mark.span[1] === b;
+        return (
+          <Fragment key={k}>
+            <mark
+              data-raw={a}
+              data-pen={mark.pen}
+              {...(first && !mark.preview ? { "data-mark-start": a } : {})}
+              {...findAttr}
+              className={`text-inherit [box-decoration-break:clone] ${first ? "rounded-l-sm pl-0.5" : ""} ${last ? "rounded-r-sm pr-0.5" : ""} ${PEN[mark.pen].mark} ${mark.preview ? "outline-dashed outline-1 outline-foreground/40" : ""} ${flash === mark.span[0] ? "ring-2 ring-primary" : ""} ${findCls} ${cls}`}
+            >
+              {text}
+            </mark>
+            {last && mark.note && (
+              <sup
+                className="ml-0.5 select-none text-[0.7em] text-primary"
+                title={mark.note}
+                aria-label={`Note: ${mark.note}`}
+              >
+                ✎
+              </sup>
+            )}
+          </Fragment>
         );
       })}
     </>
