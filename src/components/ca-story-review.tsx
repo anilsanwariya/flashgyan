@@ -91,10 +91,16 @@ export function StoryList({
   items,
   date,
   onChanged,
+  jump = null,
+  onReviewed,
 }: {
   items: CaItem[];
   date: string;
   onChanged: () => void;
+  // A story to open and scroll to (from the day's checklist).
+  jump?: { id: string; n: number } | null;
+  // The stories opened so far, for the day's checklist.
+  onReviewed?: (ids: Set<string>) => void;
 }) {
   const groups = useMemo(() => {
     const order = new Map<string, number>(CATEGORIES.map((c, i) => [c.id, i]));
@@ -147,6 +153,18 @@ export function StoryList({
       }
       return next;
     });
+  useEffect(() => {
+    onReviewed?.(reviewed);
+  }, [reviewed, onReviewed]);
+  useEffect(() => {
+    if (!jump) return;
+    setOpen((cur) => new Set(cur).add(jump.id));
+    markReviewed(jump.id);
+    requestAnimationFrame(() =>
+      cards.current.get(jump.id)?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jump]);
   const goNext = (id: string) => {
     const i = ordered.findIndex((it) => it.id === id);
     const next = ordered[i + 1];

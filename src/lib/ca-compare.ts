@@ -1,9 +1,10 @@
 // Two papers on the same news, side by side in the article reader: finding,
 // in another of the day's sources, the article that matches the one being
-// read, by the names and numbers they share. Pure helpers, shared by the
+// read, by the names and numbers they share or, across Hindi and English
+// papers, by meaning (their search embeddings). Pure helpers, shared by the
 // server and tests.
 import { normalizeForMatch } from "@/lib/current-affairs";
-import { sourceArticles } from "@/lib/ca-reader-format";
+import { sourceArticles, type ArticleText } from "@/lib/ca-reader-format";
 
 // Words that say nothing about which news it is.
 const STOP = new Set(
@@ -47,24 +48,57 @@ export type CompareMatch = {
   at: number;
   end: number;
   score: number;
+  // Found by meaning rather than shared words (usually the other language).
+  meaning?: boolean;
 };
 
 // Below this, an article only shares common words with the one being read.
 export const MATCH_MIN = 0.12;
 
+// Embedding similarity: unrelated news stays below MEANING_FLOOR; the same
+// news (in either language) reaches MEANING_MATCH and above.
+export const MEANING_FLOOR = 0.7;
+export const MEANING_MATCH = 0.8;
+export const meaningScore = (cos: number) =>
+  Math.max(0, Math.min(1, (cos - MEANING_FLOOR) / (1 - MEANING_FLOOR)));
+
+export function cosine(a: number[], b: number[]): number {
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return na && nb ? dot / Math.sqrt(na * nb) : 0;
+}
+
+// What an article is embedded from: its title and opening.
+export const meaningText = (a: { title: string; text: string }) =>
+  `${a.title}\n${a.text.slice(0, 600)}`;
+
 // The article of a source most like the text being read, if any is close.
+// `meanings`: each article's embedding similarity to the text (in the order
+// of the articles), when known.
 export function bestArticle(
   query: string,
-  source: { title: string; url: string | null; content: string },
+  source: { title: string; url: string | null; content: string } | ArticleText[],
+  meanings: (number | null)[] = [],
 ): CompareMatch | null {
   const q = matchWords(query);
-  if (!q.size) return null;
   let best: CompareMatch | null = null;
-  for (const a of sourceArticles(source)) {
-    const score = similarity(q, matchWords(`${a.title} ${a.text}`));
-    if (score >= MATCH_MIN && (!best || score > best.score)) {
-      best = { title: a.title, page: a.page, at: a.at, end: a.end, score };
+  const articles = Array.isArray(source) ? source : sourceArticles(source);
+  articles.forEach((a, i) => {
+    const words = q.size ? similarity(q, matchWords(`${a.title} ${a.text}`)) : 0;
+    const cos = meanings[i] ?? null;
+    const meant = cos === null ? 0 : meaningScore(cos);
+    if (words < MATCH_MIN && (cos === null || cos < MEANING_MATCH)) return;
+    const score = Math.max(words, meant);
+    if (!best || score > best.score) {
+      best = { title: a.title, page: a.page, at: a.at, end: a.end, score, meaning: meant > words };
     }
-  }
-  return best && { ...best, score: Math.round(best.score * 100) / 100 };
+  });
+  const found = best as CompareMatch | null;
+  return found && { ...found, score: Math.round(found.score * 100) / 100 };
 }

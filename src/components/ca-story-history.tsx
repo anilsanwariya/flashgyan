@@ -24,6 +24,7 @@ const REASONS: Record<CaVersion["reason"], string> = {
   restore: "Before a restore",
   edit: "Before your edits",
   correction: "Before a correction",
+  points: "Before adding points",
 };
 
 const when = (iso: string) =>

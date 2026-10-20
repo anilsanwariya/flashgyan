@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import {
   addCaPenKeywords,
+  addCaPoints,
   checkCaMissing,
   createCaFromHighlights,
   deleteCaItems,
@@ -58,6 +59,8 @@ import {
 } from "@/lib/current-affairs.functions";
 import { cleanQuote, findAll, findQuote, sentenceSpans, type Span } from "@/lib/ca-highlight";
 import { type MissingCheck, type MissingFact } from "@/lib/ca-missing";
+import { ADD_POINTS_MAX } from "@/lib/ca-points";
+import { normalizeForMatch } from "@/lib/current-affairs";
 import {
   isPaged,
   parseBlocks,
@@ -289,6 +292,7 @@ export function SourceReader({
   const restoreFn = useServerFn(restoreCaVersion);
   const deleteFn = useServerFn(deleteCaItems);
   const compareFn = useServerFn(getCaCompareSources);
+  const addPointsFn = useServerFn(addCaPoints);
   const q = useQuery({
     queryKey: ["caReader", key, item ? null : origin?.at],
     queryFn: () =>
@@ -1087,6 +1091,59 @@ export function SourceReader({
     toast.success(`Added: ${f.label}`);
   }
 
+  // Key points the story doesn't have yet: added as points without a rewrite.
+  const factKeys = useMemo(
+    () => new Set((item?.facts ?? []).map((f) => normalizeForMatch(f.quote))),
+    [item],
+  );
+  const newPoints = marks.filter(
+    (m) => isPoint(m.pen) && !factKeys.has(normalizeForMatch(cleanQuote(m.quote))),
+  );
+
+  async function addPointsOnly() {
+    if (!item) return;
+    const id = item.id;
+    setBusy(true);
+    try {
+      const before = item.facts.length;
+      const saved = await addPointsFn({
+        data: {
+          id,
+          highlights: newPoints.map((m) => ({
+            source_id: m.source_id,
+            quote: m.quote,
+            point: true,
+            check: m.pen === "check",
+            ...(m.note ? { note: m.note } : {}),
+          })),
+          keywords: keywordMarks.map((m) => m.quote),
+        },
+      });
+      const added = saved.facts.length - before;
+      write(draftKey(key, mode), null);
+      toast.success(`Added ${added} key point${added === 1 ? "" : "s"}`, {
+        duration: 10_000,
+        action: {
+          label: "Undo",
+          onClick: () =>
+            void restoreFn({ data: { id } }).then(
+              () => {
+                toast.success("Points removed");
+                onChanged();
+              },
+              (e) => toast.error(errorText(e, "Couldn't undo")),
+            ),
+        },
+      });
+      onChanged();
+      onOpenChange(false);
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't add the points"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function addKeywordsOnly() {
     setBusy(true);
     try {
@@ -1111,6 +1168,8 @@ export function SourceReader({
       points={points}
       keywords={keywordMarks.length}
       canAddKeywords={mode === "rewrite" && !!item?.content}
+      newPoints={newPoints.length}
+      onAddPoints={mode === "rewrite" && item?.content ? () => void addPointsOnly() : undefined}
       story={wide && mode === "rewrite" ? item : null}
       onNote={setNote}
       onCycle={(i) =>
@@ -1372,7 +1431,7 @@ export function SourceReader({
             >
               <p className="px-2 py-1 text-xs text-muted-foreground">
                 Read another of the day's sources beside this one, to take facts from both. Each
-                opens on its article most like the one you are reading.
+                opens on its article most like the one you are reading, in Hindi or English.
               </p>
               {candQ.isLoading ? (
                 <p className="px-2 py-2 text-sm text-muted-foreground">
@@ -1395,6 +1454,11 @@ export function SourceReader({
                       <span className="min-w-0 flex-1 truncate font-medium">
                         {c.source_name || c.section.toUpperCase()} · {c.title}
                       </span>
+                      {c.match?.meaning && (
+                        <Badge tone="primary" title="Same news in other words or another language">
+                          by meaning
+                        </Badge>
+                      )}
                       {c.match && (
                         <Badge tone={c.match.score >= 0.3 ? "good" : "muted"}>
                           {Math.round(c.match.score * 100)}% match
@@ -2424,6 +2488,8 @@ function Tray({
   points,
   keywords,
   canAddKeywords,
+  newPoints,
+  onAddPoints,
   story,
   onNote,
   onCycle,
@@ -2446,6 +2512,9 @@ function Tray({
   points: number;
   keywords: number;
   canAddKeywords: boolean;
+  // Key points not yet in the story, which can be added without a rewrite.
+  newPoints: number;
+  onAddPoints?: () => void;
   story: CaItem | null;
   onNote: (v: string) => void;
   onCycle: (i: number) => void;
@@ -2546,6 +2615,13 @@ function Tray({
             ? `Rewrite story from ${points} key point${points === 1 ? "" : "s"}`
             : `Create new story from ${points} key point${points === 1 ? "" : "s"}`}
       </Button>
+      {newPoints > 0 && onAddPoints && (
+        <Button variant="outline" className="w-full" disabled={busy} onClick={onAddPoints}>
+          <Plus className="mr-1 h-4 w-4" />
+          Only add {Math.min(newPoints, ADD_POINTS_MAX)} new key point
+          {Math.min(newPoints, ADD_POINTS_MAX) === 1 ? "" : "s"} · keeps the rest
+        </Button>
+      )}
       {keywords > 0 && canAddKeywords && (
         <Button variant="outline" className="w-full" disabled={busy} onClick={onAddKeywords}>
           Only add {keywords} keyword{keywords === 1 ? "" : "s"} to Static Connect
