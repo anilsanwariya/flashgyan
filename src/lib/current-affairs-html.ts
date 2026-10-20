@@ -169,6 +169,11 @@ const ROW_TARGET_MM = 55;
 const ROW_MAX_MM = 75;
 const GAP_MM = 2.5;
 const MAX_PER_ROW = 3;
+const ROW_OWN_MAX_MM = 100;
+// An image beside the text: about this tall, within these widths.
+const SIDE_HEIGHT_MM = 62;
+const SIDE_MIN_MM = 42;
+const SIDE_MAX_MM = 82;
 // A generous width for one caption letter (8pt), and the most lines shown.
 const CAPTION_CHAR_MM = 1.9;
 const CAPTION_MAX_LINES = 4;
@@ -182,9 +187,28 @@ const rowHeight = (row: CaImage[]) =>
 // The editor's images in rows of equal height that fill the story's width,
 // whatever their shapes: each image is as wide as its share of the row's
 // width-to-height ratios. The images keep their order and are split into
-// rows of 1 to 3 whose heights come closest to the target. The layout depends
-// only on the images, so it is the same in the Hindi and English issues.
+// rows of 1 to 3 whose heights come closest to the target; an image set to
+// "own row" sits alone. The layout depends only on the images, so it is the
+// same in the Hindi and English issues. Images beside the text aren't in
+// the rows.
 export function imageRows(images: CaImage[]): CaImage[][] {
+  const rows: CaImage[][] = [];
+  let run: CaImage[] = [];
+  const flush = () => {
+    rows.push(...bestRows(run));
+    run = [];
+  };
+  for (const img of images) {
+    if (img.layout === "own") {
+      flush();
+      rows.push([img]);
+    } else run.push(img);
+  }
+  flush();
+  return rows;
+}
+
+function bestRows(images: CaImage[]): CaImage[][] {
   const n = images.length;
   const best: { cost: number; from: number }[] = [{ cost: 0, from: 0 }];
   for (let end = 1; end <= n; end++) {
@@ -199,46 +223,76 @@ export function imageRows(images: CaImage[]): CaImage[][] {
   return rows;
 }
 
+export const isSideImage = (i: CaImage) => i.layout === "right" || i.layout === "left";
+
+// The lines a caption needs at a width (in either language, so both issues
+// keep the same space).
+function captionLines(i: CaImage, widthMm: number): number {
+  const chars = Math.max(i.caption?.en.trim().length ?? 0, i.caption?.hi.trim().length ?? 0);
+  return Math.min(CAPTION_MAX_LINES, Math.ceil((chars * CAPTION_CHAR_MM) / widthMm));
+}
+
+function figureHtml(i: CaImage, lang: Lang, style: string, lines: number, credits: boolean) {
+  const r = imageRatio(i);
+  const cap = lines
+    ? `<figcaption style="height:${(lines * 1.35).toFixed(2)}em;-webkit-line-clamp:${lines}">${esc(pick(i.caption, lang))}</figcaption>`
+    : "";
+  const credit = credits ? `<div class="img-credit">${esc(i.credit?.trim() ?? "")}</div>` : "";
+  return `<figure style="${style}"><img src="${esc(safeUrl(i.url))}" alt="" style="aspect-ratio:${r.toFixed(4)}" />${credit}${cap}</figure>`;
+}
+
+const usableImages = (images: CaImage[] | undefined) =>
+  (images ?? []).filter((i) => safeUrl(i.url) && i.w > 0 && i.h > 0);
+
 function imagesHtml(images: CaImage[] | undefined, lang: Lang): string {
-  const usable = (images ?? []).filter((i) => safeUrl(i.url) && i.w > 0 && i.h > 0);
+  const usable = usableImages(images).filter((i) => !isSideImage(i));
   if (!usable.length) return "";
   const rows = imageRows(usable).map((row) => {
     const sum = row.reduce((n, i) => n + imageRatio(i), 0);
-    // A row of tall images is kept to the tallest height, centred.
+    // A row of tall images is kept to the tallest height, centred (an image
+    // on its own row may be a little taller).
+    const maxH = row.length === 1 && row[0].layout === "own" ? ROW_OWN_MAX_MM : ROW_MAX_MM;
     const capped =
-      rowHeight(row) > ROW_MAX_MM
-        ? ` style="max-width:${(ROW_MAX_MM * sum + GAP_MM * (row.length - 1)).toFixed(1)}mm"`
+      rowHeight(row) > maxH
+        ? ` style="max-width:${(maxH * sum + GAP_MM * (row.length - 1)).toFixed(1)}mm"`
         : "";
-    // Caption space is the same in both issues, so the rows line up: the
-    // lines the longest caption needs, in either language, at its width.
-    const rowWidth = Math.min(ROW_WIDTH_MM, ROW_MAX_MM * sum + GAP_MM * (row.length - 1));
-    const lines = Math.min(
-      CAPTION_MAX_LINES,
-      Math.max(
-        0,
-        ...row.map((i) => {
-          const width = ((rowWidth - GAP_MM * (row.length - 1)) * imageRatio(i)) / sum;
-          const chars = Math.max(
-            i.caption?.en.trim().length ?? 0,
-            i.caption?.hi.trim().length ?? 0,
-          );
-          return Math.ceil((chars * CAPTION_CHAR_MM) / width);
-        }),
+    // Caption and credit space is the same in both issues, so the rows line
+    // up: the lines the longest caption needs, in either language.
+    const rowWidth = Math.min(ROW_WIDTH_MM, maxH * sum + GAP_MM * (row.length - 1));
+    const lines = Math.max(
+      0,
+      ...row.map((i) =>
+        captionLines(i, ((rowWidth - GAP_MM * (row.length - 1)) * imageRatio(i)) / sum),
       ),
     );
-    const captionStyle = ` style="height:${(lines * 1.35).toFixed(2)}em;-webkit-line-clamp:${lines}"`;
+    const credits = row.some((i) => i.credit?.trim());
     return `<div class="img-row"${capped}>${row
-      .map((i) => {
-        const r = imageRatio(i);
+      .map((i) =>
         // Shares of 100: flex hands out only part of the width when the
         // grow factors add up to less than 1.
-        return `<figure style="flex:${((r / sum) * 100).toFixed(3)} 1 0"><img src="${esc(safeUrl(i.url))}" alt="" style="aspect-ratio:${r.toFixed(4)}" />${
-          lines ? `<figcaption${captionStyle}>${esc(pick(i.caption, lang))}</figcaption>` : ""
-        }</figure>`;
-      })
+        figureHtml(i, lang, `flex:${((imageRatio(i) / sum) * 100).toFixed(3)} 1 0`, lines, credits),
+      )
       .join("")}</div>`;
   });
   return `<div class="images">${rows.join("")}</div>`;
+}
+
+// Images beside the story's text (portraits and squares save space this
+// way): floated at the top of the story, the text running down beside them.
+function sideImagesHtml(images: CaImage[] | undefined, lang: Lang): string {
+  return usableImages(images)
+    .filter(isSideImage)
+    .map((i) => {
+      const width = Math.min(SIDE_MAX_MM, Math.max(SIDE_MIN_MM, imageRatio(i) * SIDE_HEIGHT_MM));
+      return figureHtml(
+        i,
+        lang,
+        `width:${width.toFixed(1)}mm`,
+        captionLines(i, width),
+        Boolean(i.credit?.trim()),
+      ).replace("<figure ", `<figure class="img-side ${i.layout}" `);
+    })
+    .join("");
 }
 
 function itemHtml(
@@ -296,9 +350,11 @@ function itemHtml(
   return `<article class="item">
   <div class="item-head"><span class="num">${number}</span><div class="heads"><h3>${esc(pick(c.headline, lang))}</h3></div></div>
   ${tags ? `<div class="tags">${tags}</div>` : ""}
+  ${sideImagesHtml(c.images, lang)}
   ${block(c.summary, lang, "summary")}
   ${imagesHtml(c.images, lang)}
   ${c.visual ? visualHtml(c.visual, accent, lang) : ""}
+  ${c.visual2 ? visualHtml(c.visual2, accent, lang) : ""}
   ${points}
   ${why}
   ${background}
@@ -408,6 +464,7 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .rev-cat { display: flex; align-items: center; gap: 2mm; font-size: 10pt; color: ${accent}; margin: 4mm 0 2mm; break-after: avoid; text-transform: uppercase; letter-spacing: .06em; }
 .rev { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .visual + .points { margin-top: 2.5mm; }
+.visual + .visual { margin-top: 2.5mm; }
 .rev td { padding: 1.6mm 2.5mm; border-bottom: 1px solid #e5e7eb; vertical-align: top; font-size: 9.2pt; }
 .rev tr { break-inside: avoid; }
 .rev .rn { width: 7mm; font-weight: 700; color: ${accent}; }
@@ -423,6 +480,16 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .img-row { display: flex; gap: ${GAP_MM}mm; align-items: flex-start; margin: 0 auto 2mm; break-inside: avoid; }
 .img-row figure { margin: 0; min-width: 0; }
 .img-row img { display: block; width: 100%; height: auto; border-radius: 1.5mm; background: #f1f5f9; object-fit: cover; }
+.item { display: flow-root; }
+.img-side { margin: 2mm 0 2mm; break-inside: avoid; }
+.img-side.right { float: right; clear: right; margin-left: 4mm; }
+.img-side.left { float: left; clear: left; margin-right: 4mm; }
+.img-side img { display: block; width: 100%; height: auto; border-radius: 1.5mm; background: #f1f5f9; object-fit: cover; }
+.img-side figcaption { margin-top: 1mm; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; font-size: 8pt; line-height: 1.35; color: #64748b; }
+.item .box { display: flow-root; }
+.img-side.left ~ .bi ul { list-style-position: inside; padding-left: 0; }
+.images, .item .visual { clear: both; }
+.img-credit { margin-top: .6mm; font-size: 6.8pt; line-height: 1.3; height: 1.3em; color: #94a3b8; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .img-row figcaption { margin-top: 1mm; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; font-size: 8pt; line-height: 1.35; color: #64748b; }
 html[lang="hi"] .eyebrow { letter-spacing: 0; font-size: 10pt; }
 a.cta { text-decoration: none; color: inherit; }
@@ -602,7 +669,10 @@ export function renderMagazine(opts: {
     items.filter((i) => i.content.mcq).length +
     items.filter((i) => pick(i.content.mains, lang)).length;
   const revisionCount = items.filter(hasRevision).length;
-  const visuals = items.filter((i) => i.content.visual).length;
+  const visuals = items.reduce(
+    (n, i) => n + (i.content.visual ? 1 : 0) + (i.content.visual2 ? 1 : 0),
+    0,
+  );
   const toc = [...groups.entries()]
     .map(
       ([cat, list]) =>

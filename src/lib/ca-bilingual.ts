@@ -45,8 +45,39 @@ type Access = {
   set: (c: CaContent, b: Bi) => CaContent;
 };
 
+const isBi = (x: unknown): x is Bi =>
+  !!x &&
+  typeof x === "object" &&
+  !Array.isArray(x) &&
+  typeof (x as Bi).en === "string" &&
+  typeof (x as Bi).hi === "string";
+
+// Every Hindi–English text in a visual, by its path ("title", "rows.1.value").
+export function visualBiPaths(v: unknown, at: string[] = []): string[] {
+  if (isBi(v)) return [at.join(".")];
+  if (Array.isArray(v)) return v.flatMap((x, i) => visualBiPaths(x, [...at, String(i)]));
+  if (v && typeof v === "object")
+    return Object.entries(v).flatMap(([k, x]) => visualBiPaths(x, [...at, k]));
+  return [];
+}
+
+function getPath(v: unknown, path: string[]): unknown {
+  return path.reduce<unknown>(
+    (o, k) => (o && typeof o === "object" ? (o as Record<string, unknown>)[k] : undefined),
+    v,
+  );
+}
+
+function setPath(v: unknown, path: string[], value: unknown): unknown {
+  if (!path.length) return value;
+  const [k, ...rest] = path;
+  if (Array.isArray(v)) return v.map((x, i) => (String(i) === k ? setPath(x, rest, value) : x));
+  const o = (v ?? {}) as Record<string, unknown>;
+  return { ...o, [k]: setPath(o[k], rest, value) };
+}
+
 // Where a part lives in the story, by its name ("point 2", "static 1 term",
-// "mcq option 3"…).
+// "mcq option 3", "visual 1 rows.0.value"…).
 function access(part: string): Access | null {
   const at = (re: RegExp) => Number(re.exec(part)?.[1] ?? 0) - 1;
   const mapAt = <T>(xs: T[] | undefined, i: number, f: (x: T) => T) =>
@@ -111,6 +142,18 @@ function access(part: string): Access | null {
       set: (c, b) => ({ ...c, dyk: mapAt(c.dyk, i, (x) => ({ ...x, en: b.en, hi: b.hi })) }),
     };
   }
+  const vis = /^visual ([12]) (.+)$/.exec(part);
+  if (vis) {
+    const key = vis[1] === "2" ? "visual2" : "visual";
+    const path = vis[2].split(".");
+    return {
+      get: (c) => {
+        const b = getPath(c[key], path);
+        return isBi(b) ? b : null;
+      },
+      set: (c, b) => (c[key] ? { ...c, [key]: setPath(c[key], path, b) } : c),
+    };
+  }
   i = at(/^image (\d+) caption$/);
   if (i >= 0) {
     return {
@@ -136,6 +179,8 @@ export function bilingualParts(c: CaContent): { part: string; en: string; hi: st
     "summary",
     ...(c.images ?? []).map((_, i) => `image ${i + 1} caption`),
     ...(c.points ?? []).map((_, i) => `point ${i + 1}`),
+    ...visualBiPaths(c.visual ?? null).map((p) => `visual 1 ${p}`),
+    ...visualBiPaths(c.visual2 ?? null).map((p) => `visual 2 ${p}`),
     "why",
     "background",
     ...(c.statics ?? []).flatMap((_, i) => [`static ${i + 1} term`, `static ${i + 1}`]),
@@ -177,6 +222,12 @@ export function langPartName(part: string): string {
   if (/^static \d+$/.test(part)) return `Static Context ${n}`;
   if (/^did you know \d+$/.test(part)) return `Fact Bite ${n}`;
   if (/^image \d+ caption$/.test(part)) return `Image ${n} caption`;
+  const vis = /^visual ([12]) (.+)$/.exec(part);
+  if (vis)
+    return `Visual ${vis[1]} · ${vis[2]
+      .split(".")
+      .map((k) => (/^\d+$/.test(k) ? String(Number(k) + 1) : k))
+      .join(" ")}`;
   if (/^mcq option \d+$/.test(part)) return `MCQ option ${"ABCDEFGH"[Number(n) - 1] ?? n}`;
   const fixed: Record<string, string> = {
     background: "Background",

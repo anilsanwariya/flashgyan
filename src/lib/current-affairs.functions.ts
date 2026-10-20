@@ -10,6 +10,7 @@ import {
   cleanDomains,
   type MagazineSettings,
 } from "@/lib/current-affairs";
+import { VISUAL_TYPES, type VisualType } from "@/lib/ca-visuals";
 import type {
   CaCorrection,
   CaIssue,
@@ -101,6 +102,8 @@ const contentSchema = z.object({
   // Checked and cleaned by cleanVisual in the handler.
   visual: z.unknown().optional(),
   visual_covers: z.array(z.number().int().min(0).max(100)).max(50).optional(),
+  visual2: z.unknown().optional(),
+  visual2_covers: z.array(z.number().int().min(0).max(100)).max(50).optional(),
   oneliner: bi.nullable().optional(),
   quick: z.object({ q: bi, a: bi }).nullable().optional(),
   images: z
@@ -111,6 +114,29 @@ const contentSchema = z.object({
         w: z.number().int().min(1).max(20_000),
         h: z.number().int().min(1).max(20_000),
         caption: bi.optional(),
+        credit: z.string().trim().max(80).optional(),
+        layout: z.enum(["row", "own", "right", "left"]).optional(),
+        original: z
+          .object({
+            url: z.string().url().max(2000),
+            path: z.string().max(300),
+            w: z.number().int().min(1).max(20_000),
+            h: z.number().int().min(1).max(20_000),
+          })
+          .optional(),
+        edit: z
+          .object({
+            rotate: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]),
+            flip: z.boolean(),
+            straighten: z.number().min(-45).max(45),
+            crop: z.object({
+              x: z.number().min(0).max(1),
+              y: z.number().min(0).max(1),
+              w: z.number().min(0.01).max(1),
+              h: z.number().min(0.01).max(1),
+            }),
+          })
+          .optional(),
       }),
     )
     .max(MAX_IMAGES)
@@ -447,10 +473,6 @@ export const updateCaItem = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<CaItem> => {
     await assertAdmin(context.userId);
     const { id, sync, ...patch } = data;
-    if (patch.content && patch.content.visual !== undefined) {
-      const { cleanVisual } = await import("@/lib/ca-visuals");
-      patch.content.visual = cleanVisual(patch.content.visual).visual;
-    }
     const s = await server();
     const item = patch.content ? await s.getItem(id) : null;
     // Where the editor changed one language, the other is written to match.
@@ -460,6 +482,19 @@ export const updateCaItem = createServerFn({ method: "POST" })
         patch.content as CaItem["content"] & object,
         item.content?.headline.en || item.headline,
       )) as typeof patch.content;
+    }
+    // A visual the editor made or changed must still be a whole one (one
+    // saved earlier is kept as it is). Checked after the languages are
+    // matched, so text typed in one language gets the other written for it.
+    if (patch.content && (patch.content.visual || patch.content.visual2)) {
+      const { cleanVisual } = await import("@/lib/ca-visuals");
+      for (const key of ["visual", "visual2"] as const) {
+        const v = patch.content[key];
+        if (!v || JSON.stringify(v) === JSON.stringify(item?.content?.[key] ?? null)) continue;
+        const clean = cleanVisual(v);
+        if (!clean.visual) throw new Error(clean.problem ?? "This visual isn't complete.");
+        patch.content[key] = clean.visual;
+      }
     }
     const save = () =>
       s.updateItem(id, patch as Parameters<Awaited<ReturnType<typeof server>>["updateItem"]>[1]);
@@ -800,6 +835,24 @@ export const deleteCaPoint = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     const s = await server();
     return s.asEdit(data.id, () => s.deletePoint(data.id, data.text));
+  });
+
+// A visual of the picked type, to look at before keeping it (nothing saved).
+export const previewCaVisual = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        slot: z.union([z.literal(1), z.literal(2)]),
+        type: z.enum(VISUAL_TYPES as [VisualType, ...VisualType[]]).optional(),
+        note: z.string().max(300).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).previewVisual(data.id, data);
   });
 
 export const redoCaVisual = createServerFn({ method: "POST" })

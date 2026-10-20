@@ -1,8 +1,11 @@
-// Visuals for magazine items: key-number cards, bar and pie charts,
-// timelines, flow charts, comparison tables and mind maps. SAATHI picks the
-// visual that makes a story easiest to learn, built only from the item's
-// facts; every number in it must appear in those facts, or it is rejected.
-// Rendered as plain HTML/SVG so the PDF stays sharp.
+// Visuals for magazine items: key numbers, bar, pie and trend charts,
+// timelines, flow charts, cycles, tables, fact sheets, comparisons, before →
+// after changes, rankings, pros and challenges, hierarchies and mind maps.
+// SAATHI picks the visual that makes a story easiest to learn (or makes the
+// type the editor asks for), built only from the item's facts; every number
+// in it must appear in those facts, or it is rejected. The editor can also
+// change a visual's text and numbers by hand. Rendered as plain HTML/SVG so
+// the PDF stays sharp.
 import type { Bi, CaFact, CaQuick } from "@/lib/current-affairs";
 
 export type Visual =
@@ -12,29 +15,110 @@ export type Visual =
   | { type: "timeline"; title: Bi; events: { when: string; text: Bi }[] }
   | { type: "flow"; title: Bi; steps: Bi[] }
   | { type: "table"; title: Bi; columns: Bi[]; rows: Bi[][] }
-  | { type: "mindmap"; title: Bi; center: Bi; branches: Bi[] };
+  | { type: "mindmap"; title: Bi; center: Bi; branches: Bi[] }
+  | { type: "glance"; title: Bi; rows: { label: Bi; value: Bi }[] }
+  | { type: "compare"; title: Bi; a: Bi; b: Bi; rows: { aspect: Bi; a: Bi; b: Bi }[] }
+  | { type: "change"; title: Bi; changes: { label: Bi; from: Bi; to: Bi }[] }
+  | { type: "trend"; title: Bi; unit: string; points: { label: string; value: number }[] }
+  | {
+      type: "ranking";
+      title: Bi;
+      items: { rank: number; label: Bi; value: string; highlight: boolean }[];
+    }
+  | { type: "proscons"; title: Bi; pros: Bi[]; cons: Bi[] }
+  | { type: "hierarchy"; title: Bi; root: Bi; children: { label: Bi; items: Bi[] }[] }
+  | { type: "cycle"; title: Bi; steps: Bi[] };
 
 export type VisualType = Visual["type"];
 
-export const VISUAL_LABELS: Record<VisualType, string> = {
-  stats: "Key numbers",
-  bar: "Bar chart",
-  pie: "Pie chart",
-  timeline: "Timeline",
-  flow: "Flow chart",
-  table: "Table",
-  mindmap: "Mind map",
-};
-// The Hindi issue's box titles.
-const VISUAL_LABELS_HI: Record<VisualType, string> = {
-  stats: "मुख्य आँकड़े",
-  bar: "बार चार्ट",
-  pie: "पाई चार्ट",
-  timeline: "समय-रेखा",
-  flow: "प्रवाह चार्ट",
-  table: "तालिका",
-  mindmap: "माइंड मैप",
-};
+// Every type, in the order the editor's picker shows them, with what each
+// suits.
+export const VISUAL_INFO: { type: VisualType; label: string; hint: string }[] = [
+  {
+    type: "glance",
+    label: "At a glance",
+    hint: "A scheme's key details: launched by, date, outlay, ministry",
+  },
+  { type: "stats", label: "Key numbers", hint: "2-4 headline figures" },
+  { type: "table", label: "Table", hint: "Features, or several things across the same columns" },
+  {
+    type: "compare",
+    label: "Comparison",
+    hint: "Two things side by side: old vs new, India vs another country",
+  },
+  { type: "change", label: "Before → after", hint: "Revised rates, targets or names" },
+  { type: "timeline", label: "Timeline", hint: "Dated events in order" },
+  { type: "flow", label: "Flow chart", hint: "A process or a chain of cause and effect" },
+  { type: "cycle", label: "Cycle", hint: "A process that comes back to its start" },
+  { type: "bar", label: "Bar chart", hint: "Amounts in the same unit to compare" },
+  { type: "pie", label: "Pie chart", hint: "Percentage shares of one whole" },
+  { type: "trend", label: "Trend line", hint: "One figure over 3 or more years" },
+  { type: "ranking", label: "Ranking", hint: "Index ranks, top states, medal tallies" },
+  {
+    type: "proscons",
+    label: "Pros & challenges",
+    hint: "Benefits and concerns, for Mains answers",
+  },
+  {
+    type: "hierarchy",
+    label: "Hierarchy",
+    hint: "Ministry → body → committee; an institution's structure",
+  },
+  { type: "mindmap", label: "Mind map", hint: "A concept with 4-6 key aspects" },
+];
+
+export const VISUAL_LABELS = Object.fromEntries(
+  VISUAL_INFO.map((i) => [i.type, i.label]),
+) as Record<VisualType, string>;
+export const VISUAL_TYPES = VISUAL_INFO.map((i) => i.type);
+
+// Whether the facts can make a type, as a reason when they likely can't (null:
+// they can). A quick guess for the editor's picker; SAATHI has the last word.
+export function visualFit(type: VisualType, facts: { text: string }[]): string | null {
+  const texts = facts.map((f) => f.text);
+  const withNumbers = texts.filter((t) => numbersIn(t).length).length;
+  const numbers = texts.flatMap(numbersIn).length;
+  const years = new Set(texts.join(" ").match(/\b(19|20)\d{2}\b/g) ?? []).size;
+  const dated = texts.filter(
+    (t) =>
+      /\b(19|20)\d{2}\b/.test(t) ||
+      /\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i.test(
+        t,
+      ),
+  ).length;
+  switch (type) {
+    case "stats":
+      return withNumbers >= 2 ? null : "Needs at least 2 facts with numbers";
+    case "bar":
+      return numbers >= 2 ? null : "Needs at least 2 amounts";
+    case "pie":
+      return texts.filter((t) => /%|per ?cent|प्रतिशत/i.test(t)).length >= 2
+        ? null
+        : "Needs at least 2 percentage shares";
+    case "trend":
+      return years >= 3 && numbers >= 3 ? null : "Needs one figure for 3 or more years";
+    case "timeline":
+      return dated >= 2 ? null : "Needs at least 2 dated events";
+    case "ranking":
+      return texts.some((t) =>
+        /\brank|ranked|\b\d+(st|nd|rd|th)\b|position|top \d|स्थान|रैंक/i.test(t),
+      )
+        ? null
+        : "No ranks in the facts";
+    case "change":
+      return texts.some((t) =>
+        /\bfrom\b.*\bto\b|increas|decreas|reduc|raised|revised|renamed|replac|cut|hike|से .* (कर|हो)/i.test(
+          t,
+        ),
+      )
+        ? null
+        : "No change from one value to another in the facts";
+    case "mindmap":
+      return facts.length >= 3 ? null : "Needs at least 3 facts";
+    default:
+      return facts.length >= 2 ? null : "Needs at least 2 facts";
+  }
+}
 
 type ChatMessage = { role: "system" | "user"; content: string };
 
@@ -111,6 +195,32 @@ function visualTexts(v: Visual): string[] {
     case "mindmap":
       [v.center, ...v.branches].forEach((c) => out.push(...b(c)));
       break;
+    case "glance":
+      v.rows.forEach((r) => out.push(...b(r.label), ...b(r.value)));
+      break;
+    case "compare":
+      out.push(...b(v.a), ...b(v.b));
+      v.rows.forEach((r) => out.push(...b(r.aspect), ...b(r.a), ...b(r.b)));
+      break;
+    case "change":
+      v.changes.forEach((c) => out.push(...b(c.label), ...b(c.from), ...b(c.to)));
+      break;
+    case "trend":
+      v.points.forEach((p) => out.push(p.label, String(p.value)));
+      break;
+    case "ranking":
+      v.items.forEach((i) => out.push(String(i.rank), i.value, ...b(i.label)));
+      break;
+    case "proscons":
+      [...v.pros, ...v.cons].forEach((x) => out.push(...b(x)));
+      break;
+    case "hierarchy":
+      out.push(...b(v.root));
+      v.children.forEach((c) => [c.label, ...c.items].forEach((x) => out.push(...b(x))));
+      break;
+    case "cycle":
+      v.steps.forEach((x) => out.push(...b(x)));
+      break;
   }
   return out;
 }
@@ -130,6 +240,11 @@ export function visualMessages(opts: {
   category: string;
   facts: CaFact[];
   problem?: string;
+  // The type the editor asked for, and their note ("compare with 2023").
+  type?: VisualType;
+  note?: string;
+  // The story's other visual: this one must show something else.
+  other?: Visual | null;
 }): ChatMessage[] {
   const facts = opts.facts.map((f, i) => `${i + 1}. ${f.text}`).join("\n");
   return [
@@ -143,6 +258,15 @@ export function visualMessages(opts: {
 - "flow": a process, procedure or cause-and-effect chain in 3-5 steps. {"type":"flow","title":{...},"steps":[{"en":"...","hi":"..."}]}
 - "table": compares 2-4 things across features, or lists a scheme's key features (columns like "Feature" / "Details"); 2-4 columns, 2-6 rows. {"type":"table","title":{...},"columns":[{...}],"rows":[[{...},{...}]]}
 - "mindmap": a concept, scheme or event with 4-6 key aspects (aims, features, significance). {"type":"mindmap","title":{...},"center":{...},"branches":[{...}]}
+- "glance": a scheme's, mission's or body's key details as label → value, 3-8 rows (launched by, date, outlay, ministry, beneficiaries). {"type":"glance","title":{...},"rows":[{"label":{...},"value":{...}}]}
+- "compare": two things side by side across 2-6 aspects (old vs new policy, two countries, two missiles). {"type":"compare","title":{...},"a":{...},"b":{...},"rows":[{"aspect":{...},"a":{...},"b":{...}}]}
+- "change": 1-5 values that changed, each from → to (revised rate, target, name). {"type":"change","title":{...},"changes":[{"label":{...},"from":{...},"to":{...}}]}
+- "trend": one figure over 3-12 years or periods, in one unit. {"type":"trend","title":{...},"unit":"%","points":[{"label":"2021","value":5.2}]}
+- "ranking": 2-10 ranked entries (index ranks, top states, medal tally); mark the one the news is about with "highlight": true. {"type":"ranking","title":{...},"items":[{"rank":1,"label":{...},"value":"score or empty","highlight":false}]}
+- "proscons": 2-5 benefits and 2-5 challenges or concerns, for Mains answers. {"type":"proscons","title":{...},"pros":[{...}],"cons":[{...}]}
+- "hierarchy": a structure of 2-5 parts under one head, each with up to 4 items (ministry → bodies → committees; an institution's members). {"type":"hierarchy","title":{...},"root":{...},"children":[{"label":{...},"items":[{...}]}]}
+- "cycle": a process of 3-6 steps that returns to its start. {"type":"cycle","title":{...},"steps":[{...}]}
+"title" is a short heading naming what the visual shows ("Stepwell scheme at a glance"), in both languages.
 STRICT RULES: Use only the numbered facts. Every number you write (in values, labels, dates and in both languages) must appear in the facts exactly as written there: no totals, differences, percentages, conversions (no lakh/crore/हजार conversions) or rounding of your own. Never number the steps or branches yourself. Keep every label short (at most 8 words; table cells at most 12). Hindi is natural standard Hindi as used in RPSC exams; use the same digits as English. If the facts are too thin for a useful visual, use null.
 The visual replaces text: the story's written points leave out every fact the visual shows completely, so prefer a visual that carries as many facts as possible. List those facts in "covers": the numbers of facts whose every figure, name and date is in the visual.
 "oneliner" is the single most exam-worthy line of the story, at most 20 words, for a last-minute revision page.
@@ -152,13 +276,35 @@ Reply with JSON only: {"visual": {...} or null, "covers": [fact numbers], "oneli
     {
       role: "user",
       content: `Section: ${opts.category}\nHeadline: ${opts.headline}\n\nFacts:\n${facts}${
-        opts.problem ? `\n\nYour previous visual was rejected: ${opts.problem} Fix it.` : ""
-      }`,
+        opts.type
+          ? `\n\nThe editor asked for a "${opts.type}" visual: make that type (null only if the facts can't make it).`
+          : ""
+      }${opts.note ? `\nEditor's note: ${opts.note}` : ""}${
+        opts.other
+          ? `\nThe story already has a ${opts.other.type} visual titled "${opts.other.title.en}": show something different.`
+          : ""
+      }${opts.problem ? `\n\nYour previous visual was rejected: ${opts.problem} Fix it.` : ""}`,
     },
   ];
 }
 
-const MAX = { stats: 4, bar: 8, pie: 8, timeline: 6, flow: 5, table: 6, mindmap: 6 };
+const MAX = {
+  stats: 4,
+  bar: 8,
+  pie: 8,
+  timeline: 6,
+  flow: 5,
+  table: 6,
+  mindmap: 6,
+  glance: 8,
+  compare: 6,
+  change: 5,
+  trend: 12,
+  ranking: 10,
+  proscons: 5,
+  hierarchy: 5,
+  cycle: 6,
+};
 
 // The visual's shape, cleaned up: unknown types, empty labels and impossible
 // charts are rejected. Numbers are checked separately.
@@ -248,6 +394,110 @@ export function cleanVisual(v: unknown): { visual: Visual | null; problem: strin
         ? { visual: { type, title, center, branches }, problem: null }
         : fail("A mind map needs a centre and at least 3 branches.");
     }
+    case "glance": {
+      const rows = list(o.rows)
+        .map((x) => {
+          const r = (x ?? {}) as Record<string, unknown>;
+          const label = bi(r.label, 60);
+          const value = bi(r.value, 160);
+          return label && value ? { label, value } : null;
+        })
+        .filter((r): r is { label: Bi; value: Bi } => !!r)
+        .slice(0, MAX.glance);
+      return rows.length >= 2
+        ? { visual: { type, title, rows }, problem: null }
+        : fail("A fact sheet needs at least 2 rows of label and value.");
+    }
+    case "compare": {
+      const a = bi(o.a, 60);
+      const b = bi(o.b, 60);
+      const rows = list(o.rows)
+        .map((x) => {
+          const r = (x ?? {}) as Record<string, unknown>;
+          const aspect = bi(r.aspect, 60);
+          const ra = bi(r.a, 140);
+          const rb = bi(r.b, 140);
+          return aspect && ra && rb ? { aspect, a: ra, b: rb } : null;
+        })
+        .filter((r): r is { aspect: Bi; a: Bi; b: Bi } => !!r)
+        .slice(0, MAX.compare);
+      return a && b && rows.length >= 1
+        ? { visual: { type, title, a, b, rows }, problem: null }
+        : fail("A comparison needs two names and at least one aspect with both sides.");
+    }
+    case "change": {
+      const changes = list(o.changes)
+        .map((x) => {
+          const r = (x ?? {}) as Record<string, unknown>;
+          const label = bi(r.label, 80);
+          const from = bi(r.from, 80);
+          const to = bi(r.to, 80);
+          return label && from && to ? { label, from, to } : null;
+        })
+        .filter((r): r is { label: Bi; from: Bi; to: Bi } => !!r)
+        .slice(0, MAX.change);
+      return changes.length >= 1
+        ? { visual: { type, title, changes }, problem: null }
+        : fail("A change needs at least one value with its before and after.");
+    }
+    case "trend": {
+      const points = list(o.points)
+        .map((x) => {
+          const r = (x ?? {}) as Record<string, unknown>;
+          const label = str(r.label, 20) || (typeof r.label === "number" ? String(r.label) : "");
+          const value = num(r.value);
+          return label && Number.isFinite(value) ? { label, value } : null;
+        })
+        .filter((r): r is { label: string; value: number } => !!r)
+        .slice(0, MAX.trend);
+      return points.length >= 3
+        ? { visual: { type, title, unit: str(o.unit, 30), points }, problem: null }
+        : fail("A trend line needs at least 3 points.");
+    }
+    case "ranking": {
+      const items = list(o.items)
+        .map((x) => {
+          const r = (x ?? {}) as Record<string, unknown>;
+          const rank = num(r.rank);
+          const label = bi(r.label, 80);
+          return label && Number.isInteger(rank) && rank > 0
+            ? { rank, label, value: str(r.value, 40), highlight: r.highlight === true }
+            : null;
+        })
+        .filter((r): r is { rank: number; label: Bi; value: string; highlight: boolean } => !!r)
+        .sort((p, q) => p.rank - q.rank)
+        .slice(0, MAX.ranking);
+      return items.length >= 2
+        ? { visual: { type, title, items }, problem: null }
+        : fail("A ranking needs at least 2 ranked entries.");
+    }
+    case "proscons": {
+      const pros = biList(o.pros, 140).slice(0, MAX.proscons);
+      const cons = biList(o.cons, 140).slice(0, MAX.proscons);
+      return pros.length >= 1 && cons.length >= 1
+        ? { visual: { type, title, pros, cons }, problem: null }
+        : fail("Give at least one benefit and one challenge.");
+    }
+    case "hierarchy": {
+      const root = bi(o.root, 80);
+      const children = list(o.children)
+        .map((x) => {
+          const r = (x ?? {}) as Record<string, unknown>;
+          const label = bi(r.label, 80);
+          return label ? { label, items: biList(r.items, 100).slice(0, 4) } : null;
+        })
+        .filter((r): r is { label: Bi; items: Bi[] } => !!r)
+        .slice(0, MAX.hierarchy);
+      return root && children.length >= 2
+        ? { visual: { type, title, root, children }, problem: null }
+        : fail("A hierarchy needs a head and at least 2 parts under it.");
+    }
+    case "cycle": {
+      const steps = biList(o.steps, 120).slice(0, MAX.cycle);
+      return steps.length >= 3
+        ? { visual: { type, title, steps }, problem: null }
+        : fail("A cycle needs at least 3 steps.");
+    }
     default:
       return fail(`Unknown visual type "${type}".`);
   }
@@ -321,8 +571,13 @@ export function pointsToShow<T>(content: {
   points: T[];
   visual?: Visual | null;
   visual_covers?: number[];
+  visual2?: Visual | null;
+  visual2_covers?: number[];
 }): T[] {
-  const hidden = new Set(content.visual ? (content.visual_covers ?? []) : []);
+  const hidden = new Set([
+    ...(content.visual ? (content.visual_covers ?? []) : []),
+    ...(content.visual2 ? (content.visual2_covers ?? []) : []),
+  ]);
   return content.points.filter((_, i) => !hidden.has(i));
 }
 
@@ -516,14 +771,142 @@ export function visualHtml(v: Visual, accent = "#6d28d9", lang?: "en" | "hi"): s
     case "mindmap":
       body = mindmapSvg(v, accent, lang);
       break;
+    case "glance":
+      body = `<dl class="v-glance">${v.rows
+        .map((r) => `<div><dt>${label(r.label)}</dt><dd>${label(r.value)}</dd></div>`)
+        .join("")}</dl>`;
+      break;
+    case "compare":
+      body = `<table class="v-compare"><thead><tr><th class="ca">${label(v.a)}</th><th class="vs">vs</th><th class="cb">${label(v.b)}</th></tr></thead><tbody>${v.rows
+        .map(
+          (r) =>
+            `<tr><td class="ca">${label(r.a)}</td><td class="asp">${label(r.aspect)}</td><td class="cb">${label(r.b)}</td></tr>`,
+        )
+        .join("")}</tbody></table>`;
+      break;
+    case "change":
+      body = `<div class="v-change">${v.changes
+        .map(
+          (c) =>
+            `<div class="v-chg"><div class="v-chg-l">${label(c.label)}</div><div class="v-chg-v"><span class="from">${label(c.from)}</span><span class="v-chg-arrow">&#10140;</span><span class="to">${label(c.to)}</span></div></div>`,
+        )
+        .join("")}</div>`;
+      break;
+    case "trend":
+      body = trendSvg(v, accent);
+      break;
+    case "ranking":
+      body = `<ol class="v-rank">${v.items
+        .map(
+          (i) =>
+            `<li class="${[i.highlight ? "hl" : "", i.rank <= 3 ? `r${i.rank}` : ""].join(" ").trim()}"><span class="v-rank-n">${i.rank}</span>${label(i.label)}${i.value ? `<b class="v-rank-v">${esc(i.value)}</b>` : ""}</li>`,
+        )
+        .join("")}</ol>`;
+      break;
+    case "proscons": {
+      const words = lang === "hi" ? ["लाभ", "चुनौतियाँ"] : ["Benefits", "Challenges"];
+      const col = (cls: string, head: string, mark: string, xs: Bi[]) =>
+        `<div class="v-pc ${cls}"><div class="v-pc-h">${head}</div><ul>${xs
+          .map((x) => `<li><i>${mark}</i>${label(x)}</li>`)
+          .join("")}</ul></div>`;
+      body = `<div class="v-proscons">${col("pro", words[0], "&#10003;", v.pros)}${col("con", words[1], "!", v.cons)}</div>`;
+      break;
+    }
+    case "hierarchy":
+      body = `<div class="v-tree"><div class="v-tree-root">${label(v.root)}</div><div class="v-tree-kids">${v.children
+        .map(
+          (c, i) =>
+            `<div class="v-tree-kid"><div class="v-tree-node" style="border-color:${colors[(i + 1) % colors.length]}">${label(c.label)}</div>${
+              c.items.length
+                ? `<ul>${c.items.map((x) => `<li>${label(x)}</li>`).join("")}</ul>`
+                : ""
+            }</div>`,
+        )
+        .join("")}</div></div>`;
+      break;
+    case "cycle":
+      body = cycleSvg(v, accent, lang);
+      break;
   }
-  return `<div class="box visual visual-${v.type}"><div class="box-title">${esc((lang === "hi" ? VISUAL_LABELS_HI : VISUAL_LABELS)[v.type])}</div>${caption}${body}</div>`;
+  // No type heading: the visual's own title says what it shows.
+  return `<div class="box visual visual-${v.type}">${caption}${body}</div>`;
+}
+
+// One figure over the years: a line with each value marked.
+function trendSvg(v: Extract<Visual, { type: "trend" }>, accent: string): string {
+  const W = 600;
+  const H = 190;
+  const pad = { l: 24, r: 24, t: 26, b: 28 };
+  const vals = v.points.map((p) => p.value);
+  // The axis starts near the lowest value, so small changes show.
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const lo = min >= 0 && min - (max - min) * 0.6 <= 0 ? 0 : min - (max - min) * 0.6 || min - 1;
+  const span = max - lo || 1;
+  const x = (i: number) => pad.l + (i * (W - pad.l - pad.r)) / Math.max(1, v.points.length - 1);
+  const y = (n: number) => pad.t + (1 - (n - lo) / span) * (H - pad.t - pad.b);
+  const line = v.points.map((p, i) => `${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
+  const unit = v.unit ? `${v.unit === "%" ? "" : " "}${esc(v.unit)}` : "";
+  const area = `${pad.l},${y(lo).toFixed(1)} ${line} ${x(v.points.length - 1).toFixed(1)},${y(lo).toFixed(1)}`;
+  return `<svg class="v-trend" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">
+<line x1="${pad.l}" y1="${y(lo).toFixed(1)}" x2="${W - pad.r}" y2="${y(lo).toFixed(1)}" stroke="#cbd5e1" stroke-width="1"/>
+<polygon points="${area}" fill="${accent}" fill-opacity=".08"/>
+<polyline points="${line}" fill="none" stroke="${accent}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+${v.points
+  .map(
+    (p, i) =>
+      `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="4.5" fill="#fff" stroke="${accent}" stroke-width="2.5"/><text x="${x(i).toFixed(1)}" y="${(y(p.value) - 10).toFixed(1)}" text-anchor="middle" font-size="12" font-weight="700" fill="#1f2937">${esc(fmt(p.value))}${unit}</text><text x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="11.5" fill="#64748b">${esc(p.label)}</text>`,
+  )
+  .join("")}
+</svg>`;
+}
+
+// Steps around a ring, arrows showing the way round.
+function cycleSvg(
+  v: Extract<Visual, { type: "cycle" }>,
+  accent: string,
+  lang?: "en" | "hi",
+): string {
+  const n = v.steps.length;
+  const W = 620;
+  const H = n <= 4 ? 250 : 300;
+  const cx = W / 2;
+  const cy = H / 2;
+  const rx = W / 2 - 100;
+  const ry = H / 2 - 38;
+  const boxW = 176;
+  const boxH = 58;
+  const at = (i: number) => {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+    return { x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a), a };
+  };
+  const parts: string[] = [
+    `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="none" stroke="${accent}" stroke-opacity=".35" stroke-width="2.5" stroke-dasharray="6 5"/>`,
+  ];
+  // An arrowhead halfway between each step and the next, pointing onward.
+  for (let i = 0; i < n; i++) {
+    const a = -Math.PI / 2 + ((i + 0.5) * 2 * Math.PI) / n;
+    const px = cx + rx * Math.cos(a);
+    const py = cy + ry * Math.sin(a);
+    const tx = -rx * Math.sin(a);
+    const ty = ry * Math.cos(a);
+    const deg = (Math.atan2(ty, tx) * 180) / Math.PI;
+    parts.push(
+      `<path d="M -7 -6 L 7 0 L -7 6 Z" fill="${accent}" transform="translate(${px.toFixed(1)} ${py.toFixed(1)}) rotate(${deg.toFixed(1)})"/>`,
+    );
+  }
+  v.steps.forEach((s, i) => {
+    const p = at(i);
+    parts.push(
+      `<foreignObject x="${(p.x - boxW / 2).toFixed(1)}" y="${(p.y - boxH / 2).toFixed(1)}" width="${boxW}" height="${boxH}"><div xmlns="http://www.w3.org/1999/xhtml" class="mm-node cy-node" style="border-color:${PALETTE[i % PALETTE.length]}"><span class="cy-n" style="background:${PALETTE[i % PALETTE.length]}">${i + 1}</span>${labelIn(s, "", lang)}</div></foreignObject>`,
+    );
+  });
+  return `<svg class="v-cycle" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">${parts.join("")}</svg>`;
 }
 
 export const VISUAL_CSS = (accent: string) => `
 .visual { border: 1px solid #e2e8f0; background: #fff; break-inside: avoid; }
-.visual .box-title { color: ${accent}; }
-.v-caption { font-weight: 600; margin: .5mm 0 2mm; }
+.v-caption { font-weight: 700; color: ${accent}; margin: 0 0 2mm; }
 .v-caption .vl { flex-direction: row; gap: 2mm; flex-wrap: wrap; }
 .vl { display: inline-flex; flex-direction: column; line-height: 1.3; }
 .ven { color: #64748b; font-size: .9em; }
@@ -559,4 +942,66 @@ export const VISUAL_CSS = (accent: string) => `
 .mm-branch { background: #fff; border: 2px solid; }
 .mm-center { color: #fff; font-weight: 700; font-size: 13px; }
 .mm-center .ven { color: rgba(255,255,255,.85); }
+.v-glance { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 0; border: 1px solid #e2e8f0; border-radius: 2.5mm; overflow: hidden; }
+.v-glance > div { padding: 2mm 3mm; border-bottom: 1px solid #e2e8f0; break-inside: avoid; }
+.v-glance > div:nth-child(odd) { border-right: 1px solid #e2e8f0; }
+.v-glance > div:nth-last-child(-n+2) { border-bottom: 0; }
+.v-glance > div:nth-child(odd):last-child { grid-column: 1 / -1; border-right: 0; }
+.v-glance dt { font-size: 7.8pt; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: ${accent}; }
+.v-glance dd { margin: .5mm 0 0; font-weight: 600; }
+.v-compare { width: 100%; border-collapse: separate; border-spacing: 0 1.2mm; font-size: 9pt; }
+.v-compare th { padding: 1.8mm 2mm; color: #fff; font-weight: 700; text-align: center; }
+.v-compare th.ca { background: ${accent}; border-radius: 2mm 0 0 2mm; width: 40%; }
+.v-compare th.cb { background: ${PALETTE[0]}; border-radius: 0 2mm 2mm 0; width: 40%; }
+.v-compare th.vs { background: #1f2937; font-size: 8pt; text-transform: uppercase; }
+.v-compare th .ven { color: rgba(255,255,255,.85); }
+.v-compare td { padding: 1.6mm 2mm; background: #f8fafc; vertical-align: middle; }
+.v-compare td.ca { text-align: right; border-left: 3px solid ${accent}; }
+.v-compare td.cb { border-right: 3px solid ${PALETTE[0]}; }
+.v-compare td.asp { text-align: center; font-size: 8pt; font-weight: 700; color: #475569; background: #eef2f7; }
+.v-change { display: flex; flex-direction: column; gap: 1.8mm; }
+.v-chg { display: grid; grid-template-columns: 36% 1fr; gap: 3mm; align-items: center; padding: 1.8mm 2.5mm; border-radius: 2mm; background: #f8fafc; break-inside: avoid; }
+.v-chg-l { font-weight: 600; }
+.v-chg-v { display: flex; align-items: center; gap: 2.5mm; flex-wrap: wrap; }
+.v-chg .from { color: #94a3b8; text-decoration: line-through; }
+.v-chg .to { font-weight: 700; color: ${accent}; font-size: 10.5pt; }
+.v-chg-arrow { color: ${accent}; }
+.v-trend { display: block; max-height: 62mm; }
+.v-rank { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1.2mm; }
+.v-rank li { display: flex; align-items: center; gap: 2.5mm; padding: 1.4mm 2.5mm; border-radius: 2mm; background: #f8fafc; break-inside: avoid; }
+.v-rank li.hl { background: #f5f3ff; outline: 1.5px solid ${accent}; font-weight: 700; }
+.v-rank-n { flex: none; min-width: 7mm; height: 7mm; border-radius: 3.5mm; padding: 0 1.5mm; background: #e2e8f0; color: #1f2937; font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 9pt; }
+.v-rank li.r1 .v-rank-n { background: #fbbf24; }
+.v-rank li.r2 .v-rank-n { background: #cbd5e1; }
+.v-rank li.r3 .v-rank-n { background: #d97706; color: #fff; }
+.v-rank li.hl .v-rank-n { background: ${accent}; color: #fff; }
+.v-rank .vl { flex: 1; }
+.v-rank-v { flex: none; color: ${accent}; }
+.v-proscons { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; }
+.v-pc { border-radius: 2.5mm; padding: 2mm 3mm; break-inside: avoid; }
+.v-pc.pro { background: #ecfdf5; border: 1px solid #a7f3d0; }
+.v-pc.con { background: #fff7ed; border: 1px solid #fed7aa; }
+.v-pc-h { font-weight: 700; font-size: 9pt; text-transform: uppercase; letter-spacing: .03em; margin-bottom: 1mm; }
+.v-pc.pro .v-pc-h { color: #047857; }
+.v-pc.con .v-pc-h { color: #c2410c; }
+.v-pc ul { list-style: none; margin: 0; padding: 0; }
+.v-pc li { display: flex; gap: 2mm; margin-bottom: 1mm; }
+.v-pc li i { flex: none; font-style: normal; font-weight: 700; width: 4mm; text-align: center; }
+.v-pc.pro li i { color: #059669; }
+.v-pc.con li i { color: #ea580c; }
+.v-tree { display: flex; flex-direction: column; align-items: center; }
+.v-tree-root { padding: 2mm 5mm; border-radius: 2.5mm; background: ${accent}; color: #fff; font-weight: 700; text-align: center; max-width: 80%; }
+.v-tree-root .ven { color: rgba(255,255,255,.85); }
+.v-tree-kids { display: flex; gap: 2.5mm; width: 100%; margin-top: 3mm; position: relative; padding-top: 3mm; }
+.v-tree-kids::before { content: ""; position: absolute; left: 50%; top: -3mm; height: 3mm; border-left: 2px solid #cbd5e1; }
+.v-tree-kid { flex: 1; min-width: 0; position: relative; }
+.v-tree-kid::before { content: ""; position: absolute; left: 50%; top: -3mm; height: 3mm; border-left: 2px solid #cbd5e1; }
+.v-tree-kid::after { content: ""; position: absolute; top: -3mm; left: -1.25mm; right: -1.25mm; border-top: 2px solid #cbd5e1; }
+.v-tree-kid:first-child::after { left: 50%; }
+.v-tree-kid:last-child::after { right: 50%; }
+.v-tree-node { border: 2px solid; border-radius: 2mm; padding: 1.5mm 2mm; text-align: center; font-weight: 600; background: #fff; font-size: 9pt; }
+.v-tree-kid ul { margin: 1.5mm 0 0; padding-left: 4mm; font-size: 8.6pt; }
+.v-cycle { display: block; max-height: 78mm; }
+.cy-node { background: #fff; border: 2px solid; gap: 6px; justify-content: flex-start; text-align: left; }
+.cy-n { flex: none; width: 20px; height: 20px; border-radius: 50%; color: #fff; font-weight: 700; font-size: 11px; display: flex; align-items: center; justify-content: center; }
 `;
