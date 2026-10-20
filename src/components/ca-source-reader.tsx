@@ -387,6 +387,8 @@ export function SourceReader({
       setMarks(draft.marks);
       setNote(draft.note ?? "");
       toast("Restored the highlights you hadn't used yet", {
+        // Once, however often the reader opens on it.
+        id: `draft:${key}`,
         action: {
           label: "Discard",
           onClick: () => {
