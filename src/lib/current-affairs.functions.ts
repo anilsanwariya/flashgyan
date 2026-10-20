@@ -159,6 +159,7 @@ export const saveMagazineSettings = createServerFn({ method: "POST" })
         add_to_flashcards: z.boolean(),
         weekly_report: z.boolean(),
         min_rajasthan: z.number().int().min(0).max(20),
+        post_corrections: z.boolean(),
       })
       .parse(d),
   )
@@ -168,6 +169,37 @@ export const saveMagazineSettings = createServerFn({ method: "POST" })
       ...data,
       trusted_domains: cleanDomains(data.trusted_domains),
     });
+  });
+
+// House style: the editor's writing rules, and rules SAATHI suggests from the
+// week's edits (one AI call).
+export const getCaStyle = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    const s = await server();
+    const [settings, suggestions] = await Promise.all([
+      s.getMagazineSettings(),
+      s.styleSuggestions(),
+    ]);
+    return { rules: settings.style_rules, suggestions };
+  });
+
+export const suggestCaStyle = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).suggestStyleRules();
+  });
+
+export const saveCaStyleRules = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ rules: z.array(z.string().trim().max(200)).max(20) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).saveStyleRules(data.rules);
   });
 
 // One tiny request to each AI service, to see which one is failing and why.
@@ -640,8 +672,8 @@ export const decideCaCorrection = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    await (await server()).decideCorrection(data.id, data.approve);
-    return { ok: true };
+    const r = await (await server()).decideCorrection(data.id, data.approve);
+    return { ok: true, noted: r.noted };
   });
 
 // ---------- Issues ----------

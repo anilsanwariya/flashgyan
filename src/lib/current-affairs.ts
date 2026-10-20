@@ -405,6 +405,14 @@ export function mergeFacts(base: CaFact[], extra: CaFact[], max = 8): CaFact[] {
 
 export type KbPassage = { title: string; content: string };
 
+// The editor's house style rules, in a writing prompt.
+export function styleBlock(rules: string[] | undefined): string {
+  const list = (rules ?? []).map((r) => r.trim()).filter(Boolean);
+  return list.length
+    ? `\nHOUSE STYLE (the editor's own rules; follow them within the RULES above):\n${list.map((r) => `- ${r}`).join("\n")}`
+    : "";
+}
+
 export function enrichMessages(opts: {
   headline: string;
   category: Category;
@@ -425,6 +433,8 @@ export function enrichMessages(opts: {
   context?: string[];
   // The editor's instruction for this story ("focus on the Rajasthan angle").
   note?: string | null;
+  // The editor's house style rules (Magazine settings).
+  style?: string[];
 }): ChatMessage[] {
   const facts = opts.facts
     .map((f, i) => `${i + 1}. ${f.text}${f.note ? ` [Editor's note: ${f.note}]` : ""}`)
@@ -446,7 +456,7 @@ export function enrichMessages(opts: {
       role: "system",
       content: `You write a bilingual (Hindi and English) current affairs magazine for RAS exam aspirants. Write one news item from the numbered facts.
 RULES: Use only the facts given (numbered facts and any Context). Never add a number, name, date or claim that is not in them. Follow the editor's instruction when one is given, and an [Editor's note] on a fact (for example: put it in the headline, build the MCQ or the Mains question on it, keep it word for word), within these rules. Hindi must be natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी), with the same numbers and official names (give the English name in brackets the first time if it helps).
-BE BRIEF: students revise from this, so less theory, more memorable facts. Say each fact once: the summary gives only the gist (what happened, who, where), the points carry the details, and nothing is repeated between summary, points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}
+BE BRIEF: students revise from this, so less theory, more memorable facts. Say each fact once: the summary gives only the gist (what happened, who, where), the points carry the details, and nothing is repeated between summary, points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}${styleBlock(opts.style)}
 STATIC CONNECT links the news to the static syllabus. "keywords" lists up to ${MAX_KEYWORDS} static concepts the news links to that RPSC could ask about (constitutional articles, acts, institutions, technologies, schemes, places, conventions, terms), most important first (the "Static concept" in the message, when given), whether or not the passages explain them; each is a short name of at most 5 words. "statics" explains the first 1 or 2 keywords the way a textbook does: what it is, what it says, how it works, in 1-2 sentences of at most 40 words each, without retelling the news. Base each on the knowledge-base passages [K…] that explain it, even if they never mention the news, and list them in "from"; when no passage explains it, write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. Use [] for both when the news has no static concept worth explaining.
 Reply with JSON only:
 {"headline": {"en": "...", "hi": "..."},
@@ -880,6 +890,11 @@ export type MagazineSettings = {
   weekly_report: boolean;
   // A day's issue with fewer Rajasthan stories than this is flagged.
   min_rajasthan: number;
+  // A correction approved after the day's issue was posted is announced on
+  // the channel, under that day's PDF.
+  post_corrections: boolean;
+  // House style: the editor's writing rules, added to SAATHI's instructions.
+  style_rules: string[];
 };
 
 // Official and reference sites the "Did you know?" search may use. Subdomains
@@ -924,7 +939,28 @@ export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   add_to_flashcards: true,
   weekly_report: true,
   min_rajasthan: DEFAULT_MIN_RAJASTHAN,
+  post_corrections: true,
+  style_rules: [],
 };
+
+// The note posted on the channel, under a day's PDF, when a correction to one
+// of its stories is approved after the issue went out.
+export function correctionNote(o: {
+  date: string;
+  headline: Bi;
+  summary_en: string;
+  summary_hi: string;
+}): string {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return [
+    `✏️ <b>सुधार · Correction</b> · ${formatDate(o.date, "hi")} / ${formatDate(o.date, "en")}`,
+    "",
+    `<b>${esc(o.headline.hi || o.headline.en)}</b>`,
+    ...(o.headline.hi && o.headline.en ? [esc(o.headline.en)] : []),
+    "",
+    ...[o.summary_hi, o.summary_en].filter((t) => t.trim()).map(esc),
+  ].join("\n");
+}
 
 export function categoryLabel(id: string): { en: string; hi: string } {
   return CATEGORIES.find((c) => c.id === id) ?? { en: id, hi: id };
