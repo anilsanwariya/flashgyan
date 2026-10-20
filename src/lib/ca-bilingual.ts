@@ -1,5 +1,5 @@
 // Hindi and English saying the same thing. Every part of a story the
-// magazine prints (its text, Static Connect, "Did you know", the MCQ, the
+// magazine prints (its text, Static Context, Fact Bite, the MCQ, the
 // Mains question and the revision lines) is in both languages: a part in one
 // language only, or a number, date or name that differs between them, is half
 // a story or a wrong fact for half the readers. Missing parts, numbers and
@@ -111,6 +111,13 @@ function access(part: string): Access | null {
       set: (c, b) => ({ ...c, dyk: mapAt(c.dyk, i, (x) => ({ ...x, en: b.en, hi: b.hi })) }),
     };
   }
+  i = at(/^image (\d+) caption$/);
+  if (i >= 0) {
+    return {
+      get: (c) => c.images?.[i]?.caption,
+      set: (c, b) => ({ ...c, images: mapAt(c.images, i, (x) => ({ ...x, caption: b })) }),
+    };
+  }
   i = at(/^mcq option (\d+)$/);
   if (i >= 0) {
     return {
@@ -127,6 +134,7 @@ export function bilingualParts(c: CaContent): { part: string; en: string; hi: st
   const names = [
     "headline",
     "summary",
+    ...(c.images ?? []).map((_, i) => `image ${i + 1} caption`),
     ...(c.points ?? []).map((_, i) => `point ${i + 1}`),
     "why",
     "background",
@@ -165,9 +173,10 @@ export function withLangPart(
 // The editor's names for the parts.
 export function langPartName(part: string): string {
   const n = /(\d+)/.exec(part)?.[1];
-  if (/^static \d+ term$/.test(part)) return `Static Connect ${n} (term)`;
-  if (/^static \d+$/.test(part)) return `Static Connect ${n}`;
-  if (/^did you know \d+$/.test(part)) return `Did you know ${n}`;
+  if (/^static \d+ term$/.test(part)) return `Static Context ${n} (term)`;
+  if (/^static \d+$/.test(part)) return `Static Context ${n}`;
+  if (/^did you know \d+$/.test(part)) return `Fact Bite ${n}`;
+  if (/^image \d+ caption$/.test(part)) return `Image ${n} caption`;
   if (/^mcq option \d+$/.test(part)) return `MCQ option ${"ABCDEFGH"[Number(n) - 1] ?? n}`;
   const fixed: Record<string, string> = {
     background: "Background",
@@ -341,7 +350,7 @@ export function langCheckMessages(stories: { content: CaContent }[]): ChatMessag
   return [
     {
       role: "system",
-      content: `You compare the Hindi and English versions of a bilingual current affairs magazine for RAS exam aspirants before it is published. Each part of a story is given in English (en) and Hindi (hi), labelled like S2.point3 (story 2, point 3); both must say the same thing.
+      content: `You compare the Hindi and English versions of a bilingual current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains) before it is published. Each part of a story is given in English (en) and Hindi (hi), labelled like S2.point3 (story 2, point 3); both must say the same thing.
 RULES: Report only clear differences in names (people, places, schemes, missions, organisations, acts, awards) and in what the facts say (a different subject, or a fact one language leaves out). Ignore numbers and dates (they are checked separately), word order, style, translation choices, and different spellings of the same name in Devanagari. For each difference say which language is wrong and give that language's whole line corrected, changing only what differs. At most ${LANG_NOTES_MAX} notes, the clearest first; an empty list is fine.
 Reply with JSON only: {"notes": [{"ref": "S1.point2", "wrong": "hi", "issue": "Hindi names Jodhpur, English names Jaipur", "fix": "..."}]}`,
     },

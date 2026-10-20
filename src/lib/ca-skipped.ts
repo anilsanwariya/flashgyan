@@ -94,7 +94,7 @@ export function rankMessages(
   return [
     {
       role: "system",
-      content: `You help the editor of a magazine for RAS (Rajasthan) exam aspirants. These newspaper articles were not made into stories. Rate each one's value for the RPSC RAS exam (Prelims and Mains general studies):
+      content: `You help the editor of a magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). These newspaper articles were not made into stories. Rate each one's value for RPSC and RSSB exams (above all RAS Prelims and Mains general studies):
 3 = likely to be asked: Rajasthan or central government schemes, policies, laws and judgments; appointments, awards and honours; reports, indices and rankings; firsts and records; science, technology, defence and space; environment and wildlife; economy data; important days; international events involving India; Rajasthan's art, culture, heritage and geography.
 2 = useful background for an exam topic.
 1 = minor or routine.

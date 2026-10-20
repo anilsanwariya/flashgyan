@@ -225,6 +225,17 @@ export async function uploadLogo(kind: "main" | "partner", bytes: Uint8Array, co
   return saveMagazineSettings(kind === "main" ? { logo_main_url: url } : { logo_partner_url: url });
 }
 
+// Story images live next to the PDFs, public like them, so the PDF renderer
+// can load them. Files stay when an image is taken off a story: an older
+// version in the story's history may still show it.
+export async function uploadImage(itemId: string, bytes: Uint8Array, contentType: string) {
+  const ext = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+  const path = `images/${itemId}/${crypto.randomUUID()}.${ext}`;
+  const { error } = await supabaseAdmin.storage.from(BUCKET).upload(path, bytes, { contentType });
+  fail(error);
+  return { path, url: supabaseAdmin.storage.from(BUCKET).getPublicUrl(path).data.publicUrl };
+}
+
 // ---------- Types ----------
 
 export type CaSource = {
@@ -844,7 +855,7 @@ export async function enrichItem(
       kb.map((k) => k.title),
     );
     if (!parsed) throw new Error("The AI's reply could not be read. Try again.");
-    // Static Connect facts the admin chose survive rewriting the story.
+    // Static Context facts the admin chose survive rewriting the story.
     const kept = item.content?.statics_edited ? item.content : null;
     const statics = kept ? (kept.statics ?? []) : (parsed.content.statics ?? []);
 
@@ -863,6 +874,8 @@ export async function enrichItem(
         context_facts: context,
         dyk,
         ...look,
+        // The editor's images survive rewriting the story.
+        ...(item.content?.images?.length ? { images: item.content.images } : {}),
       },
       context_sources: staticSources(statics),
       syllabus_topic_id: syllabusId,
@@ -1061,7 +1074,7 @@ export async function redoVisual(itemId: string): Promise<CaItem> {
   return updateItem(itemId, { content: { ...item.content, ...look } });
 }
 
-// ---------- "Did you know?" from trusted websites ----------
+// ---------- "Fact Bite" from trusted websites ----------
 
 // Searches the trusted sites with Tavily and keeps only facts quoted from the
 // pages. Never fails the item: without a key or results the box is left out.
@@ -1069,7 +1082,7 @@ export async function redoVisual(itemId: string): Promise<CaItem> {
 const RELATED_MAX_SIMILARITY = 0.92;
 const RELATED_MIN_SIMILARITY = 0.6;
 
-// "Did you know?": related recent developments of the same kind, first from
+// "Fact Bite": related recent developments of the same kind, first from
 // the magazine's own stories of the last 12 months, then from trusted websites.
 export async function findDidYouKnow(
   item: Pick<CaItem, "id" | "issue_date" | "category" | "facts" | "concept">,
@@ -1278,7 +1291,7 @@ export async function updateItem(
   patch: Partial<Pick<CaItem, "category" | "status" | "position" | "content" | "importance">>,
 ) {
   if (patch.category && !isCategory(patch.category)) throw new Error("Unknown section");
-  // The Static Connect's books are its sources line.
+  // The Static Context's books are its sources line.
   const sources =
     patch.content?.statics !== undefined
       ? { context_sources: staticSources(patch.content.statics) }
@@ -2107,12 +2120,12 @@ export async function restoreVersion(itemId: string, versionId?: string): Promis
   return saved as unknown as CaItem;
 }
 
-// ---------- Static Connect ----------
+// ---------- Static Context ----------
 
 const keywordBi = (k: string): Bi =>
   /[\u0900-\u097F]/.test(k) ? { en: "", hi: k } : { en: k, hi: "" };
 
-// Keywords the editor marked with the green pen: written as Static Connect
+// Keywords the editor marked with the green pen: written as Static Context
 // facts while there is room, the rest offered as keywords. A failure here
 // never undoes the story that was just written.
 export async function withKeywords(item: CaItem, keywords: string[]): Promise<CaItem> {
@@ -2141,7 +2154,7 @@ async function keywordPassages(key: string, keyword: Bi, subjects: string[]) {
   return matches.slice(0, 3);
 }
 
-// Writes Static Connect facts for the keywords the admin picked (from the
+// Writes Static Context facts for the keywords the admin picked (from the
 // books when they explain them, otherwise SAATHI's own knowledge).
 export async function addStaticFacts(id: string, keywords: Bi[]): Promise<CaItem> {
   const item = await loadItem(id);
@@ -2761,11 +2774,7 @@ async function postCorrectionNote(
   if (!issue.pdf_path_hi) return send(channel, correctionNote(note), issue.telegram_message_id);
   const sent = await Promise.all([
     send(channel, correctionNote(note, "en"), issue.telegram_message_id),
-    send(
-      settings.channel_hi.trim() || channel,
-      correctionNote(note, "hi"),
-      issue.telegram_message_id_hi,
-    ),
+    send(channel, correctionNote(note, "hi"), issue.telegram_message_id_hi),
   ]);
   return sent.some(Boolean);
 }
@@ -2945,7 +2954,21 @@ export async function renderPdf(html: string, settings: MagazineSettings): Promi
           : "";
     throw new Error(`Cloudflare PDF making failed (${res.status}).${hint} ${body.slice(0, 200)}`);
   }
-  return new Uint8Array(await res.arrayBuffer());
+  const pdf = new Uint8Array(await res.arrayBuffer());
+  // "Join us on Telegram", linked, at the bottom of every page.
+  const d = DEFAULT_MAGAZINE_SETTINGS;
+  try {
+    const { addJoinLink } = await import("@/lib/ca-pdf-link");
+    return await addJoinLink(pdf, {
+      text: settings.join_text ?? d.join_text,
+      url: (settings.join_url ?? d.join_url).trim(),
+      color: settings.accent,
+    });
+  } catch (e) {
+    // The issue still goes out, without the link.
+    console.error("join link:", e instanceof Error ? e.message : e);
+    return pdf;
+  }
 }
 
 function fileName(kind: "daily" | "monthly", period: string, lang: Lang) {

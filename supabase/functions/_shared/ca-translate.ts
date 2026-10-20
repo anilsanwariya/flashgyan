@@ -16,7 +16,7 @@ export function syncMessages(headline: string, lines: SyncLine[]): ChatMessage[]
   return [
     {
       role: "system",
-      content: `You keep a current affairs magazine for RAS exam aspirants the same in Hindi and English. The editor changed some lines in one language; write each of them in the other language.
+      content: `You keep a current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains) the same in Hindi and English. The editor changed some lines in one language; write each of them in the other language.
 RULES: Keep every fact, number (in digits), date and official name; add nothing and leave nothing out. Keep each line's form: a headline stays a short headline, a point a short phrase, a question a question. Hindi must be natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी); English plain exam-style English.
 Reply with JSON only: {"lines": ["...", "..."]} with one line for each numbered line, in the same order.`,
     },

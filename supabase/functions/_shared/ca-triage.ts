@@ -119,7 +119,7 @@ export function editCard(rows: TriageStory[], i: number): Card {
       ...(points.length
         ? ["", `<b>Points</b>`, ...points.map((p, j) => `${j + 1}. ${esc(cut(p.en || p.hi, 160))}`)]
         : []),
-      ...(parts.includes("why") ? ["", `<b>Why it matters</b>`, ...both(c.why, 160)] : []),
+      ...(parts.includes("why") ? ["", `<b>Exam Angle</b>`, ...both(c.why, 160)] : []),
     ].join("\n"),
     reply_markup: {
       inline_keyboard: [

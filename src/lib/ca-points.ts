@@ -20,7 +20,7 @@ export function pointsMessages(opts: {
   return [
     {
       role: "system",
-      content: `You write key points, in Hindi and English, for a current affairs magazine for RAS exam aspirants. Add key points to a written story, one for each new fact.
+      content: `You write key points, in Hindi and English, for a current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). Add key points to a written story, one for each new fact.
 RULES: Use only the new fact's words: never add a number, name, date or claim that is not in it. Each point is a short phrase (at most 15 words) that starts with the key term or number, not a full explanatory sentence, and does not repeat what the story's summary or points already say. Follow an [Editor's note] on a fact. Hindi must be natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी), with the same numbers and official names.${styleBlock(opts.style)}
 Reply with JSON only: {"points": [{"en": "...", "hi": "..."}]} with exactly one point per new fact, in the same order.`,
     },

@@ -242,11 +242,11 @@ function Version({
           })}
         </ol>
       </Field>
-      <Field label="Why it matters" changed={changed(content.why, other?.why)}>
+      <Field label="Exam Angle" changed={changed(content.why, other?.why)}>
         <Text value={content.why} lang={lang} />
       </Field>
       {content.statics?.length ? (
-        <Field label="Static Connect">
+        <Field label="Static Context">
           <div className="flex flex-wrap gap-1">
             {content.statics.map((s, i) => (
               <Badge key={i}>

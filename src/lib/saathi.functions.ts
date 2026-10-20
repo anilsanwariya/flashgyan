@@ -579,7 +579,7 @@ export type SaathiKnowledgeGap = {
 };
 
 // Static concepts behind the last 6 months' magazine stories that no book in
-// the knowledge base explained (SAATHI wrote their Static Connect itself).
+// the knowledge base explained (SAATHI wrote their Static Context itself).
 export const listUncoveredConcepts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {

@@ -3,7 +3,7 @@
 // (headings, paragraphs, lists and tables; website clutter hidden), with a
 // toolbar of pens at the bottom:
 //   yellow = key point, blue = summary only, pink = key point to check,
-//   green = Static Connect keyword, and an eraser.
+//   green = Static Context keyword, and an eraser.
 // In Highlight mode a tap marks the whole sentence; press and hold (or drag
 // with a mouse) to paint just some words. Holding a highlight (or tapping it
 // in Read mode, or right-clicking it) opens its actions: change the pen, add
@@ -110,7 +110,7 @@ const PENS: { pen: Pen; label: string; dot: string; mark: string }[] = [
   },
   {
     pen: "keyword",
-    label: "Static Connect keyword",
+    label: "Static Context keyword",
     dot: "bg-emerald-400",
     mark: "bg-emerald-300/55 dark:bg-emerald-500/35",
   },
@@ -996,7 +996,7 @@ export function SourceReader({
       mode === "rewrite" &&
       item?.content &&
       !confirm(
-        "Rewrite this story from your highlights? Its text, MCQ, Mains question and visual are written again, replacing your edits. Your Static Connect picks stay, and the old version is kept in the story's History.",
+        "Rewrite this story from your highlights? Its text, MCQ, Mains question and visual are written again, replacing your edits. Your Static Context picks stay, and the old version is kept in the story's History.",
       )
     )
       return;
@@ -1150,7 +1150,7 @@ export function SourceReader({
       if (!item) return;
       await keywordsFn({ data: { id: item.id, keywords: keywordMarks.map((m) => m.quote) } });
       commit((cur) => cur.filter((m) => m.pen !== "keyword"));
-      toast.success("Added to Static Connect");
+      toast.success("Added to Static Context");
       onChanged();
     } catch (e) {
       toast.error(errorText(e, "Couldn't add the keywords"));
@@ -1905,7 +1905,7 @@ function Toolbar({
 }
 
 const SHORTCUTS: [string, string][] = [
-  ["1 2 3 4", "Pens: key point, summary only, to check, Static Connect"],
+  ["1 2 3 4", "Pens: key point, summary only, to check, Static Context"],
   ["E", "Eraser"],
   ["R", "Switch Read / Highlight"],
   ["Ctrl+Z / Ctrl+Y", "Undo / redo"],
@@ -2383,7 +2383,7 @@ const QUICK_NOTES = [
   "Make the MCQ on this",
   "Ask the Mains question on this",
   "Keep the exact words",
-  "Use in “Why it matters”",
+  "Use in “Exam Angle”",
 ];
 
 // A highlight's actions: its pen, a margin note for SAATHI, removing it.
@@ -2624,7 +2624,7 @@ function Tray({
       )}
       {keywords > 0 && canAddKeywords && (
         <Button variant="outline" className="w-full" disabled={busy} onClick={onAddKeywords}>
-          Only add {keywords} keyword{keywords === 1 ? "" : "s"} to Static Connect
+          Only add {keywords} keyword{keywords === 1 ? "" : "s"} to Static Context
         </Button>
       )}
       {story?.content && (

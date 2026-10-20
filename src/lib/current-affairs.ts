@@ -100,17 +100,17 @@ export type CaContent = {
   why: Bi;
   // The single background paragraph of older items; newer items use statics.
   background: Bi | null;
-  // Static Connect: textbook facts on the static concepts the news links to.
+  // Static Context: textbook facts on the static concepts the news links to.
   statics?: StaticFact[];
-  // Keywords the news links to, offered for more Static Connect facts.
+  // Keywords the news links to, offered for more Static Context facts.
   keywords?: Bi[];
-  // The admin chose the Static Connect facts; rewriting the story keeps them.
+  // The admin chose the Static Context facts; rewriting the story keeps them.
   statics_edited?: boolean;
   // Facts the editor highlighted for the summary and "why" only (not points).
   context_facts?: CaFact[];
   mcq: CaMcq | null;
   mains: Bi | null;
-  // "Did you know?" facts from trusted websites (missing on older items).
+  // "Fact Bite" facts from trusted websites (missing on older items).
   dyk?: DykFact[];
   // A chart, table, timeline, flow chart or mind map built from the facts,
   // and the story in one line for the revision page (missing on older items).
@@ -121,20 +121,26 @@ export type CaContent = {
   // One quick exam question with a short answer, for the revision page
   // (missing on older items, which show the one-liner instead).
   quick?: CaQuick | null;
+  // Photos, maps or diagrams the editor uploaded (the AI can't take images
+  // from the sources), in order; w × h is the image's size in pixels.
+  images?: CaImage[];
 };
 
 export type CaQuick = { q: Bi; a: Bi };
 
-// One Static Connect fact: a static concept the news links to, explained the
+export type CaImage = { url: string; path: string; w: number; h: number; caption?: Bi };
+export const MAX_IMAGES = 8;
+
+// One Static Context fact: a static concept the news links to, explained the
 // way a textbook does. "source" is the book it came from ("NCERT · …"), or
 // null when SAATHI wrote it from its own knowledge.
 export type StaticFact = { keyword: Bi; text: Bi; source: string | null };
 
-export const STATIC_CONNECT = { en: "Static Connect", hi: "स्टैटिक कनेक्ट" };
+export const STATIC_CONNECT = { en: "Static Context", hi: "Static Context" };
 export const MAX_KEYWORDS = 8;
 export const MAX_STATICS = 6;
 
-// The books behind a story's Static Connect, for its sources line.
+// The books behind a story's Static Context, for its sources line.
 export function staticSources(statics: StaticFact[] | undefined): { title: string }[] {
   return [
     ...new Set(
@@ -147,7 +153,7 @@ const sameKeyword = (a: Bi, b: Bi) =>
   (!!a.en && normalizeForMatch(a.en) === normalizeForMatch(b.en)) ||
   (!!a.hi && normalizeForMatch(a.hi) === normalizeForMatch(b.hi));
 
-// Adds or replaces Static Connect facts by keyword, keeping the order.
+// Adds or replaces Static Context facts by keyword, keeping the order.
 export function mergeStatics(cur: StaticFact[], add: StaticFact[]): StaticFact[] {
   const out = [...cur];
   for (const f of add) {
@@ -158,7 +164,7 @@ export function mergeStatics(cur: StaticFact[], add: StaticFact[]): StaticFact[]
   return out.slice(0, MAX_STATICS);
 }
 
-// Keywords plus any Static Connect keyword not among them.
+// Keywords plus any Static Context keyword not among them.
 export function mergeKeywords(keywords: Bi[], statics: StaticFact[]): Bi[] {
   const out = [...keywords];
   for (const f of statics) if (!out.some((k) => sameKeyword(k, f.keyword))) out.push(f.keyword);
@@ -234,9 +240,9 @@ export function newStoryMessages(facts: string[], note?: string | null): ChatMes
   return [
     {
       role: "system",
-      content: `You are the current affairs editor of a magazine for RAS exam aspirants. The editor highlighted these facts in a news source as one new story. Classify it.
+      content: `You are the current affairs editor of a magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). The editor highlighted these facts in a news source as one new story. Classify it.
 Categories: "rajasthan" for anything about Rajasthan; "national" for India-wide polity, governance, schemes and judgments; "international"; "science" for science, technology, defence, space, health and environment; "economy"; "sports"; "misc" for awards, appointments, persons in news, important days, reports and indices; "editorial" only for an editorial's arguments.
-Reply with JSON only: {"headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 (3 = very likely in the RAS exam), "rajasthan": true if it concerns Rajasthan, ${CONCEPT_FIELD}}`,
+Reply with JSON only: {"headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 (3 = very likely in RPSC or RSSB exams, above all RAS), "rajasthan": true if it concerns Rajasthan, ${CONCEPT_FIELD}}`,
     },
     {
       role: "user",
@@ -303,7 +309,7 @@ export function extractMessages(opts: {
   return [
     {
       role: "system",
-      content: `You are the current affairs editor of a magazine for RAS (Rajasthan Administrative Service) exam aspirants. From the source text, extract only the news items RPSC is likely to ask about in the RAS Prelims or Mains exam. Be strict: students lose time on news that is never asked, so leave out anything that does not clearly fit a story type below or would not give at least two exam facts.
+      content: `You are the current affairs editor of a magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). From the source text, extract only the news items RPSC or RSSB is likely to ask about in its exams (RAS Prelims and Mains above all). Be strict: students lose time on news that is never asked, so leave out anything that does not clearly fit a story type below or would not give at least two exam facts.
 ${blueprintText()}
 Categories: "rajasthan" for anything about Rajasthan; "national" for India-wide polity, governance, schemes and judgments; "international"; "science" for science, technology, defence, space, health and environment; "economy"; "sports"; "misc" for awards, appointments, persons in news, important days, reports and indices that fit nowhere else; "editorial" only for editorials.
 Skip: advertisements, crime and accidents, purely local incidents, opinion without facts, market tips, entertainment.
@@ -454,7 +460,7 @@ export function enrichMessages(opts: {
   return [
     {
       role: "system",
-      content: `You write a bilingual (Hindi and English) current affairs magazine for RAS exam aspirants. Write one news item from the numbered facts.
+      content: `You write a bilingual (Hindi and English) current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). Write one news item from the numbered facts.
 RULES: Use only the facts given (numbered facts and any Context). Never add a number, name, date or claim that is not in them. Follow the editor's instruction when one is given, and an [Editor's note] on a fact (for example: put it in the headline, build the MCQ or the Mains question on it, keep it word for word), within these rules. Hindi must be natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी), with the same numbers and official names (give the English name in brackets the first time if it helps).
 BE BRIEF: students revise from this, so less theory, more memorable facts. Say each fact once: the summary gives only the gist (what happened, who, where), the points carry the details, and nothing is repeated between summary, points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}${styleBlock(opts.style)}
 STATIC CONNECT links the news to the static syllabus. "keywords" lists up to ${MAX_KEYWORDS} static concepts the news links to that RPSC could ask about (constitutional articles, acts, institutions, technologies, schemes, places, conventions, terms), most important first (the "Static concept" in the message, when given), whether or not the passages explain them; each is a short name of at most 5 words. "statics" explains the first 1 or 2 keywords the way a textbook does: what it is, what it says, how it works, in 1-2 sentences of at most 40 words each, without retelling the news. Base each on the knowledge-base passages [K…] that explain it, even if they never mention the news, and list them in "from"; when no passage explains it, write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. Use [] for both when the news has no static concept worth explaining.
@@ -502,7 +508,7 @@ const bi = (v: unknown, max = 2000): Bi | null => {
   return en || hi ? { en, hi } : null;
 };
 
-// Keywords and Static Connect facts from a reply; "from" names passages
+// Keywords and Static Context facts from a reply; "from" names passages
 // [K1]…, which become the facts' book labels.
 function parseStatics(
   rawKeywords: unknown,
@@ -596,7 +602,7 @@ export function parseContent(
   };
 }
 
-// More Static Connect facts, for keywords the admin picked. Each keyword
+// More Static Context facts, for keywords the admin picked. Each keyword
 // comes with the passages its search found.
 export function staticFactsMessages(opts: {
   headline: string;
@@ -616,7 +622,7 @@ export function staticFactsMessages(opts: {
     messages: [
       {
         role: "system",
-        content: `You write the "Static Connect" box of a bilingual (Hindi and English) current affairs magazine for RAS exam aspirants: textbook facts on the static concepts a news item links to. For each keyword, explain the concept the way a textbook does (what it is, what it says, how it works), linked to the news where it helps, in 1-2 sentences of at most 40 words, without retelling the news. Base it on that keyword's knowledge-base passages [K…] when they explain it and list them in "from"; otherwise write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. Hindi must be natural standard Hindi as used in RPSC exams (मानक हिंदी).
+        content: `You write the "Static Context" box of a bilingual (Hindi and English) current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains): textbook facts on the static concepts a news item links to. For each keyword, explain the concept the way a textbook does (what it is, what it says, how it works), linked to the news where it helps, in 1-2 sentences of at most 40 words, without retelling the news. Base it on that keyword's knowledge-base passages [K…] when they explain it and list them in "from"; otherwise write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. Hindi must be natural standard Hindi as used in RPSC exams (मानक हिंदी).
 Reply with JSON only: [{"keyword": the keyword's number, "keyword_hi": the keyword in Hindi, "keyword_en": the keyword in English, "en": "...", "hi": "...", "from": ["K1", ...]}], one per keyword.`,
       },
       {
@@ -851,15 +857,23 @@ export function formatDate(date: string, lang: "en" | "hi", withDay = true): str
 // ---------- Settings ----------
 
 export type MagazineSettings = {
-  // @channelusername or the numeric chat id (-100…): the English issue's
-  // channel, and the Hindi issue's (empty: the same channel as English).
+  // @channelusername or the numeric chat id (-100…): both issues post here.
   channel: string;
-  channel_hi: string;
   // HH:MM in India time.
   post_time: string;
   title_en: string;
   title_hi: string;
   brand_line: string;
+  // Who the magazine is for: the cover line and the post captions.
+  tagline_en: string;
+  tagline_hi: string;
+  // The story boxes' names, the same in both issues.
+  box_static: string;
+  box_dyk: string;
+  box_why: string;
+  // "Join us on Telegram", linked at the bottom of every page.
+  join_text: string;
+  join_url: string;
   accent: string;
   logo_main_url: string;
   logo_partner_url: string;
@@ -867,7 +881,7 @@ export type MagazineSettings = {
   test_chat_id: string;
   // Add approved issues to SAATHI's knowledge base.
   add_to_knowledge_base: boolean;
-  // "Did you know?" facts searched on the web (Tavily), from these sites only.
+  // "Fact Bite" facts searched on the web (Tavily), from these sites only.
   do_you_know: boolean;
   trusted_domains: string[];
   // Collect news from the watched websites every evening at this time (IST).
@@ -899,7 +913,7 @@ export type MagazineSettings = {
   style_rules: string[];
 };
 
-// Official and reference sites the "Did you know?" search may use. Subdomains
+// Official and reference sites the "Fact Bite" search may use. Subdomains
 // are included (gov.in covers pib.gov.in, rajasthan.gov.in, …).
 export const DEFAULT_TRUSTED_DOMAINS = [
   "gov.in",
@@ -919,11 +933,17 @@ export const DEFAULT_TRUSTED_DOMAINS = [
 
 export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   channel: "",
-  channel_hi: "",
   post_time: "10:00",
   title_en: "Daily Current Affairs",
   title_hi: "दैनिक करेंट अफेयर्स",
   brand_line: "FlashGyan by RASbandhu",
+  tagline_en: "For all Rajasthan competitive exams · Special focus: RAS Mains",
+  tagline_hi: "राजस्थान की सभी प्रतियोगी परीक्षाओं के लिए · RAS मुख्य परीक्षा पर विशेष फोकस",
+  box_static: "Static Context",
+  box_dyk: "Fact Bite",
+  box_why: "Exam Angle",
+  join_text: "Join us on Telegram",
+  join_url: "https://t.me/RASbandhu",
   accent: "#6d28d9",
   logo_main_url: "",
   logo_partner_url: "",
@@ -1002,24 +1022,30 @@ export function captionFor(
 ): string {
   const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const brand = esc(settings.brand_line);
+  const tagline = (l: "en" | "hi") => {
+    const t = (
+      l === "hi" ? settings.tagline_hi || settings.tagline_en : settings.tagline_en
+    ).trim();
+    return t ? `🎯 ${esc(t)}\n` : "";
+  };
   if (lang === "hi") {
     const title = settings.title_hi || settings.title_en;
     return kind === "monthly"
-      ? `📚 <b>${esc(title.replace("दैनिक", "मासिक"))}</b>\n🗓 ${formatDate(period, "hi", false)}\n📰 RAS प्रारंभिक एवं मुख्य परीक्षा के लिए ${count} विषय\n\n${brand}`
-      : `📰 <b>${esc(title)}</b>\n🗓 ${formatDate(period, "hi")}\n✅ RAS के लिए ${count} महत्वपूर्ण खबरें\n\n${brand}`;
+      ? `📚 <b>${esc(title.replace("दैनिक", "मासिक"))}</b>\n🗓 ${formatDate(period, "hi", false)}\n📰 ${count} विषय\n${tagline("hi")}\n${brand}`
+      : `📰 <b>${esc(title)}</b>\n🗓 ${formatDate(period, "hi")}\n✅ ${count} महत्वपूर्ण खबरें\n${tagline("hi")}\n${brand}`;
   }
   if (lang === "en") {
     return kind === "monthly"
-      ? `📚 <b>${esc(settings.title_en.replace(/^Daily/i, "Monthly"))}</b>\n🗓 ${formatDate(period, "en", false)}\n📰 ${count} topics for RAS Prelims & Mains\n\n${brand}`
-      : `📰 <b>${esc(settings.title_en)}</b>\n🗓 ${formatDate(period, "en")}\n✅ ${count} important news items for RAS\n\n${brand}`;
+      ? `📚 <b>${esc(settings.title_en.replace(/^Daily/i, "Monthly"))}</b>\n🗓 ${formatDate(period, "en", false)}\n📰 ${count} topics\n${tagline("en")}\n${brand}`
+      : `📰 <b>${esc(settings.title_en)}</b>\n🗓 ${formatDate(period, "en")}\n✅ ${count} important news items\n${tagline("en")}\n${brand}`;
   }
   if (kind === "monthly") {
-    return `📚 <b>${esc(settings.title_hi.replace("दैनिक", "मासिक"))} | Monthly Current Affairs</b>\n🗓 ${formatDate(period, "hi", false)} / ${formatDate(period, "en", false)}\n📰 ${count} topics for RAS Prelims & Mains\n\n${esc(settings.brand_line)}`;
+    return `📚 <b>${esc(settings.title_hi.replace("दैनिक", "मासिक"))} | Monthly Current Affairs</b>\n🗓 ${formatDate(period, "hi", false)} / ${formatDate(period, "en", false)}\n📰 ${count} topics\n\n${brand}`;
   }
-  return `📰 <b>${esc(settings.title_hi)} | ${esc(settings.title_en)}</b>\n🗓 ${formatDate(period, "hi")} / ${formatDate(period, "en")}\n✅ ${count} important news items for RAS, bilingual\n\n${esc(settings.brand_line)}`;
+  return `📰 <b>${esc(settings.title_hi)} | ${esc(settings.title_en)}</b>\n🗓 ${formatDate(period, "hi")} / ${formatDate(period, "en")}\n✅ ${count} important news items, bilingual\n\n${brand}`;
 }
 
-// ---------- "Did you know?" from trusted websites ----------
+// ---------- "Fact Bite" from trusted websites ----------
 
 export type WebPage = { title: string; url: string; content: string };
 
@@ -1091,7 +1117,7 @@ export function issueCards(
 }
 
 // Concepts the magazine's stories needed but the books did not explain:
-// Static Connect keywords SAATHI wrote from its own knowledge (older stories:
+// Static Context keywords SAATHI wrote from its own knowledge (older stories:
 // a concept with no book behind the background), grouped, most first.
 export type UncoveredConcept = { concept: string; stories: number; last: string; example: string };
 
@@ -1128,7 +1154,7 @@ export function uncoveredConcepts(
   return [...by.values()].sort((a, b) => b.stories - a.stories || b.last.localeCompare(a.last));
 }
 
-// "Did you know?" lists related recent developments of the same kind as the
+// "Fact Bite" lists related recent developments of the same kind as the
 // news (other missile tests, other amendments, other new Ramsar sites), first
 // from the magazine's own earlier stories, then from trusted websites.
 export type EarlierStory = { date: string; headline: string; facts: string[] };
@@ -1146,7 +1172,7 @@ export function relatedMessages(opts: {
   return [
     {
       role: "system",
-      content: `You add a "Did you know?" box to a current affairs news item for RAS exam aspirants: related recent developments an examiner would link to this news. From the numbered earlier stories of the same magazine, pick at most 3 developments of the SAME KIND as the news (other missiles tested, other constitutional amendments, other Ramsar sites declared, other judgments on the same article…) and write each as one line that names it, with its month and year and one key detail. Skip stories of a different kind and anything about this same news. Use only what the stories state.
+      content: `You add a "Fact Bite" box to a current affairs news item for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains): related recent developments an examiner would link to this news. From the numbered earlier stories of the same magazine, pick at most 3 developments of the SAME KIND as the news (other missiles tested, other constitutional amendments, other Ramsar sites declared, other judgments on the same article…) and write each as one line that names it, with its month and year and one key detail. Skip stories of a different kind and anything about this same news. Use only what the stories state.
 Reply with JSON only: [{"en": one line in English, "hi": the same in standard exam Hindi, "story": "S1", "quote": the exact words from that story's text that state it (5 to 40 words, copied character for character)}]. Reply [] if none is of the same kind.`,
     },
     {
@@ -1193,7 +1219,7 @@ export function dykMessages(opts: {
   return [
     {
       role: "system",
-      content: `You add a "Did you know?" box to a current affairs news item for RAS exam aspirants: related recent developments an examiner would link to this news. Using ONLY the web pages given, write up to 3 developments of the SAME KIND as the news from roughly the last two years (other missiles tested, other constitutional amendments, other Ramsar sites declared…), each one line naming it with its month and year and one key detail. Do not repeat the news or explain its background. Skip anything undated, older, or not clearly stated. Each line must quote the page word for word.
+      content: `You add a "Fact Bite" box to a current affairs news item for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains): related recent developments an examiner would link to this news. Using ONLY the web pages given, write up to 3 developments of the SAME KIND as the news from roughly the last two years (other missiles tested, other constitutional amendments, other Ramsar sites declared…), each one line naming it with its month and year and one key detail. Do not repeat the news or explain its background. Skip anything undated, older, or not clearly stated. Each line must quote the page word for word.
 Reply with JSON only: [{"en": one sentence in English, "hi": the same in standard exam Hindi, "page": "W1", "quote": the exact words from that page that state it (8 to 40 words, copied character for character)}]. Reply [] if the pages have nothing suitable.`,
     },
     {
