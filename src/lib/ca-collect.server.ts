@@ -345,6 +345,13 @@ async function finishRun(
       console.error("house style check:", saathiErrorDetail(e));
     }
   }
+  // Names compared in Hindi and English (one AI call); numbers and dates
+  // need none.
+  try {
+    await CA.checkLanguages(run.issue_date);
+  } catch (e) {
+    console.error("Hindi-English check:", saathiErrorDetail(e));
+  }
   if (run.notified || !settings.notify_when_ready || !settings.test_chat_id) return;
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return;

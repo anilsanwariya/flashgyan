@@ -98,6 +98,13 @@ import { bestArticle, cosine, meaningText, type CompareMatch } from "@/lib/ca-co
 import { ADD_POINTS_MAX, STORY_POINTS_MAX, parsePoints, pointsMessages } from "@/lib/ca-points";
 import { dayChecklist, type Check } from "@/lib/ca-checklist";
 import {
+  LANG_CHECK_STORIES,
+  langCheckMessages,
+  langStatus,
+  parseLangNotes,
+  type LangCheck,
+} from "@/lib/ca-bilingual";
+import {
   STYLE_CHECK_STORIES,
   STYLE_MIN_EDITS,
   STYLE_RULES_MAX,
@@ -1643,11 +1650,12 @@ export async function rankSkipped(date: string): Promise<{ ranked: number; left:
 // The day's checklist as the server sees it (what was opened in the review
 // list is only known in the browser), for the "draft ready" message.
 export async function dayChecks(date: string): Promise<Check[]> {
-  const [day, settings, counts, style] = await Promise.all([
+  const [day, settings, counts, style, lang] = await Promise.all([
     getDay(date),
     getMagazineSettings(),
     skippedSummary(date),
     getStyleCheck(date),
+    getLangCheck(date),
   ]);
   return dayChecklist({
     items: day.items,
@@ -1658,6 +1666,7 @@ export async function dayChecks(date: string): Promise<Check[]> {
     minRajasthan: settings.min_rajasthan,
     target: settings.daily_stories,
     style: styleStatus(style, day.items, settings.style_rules),
+    lang: langStatus(lang, day.items),
   });
 }
 
@@ -2394,6 +2403,96 @@ export async function dismissStyleBreak(date: string, breakId: string): Promise<
   if (!saved || !b) throw new Error("That house style note is no longer there.");
   const next = afterKeep(saved, b);
   await saveStyleCheck(date, next);
+  return next;
+}
+
+// ---------- Hindi and English saying the same thing ----------
+
+const langCheckKey = (date: string) => `ca_lang_check:${date}`;
+
+export async function getLangCheck(date: string): Promise<LangCheck | null> {
+  const { data } = await from("bot_settings")
+    .select("value")
+    .eq("key", langCheckKey(date))
+    .maybeSingle();
+  return (data as { value: LangCheck } | null)?.value ?? null;
+}
+
+async function saveLangCheck(date: string, value: LangCheck) {
+  fail(
+    (
+      await from("bot_settings").upsert({
+        key: langCheckKey(date),
+        value,
+        updated_at: new Date().toISOString(),
+      } as never)
+    ).error,
+  );
+}
+
+// SAATHI compares the names in the day's Hindi and English (one AI call):
+// the written stories not compared as they are now. Numbers and dates need
+// no request; they are compared wherever the checklist is shown.
+export async function checkLanguages(
+  date: string,
+): Promise<{ check: LangCheck; checked: number; found: number; left: number }> {
+  const { data, error } = await from("ca_items")
+    .select("id,category,position,content")
+    .eq("issue_date", date)
+    .eq("status", "included");
+  fail(error);
+  const order = new Map<string, number>(CATEGORIES.map((c, i) => [c.id, i]));
+  const items = (
+    (data ?? []) as unknown as Pick<CaItem, "id" | "category" | "position" | "content">[]
+  )
+    .filter((i): i is typeof i & { content: CaContent } => !!i.content)
+    .sort(
+      (a, b) =>
+        (order.get(normalizeCategory(a.category)) ?? 99) -
+          (order.get(normalizeCategory(b.category)) ?? 99) || a.position - b.position,
+    );
+  const saved = await getLangCheck(date);
+  const todo = items.filter((i) => saved?.stories[i.id] !== storyFingerprint(i.content));
+  const batch = todo.slice(0, LANG_CHECK_STORIES);
+  const found = batch.length
+    ? parseLangNotes(await saathiComplete(apiKey(), langCheckMessages(batch)), batch)
+    : [];
+  if (!found) throw new Error("The AI's reply could not be read. Try again.");
+  const live = new Set(items.map((i) => i.id));
+  const done = new Set(batch.map((i) => i.id));
+  const value: LangCheck = {
+    at: new Date().toISOString(),
+    stories: {
+      ...Object.fromEntries(Object.entries(saved?.stories ?? {}).filter(([id]) => live.has(id))),
+      ...Object.fromEntries(batch.map((i) => [i.id, storyFingerprint(i.content)])),
+    },
+    notes: [
+      ...(saved?.notes ?? []).filter((n) => live.has(n.item_id) && !done.has(n.item_id)),
+      ...found,
+    ],
+    dismissed: (saved?.dismissed ?? []).slice(-300),
+  };
+  await saveLangCheck(date, value);
+  const waved = new Set(value.dismissed);
+  return {
+    check: value,
+    checked: batch.length,
+    found: found.filter((n) => !waved.has(n.id)).length,
+    left: todo.length - batch.length,
+  };
+}
+
+// "It's fine": a numbers note (worked out as the editor goes) or SAATHI's
+// names note stays out of the list while its texts stay the same.
+export async function dismissLangNote(date: string, noteId: string): Promise<LangCheck> {
+  const saved = await getLangCheck(date);
+  const next: LangCheck = {
+    at: saved?.at ?? "",
+    stories: saved?.stories ?? {},
+    notes: saved?.notes ?? [],
+    dismissed: uniq([...(saved?.dismissed ?? []), noteId]).slice(-300),
+  };
+  await saveLangCheck(date, next);
   return next;
 }
 
