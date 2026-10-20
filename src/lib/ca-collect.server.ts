@@ -22,6 +22,7 @@ import {
 } from "@/lib/ca-collect";
 import { formatDate, istDate, type UploadSection } from "@/lib/current-affairs";
 import { rajasthanBalance, rajasthanWarningLine } from "@/lib/ca-report";
+import { checklistText } from "@/lib/ca-checklist";
 import * as CA from "@/lib/current-affairs.server";
 
 const from = (table: string) => supabaseAdmin.from(table as never);
@@ -265,6 +266,13 @@ async function finishRun(
         .eq("id", run.id)
     ).error,
   );
+  // The news the AI left out, ranked by exam value (one AI call), so the
+  // review starts with the skipped articles worth a story.
+  try {
+    await CA.rankSkipped(run.issue_date);
+  } catch (e) {
+    console.error("rank skipped news:", saathiErrorDetail(e));
+  }
   if (run.notified || !settings.notify_when_ready || !settings.test_chat_id) return;
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return;
@@ -285,13 +293,19 @@ async function finishRun(
       settings.min_rajasthan,
     ),
   );
+  // What is still to do before scheduling (the Rajasthan share is the line
+  // above; what was opened is only known in the browser).
+  const left = await CA.dayChecks(run.issue_date).then(
+    (checks) => checklistText(checks, ["rajasthan"]),
+    () => "",
+  );
   const link = origin ? `\n\nReview: ${origin}/admin?section=ca.daily` : "";
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       chat_id: settings.test_chat_id,
-      text: `📰 Current affairs draft for ${formatDate(run.issue_date, "en")} is ready: ${stories ?? 0} stories from ${articles ?? 0} articles. Review and approve it before ${settings.post_time} tomorrow.${rajasthan}${link}`,
+      text: `📰 Current affairs draft for ${formatDate(run.issue_date, "en")} is ready: ${stories ?? 0} stories from ${articles ?? 0} articles. Review and approve it before ${settings.post_time} tomorrow.${rajasthan}${left}${link}`,
     }),
   }).catch(() => undefined);
   await from("ca_runs")

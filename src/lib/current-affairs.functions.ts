@@ -16,6 +16,7 @@ import type {
   CaSource,
   CaVersion,
   DayData,
+  FactCheck,
   ReaderSource,
   SkippedArticle,
 } from "@/lib/current-affairs.server";
@@ -27,6 +28,7 @@ export type {
   CaSource,
   CaVersion,
   DayData,
+  FactCheck,
   ReaderSource,
   SkippedArticle,
 };
@@ -477,6 +479,15 @@ export const getCaSkipped = createServerFn({ method: "POST" })
     return (await server()).skippedNews(data.date);
   });
 
+// The day's skipped-news counts as last worked out, for the checklist.
+export const getCaSkippedSummary = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ date: dateSchema }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).skippedSummary(data.date);
+  });
+
 // Ranks the day's skipped news by exam value (one AI call).
 export const rankCaSkipped = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -511,6 +522,38 @@ export const getCaSourceReader = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<ReaderSource[]> => {
     await assertAdmin(context.userId);
     return (await server()).sourceReader(data.source_id, data.at, data.quote);
+  });
+
+// Fact-check mode: the day's facts to check, and checking one (with its
+// printed point corrected when the wording was wrong).
+export const getCaFactChecks = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ date: dateSchema }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).factChecks(data.date);
+  });
+
+export const checkCaFact = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        text: z.string().min(1).max(4000),
+        point: z
+          .object({ en: z.string().trim().max(400), hi: z.string().trim().max(400) })
+          .refine((p) => p.en || p.hi, "Write the point")
+          .optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<CaItem> => {
+    await assertAdmin(context.userId);
+    const s = await server();
+    const check = () => s.checkFact(data.id, data.text, data.point);
+    // A corrected point is an edit, kept in the story's history.
+    return data.point ? s.asEdit(data.id, check) : check();
   });
 
 export const setCaFactChecked = createServerFn({ method: "POST" })
