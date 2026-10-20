@@ -1,16 +1,28 @@
-// Admin: Hindi and English saying the same thing. Parts whose two languages
-// give different numbers or dates (found as the editor works) or different
-// names (SAATHI compares them: one AI request, also after the evening
-// collection). Each note shows both lines; the editor puts in SAATHI's fix,
-// corrects them by hand (kept in the story's History), or keeps them.
+// Admin: Hindi and English saying the same thing. Parts printed in one
+// language only, or whose two languages give different numbers or dates
+// (found as the editor works) or different names (SAATHI compares them: one
+// AI request, also after the evening collection). Each note shows both lines;
+// the editor puts in SAATHI's fix or translation, corrects them by hand (kept
+// in the story's History), or keeps them.
 import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Check, ExternalLink, Pencil, RefreshCw } from "lucide-react";
-import { dismissCaLangNote, runCaLangCheck, updateCaItem } from "@/lib/current-affairs.functions";
+import { Check, ExternalLink, Languages, Pencil, RefreshCw } from "lucide-react";
+import {
+  dismissCaLangNote,
+  runCaLangCheck,
+  translateCaPart,
+  updateCaItem,
+} from "@/lib/current-affairs.functions";
 import { CATEGORIES, type CaContent } from "@/lib/current-affairs";
-import { partText, withPart } from "@/lib/ca-style";
-import { langPartLabel, type LangNote, type LangStatus } from "@/lib/ca-bilingual";
+import {
+  bilingualParts,
+  langPartLabel,
+  langText,
+  withLangPart,
+  type LangNote,
+  type LangStatus,
+} from "@/lib/ca-bilingual";
 import { errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -32,12 +44,8 @@ const when = (iso: string) =>
     minute: "2-digit",
   });
 
-// Headline, summary, points in order, "why it matters"; numbers before names.
-const rank = (n: LangNote) => {
-  const p = /^point (\d+)$/.exec(n.part);
-  const at = n.part === "headline" ? 0 : n.part === "summary" ? 1 : p ? 1 + Number(p[1]) : 99;
-  return at * 2 + (n.kind === "numbers" ? 0 : 1);
-};
+const KIND = { missing: "One language only", numbers: "Numbers and dates", names: "Names" };
+const KIND_ORDER = { missing: 0, numbers: 1, names: 2 };
 
 export function LangCheckDialog({
   date,
@@ -61,6 +69,7 @@ export function LangCheckDialog({
   const runFn = useServerFn(runCaLangCheck);
   const dismissFn = useServerFn(dismissCaLangNote);
   const saveFn = useServerFn(updateCaItem);
+  const translateFn = useServerFn(translateCaPart);
   const [busy, setBusy] = useState<string | null>(null);
   // The note being corrected by hand, with its two lines.
   const [edit, setEdit] = useState<{ id: string; en: string; hi: string } | null>(null);
@@ -81,10 +90,20 @@ export function LangCheckDialog({
     );
     const notes = (status?.open ?? []).filter((n) => !handled.has(n.id));
     return stories
-      .map((s) => ({
-        story: s,
-        notes: notes.filter((n) => n.item_id === s.id).sort((a, b) => rank(a) - rank(b)),
-      }))
+      .map((s) => {
+        // In the order of the page, then missing, numbers, names.
+        const at = new Map((s.content ? bilingualParts(s.content) : []).map((p, i) => [p.part, i]));
+        return {
+          story: s,
+          notes: notes
+            .filter((n) => n.item_id === s.id)
+            .sort(
+              (a, b) =>
+                (at.get(a.part) ?? 999) - (at.get(b.part) ?? 999) ||
+                KIND_ORDER[a.kind] - KIND_ORDER[b.kind],
+            ),
+        };
+      })
       .filter((g) => g.notes.length);
   }, [items, status, handled]);
   const count = groups.reduce((n, g) => n + g.notes.length, 0);
@@ -112,7 +131,9 @@ export function LangCheckDialog({
     let content = story.content;
     for (const lang of ["en", "hi"] as const) {
       const t = lines[lang].replace(/\s+/g, " ").trim();
-      if (t && t !== partText(content, n.part, lang)) content = withPart(content, n.part, lang, t);
+      if (t && t !== langText(content, n.part, lang)) {
+        content = withLangPart(content, n.part, lang, t);
+      }
     }
     if (content === story.content) {
       setEdit(null);
@@ -134,6 +155,20 @@ export function LangCheckDialog({
       onChanged();
     } catch (e) {
       toast.error(errorText(e, "Couldn't save"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // SAATHI writes the missing language; the editor checks it, then saves.
+  async function translate(n: LangNote) {
+    if (!n.wrong) return;
+    setBusy(n.id);
+    try {
+      const text = await translateFn({ data: { id: n.item_id, part: n.part, to: n.wrong } });
+      setEdit({ id: n.id, en: n.en, hi: n.hi, [n.wrong]: text });
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't translate"));
     } finally {
       setBusy(null);
     }
@@ -161,7 +196,11 @@ export function LangCheckDialog({
         {lang === "hi" ? "Hindi" : "English"}
         {n.wrong === lang ? " · check this" : ""}
       </span>
-      <span lang={lang}>{n[lang]}</span>
+      {n[lang] ? (
+        <span lang={lang}>{n[lang]}</span>
+      ) : (
+        <span className="italic text-muted-foreground">(none)</span>
+      )}
     </div>
   );
 
@@ -171,8 +210,8 @@ export function LangCheckDialog({
         <div className="pr-8">
           <DialogTitle className="text-base">Hindi–English check</DialogTitle>
           <DialogDescription className="text-xs">
-            Parts whose Hindi and English differ. Numbers and dates are compared as you work; names
-            are compared by SAATHI.
+            Parts in one language only, or whose Hindi and English differ. Missing parts, numbers
+            and dates show as you work; SAATHI compares names.
           </DialogDescription>
         </div>
 
@@ -229,7 +268,7 @@ export function LangCheckDialog({
                   className="space-y-1.5 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3"
                 >
                   <div className="text-xs font-medium text-muted-foreground">
-                    {langPartLabel(n)} · {n.kind === "numbers" ? "Numbers and dates" : "Names"}
+                    {langPartLabel(n)} · {KIND[n.kind]}
                   </div>
                   <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
                     {n.issue}
@@ -240,12 +279,14 @@ export function LangCheckDialog({
                         rows={2}
                         lang="hi"
                         aria-label="Hindi"
+                        placeholder="Hindi"
                         value={edit.hi}
                         onChange={(e) => setEdit({ ...edit, hi: e.target.value })}
                       />
                       <Textarea
                         rows={2}
                         aria-label="English"
+                        placeholder="English"
                         value={edit.en}
                         onChange={(e) => setEdit({ ...edit, en: e.target.value })}
                       />
@@ -289,6 +330,12 @@ export function LangCheckDialog({
                       </>
                     ) : (
                       <>
+                        {n.kind === "missing" && (
+                          <Button size="sm" disabled={!!busy} onClick={() => void translate(n)}>
+                            <Languages className="mr-1 h-4 w-4" />
+                            {busy === n.id ? "Translating…" : "Translate"}
+                          </Button>
+                        )}
                         {n.fix && n.wrong && (
                           <Button
                             size="sm"

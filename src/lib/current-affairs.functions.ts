@@ -272,6 +272,22 @@ export const dismissCaLangNote = createServerFn({ method: "POST" })
     return (await server()).dismissLangNote(data.date, data.id);
   });
 
+export const translateCaPart = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        part: z.string().regex(/^[a-z0-9 -]{3,40}$/),
+        to: z.enum(["en", "hi"]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).translatePart(data.id, data.part, data.to);
+  });
+
 // One tiny request to each AI service, to see which one is failing and why.
 export const checkAiServices = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

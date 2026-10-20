@@ -100,8 +100,12 @@ import { dayChecklist, type Check } from "@/lib/ca-checklist";
 import {
   LANG_CHECK_STORIES,
   langCheckMessages,
+  langFingerprint,
   langStatus,
+  langText,
   parseLangNotes,
+  parseTranslation,
+  translateMessages,
   type LangCheck,
 } from "@/lib/ca-bilingual";
 import {
@@ -2452,7 +2456,7 @@ export async function checkLanguages(
           (order.get(normalizeCategory(b.category)) ?? 99) || a.position - b.position,
     );
   const saved = await getLangCheck(date);
-  const todo = items.filter((i) => saved?.stories[i.id] !== storyFingerprint(i.content));
+  const todo = items.filter((i) => saved?.stories[i.id] !== langFingerprint(i.content));
   const batch = todo.slice(0, LANG_CHECK_STORIES);
   const found = batch.length
     ? parseLangNotes(await saathiComplete(apiKey(), langCheckMessages(batch)), batch)
@@ -2464,7 +2468,7 @@ export async function checkLanguages(
     at: new Date().toISOString(),
     stories: {
       ...Object.fromEntries(Object.entries(saved?.stories ?? {}).filter(([id]) => live.has(id))),
-      ...Object.fromEntries(batch.map((i) => [i.id, storyFingerprint(i.content)])),
+      ...Object.fromEntries(batch.map((i) => [i.id, langFingerprint(i.content)])),
     },
     notes: [
       ...(saved?.notes ?? []).filter((n) => live.has(n.item_id) && !done.has(n.item_id)),
@@ -2494,6 +2498,28 @@ export async function dismissLangNote(date: string, noteId: string): Promise<Lan
   };
   await saveLangCheck(date, next);
   return next;
+}
+
+// SAATHI writes a part in the other language (one AI call), for the editor
+// to check and save; nothing is saved here.
+export async function translatePart(id: string, part: string, to: "en" | "hi"): Promise<string> {
+  const item = await loadItem(id);
+  const from = to === "hi" ? "en" : "hi";
+  const text = langText(item.content, part, from);
+  if (!text) throw new Error("There is nothing to translate in that part.");
+  const out = parseTranslation(
+    await saathiComplete(
+      apiKey(),
+      translateMessages({
+        part,
+        text,
+        to,
+        headline: item.content?.headline.en || item.content?.headline.hi || item.headline,
+      }),
+    ),
+  );
+  if (!out) throw new Error("The AI's reply could not be read. Try again.");
+  return out;
 }
 
 // ---------- Fact-check mode ----------
