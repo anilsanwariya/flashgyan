@@ -36,6 +36,7 @@ import {
   DEFAULT_MAGAZINE_SETTINGS,
   applyChanges,
   captionFor,
+  correctionNote,
   categoryLabel,
   changeCheckMessages,
   dailyPostTime,
@@ -96,6 +97,15 @@ import { missingMessages, parseMissing, type MissingCheck } from "@/lib/ca-missi
 import { bestArticle, cosine, meaningText, type CompareMatch } from "@/lib/ca-compare";
 import { ADD_POINTS_MAX, STORY_POINTS_MAX, parsePoints, pointsMessages } from "@/lib/ca-points";
 import { dayChecklist, type Check } from "@/lib/ca-checklist";
+import {
+  STYLE_MIN_EDITS,
+  STYLE_RULES_MAX,
+  editPairs,
+  parseStyleRules,
+  styleMessages,
+  type EditPair,
+  type StyleSuggestion,
+} from "@/lib/ca-style";
 import {
   closestSentence,
   quoteContext,
@@ -749,6 +759,7 @@ export async function enrichItem(
   const before = opts.before !== undefined ? opts.before : snapshotOf(item);
   const context = opts.context ?? item.content?.context_facts ?? [];
   const key = apiKey();
+  const { style_rules: style } = await getMagazineSettings();
   try {
     // The background explains the story's static concept, so the books are
     // searched for the concept, and for the headline in case the concept's
@@ -786,6 +797,7 @@ export async function enrichItem(
         concept: item.concept,
         context: context.map((f) => (f.note ? `${f.text} [Editor's note: ${f.note}]` : f.text)),
         note: opts.note,
+        style,
         visual: look.visual
           ? { type: VISUAL_LABELS[look.visual.type].toLowerCase(), covers: look.visual_covers }
           : null,
@@ -1802,6 +1814,7 @@ export async function addPointsFromHighlights(
         summary: c.summary.en || c.summary.hi,
         points: c.points.map((p) => p.en || p.hi),
         facts: fresh,
+        style: (await getMagazineSettings()).style_rules,
       }),
     ),
     fresh.length,
@@ -2168,6 +2181,91 @@ export async function setFactChecked(
   return data as unknown as CaItem;
 }
 
+// ---------- House style ----------
+
+// The editor's changes to SAATHI's drafts in the last days: for each story
+// edited by hand, its text before the first edit against its text now.
+// Stories written again by SAATHI after that edit are left out (their text
+// now isn't the editor's).
+export async function styleEdits(days = 7): Promise<EditPair[]> {
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const { data, error } = await from("ca_item_versions")
+    .select("item_id,reason,created_at,snapshot")
+    .gte("created_at", since)
+    .order("created_at")
+    .limit(500);
+  if (error) return [];
+  const rows = (data ?? []) as {
+    item_id: string;
+    reason: CaVersion["reason"];
+    snapshot: CaSnapshot;
+  }[];
+  const first = new Map<string, CaSnapshot>();
+  const rewritten = new Set<string>();
+  for (const v of rows) {
+    if (v.reason === "edit" && !first.has(v.item_id)) first.set(v.item_id, v.snapshot);
+    else if (first.has(v.item_id) && ["rewrite", "write", "restore", "points"].includes(v.reason))
+      rewritten.add(v.item_id);
+  }
+  const ids = [...first.keys()].filter((id) => !rewritten.has(id));
+  if (!ids.length) return [];
+  const { data: items } = await from("ca_items").select("id,content").in("id", ids);
+  return ((items ?? []) as Pick<CaItem, "id" | "content">[]).flatMap((it) => {
+    const was = first.get(it.id)?.content;
+    return was && it.content ? editPairs(was, it.content) : [];
+  });
+}
+
+const STYLE_KEY = "ca_style_suggestions";
+export type StyleSuggestions = { at: string; edits: number; rules: StyleSuggestion[] };
+
+// Rules SAATHI suggests from the week's edits (one AI call). They wait for
+// the editor in Magazine settings; nothing changes until one is added.
+export async function suggestStyleRules(): Promise<StyleSuggestions> {
+  const pairs = await styleEdits();
+  if (pairs.length < STYLE_MIN_EDITS) {
+    throw new Error(
+      `Not enough edits this week to see a style yet (${pairs.length}; at least ${STYLE_MIN_EDITS} changes needed).`,
+    );
+  }
+  const { style_rules } = await getMagazineSettings();
+  const rules = parseStyleRules(
+    await saathiComplete(apiKey(), styleMessages(pairs, style_rules)),
+    style_rules,
+  );
+  if (!rules) throw new Error("The AI's reply could not be read. Try again.");
+  const value: StyleSuggestions = { at: new Date().toISOString(), edits: pairs.length, rules };
+  fail(
+    (
+      await from("bot_settings").upsert({
+        key: STYLE_KEY,
+        value,
+        updated_at: new Date().toISOString(),
+      } as never)
+    ).error,
+  );
+  return value;
+}
+
+export async function styleSuggestions(): Promise<StyleSuggestions | null> {
+  const { data } = await from("bot_settings").select("value").eq("key", STYLE_KEY).maybeSingle();
+  return (data as { value: StyleSuggestions } | null)?.value ?? null;
+}
+
+export async function saveStyleRules(rules: string[]): Promise<string[]> {
+  const seen = new Set<string>();
+  const clean = rules
+    .map((r) => r.replace(/\s+/g, " ").trim().slice(0, 200))
+    .filter((r) => {
+      const k = normalizeForMatch(r);
+      if (r.length < 3 || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
+    .slice(0, STYLE_RULES_MAX);
+  return (await saveMagazineSettings({ style_rules: clean })).style_rules;
+}
+
 // ---------- Fact-check mode ----------
 
 // A fact marked "to check", with its printed point and what its source says.
@@ -2305,10 +2403,61 @@ export async function deletePoint(
   return { item: saved as unknown as CaItem, visualShowsIt: r.visualShowsIt };
 }
 
+// A correction approved after the day's issue went out is announced on the
+// channel, as a reply under that day's PDF. It never stops the correction.
+async function postCorrectionNote(
+  item: CaItem,
+  corr: CaCorrection,
+  settings: MagazineSettings,
+): Promise<boolean> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const channel = settings.channel.trim();
+  if (!settings.post_corrections || !channel || !token) return false;
+  const { data } = await from("ca_issues")
+    .select("status,telegram_message_id")
+    .eq("kind", "daily")
+    .eq("period", item.issue_date)
+    .maybeSingle();
+  const issue = data as { status: string; telegram_message_id: number | null } | null;
+  if (issue?.status !== "posted") return false;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: channel,
+        parse_mode: "HTML",
+        text: correctionNote({
+          date: item.issue_date,
+          headline: item.content?.headline ?? { en: item.headline, hi: "" },
+          summary_en: corr.summary_en,
+          summary_hi: corr.summary_hi,
+        }),
+        ...(issue.telegram_message_id
+          ? {
+              reply_parameters: {
+                message_id: issue.telegram_message_id,
+                allow_sending_without_reply: true,
+              },
+            }
+          : {}),
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string };
+    if (!json.ok) throw new Error(json.description ?? `Telegram error ${res.status}`);
+    return true;
+  } catch (e) {
+    console.error("correction note:", e instanceof Error ? e.message : e);
+    return false;
+  }
+}
+
+// `noted`: the correction was also announced on the channel.
 export async function decideCorrection(id: string, approve: boolean) {
   const { data, error } = await from("ca_corrections").select("*").eq("id", id).single();
   fail(error);
   const corr = data as unknown as CaCorrection;
+  let noted = false;
   if (approve) {
     const { data: it } = await from("ca_items").select(ITEM_COLS).eq("id", corr.item_id).single();
     const item = it as unknown as CaItem;
@@ -2329,6 +2478,7 @@ export async function decideCorrection(id: string, approve: boolean) {
     // Keep SAATHI's copy of that day up to date.
     const day = await getIssue("daily", item.issue_date);
     const settings = await getMagazineSettings();
+    noted = await postCorrectionNote(item, corr, settings);
     if (
       day &&
       day.status !== "draft" &&
@@ -2352,7 +2502,7 @@ export async function decideCorrection(id: string, approve: boolean) {
         .eq("id", id)
     ).error,
   );
-  return corr;
+  return { ...corr, noted };
 }
 
 // ---------- Building issues ----------

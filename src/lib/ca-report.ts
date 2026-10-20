@@ -81,6 +81,9 @@ export type WeeklyStats = {
   quiz: { on: number; joined: number; finished: number; streak3: number; topStreak: number } | null;
   // How much fixing SAATHI's drafts needed, by day.
   accuracy?: Accuracy;
+  // House style rules SAATHI suggested from the week's edits, waiting for
+  // the editor.
+  styleSuggestions?: number;
 };
 
 // One day's fixing: facts in the issue, facts whose quote wasn't in the source
@@ -168,6 +171,10 @@ export function weeklyReportText(s: WeeklyStats, adminUrl?: string): string {
     lines.push(`   Books needed for: ${esc(s.uncoveredConcepts.slice(0, 5).join(", "))}`);
   if (s.pendingCorrections) lines.push(`📝 Corrections waiting for you: ${s.pendingCorrections}`);
   if (s.accuracy) lines.push(...accuracyLines(s.accuracy));
+  if (s.styleSuggestions)
+    lines.push(
+      `✍️ SAATHI suggests ${s.styleSuggestions} house style rule${s.styleSuggestions === 1 ? "" : "s"} from your edits: add the ones you agree with in Magazine settings → House style.`,
+    );
   lines.push(
     "",
     `<b>SAATHI</b>`,

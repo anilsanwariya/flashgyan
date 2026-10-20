@@ -11,7 +11,7 @@ import {
   type Accuracy,
   type WeeklyStats,
 } from "@/lib/ca-report";
-import { getMagazineSettings } from "@/lib/current-affairs.server";
+import { getMagazineSettings, suggestStyleRules } from "@/lib/current-affairs.server";
 
 const from = (table: string) => supabaseAdmin.from(table as never);
 const STATE_KEY = "ca_weekly_report";
@@ -231,14 +231,25 @@ async function quizStats(fromDate: string, toDate: string): Promise<WeeklyStats[
 }
 
 // Sends the report for the week ending yesterday to the admin's test chat.
-export async function sendWeeklyReport(origin?: string): Promise<{ sent: boolean; text: string }> {
+// With `suggestStyle` (the Sunday report), SAATHI also suggests house style
+// rules from the week's edits (one AI call, only when there are enough).
+export async function sendWeeklyReport(
+  origin?: string,
+  opts: { suggestStyle?: boolean } = {},
+): Promise<{ sent: boolean; text: string }> {
   const settings = await getMagazineSettings();
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const week = reportWeek();
-  const text = weeklyReportText(
-    await weeklyStats(week.from, week.to),
-    origin ? `${origin}/admin?section=ca.daily` : undefined,
-  );
+  const stats = await weeklyStats(week.from, week.to);
+  if (opts.suggestStyle) {
+    try {
+      stats.styleSuggestions = (await suggestStyleRules()).rules.length;
+    } catch (e) {
+      // Too few edits, or the AI failed: the report goes out without it.
+      console.error("house style:", e instanceof Error ? e.message : e);
+    }
+  }
+  const text = weeklyReportText(stats, origin ? `${origin}/admin?section=ca.daily` : undefined);
   if (!token || !settings.test_chat_id) return { sent: false, text };
   const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
@@ -275,7 +286,7 @@ export async function maybeSendWeeklyReport(origin?: string) {
     updated_at: new Date().toISOString(),
   } as never);
   try {
-    await sendWeeklyReport(origin);
+    await sendWeeklyReport(origin, { suggestStyle: true });
   } catch (e) {
     await from("bot_settings").upsert({
       key: STATE_KEY,

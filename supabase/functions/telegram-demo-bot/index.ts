@@ -3,6 +3,7 @@
 // and quiz state in bot_sessions. Public webhook (Telegram calls it directly).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { runTelegramAnswerJob } from "../_shared/telegram-answer-job.ts";
+import { TRIAGE, nextIndex, storyCard, summaryCard, triageOrder, type TriageStory } from "../_shared/ca-triage.ts";
 import { CHECK_PHOTO_MAX_BYTES, checkQuestionInput, pickCheckPhoto, validCheckAnswer, type CheckPhoto } from "../_shared/telegram-check-input.ts";
 import {
   SaathiAiError,
@@ -1260,6 +1261,100 @@ async function runMagazineTick() {
   }
 }
 
+// The magazine's admin chat: its test chat in Magazine settings.
+async function isMagazineAdmin(chat_id: number): Promise<boolean> {
+  const { data: setting } = await supabase
+    .from("bot_settings")
+    .select("value")
+    .eq("key", "ca_magazine")
+    .maybeSingle();
+  const admin = String((setting?.value as { test_chat_id?: string } | null)?.test_chat_id ?? "").trim();
+  return !!admin && admin === String(chat_id);
+}
+
+// ---------- Reviewing the day's stories from Telegram (admin only) ----------
+// /stories [YYYY-MM-DD], or "Keep or drop stories" under the "draft ready"
+// message: one story card at a time with Keep / Drop.
+async function dayStories(date: string): Promise<TriageStory[]> {
+  const { data } = await supabase
+    .from("ca_items")
+    .select("id,headline,category,importance,status,position,needs_enrich,content")
+    .eq("issue_date", date)
+    .order("position")
+    .order("created_at");
+  return triageOrder((data ?? []) as TriageStory[]);
+}
+
+// Stories can't change once the day's issue is scheduled or posted.
+async function dayLocked(date: string): Promise<boolean> {
+  const { data } = await supabase
+    .from("ca_issues")
+    .select("status")
+    .eq("kind", "daily")
+    .eq("period", date)
+    .in("status", ["scheduled", "posting", "posted"])
+    .maybeSingle();
+  return !!data;
+}
+
+async function sendStories(chat_id: number, arg: string | undefined) {
+  let date = arg && /^\d{4}-\d{2}-\d{2}$/.test(arg) ? arg : "";
+  if (!date) {
+    // The latest day with stories (usually the draft being reviewed).
+    const { data } = await supabase
+      .from("ca_items")
+      .select("issue_date")
+      .order("issue_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    date = (data as { issue_date?: string } | null)?.issue_date ?? "";
+  }
+  const rows = date ? await dayStories(date) : [];
+  if (!rows.length) {
+    await tg("sendMessage", { chat_id, text: `No stories${date ? ` for ${date}` : ""} yet.` });
+    return;
+  }
+  await tg("sendMessage", { chat_id, parse_mode: "HTML", ...storyCard(rows, 0) });
+}
+
+async function handleStoryTap(chat_id: number, message_id: number, data: string) {
+  const [what = "", arg = ""] = data.slice(TRIAGE.length).split(":");
+  if (what === "x") return;
+  if (!(await isMagazineAdmin(chat_id))) {
+    await tg("sendMessage", { chat_id, text: "Only the magazine's admin chat can review stories." });
+    return;
+  }
+  let date = arg;
+  if (!/^[slr]$/.test(what)) {
+    const { data: it } = await supabase.from("ca_items").select("issue_date").eq("id", arg).maybeSingle();
+    if (!it) {
+      await tg("editMessageText", { chat_id, message_id, text: "That story is no longer there. Send /stories to start again." });
+      return;
+    }
+    date = (it as { issue_date: string }).issue_date;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+  if (what === "d" || what === "i") {
+    if (await dayLocked(date)) {
+      await tg("sendMessage", {
+        chat_id,
+        text: `The issue for ${date} is already scheduled or posted. Cancel the schedule in the admin panel to change its stories.`,
+      });
+      return;
+    }
+    await supabase
+      .from("ca_items")
+      .update({ status: what === "d" ? "dropped" : "included", updated_at: new Date().toISOString() })
+      .eq("id", arg);
+  }
+  const rows = await dayStories(date);
+  if (!rows.length) return;
+  const at = nextIndex(what, rows.findIndex((r) => r.id === arg), rows.length);
+  const card = at >= rows.length ? summaryCard(rows, date) : storyCard(rows, at);
+  if (what === "s") await tg("sendMessage", { chat_id, parse_mode: "HTML", ...card });
+  else await tg("editMessageText", { chat_id, message_id, parse_mode: "HTML", ...card });
+}
+
 // "Approve & schedule" under the magazine's "draft ready" message. Only the
 // magazine's admin chat (its test chat) may approve. The website makes the
 // PDF and schedules the issue on its next minute tick, and answers here.
@@ -1272,13 +1367,7 @@ async function requestIssueApproval(
   markup: InlineKeyboard | undefined,
 ) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-  const { data: setting } = await supabase
-    .from("bot_settings")
-    .select("value")
-    .eq("key", "ca_magazine")
-    .maybeSingle();
-  const admin = String((setting?.value as { test_chat_id?: string } | null)?.test_chat_id ?? "").trim();
-  if (!admin || admin !== String(chat_id)) {
+  if (!(await isMagazineAdmin(chat_id))) {
     await tg("sendMessage", { chat_id, text: "Only the magazine's admin chat can approve an issue." });
     return;
   }
@@ -1680,6 +1769,12 @@ async function handleText(message: any) {
     return;
   }
 
+  // The magazine admin's own command: reviewing the day's stories.
+  if (!isGroup && /^\/stories(?:@\S+)?(?:\s|$)/i.test(text) && (await isMagazineAdmin(chat_id))) {
+    await sendStories(chat_id, text.split(/\s+/)[1]);
+    return;
+  }
+
   const commands = await getCommands();
   if (!commands) return handleTextLegacy(chat_id, user_id, text, isGroup);
 
@@ -1797,6 +1892,8 @@ Deno.serve(async (req) => {
       } else if (data === "check_cancel") {
         await supabase.from("bot_check_sessions").delete().eq("chat_id", chat_id);
         await tg("sendMessage", { chat_id, text: "Answer check cancelled. Start again any time: /check" });
+      } else if (data.startsWith(TRIAGE)) {
+        await handleStoryTap(chat_id, message_id, data);
       } else if (data.startsWith("ca_ok:")) {
         await requestIssueApproval(chat_id, message_id, data.slice("ca_ok:".length), cq.message.reply_markup);
       } else if (data === "daily_menu") {

@@ -3,6 +3,7 @@
 // counts what the daily screen (or the "draft ready" message) already has.
 import { CATEGORIES } from "@/lib/current-affairs";
 import { rajasthanBalance } from "@/lib/ca-report";
+import { TRIAGE } from "../../supabase/functions/_shared/ca-triage.ts";
 
 export type CheckAction =
   | { kind: "story"; id: string }
@@ -207,6 +208,8 @@ export function draftButtons(checks: Check[], date: string, origin?: string): Tg
   const rows: TgButton[][] = [];
   if (!todo.length)
     rows.push([{ text: "✅ Approve & schedule", callback_data: `${APPROVE_DATA}${date}` }]);
+  // Story by story in the bot: keep or drop.
+  rows.push([{ text: "📋 Keep or drop stories", callback_data: `${TRIAGE}s:${date}` }]);
   if (origin) {
     const page = `${origin}/admin?section=ca.daily&date=${date}`;
     if (todo.some((c) => c.key === "facts")) {

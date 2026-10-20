@@ -56,6 +56,7 @@ import { StoryList } from "@/components/ca-story-review";
 import { SkippedNews } from "@/components/ca-skipped-news";
 import { DayChecklist } from "@/components/ca-day-checklist";
 import { FactCheckDialog } from "@/components/ca-fact-check";
+import { HouseStyle } from "@/components/ca-house-style";
 import { dayChecklist, type CheckAction } from "@/lib/ca-checklist";
 import { FeatureBox } from "@/components/ca-feature-box";
 import { Badge, BulkBar, errorText, useChosen } from "@/components/ca-ui";
@@ -880,8 +881,14 @@ function CorrectionsBox({
   async function decide(id: string, approve: boolean) {
     setBusy(id);
     try {
-      await decideFn({ data: { id, approve } });
-      toast.success(approve ? "Correction applied" : "Correction dismissed");
+      const r = await decideFn({ data: { id, approve } });
+      toast.success(
+        !approve
+          ? "Correction dismissed"
+          : r.noted
+            ? "Correction applied and posted to the channel"
+            : "Correction applied",
+      );
       onChanged();
     } catch (e) {
       toast.error(errorText(e, "Failed"));
@@ -1138,8 +1145,10 @@ function SettingsPanel() {
 
   useEffect(() => {
     if (q.data && !form) {
+      // House style rules are edited (and saved) on their own, below.
+      const { style_rules: _rules, ...rest } = q.data;
       setForm({
-        ...q.data,
+        ...rest,
         trusted_domains: q.data.trusted_domains.join("\n"),
         daily_stories: String(q.data.daily_stories),
         daily_editorials: String(q.data.daily_editorials),
@@ -1171,6 +1180,7 @@ function SettingsPanel() {
           add_to_knowledge_base: Boolean(form!.add_to_knowledge_base),
           add_to_flashcards: Boolean(form!.add_to_flashcards),
           weekly_report: Boolean(form!.weekly_report),
+          post_corrections: Boolean(form!.post_corrections),
           min_rajasthan: Math.min(
             20,
             Math.max(0, Math.round(Number(text("min_rajasthan") || "5") || 0)),
@@ -1269,6 +1279,19 @@ function SettingsPanel() {
               Right after the PDF, the issue's MCQs go to the channel as Telegram quiz polls (Hindi
               and English), so readers can test themselves and share them. The same questions reach
               students who turned on the bot's daily quiz (/daily).
+            </span>
+          </span>
+        </label>
+        <label className="flex items-start gap-3">
+          <Switch
+            checked={Boolean(form.post_corrections)}
+            onCheckedChange={(v) => set("post_corrections", v)}
+          />
+          <span className="text-sm">
+            <span className="font-medium">Post corrections to the channel</span>
+            <span className="block text-muted-foreground">
+              When you approve a correction to a story whose issue is already posted, a short note
+              (Hindi and English) goes to the channel as a reply under that day's PDF.
             </span>
           </span>
         </label>
@@ -1535,6 +1558,8 @@ function SettingsPanel() {
       <Button onClick={save} disabled={saving}>
         {saving ? "Saving…" : "Save settings"}
       </Button>
+
+      <HouseStyle />
     </div>
   );
 }
