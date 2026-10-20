@@ -3,7 +3,22 @@
 // and quiz state in bot_sessions. Public webhook (Telegram calls it directly).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { runTelegramAnswerJob } from "../_shared/telegram-answer-job.ts";
-import { TRIAGE, nextIndex, parseHeadline, storyCard, summaryCard, triageOrder, type TriageStory } from "../_shared/ca-triage.ts";
+import { TRIAGE, editCard, nextIndex, parseBiLines, storyCard, summaryCard, triageOrder, type TriageStory } from "../_shared/ca-triage.ts";
+import {
+  STYLE_TG,
+  afterFix,
+  afterKeep,
+  orderBreaks,
+  partFromCode,
+  partName,
+  partText,
+  styleCard,
+  styleDoneCard,
+  styleStatus,
+  withPart,
+  type StyleCheck,
+  type StyleContent,
+} from "../_shared/ca-style-check.ts";
 import { CHECK_PHOTO_MAX_BYTES, checkQuestionInput, pickCheckPhoto, validCheckAnswer, type CheckPhoto } from "../_shared/telegram-check-input.ts";
 import {
   SaathiAiError,
@@ -1297,18 +1312,19 @@ async function dayLocked(date: string): Promise<boolean> {
   return !!data;
 }
 
+// The latest day with stories (usually the draft being reviewed).
+async function latestStoryDate(): Promise<string> {
+  const { data } = await supabase
+    .from("ca_items")
+    .select("issue_date")
+    .order("issue_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as { issue_date?: string } | null)?.issue_date ?? "";
+}
+
 async function sendStories(chat_id: number, arg: string | undefined) {
-  let date = arg && /^\d{4}-\d{2}-\d{2}$/.test(arg) ? arg : "";
-  if (!date) {
-    // The latest day with stories (usually the draft being reviewed).
-    const { data } = await supabase
-      .from("ca_items")
-      .select("issue_date")
-      .order("issue_date", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    date = (data as { issue_date?: string } | null)?.issue_date ?? "";
-  }
+  const date = arg && /^\d{4}-\d{2}-\d{2}$/.test(arg) ? arg : await latestStoryDate();
   const rows = date ? await dayStories(date) : [];
   if (!rows.length) {
     await tg("sendMessage", { chat_id, text: `No stories${date ? ` for ${date}` : ""} yet.` });
@@ -1317,77 +1333,59 @@ async function sendStories(chat_id: number, arg: string | undefined) {
   await tg("sendMessage", { chat_id, parse_mode: "HTML", ...storyCard(rows, 0) });
 }
 
-// ---- Editing a story's headline from its card: the admin replies with it ----
-const headlineKey = (chat_id: number) => `ca_headline_edit:${chat_id}`;
-const HEADLINE_EDIT_MS = 15 * 60_000;
+// ---- Changing a story's text from its card: the admin replies with it ----
+// "Edit text" on a story card (or "Write my own" on a house style note) asks
+// for one part; the next message from the admin's chat is its new text.
+const editKey = (chat_id: number) => `ca_story_edit:${chat_id}`;
+const EDIT_MS = 15 * 60_000;
+type PendingEdit = { item_id: string; part: string };
+type StoryRow = {
+  id: string;
+  issue_date: string;
+  facts: unknown;
+  source_ids: unknown;
+  content: StyleContent | null;
+  context_sources: unknown;
+  syllabus_topic_id: string | null;
+  unit: string | null;
+};
+const lockedText = (date: string) =>
+  `The issue for ${date} is already scheduled or posted. Cancel the schedule in the admin panel to change it.`;
+const escHtml = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const isPoint = (part: string) => part.startsWith("point ");
 
-async function pendingHeadline(chat_id: number): Promise<string | null> {
-  const { data } = await supabase.from("bot_settings").select("value").eq("key", headlineKey(chat_id)).maybeSingle();
-  const v = (data?.value ?? null) as { item_id?: string; at?: string } | null;
-  if (!v?.item_id || Date.now() - Date.parse(v.at ?? "") > HEADLINE_EDIT_MS) return null;
-  return v.item_id;
+async function pendingEdit(chat_id: number): Promise<PendingEdit | null> {
+  const { data } = await supabase.from("bot_settings").select("value").eq("key", editKey(chat_id)).maybeSingle();
+  const v = (data?.value ?? null) as { item_id?: string; part?: string; at?: string } | null;
+  if (!v?.item_id || Date.now() - Date.parse(v.at ?? "") > EDIT_MS) return null;
+  return { item_id: v.item_id, part: v.part ?? "headline" };
 }
 
-async function askHeadline(chat_id: number, item_id: string) {
-  const { data: it } = await supabase.from("ca_items").select("issue_date,content").eq("id", item_id).maybeSingle();
-  const item = it as { issue_date: string; content: { headline?: { en: string; hi: string } } | null } | null;
-  if (!item?.content) {
-    await tg("sendMessage", { chat_id, text: "This story isn't written yet." });
-    return;
-  }
-  if (await dayLocked(item.issue_date)) {
-    await tg("sendMessage", { chat_id, text: `The issue for ${item.issue_date} is already scheduled or posted. Cancel the schedule in the admin panel to change it.` });
-    return;
-  }
-  await supabase.from("bot_settings").upsert({
-    key: headlineKey(chat_id),
-    value: { item_id, at: new Date().toISOString() },
-    updated_at: new Date().toISOString(),
-  });
-  const h = item.content.headline ?? { en: "", hi: "" };
-  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  await tg("sendMessage", {
-    chat_id,
-    parse_mode: "HTML",
-    text: `✏️ Send the new headline for:\n<b>${esc(h.hi || h.en)}</b>${h.hi && h.en ? `\n${esc(h.en)}` : ""}\n\nOne line in Hindi and one in English, or just the one to change. /cancel to stop.`,
-    reply_markup: { force_reply: true, input_field_placeholder: "New headline" },
-  });
-}
-
-// The reply with the new headline: saved like an edit in the admin panel
-// (the story as it was goes into its History, once per editing session).
-async function saveHeadline(chat_id: number, item_id: string, text: string) {
-  const next = parseHeadline(text);
-  if (!next) {
-    await tg("sendMessage", { chat_id, text: "Send the headline as text (Hindi and/or English), or /cancel." });
-    return;
-  }
-  const { data: it } = await supabase
+async function loadStory(item_id: string): Promise<StoryRow | null> {
+  const { data } = await supabase
     .from("ca_items")
-    .select("id,issue_date,headline,facts,source_ids,content,context_sources,syllabus_topic_id,unit")
+    .select("id,issue_date,facts,source_ids,content,context_sources,syllabus_topic_id,unit")
     .eq("id", item_id)
     .maybeSingle();
-  const item = it as any;
-  await supabase.from("bot_settings").delete().eq("key", headlineKey(chat_id));
-  if (!item?.content) {
-    await tg("sendMessage", { chat_id, text: "That story is no longer there." });
-    return;
-  }
-  if (await dayLocked(item.issue_date)) {
-    await tg("sendMessage", { chat_id, text: `The issue for ${item.issue_date} is already scheduled or posted, so the headline wasn't changed.` });
-    return;
-  }
+  return (data as StoryRow | null) ?? null;
+}
+
+// A change to a story's text from Telegram, kept like an edit in the admin
+// panel: the story as it was goes into its History (once per editing
+// session), and only the latest versions are kept.
+const VERSIONS_KEPT = 10;
+async function saveStoryContent(item: StoryRow, content: StyleContent): Promise<boolean> {
   const { data: lastVersion } = await supabase
     .from("ca_item_versions")
     .select("reason,created_at")
-    .eq("item_id", item_id)
+    .eq("item_id", item.id)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
   const v = lastVersion as { reason: string; created_at: string } | null;
-  if (!(v?.reason === "edit" && Date.now() - Date.parse(v.created_at) < 30 * 60_000)) {
+  if (item.content && !(v?.reason === "edit" && Date.now() - Date.parse(v.created_at) < 30 * 60_000)) {
     await supabase.from("ca_item_versions").insert({
-      item_id,
+      item_id: item.id,
       reason: "edit",
       headline: item.content.headline?.en || item.content.headline?.hi || "",
       snapshot: {
@@ -1399,22 +1397,200 @@ async function saveHeadline(chat_id: number, item_id: string, text: string) {
         unit: item.unit,
       },
     });
+    const { data: old } = await supabase
+      .from("ca_item_versions")
+      .select("id")
+      .eq("item_id", item.id)
+      .order("created_at", { ascending: false })
+      .range(VERSIONS_KEPT, VERSIONS_KEPT + 100);
+    const ids = ((old ?? []) as { id: string }[]).map((r) => r.id);
+    if (ids.length) await supabase.from("ca_item_versions").delete().in("id", ids);
   }
-  const headline = { ...(item.content.headline ?? { en: "", hi: "" }), ...next };
   const { error } = await supabase
     .from("ca_items")
-    .update({ content: { ...item.content, headline }, updated_at: new Date().toISOString() })
-    .eq("id", item_id);
-  if (error) {
-    console.error("ca headline", error.message);
-    await tg("sendMessage", { chat_id, text: "Couldn't save the headline. Try again in the admin panel." });
+    .update({ content, updated_at: new Date().toISOString() })
+    .eq("id", item.id);
+  if (error) console.error("ca story edit", error.message);
+  return !error;
+}
+
+async function askEdit(chat_id: number, item_id: string, part: string) {
+  const item = await loadStory(item_id);
+  if (!item?.content) {
+    await tg("sendMessage", { chat_id, text: "This story isn't written yet." });
     return;
   }
-  // Back to the story's card, to carry on.
-  const rows = await dayStories(item.issue_date);
-  const at = rows.findIndex((r) => r.id === item_id);
-  await tg("sendMessage", { chat_id, text: "✅ Headline saved." });
+  if (await dayLocked(item.issue_date)) {
+    await tg("sendMessage", { chat_id, text: lockedText(item.issue_date) });
+    return;
+  }
+  const now = [partText(item.content, part, "hi"), partText(item.content, part, "en")].filter(Boolean);
+  if (isPoint(part) && !now.length) {
+    await tg("sendMessage", { chat_id, text: "That point is no longer in the story." });
+    return;
+  }
+  await supabase.from("bot_settings").upsert({
+    key: editKey(chat_id),
+    value: { item_id, part, at: new Date().toISOString() },
+    updated_at: new Date().toISOString(),
+  });
+  const label = part === "why" ? "“Why it matters” line" : partName(part).toLowerCase();
+  const headline = item.content.headline?.hi || item.content.headline?.en || "";
+  const shown = now.map((t, i) => (i ? escHtml(t) : `<b>${escHtml(t)}</b>`)).join("\n") || "(empty)";
+  await tg("sendMessage", {
+    chat_id,
+    parse_mode: "HTML",
+    text: `${
+      part === "headline"
+        ? "✏️ Send the new headline for:"
+        : `✏️ Send the new ${label} of “${escHtml(headline)}”. Now:`
+    }\n${shown}\n\nOne line in Hindi and one in English, or just the one to change. /cancel to stop.`,
+    reply_markup: { force_reply: true, input_field_placeholder: `New ${label}` },
+  });
+}
+
+// The reply with the new text: saved like an edit in the admin panel.
+async function saveEdit(chat_id: number, edit: PendingEdit, text: string) {
+  const next = parseBiLines(text, edit.part === "headline" ? 200 : 400);
+  if (!next) {
+    await tg("sendMessage", { chat_id, text: "Send the new text (Hindi and/or English), or /cancel." });
+    return;
+  }
+  await supabase.from("bot_settings").delete().eq("key", editKey(chat_id));
+  const item = await loadStory(edit.item_id);
+  if (!item?.content) {
+    await tg("sendMessage", { chat_id, text: "That story is no longer there." });
+    return;
+  }
+  if (await dayLocked(item.issue_date)) {
+    await tg("sendMessage", {
+      chat_id,
+      text: `The issue for ${item.issue_date} is already scheduled or posted, so the ${partName(edit.part).toLowerCase()} wasn't changed.`,
+    });
+    return;
+  }
+  if (isPoint(edit.part) && !partText(item.content, edit.part, "en") && !partText(item.content, edit.part, "hi")) {
+    await tg("sendMessage", { chat_id, text: "That point is no longer in the story." });
+    return;
+  }
+  let content = item.content;
+  for (const lang of ["en", "hi"] as const) {
+    const t = next[lang];
+    if (t) content = withPart(content, edit.part, lang, t);
+  }
+  if (!(await saveStoryContent(item, content))) {
+    await tg("sendMessage", { chat_id, text: "Couldn't save it. Try again in the admin panel." });
+    return;
+  }
+  // Back to the story's card, to carry on (or to the house style notes left,
+  // when the text was written instead of a note's fix).
+  const [rows, style] = await Promise.all([dayStories(item.issue_date), styleState(item.issue_date)]);
+  const at = rows.findIndex((r) => r.id === item.id);
+  await tg("sendMessage", {
+    chat_id,
+    text: `✅ ${partName(edit.part)} saved.`,
+    ...(style.open.length
+      ? {
+          reply_markup: {
+            inline_keyboard: [[{ text: `✍️ House style notes left: ${style.open.length}`, callback_data: `${STYLE_TG}s:${item.issue_date}` }]],
+          },
+        }
+      : {}),
+  });
   if (at >= 0) await tg("sendMessage", { chat_id, parse_mode: "HTML", ...storyCard(rows, at) });
+}
+
+// ---------- House style notes from Telegram (admin only) ----------
+// "Fix house style" under the "draft ready" message, or /style [date]: the
+// day's open notes from the house style check, one at a time, to put
+// SAATHI's fix in or keep the text. Saved like the admin panel does.
+async function styleState(date: string) {
+  const [{ data: saved }, { data: mag }, rows] = await Promise.all([
+    supabase.from("bot_settings").select("value").eq("key", `ca_style_check:${date}`).maybeSingle(),
+    supabase.from("bot_settings").select("value").eq("key", "ca_magazine").maybeSingle(),
+    dayStories(date),
+  ]);
+  const check = (saved?.value ?? null) as StyleCheck | null;
+  const rules = ((mag?.value as { style_rules?: string[] } | null)?.style_rules ?? []).filter(Boolean);
+  const status = styleStatus(check, rows as unknown as { id: string; status: string; content: StyleContent | null }[], rules);
+  const open = orderBreaks(status?.open ?? [], rows.map((r) => r.id));
+  const headlines = new Map(rows.map((r) => [r.id, r.content?.headline?.en || r.content?.headline?.hi || r.headline]));
+  return { check, status, open, headlines };
+}
+
+async function showStyle(chat_id: number, message_id: number | null, date: string, what = "s", id = "") {
+  let { check, status, open, headlines } = await styleState(date);
+  const show = (card: { text: string; reply_markup?: unknown }) =>
+    message_id
+      ? tg("editMessageText", { chat_id, message_id, parse_mode: "HTML", ...card })
+      : tg("sendMessage", { chat_id, parse_mode: "HTML", ...card });
+  if (!status || !check) {
+    await tg("sendMessage", {
+      chat_id,
+      text: status
+        ? `The stories for ${date} haven't been checked against your house style yet. The evening collection does it, or press Check in the admin panel (Before you schedule).`
+        : `No house style rules, or no written stories for ${date}.`,
+    });
+    return;
+  }
+  if (!status.checked) {
+    await tg("sendMessage", {
+      chat_id,
+      text: `Your house style rules changed since the stories for ${date} were checked. Check them again in the admin panel (Before you schedule).`,
+    });
+    return;
+  }
+  let at = Math.max(0, open.findIndex((b) => b.id === id));
+  let handled = false;
+  if (what === "a" || what === "k") {
+    const b = open.find((x) => x.id === id);
+    if (b && (await dayLocked(date))) {
+      await tg("sendMessage", { chat_id, text: lockedText(date) });
+      return;
+    }
+    if (b && what === "a") {
+      const item = await loadStory(b.item_id);
+      if (!item?.content || partText(item.content, b.part, b.lang) !== b.text) {
+        await tg("sendMessage", { chat_id, text: "That part of the story changed since the check, so the fix wasn't put in." });
+        return;
+      }
+      const fixed = withPart(item.content, b.part, b.lang, b.fix);
+      if (!(await saveStoryContent(item, fixed))) {
+        await tg("sendMessage", { chat_id, text: "Couldn't save the fix. Try again in the admin panel." });
+        return;
+      }
+      check = afterFix(check, b, item.content, fixed);
+    } else if (b) {
+      check = afterKeep(check, b);
+    }
+    if (b) {
+      await supabase.from("bot_settings").upsert({
+        key: `ca_style_check:${date}`,
+        value: check,
+        updated_at: new Date().toISOString(),
+      });
+      // The next note takes this one's place.
+      ({ open, headlines } = await styleState(date));
+      handled = true;
+    }
+  } else if (what === "n") {
+    at = open.length ? (at + 1) % open.length : 0;
+  } else if (what === "p") {
+    at = open.length ? (at - 1 + open.length) % open.length : 0;
+  }
+  if (at >= open.length) at = 0;
+  await show(open.length ? styleCard(open, at, date, headlines) : styleDoneCard(date, handled));
+}
+
+async function handleStyleTap(chat_id: number, message_id: number, data: string) {
+  const [what = "", date = "", id = ""] = data.slice(STYLE_TG.length).split(":");
+  if (what === "x") return;
+  if (!(await isMagazineAdmin(chat_id))) {
+    await tg("sendMessage", { chat_id, text: "Only the magazine's admin chat can fix house style notes." });
+    return;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+  await showStyle(chat_id, what === "s" ? null : message_id, date, what, id);
 }
 
 async function handleStoryTap(chat_id: number, message_id: number, data: string) {
@@ -1425,7 +1601,8 @@ async function handleStoryTap(chat_id: number, message_id: number, data: string)
     return;
   }
   if (what === "h") {
-    await askHeadline(chat_id, arg);
+    const part = partFromCode(data.slice(TRIAGE.length).split(":")[2]);
+    if (part) await askEdit(chat_id, arg, part);
     return;
   }
   let date = arg;
@@ -1454,7 +1631,13 @@ async function handleStoryTap(chat_id: number, message_id: number, data: string)
   const rows = await dayStories(date);
   if (!rows.length) return;
   const at = nextIndex(what, rows.findIndex((r) => r.id === arg), rows.length);
-  const card = at >= rows.length ? summaryCard(rows, date) : storyCard(rows, at);
+  // "Edit text": the same message shows the story's parts to choose from.
+  const card =
+    what === "e" && rows[at]?.content
+      ? editCard(rows, at)
+      : at >= rows.length
+        ? summaryCard(rows, date)
+        : storyCard(rows, at);
   if (what === "s") await tg("sendMessage", { chat_id, parse_mode: "HTML", ...card });
   else await tg("editMessageText", { chat_id, message_id, parse_mode: "HTML", ...card });
 }
@@ -1867,9 +2050,9 @@ async function handleText(message: any) {
   const user_id: number = message.from?.id ?? chat_id;
   const text: string = message.text.trim();
 
-  if (!isGroup && /^\/cancel(?:@\S+)?$/i.test(text) && (await pendingHeadline(chat_id))) {
-    await supabase.from("bot_settings").delete().eq("key", headlineKey(chat_id));
-    await tg("sendMessage", { chat_id, text: "Headline edit cancelled." });
+  if (!isGroup && /^\/cancel(?:@\S+)?$/i.test(text) && (await pendingEdit(chat_id))) {
+    await supabase.from("bot_settings").delete().eq("key", editKey(chat_id));
+    await tg("sendMessage", { chat_id, text: "Edit cancelled." });
     return;
   }
   if (!isGroup && /^\/cancel(?:@\S+)?$/i.test(text)) {
@@ -1883,11 +2066,19 @@ async function handleText(message: any) {
     await sendStories(chat_id, text.split(/\s+/)[1]);
     return;
   }
-  // A new headline, after "Edit headline" on a story card.
+  // ...and the day's house style notes.
+  if (!isGroup && /^\/style(?:@\S+)?(?:\s|$)/i.test(text) && (await isMagazineAdmin(chat_id))) {
+    const arg = text.split(/\s+/)[1];
+    const date = arg && /^\d{4}-\d{2}-\d{2}$/.test(arg) ? arg : await latestStoryDate();
+    if (date) await showStyle(chat_id, null, date);
+    else await tg("sendMessage", { chat_id, text: "No stories yet." });
+    return;
+  }
+  // New text for a story, after "Edit text" on its card.
   if (!isGroup && !text.startsWith("/")) {
-    const editing = await pendingHeadline(chat_id);
+    const editing = await pendingEdit(chat_id);
     if (editing && (await isMagazineAdmin(chat_id))) {
-      await saveHeadline(chat_id, editing, text);
+      await saveEdit(chat_id, editing, text);
       return;
     }
   }
@@ -2011,6 +2202,8 @@ Deno.serve(async (req) => {
         await tg("sendMessage", { chat_id, text: "Answer check cancelled. Start again any time: /check" });
       } else if (data.startsWith(TRIAGE)) {
         await handleStoryTap(chat_id, message_id, data);
+      } else if (data.startsWith(STYLE_TG)) {
+        await handleStyleTap(chat_id, message_id, data);
       } else if (data.startsWith("ca_ok:")) {
         await requestIssueApproval(chat_id, message_id, data.slice("ca_ok:".length), cq.message.reply_markup);
       } else if (data === "daily_menu") {

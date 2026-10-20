@@ -1,5 +1,6 @@
 // The admin's weekly quality report on Telegram and the Rajasthan balance
 // check for a day's issue. Pure helpers: counting and text, no database here.
+import { ruleKey, type StyleTally } from "../../supabase/functions/_shared/ca-style-check.ts";
 
 // RPSC asks a lot about Rajasthan; fewer stories than this in a day's issue is
 // flagged in the admin panel and in the "draft ready" message.
@@ -84,7 +85,65 @@ export type WeeklyStats = {
   // House style rules SAATHI suggested from the week's edits, waiting for
   // the editor.
   styleSuggestions?: number;
+  // Each house style rule's week in the style check.
+  style?: StyleScore[];
 };
+
+// One house style rule's week: notes the style check found, fixed with
+// SAATHI's text, and kept as they were.
+export type StyleScore = { rule: string; found: number; fixed: number; kept: number };
+
+// The days' tallies added up for each current rule (rules compared without
+// case or punctuation).
+export function styleScores(tallies: StyleTally[], rules: string[]): StyleScore[] {
+  const sums = new Map<string, Omit<StyleScore, "rule">>();
+  for (const t of tallies) {
+    for (const [rule, v] of Object.entries(t ?? {})) {
+      const k = ruleKey(rule);
+      const s = sums.get(k) ?? { found: 0, fixed: 0, kept: 0 };
+      sums.set(k, { found: s.found + v.found, fixed: s.fixed + v.fixed, kept: s.kept + v.kept });
+    }
+  }
+  return rules.map((rule) => ({
+    rule,
+    ...(sums.get(ruleKey(rule)) ?? { found: 0, fixed: 0, kept: 0 }),
+  }));
+}
+
+// The rule the editor should look at: one whose notes are mostly kept as
+// they were (the rule says something they don't want), or else the one
+// SAATHI breaks most.
+export function styleHint(scores: StyleScore[]): string {
+  const busy = scores.filter((s) => s.found >= 3);
+  const waved = busy
+    .filter((s) => s.kept / s.found >= 0.5)
+    .sort((a, b) => b.kept / b.found - a.kept / a.found)[0];
+  if (waved)
+    return `👉 You kept most notes on “${esc(waved.rule)}” as they were: reword the rule or drop it in Magazine settings → House style.`;
+  const most = busy.sort((a, b) => b.found - a.found)[0];
+  if (most)
+    return `👉 SAATHI breaks “${esc(most.rule)}” most (${most.found} times). Adding an example to the rule may help SAATHI follow it.`;
+  return "";
+}
+
+export function styleScoreLines(scores: StyleScore[]): string[] {
+  if (!scores.length) return [];
+  const total = (k: "found" | "fixed" | "kept") => scores.reduce((n, s) => n + s[k], 0);
+  const found = total("found");
+  const hint = styleHint(scores);
+  return [
+    "",
+    `<b>House style</b>`,
+    found
+      ? `✍️ ${found} note${found === 1 ? "" : "s"} from the style check: ${total("fixed")} fixed, ${total("kept")} kept as written`
+      : "✅ No house style notes this week.",
+    ...scores.map(
+      (s) =>
+        `• ${esc(s.rule)}: ${s.found ? `${s.found} · fixed ${s.fixed} · kept ${s.kept}` : "no notes"}`,
+    ),
+    ...(hint ? [hint] : []),
+  ];
+}
 
 // One day's fixing: facts in the issue, facts whose quote wasn't in the source
 // as written, stories edited by hand, rewritten (from highlights or written
@@ -171,6 +230,7 @@ export function weeklyReportText(s: WeeklyStats, adminUrl?: string): string {
     lines.push(`   Books needed for: ${esc(s.uncoveredConcepts.slice(0, 5).join(", "))}`);
   if (s.pendingCorrections) lines.push(`📝 Corrections waiting for you: ${s.pendingCorrections}`);
   if (s.accuracy) lines.push(...accuracyLines(s.accuracy));
+  if (s.style) lines.push(...styleScoreLines(s.style));
   if (s.styleSuggestions)
     lines.push(
       `✍️ SAATHI suggests ${s.styleSuggestions} house style rule${s.styleSuggestions === 1 ? "" : "s"} from your edits: add the ones you agree with in Magazine settings → House style.`,

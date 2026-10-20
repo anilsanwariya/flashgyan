@@ -101,6 +101,8 @@ import {
   STYLE_CHECK_STORIES,
   STYLE_MIN_EDITS,
   STYLE_RULES_MAX,
+  afterFix,
+  afterKeep,
   editPairs,
   parseStyleBreaks,
   parseStyleRules,
@@ -110,6 +112,7 @@ import {
   styleCheckMessages,
   styleMessages,
   styleStatus,
+  tallyFound,
   withPart,
   type EditPair,
   type StyleCheck,
@@ -2352,6 +2355,7 @@ export async function checkStyle(
       ...found,
     ],
     dismissed: (saved?.dismissed ?? []).slice(-200),
+    tally: tallyFound(saved, found),
   };
   await saveStyleCheck(date, value);
   const waved = new Set(value.dismissed);
@@ -2375,26 +2379,10 @@ export async function applyStyleFix(date: string, breakId: string): Promise<CaIt
   if (!content || partText(content, b.part, b.lang) !== b.text) {
     throw new Error("That part of the story has changed since the check. Check again.");
   }
-  const wasChecked = saved.stories[item.id] === storyFingerprint(content);
   const updated = await asEdit(item.id, () =>
     updateItem(item.id, { content: withPart(content, b.part, b.lang, b.fix) }),
   );
-  // The fix is the only change, so the story stays checked, unless another
-  // note was on the same text: the new text needs checking again.
-  const dismissed = new Set(saved.dismissed);
-  const sameText = saved.breaks.filter(
-    (x) => x.item_id === b.item_id && x.part === b.part && x.lang === b.lang,
-  );
-  const stories = { ...saved.stories };
-  if (wasChecked && updated.content) {
-    if (sameText.some((x) => x.id !== b.id && !dismissed.has(x.id))) delete stories[item.id];
-    else stories[item.id] = storyFingerprint(updated.content);
-  }
-  await saveStyleCheck(date, {
-    ...saved,
-    stories,
-    breaks: saved.breaks.filter((x) => !sameText.includes(x)),
-  });
+  if (updated.content) await saveStyleCheck(date, afterFix(saved, b, content, updated.content));
   return updated;
 }
 
@@ -2402,10 +2390,9 @@ export async function applyStyleFix(date: string, breakId: string): Promise<CaIt
 // find the same thing in the same text).
 export async function dismissStyleBreak(date: string, breakId: string): Promise<StyleCheck> {
   const saved = await getStyleCheck(date);
-  if (!saved?.breaks.some((b) => b.id === breakId)) {
-    throw new Error("That house style note is no longer there.");
-  }
-  const next = { ...saved, dismissed: uniq([...saved.dismissed, breakId]).slice(-200) };
+  const b = saved?.breaks.find((x) => x.id === breakId);
+  if (!saved || !b) throw new Error("That house style note is no longer there.");
+  const next = afterKeep(saved, b);
   await saveStyleCheck(date, next);
   return next;
 }

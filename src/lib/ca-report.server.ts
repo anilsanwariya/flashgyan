@@ -6,11 +6,14 @@ import { uncoveredConcepts, type CaFact, type StaticFact } from "@/lib/current-a
 import {
   rajasthanBalance,
   reportWeek,
+  styleScores,
   weeklyReportDue,
   weeklyReportText,
   type Accuracy,
+  type StyleScore,
   type WeeklyStats,
 } from "@/lib/ca-report";
+import type { StyleCheck } from "@/lib/ca-style";
 import { getMagazineSettings, suggestStyleRules } from "@/lib/current-affairs.server";
 
 const from = (table: string) => supabaseAdmin.from(table as never);
@@ -113,7 +116,29 @@ export async function weeklyStats(fromDate: string, toDate: string): Promise<Wee
     knowledgeGaps,
     quiz: await quizStats(fromDate, toDate),
     accuracy: await accuracyStats(fromDate, toDate, kept, news.length),
+    style: await styleWeek(fromDate, toDate, settings.style_rules),
   };
+}
+
+// The days' house style checks added up for each rule (each day's check
+// keeps a tally of the notes it found, fixed and kept).
+export async function styleWeek(
+  fromDate: string,
+  toDate: string,
+  rules: string[],
+): Promise<StyleScore[]> {
+  if (!rules.length) return [];
+  const keys: string[] = [];
+  for (let d = new Date(`${fromDate}T00:00:00Z`); d <= new Date(`${toDate}T00:00:00Z`);) {
+    keys.push(`ca_style_check:${d.toISOString().slice(0, 10)}`);
+    d = new Date(d.getTime() + 86_400_000);
+  }
+  const { data, error } = await from("bot_settings").select("value").in("key", keys.slice(0, 62));
+  if (error) return styleScores([], rules);
+  return styleScores(
+    ((data ?? []) as { value: StyleCheck | null }[]).map((r) => r.value?.tally ?? {}),
+    rules,
+  );
 }
 
 // How much fixing SAATHI's drafts needed, day by day: facts whose quote
