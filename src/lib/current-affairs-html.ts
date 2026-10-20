@@ -1,6 +1,7 @@
-// The magazine as a printable A4 HTML page (Hindi and English side by side).
-// Cloudflare's browser rendering turns it into the PDF; the admin panel shows
-// the same HTML as a preview.
+// The magazine as a printable A4 HTML page, one language a page: the Hindi
+// issue and the English issue are made from the same stories. Cloudflare's
+// browser rendering turns it into the PDF; the admin panel shows the same
+// HTML as a preview.
 import {
   CATEGORIES,
   STATIC_CONNECT,
@@ -45,10 +46,93 @@ const esc = (s: string | null | undefined) =>
 const safeColor = (c: string) => (/^#[0-9a-fA-F]{3,8}$/.test(c) ? c : "#6d28d9");
 const safeUrl = (u: string) => (/^https:\/\/[^\s"'<>]+$/.test(u) ? u : "");
 
-function biBlock(b: Bi | null | undefined, cls = ""): string {
-  if (!b || (!b.hi && !b.en)) return "";
-  return `<div class="bi ${cls}"><div class="hi" lang="hi">${esc(b.hi)}</div><div class="en" lang="en">${esc(b.en)}</div></div>`;
+export type Lang = "en" | "hi";
+
+// A part in the issue's language (the other one when it's missing: the
+// Hindi–English check flags those before scheduling).
+const pick = (b: Bi | null | undefined, lang: Lang) =>
+  ((lang === "hi" ? b?.hi || b?.en : b?.en || b?.hi) ?? "").trim();
+
+function block(b: Bi | null | undefined, lang: Lang, cls = ""): string {
+  const t = pick(b, lang);
+  return t ? `<div class="bi ${cls}">${esc(t)}</div>` : "";
 }
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+// The page's own words in each issue.
+const T = {
+  en: {
+    eyebrow: "RAS Prelims &amp; Mains",
+    stories: (n: number) => plural(n, "story", "stories").replace(/^\d+ /, ""),
+    sections: (n: number) => (n === 1 ? "section" : "sections"),
+    charts: "charts &amp; diagrams",
+    questions: "practice questions",
+    inThisIssue: "In this issue",
+    contents: "Contents",
+    corrections: "Corrections",
+    background: "Background",
+    revision: "60-Second Revision",
+    practice: "Practice Questions",
+    ctaTitle: "Get it every morning on Telegram",
+    ctaText: "Daily current affairs for RAS, free.",
+    edition: "English edition",
+    source: "Source",
+    rajasthan: "Rajasthan",
+    staticConnect: STATIC_CONNECT.en,
+    why: "Why it matters",
+    dyk: "Did you know?",
+    rpsc: "RPSC pattern",
+    partA: "Part A: Prelims",
+    partB: "Part B: Mains",
+    key: "Answer key (Part A)",
+    quick: "Quick questions",
+    quickLines: "Quick questions and key lines",
+    oneLine: "One line per story",
+    article: "Background Article",
+    articleSub: "Static topic behind this month's news",
+    thisMonth: (n: number) => `${n} this month`,
+    correctionsIntro:
+      "These facts changed after the day's issue was posted. The stories in this issue already show them corrected.",
+    weekdays: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+    letters: ["a", "b", "c", "d"],
+  },
+  hi: {
+    eyebrow: "RAS प्रारंभिक एवं मुख्य परीक्षा",
+    stories: (n: number) => (n === 1 ? "खबर" : "खबरें"),
+    sections: () => "खंड",
+    charts: "चार्ट व आरेख",
+    questions: "अभ्यास प्रश्न",
+    inThisIssue: "इस अंक में",
+    contents: "विषय-सूची",
+    corrections: "सुधार",
+    background: "पृष्ठभूमि",
+    revision: "60 सेकंड रिवीजन",
+    practice: "अभ्यास प्रश्न",
+    ctaTitle: "हर सुबह टेलीग्राम पर पाएँ",
+    ctaText: "RAS के लिए दैनिक करेंट अफेयर्स, निःशुल्क।",
+    edition: "हिंदी संस्करण",
+    source: "स्रोत",
+    rajasthan: "राजस्थान",
+    staticConnect: STATIC_CONNECT.hi,
+    why: "क्यों महत्वपूर्ण",
+    dyk: "क्या आप जानते हैं?",
+    rpsc: "RPSC पैटर्न",
+    partA: "भाग अ: प्रारंभिक परीक्षा",
+    partB: "भाग ब: मुख्य परीक्षा",
+    key: "उत्तर कुंजी (भाग अ)",
+    quick: "त्वरित प्रश्न",
+    quickLines: "त्वरित प्रश्न एवं मुख्य पंक्तियाँ",
+    oneLine: "हर खबर एक पंक्ति में",
+    article: "पृष्ठभूमि लेख",
+    articleSub: "इस महीने की खबरों के पीछे का स्थैतिक विषय",
+    thisMonth: (n: number) => `इस महीने ${n}`,
+    correctionsIntro:
+      "ये तथ्य दैनिक अंक प्रकाशित होने के बाद बदले। इस अंक की खबरों में सही तथ्य दिए गए हैं।",
+    weekdays: ["रविवार", "सोमवार", "मंगलवार", "बुधवार", "गुरुवार", "शुक्रवार", "शनिवार"],
+    letters: ["अ", "ब", "स", "द"],
+  },
+};
 
 // Line icons (Lucide, ISC licence) for the sections.
 const ICON_PATHS: Record<string, string> = {
@@ -75,57 +159,66 @@ function icon(id: string, cls = "icon"): string {
   return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 }
 
-function itemHtml(item: MagazineItem, number: number, showDate: boolean, accent: string): string {
+function itemHtml(
+  item: MagazineItem,
+  number: number,
+  showDate: boolean,
+  accent: string,
+  lang: Lang,
+): string {
   const c = item.content;
+  const t = T[lang];
   // Facts the visual shows aren't repeated as points.
-  const shown = pointsToShow(c);
+  const shown = pointsToShow(c)
+    .map((p) => pick(p, lang))
+    .filter(Boolean);
   const points = shown.length
-    ? `<div class="bi points"><ul class="hi" lang="hi">${shown.map((p) => `<li>${esc(p.hi)}</li>`).join("")}</ul><ul class="en" lang="en">${shown.map((p) => `<li>${esc(p.en)}</li>`).join("")}</ul></div>`
+    ? `<div class="bi points"><ul>${shown.map((p) => `<li>${esc(p)}</li>`).join("")}</ul></div>`
     : "";
   const tags = [
-    item.rajasthan && item.category !== "rajasthan" ? `<span class="tag raj">Rajasthan</span>` : "",
-    showDate ? `<span class="tag">${esc(formatDate(item.issue_date, "en"))}</span>` : "",
+    item.rajasthan && item.category !== "rajasthan"
+      ? `<span class="tag raj">${t.rajasthan}</span>`
+      : "",
+    showDate ? `<span class="tag">${esc(formatDate(item.issue_date, lang))}</span>` : "",
     item.source_names.length
-      ? `<span class="tag src-tag">Source: ${esc(item.source_names.join(", "))}</span>`
+      ? `<span class="tag src-tag">${t.source}: ${esc(item.source_names.join(", "))}</span>`
       : "",
   ].join("");
   // Static Connect: textbook facts on the concepts the news links to, each
   // led by its keyword (older stories: one background paragraph).
   const statics = (c.statics ?? [])
     .map((f) => {
-      const line = (k: string, t: string) => (k ? `<b>${esc(k)}:</b> ${esc(t)}` : esc(t));
-      return `<div class="bi"><div class="hi" lang="hi">${line(f.keyword.hi || f.keyword.en, f.text.hi)}</div><div class="en" lang="en">${line(f.keyword.en, f.text.en)}</div></div>`;
+      const k = pick(f.keyword, lang);
+      const text = pick(f.text, lang);
+      return text ? `<div class="bi">${k ? `<b>${esc(k)}:</b> ` : ""}${esc(text)}</div>` : "";
     })
     .join("");
   const background =
-    c.background || statics
-      ? `<div class="box context"><div class="box-title">${STATIC_CONNECT.en}</div>${biBlock(c.background)}${statics}${
+    pick(c.background, lang) || statics
+      ? `<div class="box context"><div class="box-title">${t.staticConnect}</div>${block(c.background, lang)}${statics}${
           item.context_sources.length
-            ? `<div class="src">Source: ${esc(item.context_sources.map((s) => s.title).join(", "))}</div>`
+            ? `<div class="src">${t.source}: ${esc(item.context_sources.map((s) => s.title).join(", "))}</div>`
             : ""
         }</div>`
       : "";
-  const why =
-    c.why.en || c.why.hi
-      ? `<div class="box why"><div class="box-title">Why it matters</div>${biBlock(c.why)}</div>`
-      : "";
-  const dyk = c.dyk?.length
-    ? `<div class="box dyk"><div class="box-title">Did you know?</div><ul>${c.dyk
-        .map(
-          (d) =>
-            `<li><span lang="hi">${esc(d.hi)}</span><br/><span class="en">${esc(d.en)}</span> <span class="site">(${esc(d.site)})</span></li>`,
-        )
+  const why = pick(c.why, lang)
+    ? `<div class="box why"><div class="box-title">${t.why}</div>${block(c.why, lang)}</div>`
+    : "";
+  const dyk = (c.dyk ?? []).filter((d) => pick(d, lang));
+  const dykBox = dyk.length
+    ? `<div class="box dyk"><div class="box-title">${t.dyk}</div><ul>${dyk
+        .map((d) => `<li>${esc(pick(d, lang))} <span class="site">(${esc(d.site)})</span></li>`)
         .join("")}</ul></div>`
     : "";
   return `<article class="item">
-  <div class="item-head"><span class="num">${number}</span><div class="heads"><h3 lang="hi">${esc(c.headline.hi)}</h3><h4 lang="en">${esc(c.headline.en)}</h4></div></div>
+  <div class="item-head"><span class="num">${number}</span><div class="heads"><h3>${esc(pick(c.headline, lang))}</h3></div></div>
   ${tags ? `<div class="tags">${tags}</div>` : ""}
-  ${biBlock(c.summary, "summary")}
-  ${c.visual ? visualHtml(c.visual, accent) : ""}
+  ${block(c.summary, lang, "summary")}
+  ${c.visual ? visualHtml(c.visual, accent, lang) : ""}
   ${points}
   ${why}
   ${background}
-  ${dyk}
+  ${dykBox}
 </article>`;
 }
 
@@ -133,7 +226,7 @@ const CSS = (accent: string) => `
 @page { size: A4; margin: 14mm 12mm 16mm; }
 * { box-sizing: border-box; }
 html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; font-size: 9.5pt; line-height: 1.42; color: #1f2937; }
+body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; font-size: 10pt; line-height: 1.45; color: #1f2937; }
 [lang="hi"], .hi { font-family: "Noto Sans Devanagari", "Noto Sans", sans-serif; }
 .accent { color: ${accent}; }
 .watermark { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0; }
@@ -185,7 +278,7 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .tag { font-size: 8pt; padding: .5mm 2mm; border-radius: 2mm; background: #f1f5f9; color: #475569; }
 .tag.raj { background: #fff7ed; color: #c2410c; }
 .tag.src-tag { background: transparent; color: #94a3b8; padding-left: 0; }
-.bi { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; margin-top: 2mm; }
+.bi { margin-top: 2mm; }
 .bi li, .box { break-inside: avoid; }
 .bi .en { color: #334155; }
 .bi ul { margin: 0; padding-left: 4.5mm; }
@@ -206,7 +299,7 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .part { font-size: 11pt; color: ${accent}; margin: 5mm 0 3mm; break-after: avoid; text-transform: uppercase; letter-spacing: .06em; }
 .mcq { display: flex; gap: 2mm; break-inside: avoid; margin-bottom: 4mm; padding-bottom: 3mm; border-bottom: 1px dashed #e5e7eb; }
 .qn { flex: none; width: 6mm; font-weight: 700; color: ${accent}; }
-.pair { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; }
+.pair { flex: 1; }
 .side .stmt { white-space: pre-line; font-weight: 600; }
 .side[lang="en"] { color: #334155; }
 .side ol { list-style: none; margin: 1.5mm 0 0; padding: 0; }
@@ -230,7 +323,6 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .toc-row .icon { color: ${accent}; }
 .rev-cat { display: flex; align-items: center; gap: 2mm; font-size: 10pt; color: ${accent}; margin: 4mm 0 2mm; break-after: avoid; text-transform: uppercase; letter-spacing: .06em; }
 .rev { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.rev td:nth-child(2) { width: 47%; }
 .visual + .points { margin-top: 2.5mm; }
 .rev td { padding: 1.6mm 2.5mm; border-bottom: 1px solid #e5e7eb; vertical-align: top; font-size: 9.2pt; }
 .rev tr { break-inside: avoid; }
@@ -254,7 +346,8 @@ const hasRevision = (i: MagazineItem) =>
 
 // One quick question (or, on older stories, one line) per story, by section,
 // for last-minute revision.
-function revisionPage(groups: Map<string, MagazineItem[]>): string {
+function revisionPage(groups: Map<string, MagazineItem[]>, lang: Lang): string {
+  const t = T[lang];
   let n = 0;
   let asked = 0;
   const parts = [...groups.entries()]
@@ -265,94 +358,85 @@ function revisionPage(groups: Map<string, MagazineItem[]>): string {
           const q = i.content.quick;
           if (q && (q.q.en || q.q.hi)) {
             asked++;
-            return `<tr><td class="rn">${++n}</td><td lang="hi">${esc(q.q.hi)} <span class="ans">— ${esc(q.a.hi)}</span></td><td class="en">${esc(q.q.en)} <span class="ans">— ${esc(q.a.en)}</span></td></tr>`;
+            return `<tr><td class="rn">${++n}</td><td>${esc(pick(q.q, lang))} <span class="ans">— ${esc(pick(q.a, lang))}</span></td></tr>`;
           }
-          const o = i.content.oneliner!;
-          return `<tr><td class="rn">${++n}</td><td lang="hi">${esc(o.hi)}</td><td class="en">${esc(o.en)}</td></tr>`;
+          return `<tr><td class="rn">${++n}</td><td>${esc(pick(i.content.oneliner, lang))}</td></tr>`;
         })
         .join("");
       return rows
-        ? `<h3 class="rev-cat">${icon(cat)} ${esc(categoryLabel(cat).en)}</h3><table class="rev">${rows}</table>`
+        ? `<h3 class="rev-cat">${icon(cat)} ${esc(categoryLabel(cat)[lang])}</h3><table class="rev">${rows}</table>`
         : "";
     })
     .join("");
   if (!n) return "";
-  const sub =
-    asked === n
-      ? "Quick questions"
-      : asked
-        ? "Quick questions and key lines"
-        : "One line per story";
-  return `<section class="section new-page"><div class="section-title"><h2>${icon("revision")} 60-Second Revision</h2><span>${sub}</span></div>${parts}</section>`;
+  const sub = asked === n ? t.quick : asked ? t.quickLines : t.oneLine;
+  return `<section class="section new-page"><div class="section-title"><h2>${icon("revision")} ${t.revision}</h2><span>${sub}</span></div>${parts}</section>`;
 }
 
-// The monthly background article: bilingual sections, one exam fact a line.
-function featurePage(f: CaFeature): string {
-  const lines = (t: string) =>
-    t
+// The monthly background article: its sections, one exam fact a line.
+function featurePage(f: CaFeature, lang: Lang): string {
+  const t = T[lang];
+  const lines = (text: string) =>
+    text
       .split(/\n+/)
       .map((l) => l.replace(/^[\s•\-–*]+/, "").trim())
       .filter(Boolean);
   const sections = f.sections
-    .map((s) => {
-      const hi = lines(s.body.hi);
-      const en = lines(s.body.en);
-      return `<div class="feat-sec"><h3 class="feat-h"><span lang="hi">${esc(s.heading.hi)}</span> · <span>${esc(s.heading.en)}</span></h3><div class="bi"><ul class="hi" lang="hi">${hi.map((l) => `<li>${esc(l)}</li>`).join("")}</ul><ul class="en" lang="en">${en.map((l) => `<li>${esc(l)}</li>`).join("")}</ul></div></div>`;
-    })
+    .map(
+      (s) =>
+        `<div class="feat-sec"><h3 class="feat-h">${esc(pick(s.heading, lang))}</h3><div class="bi"><ul>${lines(
+          pick(s.body, lang),
+        )
+          .map((l) => `<li>${esc(l)}</li>`)
+          .join("")}</ul></div></div>`,
+    )
     .join("");
   const sources = f.sources.length
-    ? `<p class="feat-src">Source: ${esc(f.sources.join(", "))}</p>`
+    ? `<p class="feat-src">${t.source}: ${esc(f.sources.join(", "))}</p>`
     : "";
-  return `<section class="section new-page feature"><div class="section-title"><h2>${icon("background")} Background Article</h2><span>Static topic behind this month's news</span></div><h2 class="feat-title"><span lang="hi">${esc(f.title.hi)}</span><br/><span class="en">${esc(f.title.en)}</span></h2><div class="bi feat-intro"><p lang="hi">${esc(f.intro.hi)}</p><p class="en">${esc(f.intro.en)}</p></div>${sections}${sources}</section>`;
+  return `<section class="section new-page feature"><div class="section-title"><h2>${icon("background")} ${t.article}</h2><span>${t.articleSub}</span></div><h2 class="feat-title">${esc(pick(f.title, lang))}</h2><div class="bi feat-intro"><p>${esc(pick(f.intro, lang))}</p></div>${sections}${sources}</section>`;
 }
 
-const OPTION_LETTERS = ["a", "b", "c", "d"];
-
-function mcqSide(question: string, options: string[], lang: "hi" | "en"): string {
-  return `<div class="side" lang="${lang}"><div class="stmt">${esc(question)}</div><ol>${options
-    .map((o, i) => `<li><span class="opt">(${OPTION_LETTERS[i]})</span> ${esc(o)}</li>`)
+function mcqSide(question: string, options: string[], letters: string[]): string {
+  return `<div class="side"><div class="stmt">${esc(question)}</div><ol>${options
+    .map((o, i) => `<li><span class="opt">(${letters[i] ?? i + 1})</span> ${esc(o)}</li>`)
     .join("")}</ol></div>`;
 }
 
 // The last section: RAS Prelims MCQs (RPSC pattern) with an answer key, then
-// RAS Mains questions. Hindi and English sit side by side, as in RPSC papers.
-function practicePage(items: MagazineItem[]): string {
+// RAS Mains questions.
+function practicePage(items: MagazineItem[], lang: Lang): string {
+  const t = T[lang];
   const withMcq = items.filter((i) => i.content.mcq);
-  const withMains = items.filter((i) => i.content.mains);
+  const withMains = items.filter((i) => pick(i.content.mains, lang));
   if (!withMcq.length && !withMains.length) return "";
   const qs = withMcq
     .map((i, n) => {
       const m = i.content.mcq!;
       return `<div class="mcq"><span class="qn">${n + 1}.</span><div class="pair">${mcqSide(
-        m.question.hi,
-        m.options.map((o) => o.hi),
-        "hi",
-      )}${mcqSide(
-        m.question.en,
-        m.options.map((o) => o.en),
-        "en",
+        pick(m.question, lang),
+        m.options.map((o) => pick(o, lang)),
+        t.letters,
       )}</div></div>`;
     })
     .join("");
   const key = withMcq
     .map((i, n) => {
       const m = i.content.mcq!;
-      return `<tr><td class="kn">${n + 1}</td><td class="ka">(${OPTION_LETTERS[m.answer]})</td><td lang="hi">${esc(m.explanation.hi)}</td><td class="en">${esc(m.explanation.en)}</td></tr>`;
+      return `<tr><td class="kn">${n + 1}</td><td class="ka">(${t.letters[m.answer] ?? m.answer + 1})</td><td>${esc(pick(m.explanation, lang))}</td></tr>`;
     })
     .join("");
   const mains = withMains
     .map(
       (i, n) =>
-        `<div class="mcq"><span class="qn">${n + 1}.</span><div class="pair"><div class="side" lang="hi">${esc(i.content.mains!.hi)}</div><div class="side" lang="en">${esc(i.content.mains!.en)}</div></div></div>`,
+        `<div class="mcq"><span class="qn">${n + 1}.</span><div class="pair"><div class="side">${esc(pick(i.content.mains, lang))}</div></div></div>`,
     )
     .join("");
-  return `<section class="section new-page"><div class="section-title"><h2>${icon("practice")} Practice Questions</h2><span>RPSC pattern</span></div>
-${qs ? `<h3 class="part">Part A: Prelims</h3>${qs}` : ""}
-${mains ? `<h3 class="part">Part B: Mains</h3>${mains}` : ""}
-${key ? `<h3 class="part">Answer key (Part A)</h3><table class="answers">${key}</table>` : ""}</section>`;
+  return `<section class="section new-page"><div class="section-title"><h2>${icon("practice")} ${t.practice}</h2><span>${t.rpsc}</span></div>
+${qs ? `<h3 class="part">${t.partA}</h3>${qs}` : ""}
+${mains ? `<h3 class="part">${t.partB}</h3>${mains}` : ""}
+${key ? `<h3 class="part">${t.key}</h3><table class="answers">${key}</table>` : ""}</section>`;
 }
-
-const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 // A darker shade of the accent colour for the cover gradient.
 function darken(hex: string, amount = 0.45): string {
@@ -366,6 +450,8 @@ function darken(hex: string, amount = 0.45): string {
 export function renderMagazine(opts: {
   kind: "daily" | "monthly";
   period: string;
+  // The issue's language: the Hindi issue or the English issue.
+  lang: Lang;
   settings: MagazineSettings;
   items: MagazineItem[];
   corrections?: MagazineCorrection[];
@@ -373,6 +459,8 @@ export function renderMagazine(opts: {
   feature?: CaFeature | null;
 }): string {
   const s = opts.settings;
+  const lang = opts.lang;
+  const t = T[lang];
   const accent = safeColor(s.accent);
   const monthly = opts.kind === "monthly";
   const order = new Map<string, number>(CATEGORIES.map((c, i) => [c.id, i]));
@@ -389,10 +477,17 @@ export function renderMagazine(opts: {
     groups.set(it.category, list);
   }
 
-  const title = monthly ? s.title_en.replace(/^Daily/i, "Monthly") : s.title_en;
+  const title =
+    lang === "hi"
+      ? monthly
+        ? (s.title_hi || s.title_en).replace(/दैनिक/, "मासिक")
+        : s.title_hi || s.title_en
+      : monthly
+        ? s.title_en.replace(/^Daily/i, "Monthly")
+        : s.title_en;
   const dateLine = monthly
-    ? formatDate(opts.period, "en", false)
-    : `${WEEKDAYS[new Date(`${opts.period}T00:00:00Z`).getUTCDay()]}, ${formatDate(opts.period, "en")}`;
+    ? formatDate(opts.period, lang, false)
+    : `${t.weekdays[new Date(`${opts.period}T00:00:00Z`).getUTCDay()]}, ${formatDate(opts.period, lang)}`;
   // Chrome repeats fixed elements on every printed page.
   const watermark = safeUrl(s.logo_main_url)
     ? `<div class="watermark"><img src="${esc(safeUrl(s.logo_main_url))}" alt="" /></div>`
@@ -403,28 +498,29 @@ export function renderMagazine(opts: {
   const highlights = top
     .map(
       (i) =>
-        `<div class="hl"><span class="hl-cat">${esc(categoryLabel(i.category).en)}</span><div class="hl-hi" lang="hi">${esc(i.content.headline.hi)}</div><div class="hl-en">${esc(i.content.headline.en)}</div></div>`,
+        `<div class="hl"><span class="hl-cat">${esc(categoryLabel(i.category)[lang])}</span><div class="hl-hi">${esc(pick(i.content.headline, lang))}</div></div>`,
     )
     .join("");
-  // A public @username (numeric chat ids are not shown).
-  const channel = /^@[A-Za-z0-9_]{4,}$/.test(s.channel.trim()) ? s.channel.trim() : "";
+  // A public @username (numeric chat ids are not shown): the issue's own channel.
+  const handle = (lang === "hi" ? s.channel_hi || s.channel : s.channel).trim();
+  const channel = /^@[A-Za-z0-9_]{4,}$/.test(handle) ? handle : "";
   const questions =
-    items.filter((i) => i.content.mcq).length + items.filter((i) => i.content.mains).length;
+    items.filter((i) => i.content.mcq).length +
+    items.filter((i) => pick(i.content.mains, lang)).length;
   const revisionCount = items.filter(hasRevision).length;
   const visuals = items.filter((i) => i.content.visual).length;
   const toc = [...groups.entries()]
     .map(
       ([cat, list]) =>
-        `<div class="toc-row"><span>${icon(cat)} ${esc(categoryLabel(cat).en)}</span><b>${list.length}</b></div>`,
+        `<div class="toc-row"><span>${icon(cat)} ${esc(categoryLabel(cat)[lang])}</span><b>${list.length}</b></div>`,
     )
     .join("");
 
   let n = 0;
   const sections = [...groups.entries()]
     .map(([cat, list]) => {
-      const l = categoryLabel(cat);
-      return `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>${icon(cat)} ${esc(l.en)}</h2><span>${list.length} ${list.length === 1 ? "story" : "stories"}</span></div>${list
-        .map((it) => itemHtml(it, ++n, monthly, accent))
+      return `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>${icon(cat)} ${esc(categoryLabel(cat)[lang])}</h2><span>${list.length} ${t.stories(list.length)}</span></div>${list
+        .map((it) => itemHtml(it, ++n, monthly, accent, lang))
         .join("")}</section>`;
     })
     .join("");
@@ -432,30 +528,26 @@ export function renderMagazine(opts: {
   // The month's corrections, on a page of their own: the facts that changed
   // after a day's issue was posted (this issue already prints them corrected).
   const fixes = opts.corrections ?? [];
-  const change = (c: NonNullable<MagazineCorrection["changes"]>[number]) =>
-    [
-      c.from.hi && c.to.hi
-        ? `<div class="c-change" lang="hi"><s>${esc(c.from.hi)}</s> → <b>${esc(c.to.hi)}</b></div>`
-        : "",
-      c.from.en || c.to.en
-        ? `<div class="c-change en"><s>${esc(c.from.en)}</s> → <b>${esc(c.to.en)}</b></div>`
-        : "",
-    ].join("");
+  const change = (c: NonNullable<MagazineCorrection["changes"]>[number]) => {
+    const from = pick(c.from, lang);
+    const to = pick(c.to, lang);
+    return from || to ? `<div class="c-change"><s>${esc(from)}</s> → <b>${esc(to)}</b></div>` : "";
+  };
   const corrections = fixes.length
-    ? `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>✏️ सुधार · Corrections</h2><span>${fixes.length} this month</span></div><p class="corrections-intro"><span lang="hi">ये तथ्य दैनिक अंक प्रकाशित होने के बाद बदले। इस अंक की खबरों में सही तथ्य दिए गए हैं।</span><br/>These facts changed after the day's issue was posted. The stories in this issue already show them corrected.</p><ol class="corrections">${fixes
+    ? `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>✏️ ${t.corrections}</h2><span>${t.thisMonth(fixes.length)}</span></div><p class="corrections-intro">${t.correctionsIntro}</p><ol class="corrections">${fixes
         .map(
           (c) =>
-            `<li><div class="c-date">${esc(formatDate(c.date, "hi"))} · ${esc(formatDate(c.date, "en"))}</div>${
-              c.headline && (c.headline.hi || c.headline.en)
-                ? `<div class="c-head"><span lang="hi">${esc(c.headline.hi || c.headline.en)}</span>${c.headline.hi && c.headline.en ? ` <span class="en">· ${esc(c.headline.en)}</span>` : ""}</div>`
+            `<li><div class="c-date">${esc(formatDate(c.date, lang))}</div>${
+              pick(c.headline, lang)
+                ? `<div class="c-head">${esc(pick(c.headline, lang))}</div>`
                 : ""
-            }<div lang="hi">${esc(c.summary.hi)}</div><div class="en">${esc(c.summary.en)}</div>${(c.changes ?? []).map(change).join("")}</li>`,
+            }<div>${esc(pick(c.summary, lang))}</div>${(c.changes ?? []).map(change).join("")}</li>`,
         )
         .join("")}</ol></section>`
     : "";
 
   return `<!doctype html>
-<html lang="en">
+<html lang="${lang}">
 <head>
 <meta charset="utf-8" />
 <title>${esc(title)} — ${esc(dateLine)}</title>
@@ -469,33 +561,33 @@ ${watermark}
 <section class="cover">
   <div class="cover-logos">${logo(s.logo_main_url) || `<span class="brand">${esc(s.brand_line)}</span>`}${logo(s.logo_partner_url)}</div>
   <div class="cover-hero">
-    <div class="eyebrow">RAS Prelims &amp; Mains · Bilingual</div>
+    <div class="eyebrow">${t.eyebrow}</div>
     <h1>${esc(title)}</h1>
     <div class="date-pill">${esc(dateLine)}</div>
     <div class="stats">
-      <div><b>${items.length}</b><span>${items.length === 1 ? "story" : "stories"}</span></div>
-      <div><b>${groups.size}</b><span>${groups.size === 1 ? "section" : "sections"}</span></div>
-      ${visuals ? `<div><b>${visuals}</b><span>charts &amp; diagrams</span></div>` : ""}
-      <div><b>${questions}</b><span>practice questions</span></div>
+      <div><b>${items.length}</b><span>${t.stories(items.length)}</span></div>
+      <div><b>${groups.size}</b><span>${t.sections(groups.size)}</span></div>
+      ${visuals ? `<div><b>${visuals}</b><span>${t.charts}</span></div>` : ""}
+      <div><b>${questions}</b><span>${t.questions}</span></div>
     </div>
   </div>
   <div class="cover-body">
-    ${highlights ? `<h3 class="cover-h">In this issue</h3><div class="hl-grid">${highlights}</div>` : ""}
-    <h3 class="cover-h">Contents</h3>
-    <div class="toc">${toc}${fixes.length ? `<div class="toc-row"><span>✏️ Corrections</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} Background: ${esc(opts.feature.title.en)}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} 60-Second Revision</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} Practice Questions</span><b>${questions}</b></div>` : ""}</div>
+    ${highlights ? `<h3 class="cover-h">${t.inThisIssue}</h3><div class="hl-grid">${highlights}</div>` : ""}
+    <h3 class="cover-h">${t.contents}</h3>
+    <div class="toc">${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}</div>
     ${
       channel
-        ? `<div class="cta"><div><b>Get it every morning on Telegram</b><span>Daily current affairs for RAS, bilingual, free.</span></div><div class="cta-handle">${esc(channel)}</div></div>`
+        ? `<div class="cta"><div><b>${t.ctaTitle}</b><span>${t.ctaText}</span></div><div class="cta-handle">${esc(channel)}</div></div>`
         : ""
     }
   </div>
-  <div class="cover-foot"><span>${esc(s.brand_line)}</span><span>हिंदी &amp; English</span></div>
+  <div class="cover-foot"><span>${esc(s.brand_line)}</span><span>${t.edition}</span></div>
 </section>
 ${sections}
 ${corrections}
-${opts.feature ? featurePage(opts.feature) : ""}
-${revisionPage(groups)}
-${practicePage(items)}
+${opts.feature ? featurePage(opts.feature, lang) : ""}
+${revisionPage(groups, lang)}
+${practicePage(items, lang)}
 </body>
 </html>`;
 }

@@ -100,10 +100,20 @@ import { dayChecklist, type Check } from "@/lib/ca-checklist";
 import {
   LANG_CHECK_STORIES,
   langCheckMessages,
+  langFingerprint,
   langStatus,
+  langPartName,
+  langText,
   parseLangNotes,
+  syncLines,
+  withLangPart,
   type LangCheck,
 } from "@/lib/ca-bilingual";
+import {
+  SYNC_LINES_MAX,
+  parseSync,
+  syncMessages,
+} from "../../supabase/functions/_shared/ca-translate.ts";
 import {
   STYLE_CHECK_STORIES,
   STYLE_MIN_EDITS,
@@ -157,6 +167,7 @@ import {
 import {
   footerTemplate,
   renderMagazine,
+  type Lang,
   type MagazineCorrection,
   type MagazineItem,
 } from "@/lib/current-affairs-html";
@@ -257,10 +268,15 @@ export type CaIssue = {
   kind: "daily" | "monthly";
   period: string;
   status: "draft" | "scheduled" | "posting" | "posted" | "failed" | "cancelled";
+  // The English issue's PDF and caption, and the Hindi issue's (none on older
+  // bilingual issues, whose one PDF is in pdf_path).
   pdf_path: string | null;
   pdf_url: string | null;
+  pdf_path_hi: string | null;
+  pdf_url_hi: string | null;
   item_count: number;
   caption: string | null;
+  caption_hi: string | null;
   scheduled_for: string | null;
   approved_at: string | null;
   posted_at: string | null;
@@ -2388,9 +2404,12 @@ export async function applyStyleFix(date: string, breakId: string): Promise<CaIt
   if (!content || partText(content, b.part, b.lang) !== b.text) {
     throw new Error("That part of the story has changed since the check. Check again.");
   }
-  const updated = await asEdit(item.id, () =>
-    updateItem(item.id, { content: withPart(content, b.part, b.lang, b.fix) }),
+  const fixed = await syncLanguages(
+    content,
+    withPart(content, b.part, b.lang, b.fix),
+    headlineOf(item),
   );
+  const updated = await asEdit(item.id, () => updateItem(item.id, { content: fixed }));
   if (updated.content) await saveStyleCheck(date, afterFix(saved, b, content, updated.content));
   return updated;
 }
@@ -2452,7 +2471,7 @@ export async function checkLanguages(
           (order.get(normalizeCategory(b.category)) ?? 99) || a.position - b.position,
     );
   const saved = await getLangCheck(date);
-  const todo = items.filter((i) => saved?.stories[i.id] !== storyFingerprint(i.content));
+  const todo = items.filter((i) => saved?.stories[i.id] !== langFingerprint(i.content));
   const batch = todo.slice(0, LANG_CHECK_STORIES);
   const found = batch.length
     ? parseLangNotes(await saathiComplete(apiKey(), langCheckMessages(batch)), batch)
@@ -2464,7 +2483,7 @@ export async function checkLanguages(
     at: new Date().toISOString(),
     stories: {
       ...Object.fromEntries(Object.entries(saved?.stories ?? {}).filter(([id]) => live.has(id))),
-      ...Object.fromEntries(batch.map((i) => [i.id, storyFingerprint(i.content)])),
+      ...Object.fromEntries(batch.map((i) => [i.id, langFingerprint(i.content)])),
     },
     notes: [
       ...(saved?.notes ?? []).filter((n) => live.has(n.item_id) && !done.has(n.item_id)),
@@ -2494,6 +2513,56 @@ export async function dismissLangNote(date: string, noteId: string): Promise<Lan
   };
   await saveLangCheck(date, next);
   return next;
+}
+
+// SAATHI writes a part in the other language (one AI call), for the editor
+// to check and save; nothing is saved here.
+export async function translatePart(id: string, part: string, to: "en" | "hi"): Promise<string> {
+  const item = await loadItem(id);
+  const text = langText(item.content, part, to === "hi" ? "en" : "hi");
+  if (!text) throw new Error("There is nothing to translate in that part.");
+  const out = parseSync(
+    await saathiComplete(
+      apiKey(),
+      syncMessages(headlineOf(item), [{ label: langPartName(part), to, text }]),
+    ),
+    1,
+  );
+  if (!out) throw new Error("The AI's reply could not be read. Try again.");
+  return out[0];
+}
+
+const headlineOf = (item: Pick<CaItem, "headline" | "content">) =>
+  item.content?.headline.en || item.content?.headline.hi || item.headline;
+
+// Every save leaves Hindi and English the same: where the editor changed only
+// one language of a part, SAATHI writes the other (one AI call for all of
+// them). If it can't, the text is saved as the editor left it, and the
+// Hindi–English check shows what still differs.
+export async function syncLanguages(
+  before: CaContent | null,
+  after: CaContent,
+  headline: string,
+): Promise<CaContent> {
+  const lines = syncLines(before, after).slice(0, SYNC_LINES_MAX);
+  if (!lines.length) return after;
+  try {
+    const out = parseSync(
+      await saathiComplete(
+        apiKey(),
+        syncMessages(
+          headline,
+          lines.map((l) => ({ label: langPartName(l.part), to: l.to, text: l.text })),
+        ),
+      ),
+      lines.length,
+    );
+    if (!out) throw new Error("unreadable reply");
+    return lines.reduce((c, l, i) => withLangPart(c, l.part, l.to, out[i]), after);
+  } catch (e) {
+    console.error("language sync:", (e instanceof Error && e.message) || e);
+    return after;
+  }
 }
 
 // ---------- Fact-check mode ----------
@@ -2583,7 +2652,11 @@ export async function checkFact(id: string, factText: string, point?: Bi): Promi
   const facts = item.facts.map((f, i) => (i === index ? markChecked(f, true) : f));
   const content =
     point && item.content
-      ? { ...item.content, points: item.content.points.map((p, i) => (i === index ? point : p)) }
+      ? await syncLanguages(
+          item.content,
+          { ...item.content, points: item.content.points.map((p, i) => (i === index ? point : p)) },
+          headlineOf(item),
+        )
       : undefined;
   const { data, error } = await from("ca_items")
     .update({
@@ -2634,7 +2707,9 @@ export async function deletePoint(
 }
 
 // A correction approved after the day's issue went out is announced on the
-// channel, as a reply under that day's PDF. It never stops the correction.
+// channel, as a reply under that day's PDF: in each issue's language under
+// the Hindi and the English issue (both languages under an older bilingual
+// issue). It never stops the correction.
 async function postCorrectionNote(
   item: CaItem,
   corr: CaCorrection,
@@ -2644,42 +2719,55 @@ async function postCorrectionNote(
   const channel = settings.channel.trim();
   if (!settings.post_corrections || !channel || !token) return false;
   const { data } = await from("ca_issues")
-    .select("status,telegram_message_id")
+    .select("status,telegram_message_id,telegram_message_id_hi,pdf_path_hi")
     .eq("kind", "daily")
     .eq("period", item.issue_date)
     .maybeSingle();
-  const issue = data as { status: string; telegram_message_id: number | null } | null;
+  const issue = data as {
+    status: string;
+    telegram_message_id: number | null;
+    telegram_message_id_hi: number | null;
+    pdf_path_hi: string | null;
+  } | null;
   if (issue?.status !== "posted") return false;
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        chat_id: channel,
-        parse_mode: "HTML",
-        text: correctionNote({
-          date: item.issue_date,
-          headline: item.content?.headline ?? { en: item.headline, hi: "" },
-          summary_en: corr.summary_en,
-          summary_hi: corr.summary_hi,
+  const note = {
+    date: item.issue_date,
+    headline: item.content?.headline ?? { en: item.headline, hi: "" },
+    summary_en: corr.summary_en,
+    summary_hi: corr.summary_hi,
+  };
+  const send = async (chat_id: string, text: string, under: number | null) => {
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chat_id,
+          parse_mode: "HTML",
+          text,
+          ...(under
+            ? { reply_parameters: { message_id: under, allow_sending_without_reply: true } }
+            : {}),
         }),
-        ...(issue.telegram_message_id
-          ? {
-              reply_parameters: {
-                message_id: issue.telegram_message_id,
-                allow_sending_without_reply: true,
-              },
-            }
-          : {}),
-      }),
-    });
-    const json = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string };
-    if (!json.ok) throw new Error(json.description ?? `Telegram error ${res.status}`);
-    return true;
-  } catch (e) {
-    console.error("correction note:", e instanceof Error ? e.message : e);
-    return false;
-  }
+      });
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string };
+      if (!json.ok) throw new Error(json.description ?? `Telegram error ${res.status}`);
+      return true;
+    } catch (e) {
+      console.error("correction note:", e instanceof Error ? e.message : e);
+      return false;
+    }
+  };
+  if (!issue.pdf_path_hi) return send(channel, correctionNote(note), issue.telegram_message_id);
+  const sent = await Promise.all([
+    send(channel, correctionNote(note, "en"), issue.telegram_message_id),
+    send(
+      settings.channel_hi.trim() || channel,
+      correctionNote(note, "hi"),
+      issue.telegram_message_id_hi,
+    ),
+  ]);
+  return sent.some(Boolean);
 }
 
 // `noted`: the correction was also announced on the channel.
@@ -2770,7 +2858,7 @@ async function magazineItems(fromDate: string, toDate: string): Promise<Magazine
   }));
 }
 
-export async function issueHtml(kind: "daily" | "monthly", period: string) {
+export async function issueHtml(kind: "daily" | "monthly", period: string, lang: Lang) {
   const settings = await getMagazineSettings();
   const range = kind === "daily" ? { from: period, to: period } : monthRange(period);
   const items = await magazineItems(range.from, range.to);
@@ -2795,6 +2883,7 @@ export async function issueHtml(kind: "daily" | "monthly", period: string) {
     html: renderMagazine({
       kind,
       period: kind === "daily" ? period : range.from,
+      lang,
       settings,
       items,
       corrections,
@@ -2848,10 +2937,11 @@ export async function renderPdf(html: string, settings: MagazineSettings): Promi
   return new Uint8Array(await res.arrayBuffer());
 }
 
-function fileName(kind: "daily" | "monthly", period: string) {
+function fileName(kind: "daily" | "monthly", period: string, lang: Lang) {
+  const name = lang === "hi" ? "Hindi" : "English";
   return kind === "daily"
-    ? `daily/FlashGyan-Current-Affairs-${period}.pdf`
-    : `monthly/FlashGyan-Current-Affairs-${period.slice(0, 7)}.pdf`;
+    ? `daily/FlashGyan-Current-Affairs-${period}-${name}.pdf`
+    : `monthly/FlashGyan-Current-Affairs-${period.slice(0, 7)}-${name}.pdf`;
 }
 
 async function upsertIssue(
@@ -2898,15 +2988,28 @@ export async function buildIssue(
     if (count)
       throw new Error(`${count} item(s) still need writing. Run "Write magazine text" first.`);
   }
-  const { html, settings, count } = await issueHtml(kind, period);
-  if (count === 0) throw new Error("There are no items to put in this issue.");
-  const pdf = await renderPdf(html, settings);
-  const path = fileName(kind, period);
-  const { error } = await supabaseAdmin.storage
-    .from(BUCKET)
-    .upload(path, pdf, { contentType: "application/pdf", upsert: true });
-  fail(error);
-  const url = `${supabaseAdmin.storage.from(BUCKET).getPublicUrl(path).data.publicUrl}?v=${Date.now()}`;
+  // The English issue and the Hindi issue, from the same stories.
+  const [en, hi] = await Promise.all(
+    (["en", "hi"] as const).map(async (lang) => {
+      const { html, settings, count } = await issueHtml(kind, period, lang);
+      if (count === 0) throw new Error("There are no items to put in this issue.");
+      const pdf = await renderPdf(html, settings);
+      const path = fileName(kind, period, lang);
+      const { error } = await supabaseAdmin.storage
+        .from(BUCKET)
+        .upload(path, pdf, { contentType: "application/pdf", upsert: true });
+      fail(error);
+      const url = `${supabaseAdmin.storage.from(BUCKET).getPublicUrl(path).data.publicUrl}?v=${Date.now()}`;
+      return {
+        path,
+        url,
+        settings,
+        count,
+        caption: captionFor(kind, period, settings, count, lang),
+      };
+    }),
+  );
+  const { settings, count } = en;
   const scheduledFor = opts.schedule
     ? opts.when
       ? new Date(opts.when)
@@ -2915,10 +3018,13 @@ export async function buildIssue(
         : new Date()
     : null;
   const issue = await upsertIssue(kind, period, {
-    pdf_path: path,
-    pdf_url: url,
+    pdf_path: en.path,
+    pdf_url: en.url,
+    caption: en.caption,
+    pdf_path_hi: hi.path,
+    pdf_url_hi: hi.url,
+    caption_hi: hi.caption,
     item_count: count,
-    caption: captionFor(kind, period, settings, count),
     status: opts.schedule ? "scheduled" : "draft",
     scheduled_for: scheduledFor?.toISOString() ?? null,
     approved_at: opts.schedule ? new Date().toISOString() : null,
@@ -2961,17 +3067,16 @@ export async function postIssueNow(kind: "daily" | "monthly", period: string) {
 
 // ---------- Telegram ----------
 
-async function sendPdf(chatId: string, issue: CaIssue) {
+async function sendPdf(chatId: string, path: string, caption: string | null) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
-  if (!issue.pdf_path) throw new Error("This issue has no PDF yet.");
-  const { data, error } = await supabaseAdmin.storage.from(BUCKET).download(issue.pdf_path);
+  const { data, error } = await supabaseAdmin.storage.from(BUCKET).download(path);
   fail(error);
   const form = new FormData();
   form.append("chat_id", chatId);
-  form.append("document", data as Blob, issue.pdf_path.split("/").pop() ?? "magazine.pdf");
-  if (issue.caption) {
-    form.append("caption", issue.caption);
+  form.append("document", data as Blob, path.split("/").pop() ?? "magazine.pdf");
+  if (caption) {
+    form.append("caption", caption);
     form.append("parse_mode", "HTML");
   }
   const res = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
@@ -2987,8 +3092,10 @@ export async function sendTestIssue(kind: "daily" | "monthly", period: string) {
   if (!settings.test_chat_id)
     throw new Error("Add your Telegram chat id in Magazine settings first.");
   const issue = await getIssue(kind, period);
-  if (!issue) throw new Error("Make the PDF first.");
-  await sendPdf(settings.test_chat_id, issue);
+  if (!issue?.pdf_path) throw new Error("Make the PDF first.");
+  // Both issues, English then Hindi.
+  await sendPdf(settings.test_chat_id, issue.pdf_path, issue.caption);
+  if (issue.pdf_path_hi) await sendPdf(settings.test_chat_id, issue.pdf_path_hi, issue.caption_hi);
 }
 
 // ---------- Knowledge base ----------

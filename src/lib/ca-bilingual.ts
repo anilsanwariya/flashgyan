@@ -1,11 +1,13 @@
-// Hindi and English saying the same thing. Each part of a story (headline,
-// summary, points, "why it matters") is printed in both languages, and a
-// number, date or name that differs between them is a wrong fact for half the
-// readers. Numbers and dates are compared here, as the editor works; names
-// (and facts one language leaves out) need SAATHI, one AI request a day.
+// Hindi and English saying the same thing. Every part of a story the
+// magazine prints (its text, Static Connect, "Did you know", the MCQ, the
+// Mains question and the revision lines) is in both languages: a part in one
+// language only, or a number, date or name that differs between them, is half
+// a story or a wrong fact for half the readers. Missing parts, numbers and
+// dates are found here, as the editor works; names (and facts one language
+// leaves out) need SAATHI, one AI request a day.
 // Pure helpers, shared by the server, the admin panel and tests.
-import { normalizeForMatch, type CaContent } from "@/lib/current-affairs";
-import { partName, storyFingerprint, storyParts } from "@/lib/ca-style";
+import { normalizeForMatch, type Bi, type CaContent } from "@/lib/current-affairs";
+import { partName } from "@/lib/ca-style";
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
@@ -16,7 +18,7 @@ export type LangNote = {
   id: string;
   item_id: string;
   part: string;
-  kind: "numbers" | "names";
+  kind: "numbers" | "names" | "missing";
   en: string;
   hi: string;
   issue: string;
@@ -35,6 +37,172 @@ export type LangCheck = {
   // Notes the editor waved through ("It's fine").
   dismissed: string[];
 };
+
+// ---------- The printed parts ----------
+
+type Access = {
+  get: (c: CaContent) => Bi | null | undefined;
+  set: (c: CaContent, b: Bi) => CaContent;
+};
+
+// Where a part lives in the story, by its name ("point 2", "static 1 term",
+// "mcq option 3"…).
+function access(part: string): Access | null {
+  const at = (re: RegExp) => Number(re.exec(part)?.[1] ?? 0) - 1;
+  const mapAt = <T>(xs: T[] | undefined, i: number, f: (x: T) => T) =>
+    (xs ?? []).map((x, j) => (j === i ? f(x) : x));
+  switch (part) {
+    case "headline":
+    case "summary":
+    case "why":
+      return { get: (c) => c[part], set: (c, b) => ({ ...c, [part]: b }) };
+    case "background":
+      return { get: (c) => c.background, set: (c, b) => ({ ...c, background: b }) };
+    case "mains":
+      return { get: (c) => c.mains, set: (c, b) => ({ ...c, mains: b }) };
+    case "one-liner":
+      return { get: (c) => c.oneliner, set: (c, b) => ({ ...c, oneliner: b }) };
+    case "mcq question":
+      return {
+        get: (c) => c.mcq?.question,
+        set: (c, b) => (c.mcq ? { ...c, mcq: { ...c.mcq, question: b } } : c),
+      };
+    case "mcq explanation":
+      return {
+        get: (c) => c.mcq?.explanation,
+        set: (c, b) => (c.mcq ? { ...c, mcq: { ...c.mcq, explanation: b } } : c),
+      };
+    case "quick question":
+      return {
+        get: (c) => c.quick?.q,
+        set: (c, b) => (c.quick ? { ...c, quick: { ...c.quick, q: b } } : c),
+      };
+    case "quick answer":
+      return {
+        get: (c) => c.quick?.a,
+        set: (c, b) => (c.quick ? { ...c, quick: { ...c.quick, a: b } } : c),
+      };
+  }
+  let i = at(/^point (\d+)$/);
+  if (i >= 0) {
+    return {
+      get: (c) => c.points[i],
+      set: (c, b) => ({ ...c, points: mapAt(c.points, i, () => b) }),
+    };
+  }
+  i = at(/^static (\d+)$/);
+  if (i >= 0) {
+    return {
+      get: (c) => c.statics?.[i]?.text,
+      set: (c, b) => ({ ...c, statics: mapAt(c.statics, i, (x) => ({ ...x, text: b })) }),
+    };
+  }
+  i = at(/^static (\d+) term$/);
+  if (i >= 0) {
+    return {
+      get: (c) => c.statics?.[i]?.keyword,
+      set: (c, b) => ({ ...c, statics: mapAt(c.statics, i, (x) => ({ ...x, keyword: b })) }),
+    };
+  }
+  i = at(/^did you know (\d+)$/);
+  if (i >= 0) {
+    return {
+      get: (c) => c.dyk?.[i],
+      set: (c, b) => ({ ...c, dyk: mapAt(c.dyk, i, (x) => ({ ...x, en: b.en, hi: b.hi })) }),
+    };
+  }
+  i = at(/^mcq option (\d+)$/);
+  if (i >= 0) {
+    return {
+      get: (c) => c.mcq?.options[i],
+      set: (c, b) =>
+        c.mcq ? { ...c, mcq: { ...c.mcq, options: mapAt(c.mcq.options, i, () => b) } } : c,
+    };
+  }
+  return null;
+}
+
+// Every printed part with text in either language, in the order of the page.
+export function bilingualParts(c: CaContent): { part: string; en: string; hi: string }[] {
+  const names = [
+    "headline",
+    "summary",
+    ...(c.points ?? []).map((_, i) => `point ${i + 1}`),
+    "why",
+    "background",
+    ...(c.statics ?? []).flatMap((_, i) => [`static ${i + 1} term`, `static ${i + 1}`]),
+    ...(c.dyk ?? []).map((_, i) => `did you know ${i + 1}`),
+    ...(c.mcq
+      ? ["mcq question", ...c.mcq.options.map((_, i) => `mcq option ${i + 1}`), "mcq explanation"]
+      : []),
+    "mains",
+    "one-liner",
+    "quick question",
+    "quick answer",
+  ];
+  return names
+    .map((part) => ({ part, en: langText(c, part, "en"), hi: langText(c, part, "hi") }))
+    .filter((p) => p.en || p.hi);
+}
+
+export function langText(c: CaContent | null, part: string, lang: "en" | "hi"): string {
+  const b = c ? access(part)?.get(c) : null;
+  return (typeof b?.[lang] === "string" ? b[lang] : "").trim();
+}
+
+export function withLangPart(
+  c: CaContent,
+  part: string,
+  lang: "en" | "hi",
+  text: string,
+): CaContent {
+  const a = access(part);
+  if (!a) return c;
+  const b = a.get(c);
+  return a.set(c, { en: b?.en ?? "", hi: b?.hi ?? "", [lang]: text });
+}
+
+// The editor's names for the parts.
+export function langPartName(part: string): string {
+  const n = /(\d+)/.exec(part)?.[1];
+  if (/^static \d+ term$/.test(part)) return `Static Connect ${n} (term)`;
+  if (/^static \d+$/.test(part)) return `Static Connect ${n}`;
+  if (/^did you know \d+$/.test(part)) return `Did you know ${n}`;
+  if (/^mcq option \d+$/.test(part)) return `MCQ option ${"ABCDEFGH"[Number(n) - 1] ?? n}`;
+  const fixed: Record<string, string> = {
+    background: "Background",
+    "mcq question": "MCQ question",
+    "mcq explanation": "MCQ explanation",
+    mains: "Mains question",
+    "one-liner": "One-liner",
+    "quick question": "Quick question",
+    "quick answer": "Quick answer",
+  };
+  return fixed[part] ?? partName(part);
+}
+
+// Whether a story's printed text changed since SAATHI compared it.
+export const langFingerprint = (c: CaContent) => hash(JSON.stringify(bilingualParts(c)));
+
+// ---------- In one language only ----------
+
+// Each part printed in one language only: half a story for the other readers.
+export function missingNotes(story: Story): LangNote[] {
+  if (!story.content) return [];
+  return bilingualParts(story.content)
+    .filter((p) => !p.en || !p.hi)
+    .map((p) => ({
+      id: noteId(story.id, p.part, "missing", p.en, p.hi),
+      item_id: story.id,
+      part: p.part,
+      kind: "missing" as const,
+      en: p.en,
+      hi: p.hi,
+      issue: p.en ? "No Hindi" : "No English",
+      wrong: p.en ? ("hi" as const) : ("en" as const),
+      fix: null,
+    }));
+}
 
 // ---------- Numbers and dates ----------
 
@@ -117,10 +285,8 @@ type Story = {
 export function numberNotes(story: Story): LangNote[] {
   const c = story.content;
   if (!c) return [];
-  const byPart = new Map<string, { en?: string; hi?: string }>();
-  for (const p of storyParts(c)) byPart.set(p.part, { ...byPart.get(p.part), [p.lang]: p.text });
   const out: LangNote[] = [];
-  for (const [part, { en, hi }] of byPart) {
+  for (const { part, en, hi } of bilingualParts(c)) {
     if (!en || !hi) continue;
     const a = numbersIn(en);
     const b = numbersIn(hi);
@@ -164,12 +330,12 @@ export function numberNotes(story: Story): LangNote[] {
 export const LANG_CHECK_STORIES = 30;
 const LANG_NOTES_MAX = 40;
 
-const ref = (n: number, part: string) => `S${n}.${part.replace(" ", "")}`;
-const pairs = (c: CaContent) => {
-  const byPart = new Map<string, { en?: string; hi?: string }>();
-  for (const p of storyParts(c)) byPart.set(p.part, { ...byPart.get(p.part), [p.lang]: p.text });
-  return [...byPart].filter(([, v]) => v.en && v.hi) as [string, { en: string; hi: string }][];
-};
+const ref = (n: number, part: string) => `S${n}.${part.replace(/[\s-]+/g, "")}`;
+// The parts printed in both languages.
+const pairs = (c: CaContent) =>
+  bilingualParts(c)
+    .filter((p) => p.en && p.hi)
+    .map(({ part, en, hi }) => [part, { en, hi }] as [string, { en: string; hi: string }]);
 
 export function langCheckMessages(stories: { content: CaContent }[]): ChatMessage[] {
   return [
@@ -245,10 +411,10 @@ export function parseLangNotes(
 
 // ---------- How the day stands ----------
 
-// The notes still in the text (not waved through): numbers as they are now,
-// and SAATHI's names notes whose texts haven't changed; whether SAATHI
-// compared names, and the written stories it didn't compare as they are now.
-// Null when nothing is written.
+// The notes still in the text (not waved through): missing parts, numbers
+// and dates as they are now, and SAATHI's names notes whose texts haven't
+// changed; whether SAATHI compared names, and the written stories it didn't
+// compare as they are now. Null when nothing is written.
 export type LangStatus = { checked: boolean; open: LangNote[]; unchecked: string[] };
 
 export function langStatus(
@@ -269,11 +435,34 @@ export function langStatus(
   });
   return {
     checked: !!check?.at,
-    open: [...written.flatMap(numberNotes), ...names].filter((n) => !dismissed.has(n.id)),
+    open: [...written.flatMap(missingNotes), ...written.flatMap(numberNotes), ...names].filter(
+      (n) => !dismissed.has(n.id),
+    ),
     unchecked: written
-      .filter((i) => check?.stories[i.id] !== storyFingerprint(i.content!))
+      .filter((i) => check?.stories[i.id] !== langFingerprint(i.content!))
       .map((i) => i.id),
   };
 }
 
-export const langPartLabel = (n: LangNote) => partName(n.part);
+export const langPartLabel = (n: LangNote) => langPartName(n.part);
+
+// ---------- Keeping both languages in step ----------
+
+// The lines to write again in the other language after an edit: the parts
+// where the editor changed one language and left the other as it was (a new
+// part written in one language too). Parts changed in both are the editor's.
+export function syncLines(
+  before: CaContent | null,
+  after: CaContent,
+): { part: string; to: "en" | "hi"; text: string }[] {
+  const was = new Map((before ? bilingualParts(before) : []).map((p) => [p.part, p]));
+  const out: { part: string; to: "en" | "hi"; text: string }[] = [];
+  for (const p of bilingualParts(after)) {
+    const o = was.get(p.part) ?? { en: "", hi: "" };
+    const en = p.en !== o.en;
+    const hi = p.hi !== o.hi;
+    if (en && !hi && p.en) out.push({ part: p.part, to: "hi", text: p.en });
+    else if (hi && !en && p.hi) out.push({ part: p.part, to: "en", text: p.hi });
+  }
+  return out;
+}

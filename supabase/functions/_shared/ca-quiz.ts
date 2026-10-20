@@ -42,10 +42,30 @@ export function quizMcqs(items: { mcq?: QuizMcq | null }[], max: number): QuizMc
     .slice(0, Math.max(0, max));
 }
 
-// One MCQ as a Telegram quiz poll, Hindi and English together where they fit.
-// A statement question too long for a poll goes in a message just before it.
-export function quizPoll(m: QuizMcq, n: number, total: number): QuizPoll {
+export type QuizLang = "en" | "hi";
+// A part in one language (the other when it's missing).
+const one = (b: Bi | undefined, lang: QuizLang) =>
+  (lang === "hi" ? b?.hi || b?.en : b?.en || b?.hi) ?? "";
+
+// One MCQ as a Telegram quiz poll: in one language (the Hindi or the English
+// issue's channel, a student who picked one), or Hindi and English together
+// where they fit. A statement question too long for a poll goes in a message
+// just before it.
+export function quizPoll(m: QuizMcq, n: number, total: number, lang?: QuizLang): QuizPoll {
   const no = `${n}/${total}. `;
+  if (lang) {
+    const q = one(m.question, lang);
+    const fits = no.length + q.length <= QUESTION_MAX;
+    return {
+      intro: fits ? null : `<b>${n}/${total}</b>\n\n${esc(q)}`,
+      question: fits
+        ? `${no}${q}`
+        : `${no}${lang === "hi" ? "ऊपर दिए प्रश्न का सही उत्तर चुनें" : "Choose the answer to the question above"}`,
+      options: m.options.map((o) => clip(one(o, lang), OPTION_MAX)),
+      correct: m.answer,
+      explanation: clip(one(m.explanation, lang), EXPLANATION_MAX),
+    };
+  }
   const full = both(m.question, "\n\n");
   const fits = no.length + full.length <= QUESTION_MAX;
   const options = m.options.map((o) => {
@@ -120,8 +140,20 @@ export function streakOnDone(
   return { streak, best_streak: Math.max(s.best_streak, streak), last_done_date: sentDate };
 }
 
-// The result after the last question.
-export function quizResultText(correct: number, total: number, streak: number, best: number) {
+// The result after the last question, in the student's language.
+export function quizResultText(
+  correct: number,
+  total: number,
+  streak: number,
+  best: number,
+  lang?: QuizLang,
+) {
+  if (lang === "hi") {
+    const fire = streak >= 2 ? `🔥 <b>${streak} दिन की स्ट्रीक!</b>` : "🔥 स्ट्रीक शुरू: 1 दिन";
+    return `🏁 <b>दैनिक क्विज़ पूरा</b> · ${total} में से ${correct} सही\n\n${fire}${
+      best > streak ? ` (सर्वश्रेष्ठ: ${best})` : ""
+    }\n<i>कल का क्विज़ इसी समय आएगा। स्ट्रीक जारी रखें!</i>`;
+  }
   const fire = streak >= 2 ? `🔥 <b>${streak}-day streak!</b>` : "🔥 Streak started: 1 day";
   return `🏁 <b>Daily quiz done</b> · ${correct}/${total} correct\n\n${fire}${
     best > streak ? ` (best: ${best})` : ""

@@ -19,6 +19,7 @@ import {
   type StyleCheck,
   type StyleContent,
 } from "../_shared/ca-style-check.ts";
+import { parseSync, syncMessages } from "../_shared/ca-translate.ts";
 import { CHECK_PHOTO_MAX_BYTES, checkQuestionInput, pickCheckPhoto, validCheckAnswer, type CheckPhoto } from "../_shared/telegram-check-input.ts";
 import {
   SaathiAiError,
@@ -63,6 +64,7 @@ import {
   streakOnDone,
   streakOnSend,
   type DailyQuizState,
+  type QuizLang,
   type QuizMcq,
 } from "../_shared/ca-quiz.ts";
 import {
@@ -1149,12 +1151,18 @@ async function deliverCheck(
 // ---------- Current affairs magazine ----------
 // Posts approved magazine issues (PDF) to the channel when they are due.
 // Runs with every broadcast tick.
+// The English issue's PDF, caption and post, and the Hindi issue's (none on
+// older bilingual issues, whose one PDF is pdf_path).
 type MagazineIssue = {
   id: string;
   kind: "daily" | "monthly";
   period: string;
   pdf_path: string;
   caption: string | null;
+  telegram_message_id: number | null;
+  pdf_path_hi: string | null;
+  caption_hi: string | null;
+  telegram_message_id_hi: number | null;
 };
 
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -1177,10 +1185,11 @@ async function sendQuizPolls(
   mcqs: QuizMcq[],
   anonymous: boolean,
   gapMs: number,
+  lang?: QuizLang,
 ): Promise<{ id: string; correct: number }[]> {
   const sent: { id: string; correct: number }[] = [];
   for (let i = 0; i < mcqs.length; i++) {
-    const poll = quizPoll(mcqs[i], i + 1, mcqs.length);
+    const poll = quizPoll(mcqs[i], i + 1, mcqs.length, lang);
     if (poll.intro) {
       await tg("sendMessage", { chat_id, text: poll.intro, parse_mode: "HTML" });
       await pause(gapMs);
@@ -1203,20 +1212,29 @@ async function sendQuizPolls(
   return sent;
 }
 
-// After the daily PDF: its MCQs as quiz polls on the channel.
-async function postChannelQuiz(channel: string, date: string, count: number) {
+// After the daily PDF: its MCQs as quiz polls on the channel, in the issue's
+// language (both languages when one channel has both issues).
+async function postChannelQuiz(channel: string, date: string, count: number, lang?: QuizLang) {
   const mcqs = await issueMcqs(date, count);
   if (!mcqs.length) return;
   await tg("sendMessage", {
     chat_id: channel,
-    text: `🧠 <b>आज का क्विज़ | Today's quiz</b>\n${mcqs.length} questions from today's magazine. Answer and check yourself! 👇`,
+    text:
+      lang === "hi"
+        ? `🧠 <b>आज का क्विज़</b>\nआज के अंक से ${mcqs.length} प्रश्न। उत्तर दें और खुद को जाँचें! 👇`
+        : lang === "en"
+          ? `🧠 <b>Today's quiz</b>\n${mcqs.length} questions from today's magazine. Answer and check yourself! 👇`
+          : `🧠 <b>आज का क्विज़ | Today's quiz</b>\n${mcqs.length} questions from today's magazine. Answer and check yourself! 👇`,
     parse_mode: "HTML",
   });
   await pause(1500);
   // Channels allow about 20 messages a minute.
-  await sendQuizPolls(channel, mcqs, true, 3000);
+  await sendQuizPolls(channel, mcqs, true, 3000, lang);
 }
 
+// Posts a due issue: the English PDF to the English channel and the Hindi PDF
+// to the Hindi channel (one PDF for an older bilingual issue). Each post is
+// recorded as it goes, so a retry after a failure only sends what is missing.
 async function runMagazineTick() {
   const { data: claimed, error } = await supabase.rpc("ca_claim_due_issue");
   if (error) {
@@ -1233,38 +1251,61 @@ async function runMagazineTick() {
       .maybeSingle();
     const magazine = (setting?.value ?? {}) as {
       channel?: string;
+      channel_hi?: string;
       channel_quiz?: boolean;
       channel_quiz_count?: number;
     };
     const channel = String(magazine.channel ?? "").trim();
     if (!channel) throw new Error("No channel set in Magazine settings");
-    const { data: file, error: dErr } = await supabase.storage.from("ca-magazines").download(issue.pdf_path);
-    if (dErr || !file) throw new Error(dErr?.message ?? "PDF not found");
-    const form = new FormData();
-    form.append("chat_id", channel);
-    form.append("document", file, issue.pdf_path.split("/").pop() ?? "magazine.pdf");
-    if (issue.caption) {
-      form.append("caption", issue.caption);
-      form.append("parse_mode", "HTML");
+    const channelHi = String(magazine.channel_hi ?? "").trim() || channel;
+    type Edition = {
+      lang?: QuizLang;
+      path: string;
+      caption: string | null;
+      channel: string;
+      posted: number | null;
+      column: "telegram_message_id" | "telegram_message_id_hi";
+    };
+    const editions: Edition[] = issue.pdf_path_hi
+      ? [
+          { lang: "en", path: issue.pdf_path, caption: issue.caption, channel, posted: issue.telegram_message_id, column: "telegram_message_id" },
+          { lang: "hi", path: issue.pdf_path_hi, caption: issue.caption_hi, channel: channelHi, posted: issue.telegram_message_id_hi, column: "telegram_message_id_hi" },
+        ]
+      : [{ path: issue.pdf_path, caption: issue.caption, channel, posted: issue.telegram_message_id, column: "telegram_message_id" }];
+    const sentNow: Edition[] = [];
+    for (const ed of editions) {
+      if (ed.posted) continue;
+      const { data: file, error: dErr } = await supabase.storage.from("ca-magazines").download(ed.path);
+      if (dErr || !file) throw new Error(dErr?.message ?? "PDF not found");
+      const form = new FormData();
+      form.append("chat_id", ed.channel);
+      form.append("document", file, ed.path.split("/").pop() ?? "magazine.pdf");
+      if (ed.caption) {
+        form.append("caption", ed.caption);
+        form.append("parse_mode", "HTML");
+      }
+      const res = await fetch(`${TG}/sendDocument`, { method: "POST", body: form });
+      const json = await res.json().catch(() => ({}));
+      if (!json.ok) throw new Error(`${ed.lang === "hi" ? "Hindi issue: " : ed.lang === "en" ? "English issue: " : ""}${json.description ?? `Telegram error ${res.status}`}`);
+      await supabase.from("ca_issues").update({ [ed.column]: json.result?.message_id ?? null }).eq("id", issue.id);
+      sentNow.push(ed);
     }
-    const res = await fetch(`${TG}/sendDocument`, { method: "POST", body: form });
-    const json = await res.json().catch(() => ({}));
-    if (!json.ok) throw new Error(json.description ?? `Telegram error ${res.status}`);
     await supabase
       .from("ca_issues")
-      .update({
-        status: "posted",
-        posted_at: new Date().toISOString(),
-        telegram_message_id: json.result?.message_id ?? null,
-        error: null,
-      })
+      .update({ status: "posted", posted_at: new Date().toISOString(), error: null })
       .eq("id", issue.id);
-    // The quiz never fails the post: the PDF is already out.
+    // The quiz never fails the post: the PDFs are already out. One channel
+    // with both issues gets one quiz in both languages.
     if (issue.kind === "daily" && magazine.channel_quiz !== false) {
-      try {
-        await postChannelQuiz(channel, issue.period, Math.min(10, Math.max(1, magazine.channel_quiz_count ?? 5)));
-      } catch (e) {
-        console.error("channel quiz", e);
+      const count = Math.min(10, Math.max(1, magazine.channel_quiz_count ?? 5));
+      const shared = editions.length === 2 && channelHi === channel;
+      const quizzes = shared ? (sentNow.length ? [{ channel, lang: undefined }] : []) : sentNow;
+      for (const q of quizzes) {
+        try {
+          await postChannelQuiz(q.channel, issue.period, count, q.lang);
+        } catch (e) {
+          console.error("channel quiz", e);
+        }
       }
     }
   } catch (e) {
@@ -1414,6 +1455,30 @@ async function saveStoryContent(item: StoryRow, content: StyleContent): Promise<
   return !error;
 }
 
+// The other language written to match a line the admin changed (one AI
+// request), so Hindi and English stay the same. Unchanged when SAATHI can't;
+// the admin panel's Hindi–English check then shows the difference.
+async function syncOther(
+  content: StyleContent,
+  part: string,
+  lang: "en" | "hi",
+): Promise<{ content: StyleContent; synced: boolean }> {
+  const to = lang === "en" ? "hi" : "en";
+  const text = partText(content, part, lang);
+  if (!text) return { content, synced: false };
+  try {
+    const headline = content.headline?.en || content.headline?.hi || "";
+    const out = parseSync(
+      await saathiComplete(LOVABLE_API_KEY, syncMessages(headline, [{ label: partName(part), to, text }])),
+      1,
+    );
+    return out ? { content: withPart(content, part, to, out[0]), synced: true } : { content, synced: false };
+  } catch (e) {
+    console.error("ca language sync", e instanceof Error ? e.message : e);
+    return { content, synced: false };
+  }
+}
+
 async function askEdit(chat_id: number, item_id: string, part: string) {
   const item = await loadStory(item_id);
   if (!item?.content) {
@@ -1444,7 +1509,7 @@ async function askEdit(chat_id: number, item_id: string, part: string) {
       part === "headline"
         ? "✏️ Send the new headline for:"
         : `✏️ Send the new ${label} of “${escHtml(headline)}”. Now:`
-    }\n${shown}\n\nOne line in Hindi and one in English, or just the one to change. /cancel to stop.`,
+    }\n${shown}\n\nOne line in Hindi or English (the other is written to match), or one in each. /cancel to stop.`,
     reply_markup: { force_reply: true, input_field_placeholder: `New ${label}` },
   });
 }
@@ -1478,6 +1543,10 @@ async function saveEdit(chat_id: number, edit: PendingEdit, text: string) {
     const t = next[lang];
     if (t) content = withPart(content, edit.part, lang, t);
   }
+  // One language sent: the other is written to match.
+  const only = next.en && !next.hi ? "en" : next.hi && !next.en ? "hi" : null;
+  const sync = only ? await syncOther(content, edit.part, only) : null;
+  if (sync) content = sync.content;
   if (!(await saveStoryContent(item, content))) {
     await tg("sendMessage", { chat_id, text: "Couldn't save it. Try again in the admin panel." });
     return;
@@ -1488,7 +1557,9 @@ async function saveEdit(chat_id: number, edit: PendingEdit, text: string) {
   const at = rows.findIndex((r) => r.id === item.id);
   await tg("sendMessage", {
     chat_id,
-    text: `✅ ${partName(edit.part)} saved.`,
+    text: `✅ ${partName(edit.part)} saved.${
+      only ? (sync?.synced ? ` ${only === "en" ? "Hindi" : "English"} updated to match.` : ` ${only === "en" ? "Hindi" : "English"} not updated: check it in the admin panel.`) : ""
+    }`,
     ...(style.open.length
       ? {
           reply_markup: {
@@ -1554,7 +1625,8 @@ async function showStyle(chat_id: number, message_id: number | null, date: strin
         await tg("sendMessage", { chat_id, text: "That part of the story changed since the check, so the fix wasn't put in." });
         return;
       }
-      const fixed = withPart(item.content, b.part, b.lang, b.fix);
+      // The fix, and the other language written to match it.
+      const fixed = (await syncOther(withPart(item.content, b.part, b.lang, b.fix), b.part, b.lang)).content;
       if (!(await saveStoryContent(item, fixed))) {
         await tg("sendMessage", { chat_id, text: "Couldn't save the fix. Try again in the admin panel." });
         return;
@@ -1687,6 +1759,8 @@ type DailyRow = DailyQuizState & {
   chat_id: number;
   enabled: boolean;
   send_hour: number;
+  // The language the student picked (none yet: both languages).
+  lang: QuizLang | null;
   quiz: {
     issue: string;
     date: string;
@@ -1715,6 +1789,8 @@ async function latestPostedIssue(): Promise<string | null> {
   return (data as { period?: string } | null)?.period ?? null;
 }
 
+const LANG_NAME: Record<QuizLang, string> = { hi: "हिंदी", en: "English" };
+
 function dailyMenu(row: DailyRow | null) {
   const on = !!row?.enabled;
   const hour = row?.send_hour ?? DAILY_QUIZ_DEFAULT_HOUR;
@@ -1725,6 +1801,7 @@ function dailyMenu(row: DailyRow | null) {
     (on
       ? `✅ On · every day at <b>${hourLabel(hour)}</b> (India time)\n`
       : `⏸ Off. Pick a time to start:\n`) +
+    `🗣 Language / भाषा: <b>${row?.lang ? LANG_NAME[row.lang] : "not chosen / चुनें"}</b>\n` +
     `🔥 Streak: <b>${row?.streak ?? 0}</b> day${(row?.streak ?? 0) === 1 ? "" : "s"}` +
     (row?.best_streak ? ` · best ${row.best_streak}` : "");
   const hours = DAILY_QUIZ_HOURS.map((h) => ({
@@ -1732,6 +1809,12 @@ function dailyMenu(row: DailyRow | null) {
     callback_data: `daily_on_${h}`,
   }));
   const rows: { text: string; callback_data: string }[][] = [hours.slice(0, 3), hours.slice(3)];
+  rows.push(
+    (["hi", "en"] as const).map((l) => ({
+      text: `${row?.lang === l ? "✓ " : ""}${LANG_NAME[l]}`,
+      callback_data: `daily_lang_${l}`,
+    })),
+  );
   rows.push([{ text: "▶️ Take today's quiz / आज का क्विज़", callback_data: "daily_now" }]);
   if (on) rows.push([{ text: "⏹ Stop daily quiz", callback_data: "daily_off" }]);
   return { text, reply_markup: { inline_keyboard: rows } };
@@ -1742,6 +1825,22 @@ async function sendDailyMenu(chat_id: number, message_id?: number) {
   if (message_id)
     await tg("editMessageText", { chat_id, message_id, parse_mode: "HTML", ...menu });
   else await tg("sendMessage", { chat_id, parse_mode: "HTML", ...menu });
+}
+
+// Before the first quiz: which language? `then` is what to do after
+// ("on<hour>" or "now").
+async function askDailyLang(chat_id: number, then: string, message_id?: number) {
+  const body = {
+    chat_id,
+    text: "🗣 Which language should your daily quiz be in?\nआपका दैनिक क्विज़ किस भाषा में हो?",
+    reply_markup: {
+      inline_keyboard: [
+        (["hi", "en"] as const).map((l) => ({ text: LANG_NAME[l], callback_data: `daily_lang_${l}:${then}` })),
+      ],
+    },
+  };
+  if (message_id) await tg("editMessageText", { message_id, ...body });
+  else await tg("sendMessage", body);
 }
 
 async function setDaily(chat_id: number, patch: Partial<DailyRow>) {
@@ -1768,11 +1867,17 @@ async function deliverDailyQuiz(
   if (error) throw new Error(error.message);
   if (claimed !== true) return "already";
   const streak = streakOnSend(row);
+  const lang = row.lang ?? undefined;
   const res = await tg("sendMessage", {
     chat_id: row.chat_id,
     text:
-      `🧠 <b>Daily quiz</b> · ${mcqs.length} questions from the FlashGyan magazine of ${issue}\n` +
-      `🔥 Streak: <b>${streak}</b> · answer all ${mcqs.length} to keep it going`,
+      lang === "hi"
+        ? `🧠 <b>दैनिक क्विज़</b> · ${issue} की FlashGyan पत्रिका से ${mcqs.length} प्रश्न\n` +
+          `🔥 स्ट्रीक: <b>${streak}</b> · स्ट्रीक जारी रखने के लिए सभी ${mcqs.length} के उत्तर दें`
+        : `🧠 <b>Daily quiz</b> · ${mcqs.length} questions from the FlashGyan magazine of ${issue}\n` +
+          `🔥 Streak: <b>${streak}</b> · answer all ${mcqs.length} to keep it going` +
+          // Students from before languages could be picked: how to pick one.
+          (lang ? "" : `\n🗣 Pick Hindi or English for your quiz / भाषा चुनें: /daily`),
     parse_mode: "HTML",
   });
   if (res.status === 403) {
@@ -1781,7 +1886,7 @@ async function deliverDailyQuiz(
     await setDaily(row.chat_id, { enabled: false });
     return "sent";
   }
-  const polls = await sendQuizPolls(row.chat_id, mcqs, false, 60);
+  const polls = await sendQuizPolls(row.chat_id, mcqs, false, 60, lang);
   await setDaily(row.chat_id, {
     streak,
     quiz: { issue, date: today, polls, answered: [], correct: 0 },
@@ -1861,7 +1966,7 @@ async function handleDailyAnswer(chat_id: number, poll_id: string, option: numbe
   await setDaily(chat_id, done);
   await tg("sendMessage", {
     chat_id,
-    text: quizResultText(quiz.correct ?? 0, quiz.polls.length, done.streak, done.best_streak),
+    text: quizResultText(quiz.correct ?? 0, quiz.polls.length, done.streak, done.best_streak, row.lang ?? undefined),
     parse_mode: "HTML",
     reply_markup: {
       inline_keyboard: [
@@ -2211,9 +2316,30 @@ Deno.serve(async (req) => {
       } else if (data.startsWith("daily_on_")) {
         const h = parseInt(data.slice(9), 10);
         if (DAILY_QUIZ_HOURS.includes(h)) {
-          await logEvent(chat_id, "daily_quiz", `on ${h}`);
-          await setDaily(chat_id, { enabled: true, send_hour: h });
-          await sendDailyMenu(chat_id, message_id);
+          // The language first, the first time.
+          if (!(await getDaily(chat_id))?.lang) {
+            await askDailyLang(chat_id, `on${h}`, message_id);
+          } else {
+            await logEvent(chat_id, "daily_quiz", `on ${h}`);
+            await setDaily(chat_id, { enabled: true, send_hour: h });
+            await sendDailyMenu(chat_id, message_id);
+          }
+        }
+      } else if (data.startsWith("daily_lang_")) {
+        const [l, then = ""] = data.slice("daily_lang_".length).split(":");
+        if (l === "hi" || l === "en") {
+          await logEvent(chat_id, "daily_quiz", `lang ${l}`);
+          const h = parseInt(then.slice(2), 10);
+          await setDaily(chat_id, {
+            lang: l,
+            ...(then.startsWith("on") && DAILY_QUIZ_HOURS.includes(h) ? { enabled: true, send_hour: h } : {}),
+          });
+          if (then === "now") {
+            await tg("editMessageText", { chat_id, message_id, text: `🗣 ${LANG_NAME[l]} ✓` });
+            await takeDailyNow(chat_id);
+          } else {
+            await sendDailyMenu(chat_id, message_id);
+          }
         }
       } else if (data === "daily_off") {
         await logEvent(chat_id, "daily_quiz", "off");
@@ -2221,7 +2347,8 @@ Deno.serve(async (req) => {
         await sendDailyMenu(chat_id, message_id);
       } else if (data === "daily_now") {
         await logEvent(chat_id, "daily_quiz", "now");
-        await takeDailyNow(chat_id);
+        if (!(await getDaily(chat_id))?.lang) await askDailyLang(chat_id, "now");
+        else await takeDailyNow(chat_id);
       } else if (data === "menu_flashcards") {
         await editFlashcardSubjects(chat_id, message_id);
       } else if (data === "menu_mcqs") {

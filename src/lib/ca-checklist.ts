@@ -149,13 +149,24 @@ export function dayChecklist(o: {
 
   const lang = o.lang;
   if (lang) {
-    const stories = new Set(lang.open.map((n) => n.item_id)).size;
+    // Parts in one language only: a row of their own.
+    const missing = lang.open.filter((n) => n.kind === "missing");
+    if (missing.length) {
+      out.push({
+        key: "missing",
+        state: "todo",
+        text: `${plural(missing.length, "part")} printed in one language only, in ${plural(new Set(missing.map((n) => n.item_id)).size, "story", "stories")}`,
+        action: { kind: "lang", label: "Show" },
+      });
+    }
+    const differ = lang.open.filter((n) => n.kind !== "missing");
+    const stories = new Set(differ.map((n) => n.item_id)).size;
     out.push(
-      lang.open.length
+      differ.length
         ? {
             key: "lang",
             state: "todo",
-            text: `${plural(lang.open.length, "Hindi–English mismatch", "Hindi–English mismatches")} in ${plural(stories, "story", "stories")}`,
+            text: `${plural(differ.length, "Hindi–English mismatch", "Hindi–English mismatches")} in ${plural(stories, "story", "stories")}`,
             action: { kind: "lang", label: "Show" },
           }
         : !lang.checked
@@ -275,7 +286,7 @@ export function draftButtons(checks: Check[], date: string, origin?: string): Tg
   const rows: TgButton[][] = [];
   if (!todo.length)
     rows.push([{ text: "✅ Approve & schedule", callback_data: `${APPROVE_DATA}${date}` }]);
-  if (origin && todo.some((c) => c.key === "lang")) {
+  if (origin && todo.some((c) => c.key === "lang" || c.key === "missing")) {
     rows.push([
       {
         text: "🔤 Hindi–English",

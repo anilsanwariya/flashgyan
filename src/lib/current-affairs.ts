@@ -851,8 +851,10 @@ export function formatDate(date: string, lang: "en" | "hi", withDay = true): str
 // ---------- Settings ----------
 
 export type MagazineSettings = {
-  // @channelusername or the numeric chat id (-100…).
+  // @channelusername or the numeric chat id (-100…): the English issue's
+  // channel, and the Hindi issue's (empty: the same channel as English).
   channel: string;
+  channel_hi: string;
   // HH:MM in India time.
   post_time: string;
   title_en: string;
@@ -917,6 +919,7 @@ export const DEFAULT_TRUSTED_DOMAINS = [
 
 export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   channel: "",
+  channel_hi: "",
   post_time: "10:00",
   title_en: "Daily Current Affairs",
   title_hi: "दैनिक करेंट अफेयर्स",
@@ -944,14 +947,36 @@ export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
 };
 
 // The note posted on the channel, under a day's PDF, when a correction to one
-// of its stories is approved after the issue went out.
-export function correctionNote(o: {
-  date: string;
-  headline: Bi;
-  summary_en: string;
-  summary_hi: string;
-}): string {
+// of its stories is approved after the issue went out: in that issue's
+// language (both, under an older bilingual issue).
+export function correctionNote(
+  o: {
+    date: string;
+    headline: Bi;
+    summary_en: string;
+    summary_hi: string;
+  },
+  lang?: "en" | "hi",
+): string {
   const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  if (lang === "hi") {
+    return [
+      `✏️ <b>सुधार</b> · ${formatDate(o.date, "hi")}`,
+      "",
+      `<b>${esc(o.headline.hi || o.headline.en)}</b>`,
+      "",
+      esc(o.summary_hi.trim() || o.summary_en),
+    ].join("\n");
+  }
+  if (lang === "en") {
+    return [
+      `✏️ <b>Correction</b> · ${formatDate(o.date, "en")}`,
+      "",
+      `<b>${esc(o.headline.en || o.headline.hi)}</b>`,
+      "",
+      esc(o.summary_en.trim() || o.summary_hi),
+    ].join("\n");
+  }
   return [
     `✏️ <b>सुधार · Correction</b> · ${formatDate(o.date, "hi")} / ${formatDate(o.date, "en")}`,
     "",
@@ -966,13 +991,28 @@ export function categoryLabel(id: string): { en: string; hi: string } {
   return CATEGORIES.find((c) => c.id === id) ?? { en: id, hi: id };
 }
 
+// The post's caption, in the issue's language (both for an older bilingual
+// issue).
 export function captionFor(
   kind: "daily" | "monthly",
   period: string,
   settings: MagazineSettings,
   count: number,
+  lang?: "en" | "hi",
 ): string {
   const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const brand = esc(settings.brand_line);
+  if (lang === "hi") {
+    const title = settings.title_hi || settings.title_en;
+    return kind === "monthly"
+      ? `📚 <b>${esc(title.replace("दैनिक", "मासिक"))}</b>\n🗓 ${formatDate(period, "hi", false)}\n📰 RAS प्रारंभिक एवं मुख्य परीक्षा के लिए ${count} विषय\n\n${brand}`
+      : `📰 <b>${esc(title)}</b>\n🗓 ${formatDate(period, "hi")}\n✅ RAS के लिए ${count} महत्वपूर्ण खबरें\n\n${brand}`;
+  }
+  if (lang === "en") {
+    return kind === "monthly"
+      ? `📚 <b>${esc(settings.title_en.replace(/^Daily/i, "Monthly"))}</b>\n🗓 ${formatDate(period, "en", false)}\n📰 ${count} topics for RAS Prelims & Mains\n\n${brand}`
+      : `📰 <b>${esc(settings.title_en)}</b>\n🗓 ${formatDate(period, "en")}\n✅ ${count} important news items for RAS\n\n${brand}`;
+  }
   if (kind === "monthly") {
     return `📚 <b>${esc(settings.title_hi.replace("दैनिक", "मासिक"))} | Monthly Current Affairs</b>\n🗓 ${formatDate(period, "hi", false)} / ${formatDate(period, "en", false)}\n📰 ${count} topics for RAS Prelims & Mains\n\n${esc(settings.brand_line)}`;
   }

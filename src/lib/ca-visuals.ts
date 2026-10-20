@@ -25,6 +25,16 @@ export const VISUAL_LABELS: Record<VisualType, string> = {
   table: "Table",
   mindmap: "Mind map",
 };
+// The Hindi issue's box titles.
+const VISUAL_LABELS_HI: Record<VisualType, string> = {
+  stats: "मुख्य आँकड़े",
+  bar: "बार चार्ट",
+  pie: "पाई चार्ट",
+  timeline: "समय-रेखा",
+  flow: "प्रवाह चार्ट",
+  table: "तालिका",
+  mindmap: "माइंड मैप",
+};
 
 type ChatMessage = { role: "system" | "user"; content: string };
 
@@ -325,10 +335,15 @@ const esc = (s: string | null | undefined) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
-// Hindi above English; once when both are the same.
-function label(b: Bi, cls = ""): string {
+// Hindi above English; once when both are the same. With a language (the
+// Hindi or English issue), that one only (the other when it's missing).
+function labelIn(b: Bi, cls = "", lang?: "en" | "hi"): string {
   const hi = b.hi.trim();
   const en = b.en.trim();
+  if (lang) {
+    const t = (lang === "hi" ? hi || en : en || hi) ?? "";
+    return `<span class="vl ${cls}" lang="${lang}">${esc(t)}</span>`;
+  }
   if (!hi || !en || hi === en) return `<span class="vl ${cls}">${esc(hi || en)}</span>`;
   return `<span class="vl ${cls}"><span lang="hi">${esc(hi)}</span><span class="ven" lang="en">${esc(en)}</span></span>`;
 }
@@ -382,7 +397,11 @@ function pieSvg(slices: { value: number }[], colors: string[]): string {
   return `<svg class="pie" viewBox="0 0 120 120" width="120" height="120">${paths.join("")}</svg>`;
 }
 
-function mindmapSvg(v: Extract<Visual, { type: "mindmap" }>, accent: string): string {
+function mindmapSvg(
+  v: Extract<Visual, { type: "mindmap" }>,
+  accent: string,
+  lang?: "en" | "hi",
+): string {
   const n = v.branches.length;
   const left = v.branches.slice(0, Math.ceil(n / 2));
   const right = v.branches.slice(Math.ceil(n / 2));
@@ -416,19 +435,37 @@ function mindmapSvg(v: Extract<Visual, { type: "mindmap" }>, accent: string): st
       `<path d="M ${cx + (side === "l" ? -cW / 2 : cW / 2)} ${cy} C ${cx + (side === "l" ? -cW / 2 - 40 : cW / 2 + 40)} ${cy}, ${edge + (side === "l" ? 40 : -40)} ${y}, ${edge} ${y}" fill="none" stroke="${color}" stroke-width="2.5"/>`,
     );
     parts.push(
-      node(x, y - (rowH - 10) / 2, boxW, rowH - 10, label(b), "mm-branch", `border-color:${color}`),
+      node(
+        x,
+        y - (rowH - 10) / 2,
+        boxW,
+        rowH - 10,
+        labelIn(b, "", lang),
+        "mm-branch",
+        `border-color:${color}`,
+      ),
     );
   };
   ys(left.length).forEach((y, i) => branch(left[i], y, "l", i));
   ys(right.length).forEach((y, i) => branch(right[i], y, "r", i + left.length));
   parts.push(
-    node(cx - cW / 2, cy - cH / 2, cW, cH, label(v.center), "mm-center", `background:${accent}`),
+    node(
+      cx - cW / 2,
+      cy - cH / 2,
+      cW,
+      cH,
+      labelIn(v.center, "", lang),
+      "mm-center",
+      `background:${accent}`,
+    ),
   );
   return `<svg class="mindmap" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">${parts.join("")}</svg>`;
 }
 
-// The visual as HTML, for the magazine and the admin preview.
-export function visualHtml(v: Visual, accent = "#6d28d9"): string {
+// The visual as HTML, for the magazine (in its language) and the admin
+// preview (both languages).
+export function visualHtml(v: Visual, accent = "#6d28d9", lang?: "en" | "hi"): string {
+  const label = (b: Bi, cls = "") => labelIn(b, cls, lang);
   const colors = [accent, ...PALETTE];
   const caption = v.title.en || v.title.hi ? `<div class="v-caption">${label(v.title)}</div>` : "";
   let body = "";
@@ -477,10 +514,10 @@ export function visualHtml(v: Visual, accent = "#6d28d9"): string {
         .join("")}</tbody></table>`;
       break;
     case "mindmap":
-      body = mindmapSvg(v, accent);
+      body = mindmapSvg(v, accent, lang);
       break;
   }
-  return `<div class="box visual visual-${v.type}"><div class="box-title">${esc(VISUAL_LABELS[v.type])}</div>${caption}${body}</div>`;
+  return `<div class="box visual visual-${v.type}"><div class="box-title">${esc((lang === "hi" ? VISUAL_LABELS_HI : VISUAL_LABELS)[v.type])}</div>${caption}${body}</div>`;
 }
 
 export const VISUAL_CSS = (accent: string) => `

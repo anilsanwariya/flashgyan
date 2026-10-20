@@ -1,6 +1,6 @@
 // Admin: daily and monthly current affairs magazine. Upload the day's sources,
 // review the news items SAATHI writes from them, approve the issue and it is
-// posted to the Telegram channel as a bilingual PDF.
+// posted to the Telegram channels as an English PDF and a Hindi PDF.
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -166,10 +166,10 @@ function IssueBar({
     }
   }
 
-  async function showPreview() {
-    setBusy("preview");
+  async function showPreview(lang: "en" | "hi") {
+    setBusy(`preview-${lang}`);
     try {
-      const { html, count } = await previewFn({ data: { kind, period } });
+      const { html, count } = await previewFn({ data: { kind, period, lang } });
       if (!count) toast.warning("No written items yet; the preview shows only the cover.");
       setPreview(html);
     } catch (e) {
@@ -197,14 +197,27 @@ function IssueBar({
           <span className="text-xs text-muted-foreground">on {timeIst(issue.posted_at)} IST</span>
         )}
         {issue?.pdf_url && (
-          <a
-            href={issue.pdf_url}
-            target="_blank"
-            rel="noreferrer"
-            className="ml-auto inline-flex items-center gap-1 text-sm text-primary hover:underline"
-          >
-            <FileText className="h-4 w-4" /> Open PDF
-          </a>
+          <span className="ml-auto flex flex-wrap gap-3">
+            {/* The English issue, and the Hindi issue (none on older bilingual issues). */}
+            <a
+              href={issue.pdf_url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+            >
+              <FileText className="h-4 w-4" /> {issue.pdf_url_hi ? "English PDF" : "Open PDF"}
+            </a>
+            {issue.pdf_url_hi && (
+              <a
+                href={issue.pdf_url_hi}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+              >
+                <FileText className="h-4 w-4" /> Hindi PDF
+              </a>
+            )}
+          </span>
         )}
       </div>
       {issue?.error && <p className="text-sm text-destructive">{issue.error}</p>}
@@ -222,9 +235,22 @@ function IssueBar({
       {blocking && <p className="text-sm text-amber-700 dark:text-amber-400">{blocking}</p>}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" size="sm" onClick={showPreview} disabled={!!busy}>
-          <Eye className="mr-1 h-4 w-4" /> {busy === "preview" ? "Preparing…" : "Preview"}
-        </Button>
+        {(["en", "hi"] as const).map((lang) => (
+          <Button
+            key={lang}
+            variant="outline"
+            size="sm"
+            onClick={() => void showPreview(lang)}
+            disabled={!!busy}
+          >
+            <Eye className="mr-1 h-4 w-4" />{" "}
+            {busy === `preview-${lang}`
+              ? "Preparing…"
+              : lang === "en"
+                ? "Preview English"
+                : "Preview Hindi"}
+          </Button>
+        ))}
         {!posted && issue?.status !== "scheduled" && (
           <Button
             variant="outline"
@@ -234,11 +260,11 @@ function IssueBar({
               run(
                 "pdf",
                 () => buildFn({ data: { kind, period, schedule: false } }),
-                "PDF made. Open it to check, then approve.",
+                "PDFs made. Open them to check, then approve.",
               )
             }
           >
-            <FileText className="mr-1 h-4 w-4" /> {busy === "pdf" ? "Making PDF…" : "Make PDF"}
+            <FileText className="mr-1 h-4 w-4" /> {busy === "pdf" ? "Making PDFs…" : "Make PDFs"}
           </Button>
         )}
         {issue?.pdf_path && (
@@ -288,7 +314,7 @@ function IssueBar({
               }
             >
               <CheckCircle2 className="mr-1 h-4 w-4" />
-              {busy === "approve" ? "Making PDF…" : "Approve & schedule"}
+              {busy === "approve" ? "Making PDFs…" : "Approve & schedule"}
             </Button>
           </>
         )}
@@ -331,7 +357,7 @@ function IssueBar({
       </div>
       {!posted && (
         <p className="text-xs text-muted-foreground">
-          {defaultWhen}. Approving remakes the PDF with your latest edits.
+          {defaultWhen}. Approving remakes both PDFs with your latest edits.
         </p>
       )}
 
@@ -1223,6 +1249,7 @@ function SettingsPanel() {
       await saveFn({
         data: {
           channel: text("channel"),
+          channel_hi: text("channel_hi"),
           post_time: text("post_time"),
           title_en: text("title_en"),
           title_hi: text("title_hi"),
@@ -1299,14 +1326,21 @@ function SettingsPanel() {
   return (
     <div className="space-y-5">
       <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
-        <h3 className="font-semibold">Telegram channel</h3>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <h3 className="font-semibold">Telegram channels</h3>
+        <p className="text-sm text-muted-foreground">
+          Each day's stories become two issues: an English PDF and a Hindi PDF, each posted to its
+          own channel. Add the bot to each channel as an admin with “Post messages”.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {field("channel", "English channel", "@yourchannel or -100…")}
           {field(
-            "channel",
-            "Channel",
-            "@yourchannel or -100…",
-            "Add the bot to the channel as an admin with “Post messages”.",
+            "channel_hi",
+            "Hindi channel",
+            "@yourhindichannel or -100…",
+            "Leave empty to post the Hindi issue to the English channel too.",
           )}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
           {field(
             "post_time",
             "Daily post time (IST)",
@@ -1328,9 +1362,10 @@ function SettingsPanel() {
           <span className="text-sm">
             <span className="font-medium">Post a quiz after each daily issue</span>
             <span className="block text-muted-foreground">
-              Right after the PDF, the issue's MCQs go to the channel as Telegram quiz polls (Hindi
-              and English), so readers can test themselves and share them. The same questions reach
-              students who turned on the bot's daily quiz (/daily).
+              Right after each PDF, the issue's MCQs go to its channel as Telegram quiz polls in
+              that issue's language, so readers can test themselves and share them. The same
+              questions reach students who turned on the bot's daily quiz (/daily), in the language
+              each student picks.
             </span>
           </span>
         </label>
@@ -1343,7 +1378,7 @@ function SettingsPanel() {
             <span className="font-medium">Post corrections to the channel</span>
             <span className="block text-muted-foreground">
               When you approve a correction to a story whose issue is already posted, a short note
-              (Hindi and English) goes to the channel as a reply under that day's PDF.
+              goes to each channel as a reply under that day's PDF, in that issue's language.
             </span>
           </span>
         </label>
