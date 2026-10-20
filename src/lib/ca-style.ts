@@ -86,3 +86,184 @@ export function parseStyleRules(raw: string, existing: string[]): StyleSuggestio
   }
   return out.slice(0, 5);
 }
+
+// ---------- Checking a day's stories against the rules ----------
+
+// One part of a story in one language: "headline", "summary", "point 2" or
+// "why", as the editor sees it.
+export type StylePart = { part: string; lang: "en" | "hi"; text: string };
+
+// Where the AI saw a rule broken, and the text it suggests instead. `text` is
+// the part as it was checked; once the story changes there, the note is gone.
+export type StyleBreak = StylePart & { id: string; item_id: string; rule: string; fix: string };
+
+export type StyleCheck = {
+  at: string;
+  // The rules checked against, and each story's text when it was checked.
+  rules: string;
+  stories: Record<string, string>;
+  breaks: StyleBreak[];
+  // Notes the editor waved through ("It's fine").
+  dismissed: string[];
+};
+
+// What one AI request checks, and the most notes it gives.
+export const STYLE_CHECK_STORIES = 30;
+const STYLE_BREAKS_MAX = 40;
+
+export function storyParts(c: CaContent): StylePart[] {
+  const out: StylePart[] = [];
+  const add = (part: string, b: Bi | null | undefined) => {
+    for (const lang of ["en", "hi"] as const) {
+      const text = b?.[lang]?.trim() ?? "";
+      if (text) out.push({ part, lang, text });
+    }
+  };
+  add("headline", c.headline);
+  add("summary", c.summary);
+  c.points.forEach((p, i) => add(`point ${i + 1}`, p));
+  add("why", c.why);
+  return out;
+}
+
+export function partText(c: CaContent | null, part: string, lang: "en" | "hi"): string {
+  if (!c) return "";
+  const p = /^point (\d+)$/.exec(part);
+  const b =
+    part === "headline"
+      ? c.headline
+      : part === "summary"
+        ? c.summary
+        : part === "why"
+          ? c.why
+          : p
+            ? c.points[Number(p[1]) - 1]
+            : null;
+  return b?.[lang]?.trim() ?? "";
+}
+
+export function withPart(c: CaContent, part: string, lang: "en" | "hi", text: string): CaContent {
+  const set = (b: Bi | null | undefined): Bi => ({ en: "", hi: "", ...b, [lang]: text });
+  const p = /^point (\d+)$/.exec(part);
+  if (p) {
+    const i = Number(p[1]) - 1;
+    return { ...c, points: c.points.map((x, j) => (j === i ? set(x) : x)) };
+  }
+  if (part === "headline" || part === "summary" || part === "why") {
+    return { ...c, [part]: set(c[part]) };
+  }
+  return c;
+}
+
+// A short hash (FNV-1a), the same in the browser and on the server: whether a
+// story's text or the rules changed since the check.
+function hash(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+export const storyFingerprint = (c: CaContent) => hash(JSON.stringify(storyParts(c)));
+export const rulesFingerprint = (rules: string[]) =>
+  hash(JSON.stringify(rules.map(normalizeForMatch)));
+const breakId = (item_id: string, p: StylePart, rule: string) =>
+  hash(JSON.stringify([item_id, p.part, p.lang, p.text, rule]));
+
+const ref = (n: number, p: StylePart) => `S${n}.${p.part.replace(" ", "")}.${p.lang}`;
+
+export function styleCheckMessages(
+  rules: string[],
+  stories: { content: CaContent }[],
+): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: `You check a current affairs magazine (Hindi and English, for RAS exam aspirants) against the editor's house style rules before it is published. Each line of the stories is one part, labelled like S2.point3.hi (story 2, point 3, Hindi).
+RULES: Report only clear breaks of a numbered rule, not taste, facts or anything the rules don't ask for. A rule about one language applies only to that language. For each break give the part's label, the rule's number and the whole part rewritten to follow the rule: same language, same facts, numbers and names, changing only what the rule needs. Leave out a part that already follows the rules. At most ${STYLE_BREAKS_MAX} breaks, the clearest first; an empty list is fine.
+Reply with JSON only: {"breaks": [{"ref": "S1.headline.en", "rule": 1, "fix": "..."}]}`,
+    },
+    {
+      role: "user",
+      content: `House style rules:\n${rules.map((r, i) => `${i + 1}. ${r}`).join("\n")}\n\nStories:\n${stories
+        .map((s, i) =>
+          storyParts(s.content)
+            .map((p) => `${ref(i + 1, p)}: ${p.text}`)
+            .join("\n"),
+        )
+        .join("\n\n")}`,
+    },
+  ];
+}
+
+// The breaks the AI found, matched to the stories' parts; null when unreadable.
+export function parseStyleBreaks(
+  raw: string,
+  rules: string[],
+  stories: { id: string; content: CaContent }[],
+): StyleBreak[] | null {
+  const text = raw.replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end < start) return null;
+  let o: { breaks?: unknown };
+  try {
+    o = JSON.parse(text.slice(start, end + 1)) as { breaks?: unknown };
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(o.breaks)) return null;
+  const parts = new Map<string, { id: string; p: StylePart }>();
+  stories.forEach((s, i) => {
+    for (const p of storyParts(s.content)) parts.set(ref(i + 1, p).toLowerCase(), { id: s.id, p });
+  });
+  const out: StyleBreak[] = [];
+  const seen = new Set<string>();
+  for (const b of o.breaks as Record<string, unknown>[]) {
+    const at = parts.get(
+      String(b?.ref ?? "")
+        .replace(/\s+/g, "")
+        .toLowerCase(),
+    );
+    const rule = rules[Number(b?.rule) - 1];
+    const fix = typeof b?.fix === "string" ? b.fix.replace(/\s+/g, " ").trim().slice(0, 400) : "";
+    if (!at || !rule || !fix || normalizeForMatch(fix) === normalizeForMatch(at.p.text)) continue;
+    const id = breakId(at.id, at.p, rule);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, item_id: at.id, ...at.p, rule, fix });
+  }
+  return out.slice(0, STYLE_BREAKS_MAX);
+}
+
+// How the day stands: whether it was checked against these rules, the notes
+// still in the text (not waved through), and the written stories not checked
+// as they are now. Null when there are no rules or nothing written to check.
+export type StyleStatus = { checked: boolean; open: StyleBreak[]; unchecked: string[] };
+
+export function styleStatus(
+  check: StyleCheck | null,
+  items: { id: string; status: string; content: CaContent | null }[],
+  rules: string[],
+): StyleStatus | null {
+  const written = items.filter((i) => i.status === "included" && i.content);
+  if (!rules.length || !written.length) return null;
+  if (!check || check.rules !== rulesFingerprint(rules)) {
+    return { checked: false, open: [], unchecked: written.map((i) => i.id) };
+  }
+  const byId = new Map(written.map((i) => [i.id, i.content]));
+  const dismissed = new Set(check.dismissed);
+  return {
+    checked: true,
+    open: check.breaks.filter(
+      (b) =>
+        !dismissed.has(b.id) &&
+        byId.has(b.item_id) &&
+        partText(byId.get(b.item_id)!, b.part, b.lang) === b.text,
+    ),
+    unchecked: written
+      .filter((i) => check.stories[i.id] !== storyFingerprint(i.content!))
+      .map((i) => i.id),
+  };
+}

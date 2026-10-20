@@ -31,6 +31,7 @@ import {
   extractCaSourcePart,
   getCaDay,
   getCaSkippedSummary,
+  getCaStyleCheck,
   getCaMonth,
   sendCaWeeklyReport,
   getMagazineSettings,
@@ -56,8 +57,10 @@ import { StoryList } from "@/components/ca-story-review";
 import { SkippedNews } from "@/components/ca-skipped-news";
 import { DayChecklist } from "@/components/ca-day-checklist";
 import { FactCheckDialog } from "@/components/ca-fact-check";
+import { StyleCheckDialog } from "@/components/ca-style-check";
 import { HouseStyle } from "@/components/ca-house-style";
 import { dayChecklist, type CheckAction } from "@/lib/ca-checklist";
+import { styleStatus } from "@/lib/ca-style";
 import { FeatureBox } from "@/components/ca-feature-box";
 import { Badge, BulkBar, errorText, useChosen } from "@/components/ca-ui";
 import { FileDropZone, FileQueueList, useFileQueue } from "@/components/saathi-file-queue";
@@ -400,12 +403,15 @@ function DailyPanel() {
   const [storyJump, setStoryJump] = useState<{ id: string; n: number } | null>(null);
   const [skippedSignal, setSkippedSignal] = useState(0);
   const [factsOpen, setFactsOpen] = useState(false);
-  // A link from the Telegram message: the day, and fact-check mode.
+  const [styleOpen, setStyleOpen] = useState(false);
+  // A link from the Telegram message: the day, and fact-check mode or the
+  // house style check.
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     const d = p.get("date");
     if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) setDate(d);
     if (p.get("open") === "facts") setFactsOpen(true);
+    if (p.get("open") === "style") setStyleOpen(true);
   }, []);
   // Until the skipped news list is opened, its last saved counts (kept up to
   // date by the evening collection's ranking).
@@ -414,6 +420,14 @@ function DailyPanel() {
     queryKey: ["caDay", date, "skippedSummary"],
     queryFn: () => skippedSummaryFn({ data: { date } }),
     enabled: (day?.sources.length ?? 0) > 0,
+  });
+  // The last house style check (when there are rules).
+  const styleRules = daySettingsQ.data?.style_rules ?? [];
+  const styleFn = useServerFn(getCaStyleCheck);
+  const styleQ = useQuery({
+    queryKey: ["caDay", date, "styleCheck"],
+    queryFn: () => styleFn({ data: { date } }),
+    enabled: styleRules.length > 0,
   });
 
   const addFn = useServerFn(addCaSource);
@@ -571,6 +585,7 @@ function DailyPanel() {
         ? "Upload the day's sources to make an issue."
         : null;
   const dayCorrections = (day?.corrections ?? []).filter((c) => c.item_date === date).length;
+  const style = styleStatus(styleQ.data ?? null, items, styleRules);
   const checks = dayChecklist({
     items,
     reviewed,
@@ -583,6 +598,7 @@ function DailyPanel() {
         : null),
     minRajasthan: daySettingsQ.data?.min_rajasthan ?? DEFAULT_MIN_RAJASTHAN,
     target: daySettingsQ.data?.daily_stories ?? 0,
+    style: styleQ.isSuccess ? style : null,
   });
   const issueDone =
     day?.issue?.status === "posted" || day?.issue?.status === "posting" || !included.length;
@@ -591,6 +607,7 @@ function DailyPanel() {
     else if (a.kind === "skipped") setSkippedSignal(Date.now());
     else if (a.kind === "write") void retryAll();
     else if (a.kind === "facts") setFactsOpen(true);
+    else if (a.kind === "style") setStyleOpen(true);
     else document.getElementById("ca-corrections")?.scrollIntoView({ behavior: "smooth" });
   }
 
@@ -639,6 +656,17 @@ function DailyPanel() {
         open={factsOpen}
         onOpenChange={setFactsOpen}
         onChanged={refresh}
+      />
+      <StyleCheckDialog
+        date={date}
+        open={styleOpen}
+        onOpenChange={setStyleOpen}
+        status={style}
+        checkedAt={styleQ.data?.at ?? null}
+        rules={styleRules.length}
+        items={included}
+        onChanged={refresh}
+        onOpenStory={(id) => setStoryJump({ id, n: Date.now() })}
       />
 
       <CollectionBox date={date} onChanged={refresh} />

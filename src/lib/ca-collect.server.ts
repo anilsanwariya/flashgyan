@@ -336,6 +336,15 @@ async function finishRun(
   } catch (e) {
     console.error("rank skipped news:", saathiErrorDetail(e));
   }
+  // The stories against the editor's house style rules (one AI call), so the
+  // checklist lists what breaks them.
+  if (settings.style_rules.length) {
+    try {
+      await CA.checkStyle(run.issue_date);
+    } catch (e) {
+      console.error("house style check:", saathiErrorDetail(e));
+    }
+  }
   if (run.notified || !settings.notify_when_ready || !settings.test_chat_id) return;
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return;

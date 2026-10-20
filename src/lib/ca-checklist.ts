@@ -3,6 +3,7 @@
 // counts what the daily screen (or the "draft ready" message) already has.
 import { CATEGORIES } from "@/lib/current-affairs";
 import { rajasthanBalance } from "@/lib/ca-report";
+import type { StyleStatus } from "@/lib/ca-style";
 import { TRIAGE } from "../../supabase/functions/_shared/ca-triage.ts";
 
 export type CheckAction =
@@ -10,7 +11,8 @@ export type CheckAction =
   | { kind: "write" }
   | { kind: "skipped" }
   | { kind: "corrections" }
-  | { kind: "facts" };
+  | { kind: "facts" }
+  | { kind: "style" };
 
 // "todo": should be done before scheduling; "note": worth a look; "done".
 export type Check = {
@@ -46,6 +48,8 @@ export function dayChecklist(o: {
   skipped: { worth: number; unranked: number } | null;
   minRajasthan: number;
   target: number;
+  // The house style check (null: no rules, or not known).
+  style?: StyleStatus | null;
 }): Check[] {
   const order = new Map<string, number>(CATEGORIES.map((c, i) => [c.id, i]));
   // In the order the review list shows them.
@@ -108,6 +112,35 @@ export function dayChecklist(o: {
         }
       : { key: "facts", state: "done", text: "No facts left to check" },
   );
+
+  const style = o.style;
+  if (style) {
+    const stories = new Set(style.open.map((b) => b.item_id)).size;
+    out.push(
+      !style.checked
+        ? {
+            key: "style",
+            state: "note",
+            text: "Stories not checked against your house style",
+            action: { kind: "style", label: "Check" },
+          }
+        : style.open.length
+          ? {
+              key: "style",
+              state: "todo",
+              text: `${plural(style.open.length, "house style break")} in ${plural(stories, "story", "stories")}`,
+              action: { kind: "style", label: "Show" },
+            }
+          : style.unchecked.length
+            ? {
+                key: "style",
+                state: "note",
+                text: `${plural(style.unchecked.length, "story", "stories")} changed or new since the house style check`,
+                action: { kind: "style", label: "Check" },
+              }
+            : { key: "style", state: "done", text: "Stories follow your house style" },
+    );
+  }
 
   if (o.corrections) {
     out.push({
@@ -214,6 +247,9 @@ export function draftButtons(checks: Check[], date: string, origin?: string): Tg
     const page = `${origin}/admin?section=ca.daily&date=${date}`;
     if (todo.some((c) => c.key === "facts")) {
       rows.push([{ text: "🔍 Check facts", url: `${page}&open=facts` }]);
+    }
+    if (todo.some((c) => c.key === "style")) {
+      rows.push([{ text: "✍️ House style", url: `${page}&open=style` }]);
     }
     rows.push([{ text: "📝 Open review", url: page }]);
   }

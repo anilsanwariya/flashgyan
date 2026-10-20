@@ -202,6 +202,42 @@ export const saveCaStyleRules = createServerFn({ method: "POST" })
     return (await server()).saveStyleRules(data.rules);
   });
 
+// The house style check of a day: the last one, running it (the stories not
+// yet checked as they are), applying a suggested fix, and "It's fine".
+export const getCaStyleCheck = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ date: dateSchema }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).getStyleCheck(data.date);
+  });
+
+export const runCaStyleCheck = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ date: dateSchema }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).checkStyle(data.date);
+  });
+
+const styleBreakSchema = z.object({ date: dateSchema, id: z.string().regex(/^[0-9a-f]{8}$/) });
+
+export const applyCaStyleFix = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => styleBreakSchema.parse(d))
+  .handler(async ({ data, context }): Promise<CaItem> => {
+    await assertAdmin(context.userId);
+    return (await server()).applyStyleFix(data.date, data.id);
+  });
+
+export const dismissCaStyleBreak = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => styleBreakSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).dismissStyleBreak(data.date, data.id);
+  });
+
 // One tiny request to each AI service, to see which one is failing and why.
 export const checkAiServices = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

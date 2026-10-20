@@ -39,7 +39,7 @@ export function triageOrder(rows: TriageStory[]): TriageStory[] {
 
 // Button data: "cas:<what>:<story id or date>". d drop and go on, i put back,
 // k keep and go on, n next, p previous, s start (a new message), r start
-// again, l the last story, x nothing (the "3/18" label).
+// again, l the last story, h edit the headline, x nothing (the "3/18" label).
 export const TRIAGE = "cas:";
 type Button = { text: string; callback_data: string };
 type Card = { text: string; reply_markup: { inline_keyboard: Button[][] } };
@@ -81,6 +81,7 @@ export function storyCard(rows: TriageStory[], i: number): Card {
           { text: `${i + 1}/${rows.length}`, callback_data: `${TRIAGE}x:` },
           { text: "➡️", callback_data: `${TRIAGE}n:${s.id}` },
         ],
+        ...(c ? [[{ text: "✏️ Edit headline", callback_data: `${TRIAGE}h:${s.id}` }]] : []),
       ],
     },
   };
@@ -110,4 +111,18 @@ export function nextIndex(what: string, at: number, count: number): number {
   if (what === "p") return Math.max(0, at - 1);
   if (what === "i") return Math.max(0, at);
   return at < 0 ? 0 : Math.min(count, at + 1);
+}
+
+// A new headline sent as a reply: a line in Devanagari is the Hindi one, any
+// other line the English one; a language left out stays as it is. Null when
+// there is nothing usable.
+export function parseHeadline(text: string): Partial<Bi> | null {
+  const out: Partial<Bi> = {};
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/\s+/g, " ").trim().slice(0, 200);
+    if (line.length < 3 || line.startsWith("/")) continue;
+    const lang = /[\u0900-\u097F]/.test(line) ? "hi" : "en";
+    if (!out[lang]) out[lang] = line;
+  }
+  return out.en || out.hi ? out : null;
 }

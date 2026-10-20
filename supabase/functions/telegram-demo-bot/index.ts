@@ -3,7 +3,7 @@
 // and quiz state in bot_sessions. Public webhook (Telegram calls it directly).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { runTelegramAnswerJob } from "../_shared/telegram-answer-job.ts";
-import { TRIAGE, nextIndex, storyCard, summaryCard, triageOrder, type TriageStory } from "../_shared/ca-triage.ts";
+import { TRIAGE, nextIndex, parseHeadline, storyCard, summaryCard, triageOrder, type TriageStory } from "../_shared/ca-triage.ts";
 import { CHECK_PHOTO_MAX_BYTES, checkQuestionInput, pickCheckPhoto, validCheckAnswer, type CheckPhoto } from "../_shared/telegram-check-input.ts";
 import {
   SaathiAiError,
@@ -1317,11 +1317,115 @@ async function sendStories(chat_id: number, arg: string | undefined) {
   await tg("sendMessage", { chat_id, parse_mode: "HTML", ...storyCard(rows, 0) });
 }
 
+// ---- Editing a story's headline from its card: the admin replies with it ----
+const headlineKey = (chat_id: number) => `ca_headline_edit:${chat_id}`;
+const HEADLINE_EDIT_MS = 15 * 60_000;
+
+async function pendingHeadline(chat_id: number): Promise<string | null> {
+  const { data } = await supabase.from("bot_settings").select("value").eq("key", headlineKey(chat_id)).maybeSingle();
+  const v = (data?.value ?? null) as { item_id?: string; at?: string } | null;
+  if (!v?.item_id || Date.now() - Date.parse(v.at ?? "") > HEADLINE_EDIT_MS) return null;
+  return v.item_id;
+}
+
+async function askHeadline(chat_id: number, item_id: string) {
+  const { data: it } = await supabase.from("ca_items").select("issue_date,content").eq("id", item_id).maybeSingle();
+  const item = it as { issue_date: string; content: { headline?: { en: string; hi: string } } | null } | null;
+  if (!item?.content) {
+    await tg("sendMessage", { chat_id, text: "This story isn't written yet." });
+    return;
+  }
+  if (await dayLocked(item.issue_date)) {
+    await tg("sendMessage", { chat_id, text: `The issue for ${item.issue_date} is already scheduled or posted. Cancel the schedule in the admin panel to change it.` });
+    return;
+  }
+  await supabase.from("bot_settings").upsert({
+    key: headlineKey(chat_id),
+    value: { item_id, at: new Date().toISOString() },
+    updated_at: new Date().toISOString(),
+  });
+  const h = item.content.headline ?? { en: "", hi: "" };
+  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  await tg("sendMessage", {
+    chat_id,
+    parse_mode: "HTML",
+    text: `✏️ Send the new headline for:\n<b>${esc(h.hi || h.en)}</b>${h.hi && h.en ? `\n${esc(h.en)}` : ""}\n\nOne line in Hindi and one in English, or just the one to change. /cancel to stop.`,
+    reply_markup: { force_reply: true, input_field_placeholder: "New headline" },
+  });
+}
+
+// The reply with the new headline: saved like an edit in the admin panel
+// (the story as it was goes into its History, once per editing session).
+async function saveHeadline(chat_id: number, item_id: string, text: string) {
+  const next = parseHeadline(text);
+  if (!next) {
+    await tg("sendMessage", { chat_id, text: "Send the headline as text (Hindi and/or English), or /cancel." });
+    return;
+  }
+  const { data: it } = await supabase
+    .from("ca_items")
+    .select("id,issue_date,headline,facts,source_ids,content,context_sources,syllabus_topic_id,unit")
+    .eq("id", item_id)
+    .maybeSingle();
+  const item = it as any;
+  await supabase.from("bot_settings").delete().eq("key", headlineKey(chat_id));
+  if (!item?.content) {
+    await tg("sendMessage", { chat_id, text: "That story is no longer there." });
+    return;
+  }
+  if (await dayLocked(item.issue_date)) {
+    await tg("sendMessage", { chat_id, text: `The issue for ${item.issue_date} is already scheduled or posted, so the headline wasn't changed.` });
+    return;
+  }
+  const { data: lastVersion } = await supabase
+    .from("ca_item_versions")
+    .select("reason,created_at")
+    .eq("item_id", item_id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const v = lastVersion as { reason: string; created_at: string } | null;
+  if (!(v?.reason === "edit" && Date.now() - Date.parse(v.created_at) < 30 * 60_000)) {
+    await supabase.from("ca_item_versions").insert({
+      item_id,
+      reason: "edit",
+      headline: item.content.headline?.en || item.content.headline?.hi || "",
+      snapshot: {
+        facts: item.facts,
+        source_ids: item.source_ids,
+        content: item.content,
+        context_sources: item.context_sources,
+        syllabus_topic_id: item.syllabus_topic_id,
+        unit: item.unit,
+      },
+    });
+  }
+  const headline = { ...(item.content.headline ?? { en: "", hi: "" }), ...next };
+  const { error } = await supabase
+    .from("ca_items")
+    .update({ content: { ...item.content, headline }, updated_at: new Date().toISOString() })
+    .eq("id", item_id);
+  if (error) {
+    console.error("ca headline", error.message);
+    await tg("sendMessage", { chat_id, text: "Couldn't save the headline. Try again in the admin panel." });
+    return;
+  }
+  // Back to the story's card, to carry on.
+  const rows = await dayStories(item.issue_date);
+  const at = rows.findIndex((r) => r.id === item_id);
+  await tg("sendMessage", { chat_id, text: "✅ Headline saved." });
+  if (at >= 0) await tg("sendMessage", { chat_id, parse_mode: "HTML", ...storyCard(rows, at) });
+}
+
 async function handleStoryTap(chat_id: number, message_id: number, data: string) {
   const [what = "", arg = ""] = data.slice(TRIAGE.length).split(":");
   if (what === "x") return;
   if (!(await isMagazineAdmin(chat_id))) {
     await tg("sendMessage", { chat_id, text: "Only the magazine's admin chat can review stories." });
+    return;
+  }
+  if (what === "h") {
+    await askHeadline(chat_id, arg);
     return;
   }
   let date = arg;
@@ -1763,6 +1867,11 @@ async function handleText(message: any) {
   const user_id: number = message.from?.id ?? chat_id;
   const text: string = message.text.trim();
 
+  if (!isGroup && /^\/cancel(?:@\S+)?$/i.test(text) && (await pendingHeadline(chat_id))) {
+    await supabase.from("bot_settings").delete().eq("key", headlineKey(chat_id));
+    await tg("sendMessage", { chat_id, text: "Headline edit cancelled." });
+    return;
+  }
   if (!isGroup && /^\/cancel(?:@\S+)?$/i.test(text)) {
     await supabase.from("bot_check_sessions").delete().eq("chat_id", chat_id);
     await tg("sendMessage", { chat_id, text: "Answer check cancelled. Start again any time: /check" });
@@ -1773,6 +1882,14 @@ async function handleText(message: any) {
   if (!isGroup && /^\/stories(?:@\S+)?(?:\s|$)/i.test(text) && (await isMagazineAdmin(chat_id))) {
     await sendStories(chat_id, text.split(/\s+/)[1]);
     return;
+  }
+  // A new headline, after "Edit headline" on a story card.
+  if (!isGroup && !text.startsWith("/")) {
+    const editing = await pendingHeadline(chat_id);
+    if (editing && (await isMagazineAdmin(chat_id))) {
+      await saveHeadline(chat_id, editing, text);
+      return;
+    }
   }
 
   const commands = await getCommands();
