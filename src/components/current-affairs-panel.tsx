@@ -30,6 +30,7 @@ import {
   enrichCaItem,
   extractCaSourcePart,
   getCaDay,
+  getCaSkippedSummary,
   getCaMonth,
   sendCaWeeklyReport,
   getMagazineSettings,
@@ -54,6 +55,7 @@ import { CollectionBox, WatchSitesSettings } from "@/components/ca-collect-panel
 import { StoryList } from "@/components/ca-story-review";
 import { SkippedNews } from "@/components/ca-skipped-news";
 import { DayChecklist } from "@/components/ca-day-checklist";
+import { FactCheckDialog } from "@/components/ca-fact-check";
 import { dayChecklist, type CheckAction } from "@/lib/ca-checklist";
 import { FeatureBox } from "@/components/ca-feature-box";
 import { Badge, BulkBar, errorText, useChosen } from "@/components/ca-ui";
@@ -396,6 +398,15 @@ function DailyPanel() {
   );
   const [storyJump, setStoryJump] = useState<{ id: string; n: number } | null>(null);
   const [skippedSignal, setSkippedSignal] = useState(0);
+  const [factsOpen, setFactsOpen] = useState(false);
+  // Until the skipped news list is opened, its last saved counts (kept up to
+  // date by the evening collection's ranking).
+  const skippedSummaryFn = useServerFn(getCaSkippedSummary);
+  const skippedSummaryQ = useQuery({
+    queryKey: ["caDay", date, "skippedSummary"],
+    queryFn: () => skippedSummaryFn({ data: { date } }),
+    enabled: (day?.sources.length ?? 0) > 0,
+  });
 
   const addFn = useServerFn(addCaSource);
   const extractFn = useServerFn(extractCaSourcePart);
@@ -557,7 +568,11 @@ function DailyPanel() {
     reviewed,
     unfinishedSources: unfinished,
     corrections: dayCorrections,
-    skipped: skippedStats,
+    skipped:
+      skippedStats ??
+      (skippedSummaryQ.data
+        ? { worth: skippedSummaryQ.data.worth, unranked: skippedSummaryQ.data.unranked }
+        : null),
     minRajasthan: daySettingsQ.data?.min_rajasthan ?? DEFAULT_MIN_RAJASTHAN,
     target: daySettingsQ.data?.daily_stories ?? 0,
   });
@@ -567,6 +582,7 @@ function DailyPanel() {
     if (a.kind === "story") setStoryJump({ id: a.id, n: Date.now() });
     else if (a.kind === "skipped") setSkippedSignal(Date.now());
     else if (a.kind === "write") void retryAll();
+    else if (a.kind === "facts") setFactsOpen(true);
     else document.getElementById("ca-corrections")?.scrollIntoView({ behavior: "smooth" });
   }
 
@@ -610,6 +626,12 @@ function DailyPanel() {
       />
 
       {!issueDone && <DayChecklist checks={checks} onAction={onCheck} />}
+      <FactCheckDialog
+        date={date}
+        open={factsOpen}
+        onOpenChange={setFactsOpen}
+        onChanged={refresh}
+      />
 
       <CollectionBox date={date} onChanged={refresh} />
 
@@ -742,6 +764,7 @@ function DailyPanel() {
             onChanged={refresh}
             jump={storyJump}
             onReviewed={setReviewed}
+            onFactCheck={() => setFactsOpen(true)}
           />
         </>
       )}

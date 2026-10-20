@@ -93,6 +93,7 @@ export function StoryList({
   onChanged,
   jump = null,
   onReviewed,
+  onFactCheck,
 }: {
   items: CaItem[];
   date: string;
@@ -101,6 +102,8 @@ export function StoryList({
   jump?: { id: string; n: number } | null;
   // The stories opened so far, for the day's checklist.
   onReviewed?: (ids: Set<string>) => void;
+  // Opens fact-check mode.
+  onFactCheck?: () => void;
 }) {
   const groups = useMemo(() => {
     const order = new Map<string, number>(CATEGORIES.map((c, i) => [c.id, i]));
@@ -223,6 +226,15 @@ export function StoryList({
           >
             {unverified} facts to check
           </Badge>
+        )}
+        {unverified > 0 && onFactCheck && (
+          <button
+            type="button"
+            onClick={onFactCheck}
+            className="text-xs font-medium text-primary hover:underline"
+          >
+            Check them one by one
+          </button>
         )}
         <Badge tone="good">
           {items.filter((i) => i.context_sources.length > 0).length} with {STATIC_CONNECT.en} from

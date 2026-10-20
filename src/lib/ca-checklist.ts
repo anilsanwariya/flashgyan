@@ -1,11 +1,15 @@
 // The day's checklist before the issue is scheduled: what is still left to
 // read, write, review or check, each with where to go to do it. Pure: it
-// counts what the daily screen already has.
+// counts what the daily screen (or the "draft ready" message) already has.
 import { CATEGORIES } from "@/lib/current-affairs";
 import { rajasthanBalance } from "@/lib/ca-report";
 
 export type CheckAction =
-  { kind: "story"; id: string } | { kind: "write" } | { kind: "skipped" } | { kind: "corrections" };
+  | { kind: "story"; id: string }
+  | { kind: "write" }
+  | { kind: "skipped" }
+  | { kind: "corrections" }
+  | { kind: "facts" };
 
 // "todo": should be done before scheduling; "note": worth a look; "done".
 export type Check = {
@@ -31,13 +35,13 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 
 export function dayChecklist(o: {
   items: DayItem[];
-  // Stories opened in the review list.
-  reviewed: Set<string>;
+  // Stories opened in the review list (null: not known, e.g. on Telegram).
+  reviewed: Set<string> | null;
   unfinishedSources: number;
   // Pending corrections to this day's stories.
   corrections: number;
-  // From the skipped news list once loaded: articles worth a story (not
-  // marked "not needed") and articles not ranked yet.
+  // From the skipped news list once loaded (or its last saved counts):
+  // articles worth a story (not marked "not needed") and not ranked yet.
   skipped: { worth: number; unranked: number } | null;
   minRajasthan: number;
   target: number;
@@ -72,21 +76,24 @@ export function dayChecklist(o: {
       : { key: "written", state: "done", text: "Every story is written" },
   );
 
-  const unread = included.filter((i) => !o.reviewed.has(i.id));
-  out.push(
-    unread.length
-      ? {
-          key: "reviewed",
-          state: "todo",
-          text: `${unread.length} of ${plural(included.length, "story", "stories")} not opened yet`,
-          action: { kind: "story", id: unread[0].id, label: "Next" },
-        }
-      : {
-          key: "reviewed",
-          state: "done",
-          text: `All ${plural(included.length, "story", "stories")} reviewed`,
-        },
-  );
+  const reviewed = o.reviewed;
+  const unread = reviewed ? included.filter((i) => !reviewed.has(i.id)) : [];
+  if (reviewed) {
+    out.push(
+      unread.length
+        ? {
+            key: "reviewed",
+            state: "todo",
+            text: `${unread.length} of ${plural(included.length, "story", "stories")} not opened yet`,
+            action: { kind: "story", id: unread[0].id, label: "Next" },
+          }
+        : {
+            key: "reviewed",
+            state: "done",
+            text: `All ${plural(included.length, "story", "stories")} reviewed`,
+          },
+    );
+  }
 
   const toCheck = included.filter((i) => i.facts.some((f) => !f.verified));
   const facts = toCheck.reduce((n, i) => n + i.facts.filter((f) => !f.verified).length, 0);
@@ -96,7 +103,7 @@ export function dayChecklist(o: {
           key: "facts",
           state: "todo",
           text: `${plural(facts, "fact")} to check in ${plural(toCheck.length, "story", "stories")}`,
-          action: { kind: "story", id: toCheck[0].id, label: "Show" },
+          action: { kind: "facts", label: "Check" },
         }
       : { key: "facts", state: "done", text: "No facts left to check" },
   );
@@ -179,4 +186,13 @@ export function dayChecklist(o: {
     });
   }
   return out;
+}
+
+// The checklist in a plain-text message (the "draft ready" message on
+// Telegram): what is still to do, leaving out the rows named in `skip`.
+export function checklistText(checks: Check[], skip: string[] = []): string {
+  const todo = checks.filter((c) => c.state === "todo" && !skip.includes(c.key));
+  return todo.length
+    ? `\n\nStill to do:\n${todo.map((c) => `• ${c.text}`).join("\n")}`
+    : "\n\n✅ Nothing left to check.";
 }

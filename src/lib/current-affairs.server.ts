@@ -54,6 +54,7 @@ import {
   formatDate,
   isCategory,
   normalizeCategory,
+  CATEGORIES,
   mergeFacts,
   monthRange,
   parseChanges,
@@ -94,6 +95,13 @@ import {
 import { missingMessages, parseMissing, type MissingCheck } from "@/lib/ca-missing";
 import { bestArticle, cosine, meaningText, type CompareMatch } from "@/lib/ca-compare";
 import { ADD_POINTS_MAX, STORY_POINTS_MAX, parsePoints, pointsMessages } from "@/lib/ca-points";
+import { dayChecklist, type Check } from "@/lib/ca-checklist";
+import {
+  closestSentence,
+  quoteContext,
+  sourceSentences,
+  type QuoteContext,
+} from "@/lib/ca-factcheck";
 import {
   RANK_MAX,
   parseRanks,
@@ -1454,7 +1462,14 @@ async function findSkipped(date: string): Promise<{ found: FoundArticle[]; readi
 }
 
 // The exam-value ranks given so far for a day's skipped news, by article.
-type SkippedRanks = { ranked_at: string; ranks: Record<string, SkippedRank> };
+// `counts`: how many skipped articles are worth a story and not ranked yet,
+// as last worked out, for the day's checklist without reading every source.
+type SkippedCounts = { worth: number; unranked: number; at: string };
+type SkippedRanks = {
+  ranked_at: string;
+  ranks: Record<string, SkippedRank>;
+  counts?: SkippedCounts;
+};
 const ranksKey = (date: string) => `ca_skipped_rank:${date}`;
 
 async function loadRanks(date: string): Promise<SkippedRanks | null> {
@@ -1471,14 +1486,39 @@ export async function skippedNews(date: string): Promise<{
   ranked_at: string | null;
 }> {
   const [{ found, reading }, saved] = await Promise.all([findSkipped(date), loadRanks(date)]);
-  return {
-    articles: found.map(({ snippet: _, ...a }) => ({
-      ...a,
-      rank: saved?.ranks[skippedKey(a)] ?? null,
-    })),
-    reading,
-    ranked_at: saved?.ranked_at ?? null,
+  const articles = found.map(({ snippet: _, ...a }) => ({
+    ...a,
+    rank: saved?.ranks[skippedKey(a)] ?? null,
+  }));
+  await saveCounts(date, saved, articles);
+  return { articles, reading, ranked_at: saved?.ranked_at ?? null };
+}
+
+// Keeps the day's counts up to date (only written when they change).
+async function saveCounts(
+  date: string,
+  saved: SkippedRanks | null,
+  articles: { rank?: SkippedRank | null }[],
+) {
+  const worth = articles.filter((a) => (a.rank?.score ?? 0) >= 2).length;
+  const unranked = articles.filter((a) => !a.rank).length;
+  if (saved?.counts?.worth === worth && saved.counts.unranked === unranked) return;
+  const value: SkippedRanks = {
+    ranked_at: saved?.ranked_at ?? "",
+    ranks: saved?.ranks ?? {},
+    counts: { worth, unranked, at: new Date().toISOString() },
   };
+  const { error } = await from("bot_settings").upsert({
+    key: ranksKey(date),
+    value,
+    updated_at: new Date().toISOString(),
+  } as never);
+  if (error) console.error("skipped news counts:", error.message);
+}
+
+// The day's skipped-news counts as last worked out (no sources are read).
+export async function skippedSummary(date: string): Promise<SkippedCounts | null> {
+  return (await loadRanks(date))?.counts ?? null;
 }
 
 // Ranks the day's skipped articles that have no rank yet, by their value for
@@ -1487,7 +1527,15 @@ export async function rankSkipped(date: string): Promise<{ ranked: number; left:
   const [{ found }, saved] = await Promise.all([findSkipped(date), loadRanks(date)]);
   const ranks = { ...(saved?.ranks ?? {}) };
   const todo = found.filter((a) => !ranks[skippedKey(a)]);
-  if (!todo.length) return { ranked: 0, left: 0 };
+  if (!todo.length) {
+    // Nothing new to rank: the counts still follow the stories made since.
+    await saveCounts(
+      date,
+      saved,
+      found.map((a) => ({ rank: ranks[skippedKey(a)] })),
+    );
+    return { ranked: 0, left: 0 };
+  }
   const batch = todo.slice(0, RANK_MAX);
   const parsed = parseRanks(await saathiComplete(apiKey(), rankMessages(batch)), batch.length);
   if (!parsed) throw new Error("The AI's reply could not be read. Try again.");
@@ -1502,13 +1550,37 @@ export async function rankSkipped(date: string): Promise<{ ranked: number; left:
   // Ranks of articles no longer skipped (made into stories) are dropped.
   const live = new Set(found.map(skippedKey));
   const kept = Object.fromEntries(Object.entries(ranks).filter(([k]) => live.has(k)));
+  const counts: SkippedCounts = {
+    worth: found.filter((a) => (kept[skippedKey(a)]?.score ?? 0) >= 2).length,
+    unranked: found.filter((a) => !kept[skippedKey(a)]).length,
+    at: new Date().toISOString(),
+  };
   const { error } = await from("bot_settings").upsert({
     key: ranksKey(date),
-    value: { ranked_at: new Date().toISOString(), ranks: kept } satisfies SkippedRanks,
+    value: { ranked_at: new Date().toISOString(), ranks: kept, counts } satisfies SkippedRanks,
     updated_at: new Date().toISOString(),
   } as never);
   fail(error);
   return { ranked, left: todo.length - ranked };
+}
+
+// The day's checklist as the server sees it (what was opened in the review
+// list is only known in the browser), for the "draft ready" message.
+export async function dayChecks(date: string): Promise<Check[]> {
+  const [day, settings, counts] = await Promise.all([
+    getDay(date),
+    getMagazineSettings(),
+    skippedSummary(date),
+  ]);
+  return dayChecklist({
+    items: day.items,
+    reviewed: null,
+    unfinishedSources: day.sources.filter((s) => s.chunks_done < s.chunks).length,
+    corrections: day.corrections.filter((c) => c.item_date === date).length,
+    skipped: counts,
+    minRajasthan: settings.min_rajasthan,
+    target: settings.daily_stories,
+  });
 }
 
 // "What's missing?": the facts an examiner asks for that the highlights don't
@@ -2030,6 +2102,108 @@ export async function setFactChecked(
   const facts = item.facts.map((f, i) => (i === index ? { ...f, verified: checked } : f));
   const { data, error } = await from("ca_items")
     .update({ facts, updated_at: new Date().toISOString() } as never)
+    .eq("id", id)
+    .select(ITEM_COLS)
+    .single();
+  fail(error);
+  return data as unknown as CaItem;
+}
+
+// ---------- Fact-check mode ----------
+
+// A fact marked "to check", with its printed point and what its source says.
+export type FactCheck = {
+  item_id: string;
+  headline: string;
+  text: string;
+  quote: string;
+  note?: string;
+  point: Bi | null;
+  source: { id: string; name: string; title: string } | null;
+  // The quote with the words around it, when the source has it word for word.
+  found: QuoteContext | null;
+  // Otherwise the source's sentence closest to the fact, if any.
+  closest: string | null;
+};
+
+// Every fact of the day's stories still to check, in the review list's order.
+export async function factChecks(date: string): Promise<FactCheck[]> {
+  const { data, error } = await from("ca_items")
+    .select("id,headline,category,position,facts,content")
+    .eq("issue_date", date)
+    .eq("status", "included");
+  fail(error);
+  const order = new Map<string, number>(CATEGORIES.map((c, i) => [c.id, i]));
+  const items = (
+    (data ?? []) as unknown as Pick<
+      CaItem,
+      "id" | "headline" | "category" | "position" | "facts" | "content"
+    >[]
+  )
+    .filter((i) => i.facts.some((f) => !f.verified))
+    .sort(
+      (a, b) =>
+        (order.get(normalizeCategory(a.category)) ?? 99) -
+          (order.get(normalizeCategory(b.category)) ?? 99) || a.position - b.position,
+    );
+  const ids = uniq(
+    items.flatMap((i) => i.facts.filter((f) => !f.verified).map((f) => f.source_id)),
+  );
+  const { data: srcs } = ids.length
+    ? await from("ca_sources").select("id,source_name,title,content").in("id", ids)
+    : { data: [] };
+  const sources = new Map(
+    ((srcs ?? []) as { id: string; source_name: string; title: string; content: string }[]).map(
+      (r) => [r.id, r],
+    ),
+  );
+  const sentences = new Map<string, string[]>();
+  const sentencesOf = (id: string, content: string) => {
+    let list = sentences.get(id);
+    if (!list) sentences.set(id, (list = sourceSentences(content)));
+    return list;
+  };
+  return items.flatMap((item) =>
+    item.facts.flatMap((f, i): FactCheck[] => {
+      if (f.verified) return [];
+      const src = sources.get(f.source_id);
+      const found = src ? quoteContext(src.content, f.quote) : null;
+      return [
+        {
+          item_id: item.id,
+          headline: item.content?.headline.en || item.headline,
+          text: f.text,
+          quote: f.quote,
+          ...(f.note ? { note: f.note } : {}),
+          point: item.content?.points[i] ?? null,
+          source: src ? { id: src.id, name: src.source_name, title: src.title } : null,
+          found,
+          closest:
+            src && !found
+              ? closestSentence(sentencesOf(src.id, src.content), `${f.text} ${f.quote}`)
+              : null,
+        },
+      ];
+    }),
+  );
+}
+
+// A fact checked in fact-check mode, its printed point corrected if needed.
+export async function checkFact(id: string, factText: string, point?: Bi): Promise<CaItem> {
+  const item = await loadItem(id);
+  const index = item.facts.findIndex((f) => f.text === factText);
+  if (index < 0) throw new Error("That fact is no longer in the story");
+  const facts = item.facts.map((f, i) => (i === index ? { ...f, verified: true } : f));
+  const content =
+    point && item.content
+      ? { ...item.content, points: item.content.points.map((p, i) => (i === index ? point : p)) }
+      : undefined;
+  const { data, error } = await from("ca_items")
+    .update({
+      facts,
+      ...(content ? { content } : {}),
+      updated_at: new Date().toISOString(),
+    } as never)
     .eq("id", id)
     .select(ITEM_COLS)
     .single();
