@@ -117,6 +117,9 @@ export type CaContent = {
   visual?: Visual | null;
   // Facts (0-based) the visual shows; their points are not printed with it.
   visual_covers?: number[];
+  // A second visual, printed after the first (the editor adds it).
+  visual2?: Visual | null;
+  visual2_covers?: number[];
   oneliner?: Bi | null;
   // One quick exam question with a short answer, for the revision page
   // (missing on older items, which show the one-liner instead).
@@ -128,7 +131,35 @@ export type CaContent = {
 
 export type CaQuick = { q: Bi; a: Bi };
 
-export type CaImage = { url: string; path: string; w: number; h: number; caption?: Bi };
+// A story's two visual slots: the visual and the facts it shows.
+export const VISUAL_SLOTS = [
+  ["visual", "visual_covers"],
+  ["visual2", "visual2_covers"],
+] as const;
+
+export type CaImage = {
+  url: string;
+  path: string;
+  w: number;
+  h: number;
+  caption?: Bi;
+  // "Photo: PIB", printed small under the image (the same in both issues).
+  credit?: string;
+  // In the rows (default), on a row of its own, or beside the story's text.
+  layout?: ImageLayout;
+  // An edited image keeps its original and the edit, to change or undo it.
+  original?: { url: string; path: string; w: number; h: number };
+  edit?: ImageEdit;
+};
+export type ImageLayout = "row" | "own" | "right" | "left";
+export type ImageEdit = {
+  // Quarter turns clockwise, a mirror image, and a small tilt in degrees.
+  rotate: 0 | 90 | 180 | 270;
+  flip: boolean;
+  straighten: number;
+  // The part kept, as fractions of the turned image.
+  crop: { x: number; y: number; w: number; h: number };
+};
 export const MAX_IMAGES = 8;
 
 // One Static Context fact: a static concept the news links to, explained the
@@ -747,12 +778,17 @@ export function applyChanges(
   // A visual showing a number the correction replaced is dropped (it can be
   // made again from the corrected facts), and its facts print as points again.
   // So is one that shows a changed fact in place of its point.
-  const covers = new Set(next?.visual_covers ?? []);
-  if (
-    next?.visual &&
-    (unverifiedNumbers(next.visual, nextFacts).length || changes.some((c) => covers.has(c.fact)))
-  ) {
-    next.visual = null;
+  if (next) {
+    for (const [key, coversKey] of VISUAL_SLOTS) {
+      const v = next[key];
+      const covers = new Set(next[coversKey] ?? []);
+      if (
+        v &&
+        (unverifiedNumbers(v, nextFacts).length || changes.some((c) => covers.has(c.fact)))
+      ) {
+        next[key] = null;
+      }
+    }
   }
   return { facts: nextFacts, content: next };
 }
@@ -767,17 +803,21 @@ export function removePoint(
 ): { facts: CaFact[]; content: CaContent | null; visualShowsIt: boolean } {
   const nextFacts = facts.filter((_, i) => i !== index);
   if (!content) return { facts: nextFacts, content, visualShowsIt: false };
-  const covers = content.visual_covers ?? [];
-  const visualShowsIt = Boolean(
-    content.visual &&
-    (covers.includes(index) || unverifiedNumbers(content.visual, nextFacts).length),
-  );
+  const shift = (covers: number[]) =>
+    covers.filter((i) => i !== index).map((i) => (i > index ? i - 1 : i));
+  const visualShowsIt = VISUAL_SLOTS.some(([key, coversKey]) => {
+    const v = content[key];
+    return Boolean(
+      v && ((content[coversKey] ?? []).includes(index) || unverifiedNumbers(v, nextFacts).length),
+    );
+  });
   return {
     facts: nextFacts,
     content: {
       ...content,
       points: content.points.filter((_, i) => i !== index),
-      visual_covers: covers.filter((i) => i !== index).map((i) => (i > index ? i - 1 : i)),
+      visual_covers: shift(content.visual_covers ?? []),
+      ...(content.visual2 ? { visual2_covers: shift(content.visual2_covers ?? []) } : {}),
     },
     visualShowsIt,
   };

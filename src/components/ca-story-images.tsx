@@ -5,10 +5,12 @@
 import { useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { ArrowLeft, ArrowRight, ImagePlus, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Crop, ImagePlus, Trash2 } from "lucide-react";
 import { uploadCaImage } from "@/lib/current-affairs.functions";
-import { MAX_IMAGES, type CaContent, type CaImage } from "@/lib/current-affairs";
-import { imageRows } from "@/lib/current-affairs-html";
+import { MAX_IMAGES, type CaContent, type CaImage, type ImageLayout } from "@/lib/current-affairs";
+import { imageRows, isSideImage } from "@/lib/current-affairs-html";
+import { ImageEditor } from "@/components/ca-image-editor";
+import { Input } from "@/components/ui/input";
 import { errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { BiLine, type Lang } from "@/components/ca-story-review";
@@ -48,6 +50,13 @@ async function toBase64(blob: Blob): Promise<string> {
   return btoa(binary);
 }
 
+const LAYOUTS: { value: ImageLayout; label: string }[] = [
+  { value: "row", label: "In the rows" },
+  { value: "own", label: "Own row" },
+  { value: "right", label: "Right of text" },
+  { value: "left", label: "Left of text" },
+];
+
 export function StoryImages({
   itemId,
   content,
@@ -65,6 +74,7 @@ export function StoryImages({
   const input = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [editingImage, setEditingImage] = useState<number | null>(null);
   const images = content.images ?? [];
   const room = MAX_IMAGES - images.length;
 
@@ -155,12 +165,133 @@ export function StoryImages({
 
   if (!images.length) return <div className="flex">{picker}</div>;
 
-  // The rows as printed: equal heights, filling the width.
+  // The rows as printed: equal heights, filling the width; images beside
+  // the text after them.
   let n = 0;
   const index = new Map(images.map((img, i) => [img, i]));
+  const update = (i: number, patch: Partial<CaImage>, ok: string) =>
+    change(
+      images.map((x, j) => (j === i ? { ...x, ...patch } : x)),
+      ok,
+    );
+  const controls = (img: CaImage, i: number) => (
+    <div className="space-y-1">
+      <div className="flex flex-wrap items-center gap-0.5">
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7"
+          aria-label="Move earlier"
+          disabled={busy || i === 0}
+          onClick={() => move(i, -1)}
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7"
+          aria-label="Move later"
+          disabled={busy || i === images.length - 1}
+          onClick={() => move(i, 1)}
+        >
+          <ArrowRight className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7"
+          aria-label="Crop and turn"
+          disabled={busy}
+          onClick={() => setEditingImage(i)}
+        >
+          <Crop className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7 text-destructive hover:text-destructive"
+          aria-label="Remove image"
+          disabled={busy}
+          onClick={() =>
+            change(
+              images.filter((_, j) => j !== i),
+              "Image removed",
+            )
+          }
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+        <select
+          aria-label="Place"
+          className="h-7 rounded-md border border-input bg-background px-1.5 text-xs"
+          value={img.layout ?? "row"}
+          disabled={busy}
+          onChange={(e) => update(i, { layout: e.target.value as ImageLayout }, "Image placed")}
+        >
+          {LAYOUTS.map((l) => (
+            <option key={l.value} value={l.value}>
+              {l.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <Input
+        aria-label="Photo credit"
+        className="h-7 text-xs"
+        placeholder="Photo credit, e.g. Photo: PIB"
+        defaultValue={img.credit ?? ""}
+        maxLength={80}
+        disabled={busy}
+        onBlur={(e) => {
+          const credit = e.target.value.trim();
+          if (credit !== (img.credit ?? "")) void update(i, { credit }, "Credit saved");
+        }}
+        onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+      />
+      <div className="text-xs text-muted-foreground">
+        <BiLine
+          value={img.caption ?? { en: "", hi: "" }}
+          lang={lang}
+          editing
+          onSave={(caption) =>
+            onSave({
+              images: images.map((x, j) => (j === i ? { ...x, caption } : x)),
+            })
+          }
+        />
+        {!img.caption?.en && !img.caption?.hi && <p>No caption</p>}
+      </div>
+    </div>
+  );
+  const shown = (img: CaImage) => (
+    <>
+      {(img.caption?.en || img.caption?.hi) && (
+        <figcaption className="text-xs text-muted-foreground">
+          <BiLine value={img.caption} lang={lang} />
+        </figcaption>
+      )}
+      {img.credit && <p className="text-right text-[10px] text-muted-foreground">{img.credit}</p>}
+    </>
+  );
+  const side = images.filter(isSideImage);
   return (
     <section className="space-y-2" aria-label="Images">
-      {imageRows(images).map((row) => {
+      {editingImage !== null && images[editingImage] && (
+        <ImageEditor
+          image={images[editingImage]}
+          itemId={itemId}
+          onClose={() => setEditingImage(null)}
+          onSave={async (next) => {
+            await onSave({
+              images: images.map((x, j) => (j === editingImage ? next : x)),
+            });
+            setEditingImage(null);
+            toast.success("Image saved");
+          }}
+        />
+      )}
+      {imageRows(images.filter((i) => !isSideImage(i))).map((row) => {
         const sum = row.reduce((s, i) => s + Math.min(6, Math.max(0.2, i.w / i.h)), 0);
         return (
           <div key={row.map((i) => i.path).join()} className="flex items-start gap-2">
@@ -180,72 +311,33 @@ export function StoryImages({
                     className="block w-full rounded-lg bg-muted object-cover"
                     style={{ aspectRatio: r }}
                   />
-                  {editing ? (
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-0.5">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7"
-                          aria-label="Move earlier"
-                          disabled={busy || i === 0}
-                          onClick={() => move(i, -1)}
-                        >
-                          <ArrowLeft className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7"
-                          aria-label="Move later"
-                          disabled={busy || i === images.length - 1}
-                          onClick={() => move(i, 1)}
-                        >
-                          <ArrowRight className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                          aria-label="Remove image"
-                          disabled={busy}
-                          onClick={() =>
-                            change(
-                              images.filter((_, j) => j !== i),
-                              "Image removed",
-                            )
-                          }
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        <BiLine
-                          value={img.caption ?? { en: "", hi: "" }}
-                          lang={lang}
-                          editing
-                          onSave={(caption) =>
-                            onSave({
-                              images: images.map((x, j) => (j === i ? { ...x, caption } : x)),
-                            })
-                          }
-                        />
-                        {!img.caption?.en && !img.caption?.hi && <p>No caption</p>}
-                      </div>
-                    </div>
-                  ) : (
-                    (img.caption?.en || img.caption?.hi) && (
-                      <figcaption className="text-xs text-muted-foreground">
-                        <BiLine value={img.caption} lang={lang} />
-                      </figcaption>
-                    )
-                  )}
+                  {editing ? controls(img, i) : shown(img)}
                 </figure>
               );
             })}
           </div>
         );
       })}
+      {side.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {side.map((img) => {
+            const i = index.get(img)!;
+            return (
+              <figure key={img.path} className="w-36 space-y-1">
+                <img
+                  src={img.url}
+                  alt={img.caption?.en || "Image beside the text"}
+                  className="block w-full rounded-lg bg-muted"
+                />
+                <p className="text-[11px] font-medium text-primary">
+                  {img.layout === "left" ? "Left of the text" : "Right of the text"}
+                </p>
+                {editing ? controls(img, i) : shown(img)}
+              </figure>
+            );
+          })}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         {picker}
         <span className="text-xs text-muted-foreground">

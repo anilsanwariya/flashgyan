@@ -47,10 +47,10 @@ import {
 import { SourceReader } from "@/components/ca-source-reader";
 import { StoryHistory } from "@/components/ca-story-history";
 import { StoryImages } from "@/components/ca-story-images";
+import { StoryVisuals } from "@/components/ca-story-visuals";
 import { useQuery } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { VISUAL_LABELS } from "@/lib/ca-visuals";
-import { visualPreviewHtml } from "@/lib/current-affairs-html";
 import { unitLabel } from "../../supabase/functions/_shared/ras-syllabus.ts";
 import { Badge, BulkBar, errorText, useChosen } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
@@ -384,7 +384,10 @@ function StoryCard({
   const c = item.content;
   const dropped = item.status === "dropped";
   const unverified = item.facts.filter((f) => !f.verified).length;
-  const inVisual = new Set(c?.visual ? (c.visual_covers ?? []) : []);
+  const inVisual = new Set([
+    ...(c?.visual ? (c.visual_covers ?? []) : []),
+    ...(c?.visual2 ? (c.visual2_covers ?? []) : []),
+  ]);
 
   useEffect(() => {
     if (!open) setEditing(false);
@@ -553,10 +556,13 @@ function StoryCard({
                 <AlertTriangle className="h-3 w-3" /> {unverified} to check
               </Badge>
             )}
-            {c?.visual && (
-              <Badge tone="primary">
-                <BarChart3 className="h-3 w-3" /> {VISUAL_LABELS[c.visual.type]}
-              </Badge>
+            {[c?.visual, c?.visual2].map(
+              (v, i) =>
+                v && (
+                  <Badge key={i} tone="primary">
+                    <BarChart3 className="h-3 w-3" /> {VISUAL_LABELS[v.type]}
+                  </Badge>
+                ),
             )}
             {item.related_item_id && <Badge tone="primary">Follow-up</Badge>}
             {dropped && <Badge tone="bad">Dropped</Badge>}
@@ -660,12 +666,7 @@ function StoryCard({
                 onSave={save}
               />
 
-              <VisualBox
-                content={c}
-                busy={busy}
-                onRemove={() => act(() => save({ visual: null }), "Visual removed")}
-                onRedo={() => act(() => redoFn({ data: { id: item.id } }), "New visual made")}
-              />
+              <StoryVisuals item={item} content={c} busy={busy} onSave={save} />
 
               <Part title="Key points · मुख्य बिंदु">
                 <ul className="space-y-2">
@@ -1463,69 +1464,3 @@ function GrowText({
 }
 
 // The story's visual as it will print, with the revision line.
-function VisualBox({
-  content,
-  busy,
-  onRemove,
-  onRedo,
-}: {
-  content: CaContent;
-  busy: boolean;
-  onRemove: () => void;
-  onRedo: () => void;
-}) {
-  const frame = useRef<HTMLIFrameElement>(null);
-  const [height, setHeight] = useState(160);
-  const v = content.visual;
-  const html = useMemo(() => (v ? visualPreviewHtml(v) : ""), [v]);
-  const fit = () => {
-    const doc = frame.current?.contentDocument;
-    if (doc?.body) setHeight(Math.min(900, doc.body.scrollHeight + 4));
-  };
-  return (
-    <div className="rounded-xl border border-border p-2.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary">
-          <BarChart3 className="h-3.5 w-3.5" />
-          {v ? `Visual · ${VISUAL_LABELS[v.type]}` : "No visual"}
-        </span>
-        {v && (content.visual_covers?.length ?? 0) > 0 && (
-          <span className="text-xs text-muted-foreground">
-            Shows {content.visual_covers!.length} fact(s), left out of the points
-          </span>
-        )}
-        <div className="ml-auto flex gap-1">
-          <Button size="sm" variant="outline" className="h-7" disabled={busy} onClick={onRedo}>
-            <RefreshCw className="mr-1 h-3.5 w-3.5" /> {v ? "Redo" : "Make visual"}
-          </Button>
-          {v && (
-            <Button size="sm" variant="ghost" className="h-7" disabled={busy} onClick={onRemove}>
-              Remove
-            </Button>
-          )}
-        </div>
-      </div>
-      {v && (
-        <iframe
-          ref={frame}
-          title="Visual preview"
-          srcDoc={html}
-          onLoad={() => {
-            fit();
-            // Web fonts can change the height after load.
-            setTimeout(fit, 600);
-          }}
-          className="mt-2 w-full rounded-lg bg-white"
-          style={{ height }}
-        />
-      )}
-      {content.oneliner && (content.oneliner.en || content.oneliner.hi) && (
-        <p className="mt-2 text-xs">
-          <span className="font-semibold text-muted-foreground">Revision line: </span>
-          <span lang="hi">{content.oneliner.hi}</span>
-          <span className="text-muted-foreground"> · {content.oneliner.en}</span>
-        </p>
-      )}
-    </div>
-  );
-}

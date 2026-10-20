@@ -85,7 +85,13 @@ import {
   type MagazineSettings,
   type UploadSection,
 } from "@/lib/current-affairs";
-import { VISUAL_LABELS, parseVisual, visualMessages, type Visual } from "@/lib/ca-visuals";
+import {
+  VISUAL_LABELS,
+  parseVisual,
+  visualMessages,
+  type Visual,
+  type VisualType,
+} from "@/lib/ca-visuals";
 import {
   isPaged,
   outline,
@@ -1052,6 +1058,45 @@ export async function makeVisual(item: Pick<CaItem, "headline" | "category" | "f
     console.error("visual:", e);
     return { visual: null, visual_covers: [], oneliner: null, quick: null };
   }
+}
+
+// A visual of the type the editor picked (or SAATHI's choice), with their
+// note, shown to them before it replaces anything. The story's other visual
+// is passed so the two show different things. One retry when its numbers
+// aren't all in the facts.
+export async function previewVisual(
+  itemId: string,
+  opts: { slot: 1 | 2; type?: VisualType; note?: string },
+): Promise<{ visual: Visual; covers: number[] }> {
+  const item = await getItem(itemId);
+  if (!item.content) throw new Error("Write the text first");
+  const other = opts.slot === 1 ? item.content.visual2 : item.content.visual;
+  let problem: string | undefined;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const raw = await saathiComplete(
+      apiKey(),
+      visualMessages({
+        headline: item.headline,
+        category: item.category,
+        facts: item.facts,
+        problem,
+        type: opts.type,
+        note: opts.note?.trim() || undefined,
+        other: other ?? null,
+      }),
+    );
+    const r = parseVisual(raw, item.facts, item.headline);
+    if (r.visual && (!opts.type || r.visual.type === opts.type))
+      return { visual: r.visual, covers: r.covers };
+    problem =
+      r.problem ?? (r.visual ? `You made a "${r.visual.type}"; make a "${opts.type}".` : undefined);
+    if (!problem) break;
+  }
+  throw new Error(
+    opts.type
+      ? `SAATHI couldn't make a ${VISUAL_LABELS[opts.type].toLowerCase()} from these facts that passed the number check.${problem ? ` (${problem})` : ""}`
+      : "SAATHI couldn't make a visual from these facts that passed the number check.",
+  );
 }
 
 // Makes the visual again (the admin's "Redo visual").
