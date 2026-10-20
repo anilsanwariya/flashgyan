@@ -2922,8 +2922,19 @@ export async function renderPdf(html: string, settings: MagazineSettings): Promi
         },
       }),
     });
+  // Cloudflare limits how often PDFs can be made: on "too many", wait (as long
+  // as it asks, up to 20 seconds) and try again, a few times.
   let res = await call("browser-rendering");
   if (res.status === 404) res = await call("browser-run");
+  for (let attempt = 0; res.status === 429 && attempt < 3; attempt++) {
+    const wait = Math.min(
+      20,
+      Math.max(5, Number(res.headers.get("retry-after")) || 8 * (attempt + 1)),
+    );
+    await new Promise((r) => setTimeout(r, wait * 1000));
+    res = await call("browser-rendering");
+    if (res.status === 404) res = await call("browser-run");
+  }
   if (!res.ok) {
     const body = await res.text();
     const hint =
@@ -2988,27 +2999,32 @@ export async function buildIssue(
     if (count)
       throw new Error(`${count} item(s) still need writing. Run "Write magazine text" first.`);
   }
-  // The English issue and the Hindi issue, from the same stories.
-  const [en, hi] = await Promise.all(
-    (["en", "hi"] as const).map(async (lang) => {
-      const { html, settings, count } = await issueHtml(kind, period, lang);
-      if (count === 0) throw new Error("There are no items to put in this issue.");
-      const pdf = await renderPdf(html, settings);
-      const path = fileName(kind, period, lang);
-      const { error } = await supabaseAdmin.storage
-        .from(BUCKET)
-        .upload(path, pdf, { contentType: "application/pdf", upsert: true });
-      fail(error);
-      const url = `${supabaseAdmin.storage.from(BUCKET).getPublicUrl(path).data.publicUrl}?v=${Date.now()}`;
-      return {
-        path,
-        url,
-        settings,
-        count,
-        caption: captionFor(kind, period, settings, count, lang),
-      };
-    }),
-  );
+  // The English issue and the Hindi issue, from the same stories, one after
+  // the other: Cloudflare refuses PDFs asked for at the same time.
+  const made = [];
+  for (const lang of ["en", "hi"] as const) {
+    made.push(
+      await (async () => {
+        const { html, settings, count } = await issueHtml(kind, period, lang);
+        if (count === 0) throw new Error("There are no items to put in this issue.");
+        const pdf = await renderPdf(html, settings);
+        const path = fileName(kind, period, lang);
+        const { error } = await supabaseAdmin.storage
+          .from(BUCKET)
+          .upload(path, pdf, { contentType: "application/pdf", upsert: true });
+        fail(error);
+        const url = `${supabaseAdmin.storage.from(BUCKET).getPublicUrl(path).data.publicUrl}?v=${Date.now()}`;
+        return {
+          path,
+          url,
+          settings,
+          count,
+          caption: captionFor(kind, period, settings, count, lang),
+        };
+      })(),
+    );
+  }
+  const [en, hi] = made;
   const { settings, count } = en;
   const scheduledFor = opts.schedule
     ? opts.when
