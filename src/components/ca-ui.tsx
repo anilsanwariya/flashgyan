@@ -4,8 +4,24 @@ import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 
-export const errorText = (e: unknown, fallback: string) =>
-  e instanceof Error ? e.message : fallback;
+// A server check that failed arrives as a list of problems in JSON: shown as
+// a sentence ("Invalid url (content › Fact Bite 1 › url)").
+export const errorText = (e: unknown, fallback: string) => {
+  if (!(e instanceof Error)) return fallback;
+  try {
+    const issues = JSON.parse(e.message) as { message?: string; path?: (string | number)[] }[];
+    if (Array.isArray(issues) && issues[0]?.message) {
+      const { message, path = [] } = issues[0];
+      const where = path
+        .map((p) => (typeof p === "number" ? String(p + 1) : p === "dyk" ? "Fact Bite" : p))
+        .join(" › ");
+      return where ? `${message} (${where})` : message;
+    }
+  } catch {
+    // not JSON: the message as it is
+  }
+  return e.message;
+};
 
 export function Badge({
   children,
