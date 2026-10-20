@@ -46,6 +46,7 @@ import {
 } from "@/lib/current-affairs";
 import { SourceReader } from "@/components/ca-source-reader";
 import { StoryHistory } from "@/components/ca-story-history";
+import { StoryImages } from "@/components/ca-story-images";
 import { useQuery } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { VISUAL_LABELS } from "@/lib/ca-visuals";
@@ -651,6 +652,14 @@ function StoryCard({
                 onSave={(v) => save({ summary: v })}
               />
 
+              <StoryImages
+                itemId={item.id}
+                content={c}
+                lang={lang}
+                editing={editing}
+                onSave={save}
+              />
+
               <VisualBox
                 content={c}
                 busy={busy}
@@ -687,7 +696,7 @@ function StoryCard({
               </Part>
 
               {(c.why.en || c.why.hi || editing) && (
-                <Part title="Why it matters · महत्व" tone="why">
+                <Part title="Exam Angle" tone="why">
                   <BiLine
                     value={c.why}
                     lang={lang}
@@ -732,7 +741,7 @@ function StoryCard({
               />
 
               {c.dyk && c.dyk.length > 0 && (
-                <Part title="Did you know? · क्या आप जानते हैं?" tone="dyk">
+                <Part title="Fact Bite" tone="dyk">
                   <ul className="space-y-2">
                     {c.dyk.map((d, i) => (
                       <li key={d.url + i} className="flex items-start gap-2">
@@ -1042,7 +1051,7 @@ const keywordLabel = (k: Bi, lang: Lang) =>
       ? k.hi || k.en
       : [k.hi, k.en].filter(Boolean).join(" · ");
 
-// Static Connect: textbook facts on the concepts the news links to. Each fact
+// Static Context: textbook facts on the concepts the news links to. Each fact
 // can be edited or removed; more are written for keywords the admin picks
 // from SAATHI's suggestions or types in.
 function StaticConnect({
@@ -1098,7 +1107,7 @@ function StaticConnect({
   const custom = chosen.filter((k) => !offered.some((o) => keyOf(o) === keyOf(k)));
 
   return (
-    <Part title={`${STATIC_CONNECT.en} · ${STATIC_CONNECT.hi}`} tone="background">
+    <Part title={STATIC_CONNECT.en} tone="background">
       {c.background && (
         <BiLine
           value={c.background}

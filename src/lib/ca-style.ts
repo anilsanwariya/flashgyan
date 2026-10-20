@@ -54,7 +54,7 @@ export function styleMessages(pairs: EditPair[], rules: string[]): ChatMessage[]
   return [
     {
       role: "system",
-      content: `You help keep a current affairs magazine's house style. The magazine (Hindi and English, for RAS exam aspirants) is drafted by SAATHI and corrected by the editor. Below are SAATHI's drafts and the editor's versions. Find the editor's consistent preferences in wording, length, structure, word choice and Hindi usage, and write them as rules SAATHI should follow from now on.
+      content: `You help keep a current affairs magazine's house style. The magazine (Hindi and English, for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains)) is drafted by SAATHI and corrected by the editor. Below are SAATHI's drafts and the editor's versions. Find the editor's consistent preferences in wording, length, structure, word choice and Hindi usage, and write them as rules SAATHI should follow from now on.
 RULES: At most 5 rules, most common first. Each is one specific instruction of at most 25 words, in English, that SAATHI can follow without seeing these edits. Leave out one-off fact fixes (a wrong number, name or date corrected) and anything the existing rules already say. Add one short example from the edits for each rule ("draft → edited"). Fewer rules are better than vague ones; reply with an empty list when there is no clear pattern.
 Reply with JSON only: {"rules": [{"rule": "...", "example": "..."}]}`,
     },
@@ -111,7 +111,7 @@ export function styleCheckMessages(
   return [
     {
       role: "system",
-      content: `You check a current affairs magazine (Hindi and English, for RAS exam aspirants) against the editor's house style rules before it is published. Each line of the stories is one part, labelled like S2.point3.hi (story 2, point 3, Hindi).
+      content: `You check a current affairs magazine (Hindi and English, for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains)) against the editor's house style rules before it is published. Each line of the stories is one part, labelled like S2.point3.hi (story 2, point 3, Hindi).
 RULES: Report only clear breaks of a numbered rule, not taste, facts or anything the rules don't ask for. A rule about one language applies only to that language. For each break give the part's label, the rule's number and the whole part rewritten to follow the rule: same language, same facts, numbers and names, changing only what the rule needs. Leave out a part that already follows the rules. At most ${STYLE_BREAKS_MAX} breaks, the clearest first; an empty list is fine.
 Reply with JSON only: {"breaks": [{"ref": "S1.headline.en", "rule": 1, "fix": "..."}]}`,
     },

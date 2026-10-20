@@ -81,11 +81,7 @@ export function withPart<C extends StyleContent>(
 // The editor's names for the parts, and short codes for Telegram buttons.
 export function partName(part: string): string {
   const n = pointNo(part);
-  return n
-    ? `Point ${n}`
-    : part === "why"
-      ? "Why it matters"
-      : part[0].toUpperCase() + part.slice(1);
+  return n ? `Point ${n}` : part === "why" ? "Exam Angle" : part[0].toUpperCase() + part.slice(1);
 }
 export const partCode = (part: string) =>
   pointNo(part) ? `p${pointNo(part)}` : ({ headline: "h", summary: "s", why: "w" }[part] ?? "h");

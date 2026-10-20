@@ -27,7 +27,7 @@ export function missingMessages(opts: {
   return [
     {
       role: "system",
-      content: `You help the editor of a current affairs magazine for RAS (Rajasthan) exam aspirants. The editor highlighted facts in a news article for one story. Pick the story's type from the list, then name the facts of that type an RPSC examiner would ask about that the highlights do not cover yet, most exam-relevant first, at most ${MISSING_MAX}. For each, copy the exact words of the article that state it (5 to 30 words, character for character, in the article's language), or null when the article does not state it. Only facts about this story; never anything the highlights already say.
+      content: `You help the editor of a current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). The editor highlighted facts in a news article for one story. Pick the story's type from the list, then name the facts of that type an RPSC or RSSB examiner would ask about that the highlights do not cover yet, most exam-relevant first, at most ${MISSING_MAX}. For each, copy the exact words of the article that state it (5 to 30 words, character for character, in the article's language), or null when the article does not state it. Only facts about this story; never anything the highlights already say.
 STORY TYPES and their facts, as "slot: what it holds":
 ${typesText()}
 Reply with JSON only: {"type": type id, "missing": [{"slot": slot id, "quote": "..." or null}]}`,

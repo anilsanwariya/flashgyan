@@ -103,7 +103,7 @@ export async function weeklyStats(fromDate: string, toDate: string): Promise<Wee
     rajasthanShortDays,
     minRajasthan: settings.min_rajasthan,
     editorials: kept.length - news.length,
-    // No book behind the Static Connect (none, or SAATHI's own knowledge).
+    // No book behind the Static Context (none, or SAATHI's own knowledge).
     missingBackground: news.filter(
       (i) => (i.concept || i.statics?.length) && !i.context_sources?.length,
     ).length,

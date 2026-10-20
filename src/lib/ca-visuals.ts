@@ -135,7 +135,7 @@ export function visualMessages(opts: {
   return [
     {
       role: "system",
-      content: `You design one learning visual for a news item in a bilingual (Hindi and English) current affairs magazine for RAS exam aspirants, and a one-line revision note. Pick the visual that makes the story easiest to understand and remember:
+      content: `You design one learning visual for a news item in a bilingual (Hindi and English) current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains), and a one-line revision note. Pick the visual that makes the story easiest to understand and remember:
 - "stats": 2-4 headline numbers (outlay, beneficiaries, rank, districts covered). {"type":"stats","title":{...},"stats":[{"value":"₹500 crore","label":{"en":"...","hi":"..."}}]}
 - "bar": 2-8 quantities in the same unit to compare (allocations, ranks, figures over years). {"type":"bar","title":{...},"unit":"crore","bars":[{"label":{...},"value":500}]}
 - "pie": ONLY when the facts give percentage shares of one whole. {"type":"pie","title":{...},"unit":"%","slices":[{"label":{...},"value":40}]}

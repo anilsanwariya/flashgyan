@@ -260,7 +260,7 @@ export function dayChecklist(o: {
     out.push({
       key: "static",
       state: "note",
-      text: `${plural(bare.length, "story", "stories")} without Static Connect`,
+      text: `${plural(bare.length, "story", "stories")} without Static Context`,
       action: { kind: "story", id: bare[0].id, label: "Show" },
     });
   }

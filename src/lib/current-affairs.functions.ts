@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   CATEGORIES,
+  MAX_IMAGES,
   MAX_STATICS,
   UPLOAD_SECTIONS,
   cleanDomains,
@@ -102,6 +103,18 @@ const contentSchema = z.object({
   visual_covers: z.array(z.number().int().min(0).max(100)).max(50).optional(),
   oneliner: bi.nullable().optional(),
   quick: z.object({ q: bi, a: bi }).nullable().optional(),
+  images: z
+    .array(
+      z.object({
+        url: z.string().url().max(2000),
+        path: z.string().max(300),
+        w: z.number().int().min(1).max(20_000),
+        h: z.number().int().min(1).max(20_000),
+        caption: bi.optional(),
+      }),
+    )
+    .max(MAX_IMAGES)
+    .optional(),
 });
 
 // ---------- Settings ----------
@@ -139,11 +152,27 @@ export const saveMagazineSettings = createServerFn({ method: "POST" })
     z
       .object({
         channel: z.string().trim().max(100),
-        channel_hi: z.string().trim().max(100).default(""),
         post_time: z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/, "Use HH:MM"),
         title_en: z.string().trim().min(1).max(80),
         title_hi: z.string().trim().min(1).max(80),
         brand_line: z.string().trim().max(100),
+        tagline_en: z.string().trim().max(120),
+        tagline_hi: z.string().trim().max(120),
+        box_static: z.string().trim().min(1).max(30),
+        box_dyk: z.string().trim().min(1).max(30),
+        box_why: z.string().trim().min(1).max(30),
+        // Printed with the PDF's built-in font: Latin letters only.
+        join_text: z
+          .string()
+          .trim()
+          .min(1)
+          .max(40)
+          .regex(/^[\x20-\x7e]+$/, "Use English letters only"),
+        join_url: z
+          .string()
+          .trim()
+          .max(200)
+          .regex(/^(https:\/\/\S+)?$/, "Use a link starting with https://"),
         accent: z.string().regex(/^#[0-9a-fA-F]{6}$/, "Use a colour like #6d28d9"),
         test_chat_id: z.string().trim().max(40),
         add_to_knowledge_base: z.boolean(),
@@ -423,9 +452,9 @@ export const updateCaItem = createServerFn({ method: "POST" })
       patch.content.visual = cleanVisual(patch.content.visual).visual;
     }
     const s = await server();
+    const item = patch.content ? await s.getItem(id) : null;
     // Where the editor changed one language, the other is written to match.
-    if (patch.content && sync !== false) {
-      const item = await s.getItem(id);
+    if (item && patch.content && sync !== false) {
       patch.content = (await s.syncLanguages(
         item.content,
         patch.content as CaItem["content"] & object,
@@ -438,7 +467,26 @@ export const updateCaItem = createServerFn({ method: "POST" })
     return patch.content ? s.asEdit(id, save) : save();
   });
 
-// ---------- Article reader and Static Connect ----------
+// One image for a story, resized in the browser; the editor's next save adds
+// it to the story.
+export const uploadCaImage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        item_id: z.string().uuid(),
+        contentType: z.enum(["image/png", "image/jpeg", "image/webp"]),
+        base64: z.string().min(1).max(6_000_000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    const bytes = Uint8Array.from(atob(data.base64), (c) => c.charCodeAt(0));
+    return (await server()).uploadImage(data.item_id, bytes, data.contentType);
+  });
+
+// ---------- Article reader and Static Context ----------
 
 const highlightsSchema = z
   .array(
@@ -453,7 +501,7 @@ const highlightsSchema = z
   .min(1)
   .max(40);
 const noteSchema = z.string().trim().max(500).nullish();
-// Green-pen highlights: keywords for Static Connect.
+// Green-pen highlights: keywords for Static Context.
 const penKeywords = z.array(z.string().trim().min(2).max(80)).max(10).optional();
 
 export const getCaReader = createServerFn({ method: "POST" })
@@ -541,7 +589,7 @@ export const addCaPoints = createServerFn({ method: "POST" })
     return (await server()).addPointsFromHighlights(data.id, data.highlights, data.keywords);
   });
 
-// Green-pen keywords added to Static Connect without rewriting the story.
+// Green-pen keywords added to Static Context without rewriting the story.
 export const addCaPenKeywords = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>

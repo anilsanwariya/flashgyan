@@ -4,12 +4,13 @@
 // HTML as a preview.
 import {
   CATEGORIES,
-  STATIC_CONNECT,
+  DEFAULT_MAGAZINE_SETTINGS,
   categoryLabel,
   formatDate,
   type Bi,
   type CaContent,
   type CaFact,
+  type CaImage,
   type MagazineSettings,
 } from "@/lib/current-affairs";
 import { VISUAL_CSS, pointsToShow, visualHtml, type Visual } from "@/lib/ca-visuals";
@@ -63,7 +64,6 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 // The page's own words in each issue.
 const T = {
   en: {
-    eyebrow: "RAS Prelims &amp; Mains",
     stories: (n: number) => plural(n, "story", "stories").replace(/^\d+ /, ""),
     sections: (n: number) => (n === 1 ? "section" : "sections"),
     charts: "charts &amp; diagrams",
@@ -74,15 +74,11 @@ const T = {
     background: "Background",
     revision: "60-Second Revision",
     practice: "Practice Questions",
-    ctaTitle: "Get it every morning on Telegram",
-    ctaText: "Daily current affairs for RAS, free.",
+    ctaText: "Free current affairs every morning.",
     edition: "English edition",
     source: "Source",
     rajasthan: "Rajasthan",
-    staticConnect: STATIC_CONNECT.en,
-    why: "Why it matters",
-    dyk: "Did you know?",
-    rpsc: "RPSC pattern",
+    rpsc: "RPSC / RSSB pattern",
     partA: "Part A: Prelims",
     partB: "Part B: Mains",
     key: "Answer key (Part A)",
@@ -98,7 +94,6 @@ const T = {
     letters: ["a", "b", "c", "d"],
   },
   hi: {
-    eyebrow: "RAS प्रारंभिक एवं मुख्य परीक्षा",
     stories: (n: number) => (n === 1 ? "खबर" : "खबरें"),
     sections: () => "खंड",
     charts: "चार्ट व आरेख",
@@ -109,15 +104,11 @@ const T = {
     background: "पृष्ठभूमि",
     revision: "60 सेकंड रिवीजन",
     practice: "अभ्यास प्रश्न",
-    ctaTitle: "हर सुबह टेलीग्राम पर पाएँ",
-    ctaText: "RAS के लिए दैनिक करेंट अफेयर्स, निःशुल्क।",
+    ctaText: "हर सुबह निःशुल्क करेंट अफेयर्स।",
     edition: "हिंदी संस्करण",
     source: "स्रोत",
     rajasthan: "राजस्थान",
-    staticConnect: STATIC_CONNECT.hi,
-    why: "क्यों महत्वपूर्ण",
-    dyk: "क्या आप जानते हैं?",
-    rpsc: "RPSC पैटर्न",
+    rpsc: "RPSC / RSSB पैटर्न",
     partA: "भाग अ: प्रारंभिक परीक्षा",
     partB: "भाग ब: मुख्य परीक्षा",
     key: "उत्तर कुंजी (भाग अ)",
@@ -159,12 +150,104 @@ function icon(id: string, cls = "icon"): string {
   return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 }
 
+// The story boxes' names from the settings, the same in both issues.
+type Boxes = { static: string; dyk: string; why: string };
+
+function boxNames(s: MagazineSettings): Boxes {
+  const d = DEFAULT_MAGAZINE_SETTINGS;
+  return {
+    static: esc(s.box_static?.trim() || d.box_static),
+    dyk: esc(s.box_dyk?.trim() || d.box_dyk),
+    why: esc(s.box_why?.trim() || d.box_why),
+  };
+}
+
+// The usable width of a story box, the height image rows aim for, and the
+// tallest a row may be.
+const ROW_WIDTH_MM = 176;
+const ROW_TARGET_MM = 55;
+const ROW_MAX_MM = 75;
+const GAP_MM = 2.5;
+const MAX_PER_ROW = 3;
+// A generous width for one caption letter (8pt), and the most lines shown.
+const CAPTION_CHAR_MM = 1.9;
+const CAPTION_MAX_LINES = 4;
+
+const imageRatio = (i: CaImage) => Math.min(6, Math.max(0.2, i.w / i.h));
+
+// A row's height when its images fill the story's width.
+const rowHeight = (row: CaImage[]) =>
+  (ROW_WIDTH_MM - GAP_MM * (row.length - 1)) / row.reduce((n, i) => n + imageRatio(i), 0);
+
+// The editor's images in rows of equal height that fill the story's width,
+// whatever their shapes: each image is as wide as its share of the row's
+// width-to-height ratios. The images keep their order and are split into
+// rows of 1 to 3 whose heights come closest to the target. The layout depends
+// only on the images, so it is the same in the Hindi and English issues.
+export function imageRows(images: CaImage[]): CaImage[][] {
+  const n = images.length;
+  const best: { cost: number; from: number }[] = [{ cost: 0, from: 0 }];
+  for (let end = 1; end <= n; end++) {
+    best[end] = { cost: Infinity, from: 0 };
+    for (let start = Math.max(0, end - MAX_PER_ROW); start < end; start++) {
+      const cost = best[start].cost + (rowHeight(images.slice(start, end)) - ROW_TARGET_MM) ** 2;
+      if (cost < best[end].cost) best[end] = { cost, from: start };
+    }
+  }
+  const rows: CaImage[][] = [];
+  for (let end = n; end > 0; end = best[end].from) rows.unshift(images.slice(best[end].from, end));
+  return rows;
+}
+
+function imagesHtml(images: CaImage[] | undefined, lang: Lang): string {
+  const usable = (images ?? []).filter((i) => safeUrl(i.url) && i.w > 0 && i.h > 0);
+  if (!usable.length) return "";
+  const rows = imageRows(usable).map((row) => {
+    const sum = row.reduce((n, i) => n + imageRatio(i), 0);
+    // A row of tall images is kept to the tallest height, centred.
+    const capped =
+      rowHeight(row) > ROW_MAX_MM
+        ? ` style="max-width:${(ROW_MAX_MM * sum + GAP_MM * (row.length - 1)).toFixed(1)}mm"`
+        : "";
+    // Caption space is the same in both issues, so the rows line up: the
+    // lines the longest caption needs, in either language, at its width.
+    const rowWidth = Math.min(ROW_WIDTH_MM, ROW_MAX_MM * sum + GAP_MM * (row.length - 1));
+    const lines = Math.min(
+      CAPTION_MAX_LINES,
+      Math.max(
+        0,
+        ...row.map((i) => {
+          const width = ((rowWidth - GAP_MM * (row.length - 1)) * imageRatio(i)) / sum;
+          const chars = Math.max(
+            i.caption?.en.trim().length ?? 0,
+            i.caption?.hi.trim().length ?? 0,
+          );
+          return Math.ceil((chars * CAPTION_CHAR_MM) / width);
+        }),
+      ),
+    );
+    const captionStyle = ` style="height:${(lines * 1.35).toFixed(2)}em;-webkit-line-clamp:${lines}"`;
+    return `<div class="img-row"${capped}>${row
+      .map((i) => {
+        const r = imageRatio(i);
+        // Shares of 100: flex hands out only part of the width when the
+        // grow factors add up to less than 1.
+        return `<figure style="flex:${((r / sum) * 100).toFixed(3)} 1 0"><img src="${esc(safeUrl(i.url))}" alt="" style="aspect-ratio:${r.toFixed(4)}" />${
+          lines ? `<figcaption${captionStyle}>${esc(pick(i.caption, lang))}</figcaption>` : ""
+        }</figure>`;
+      })
+      .join("")}</div>`;
+  });
+  return `<div class="images">${rows.join("")}</div>`;
+}
+
 function itemHtml(
   item: MagazineItem,
   number: number,
   showDate: boolean,
   accent: string,
   lang: Lang,
+  boxes: Boxes,
 ): string {
   const c = item.content;
   const t = T[lang];
@@ -195,18 +278,18 @@ function itemHtml(
     .join("");
   const background =
     pick(c.background, lang) || statics
-      ? `<div class="box context"><div class="box-title">${t.staticConnect}</div>${block(c.background, lang)}${statics}${
+      ? `<div class="box context"><div class="box-title">${boxes.static}</div>${block(c.background, lang)}${statics}${
           item.context_sources.length
             ? `<div class="src">${t.source}: ${esc(item.context_sources.map((s) => s.title).join(", "))}</div>`
             : ""
         }</div>`
       : "";
   const why = pick(c.why, lang)
-    ? `<div class="box why"><div class="box-title">${t.why}</div>${block(c.why, lang)}</div>`
+    ? `<div class="box why"><div class="box-title">${boxes.why}</div>${block(c.why, lang)}</div>`
     : "";
   const dyk = (c.dyk ?? []).filter((d) => pick(d, lang));
   const dykBox = dyk.length
-    ? `<div class="box dyk"><div class="box-title">${t.dyk}</div><ul>${dyk
+    ? `<div class="box dyk"><div class="box-title">${boxes.dyk}</div><ul>${dyk
         .map((d) => `<li>${esc(pick(d, lang))} <span class="site">(${esc(d.site)})</span></li>`)
         .join("")}</ul></div>`
     : "";
@@ -214,6 +297,7 @@ function itemHtml(
   <div class="item-head"><span class="num">${number}</span><div class="heads"><h3>${esc(pick(c.headline, lang))}</h3></div></div>
   ${tags ? `<div class="tags">${tags}</div>` : ""}
   ${block(c.summary, lang, "summary")}
+  ${imagesHtml(c.images, lang)}
   ${c.visual ? visualHtml(c.visual, accent, lang) : ""}
   ${points}
   ${why}
@@ -242,7 +326,7 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
   background: radial-gradient(circle at 92% 8%, rgba(255,255,255,.18) 0 22mm, transparent 22.2mm),
     radial-gradient(circle at 78% 105%, rgba(255,255,255,.10) 0 30mm, transparent 30.2mm),
     linear-gradient(135deg, ${accent} 0%, ${darken(accent)} 100%); }
-.eyebrow { font-size: 9pt; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; opacity: .85; }
+.eyebrow { font-size: 9pt; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; opacity: .85; max-width: 150mm; }
 .cover-hero h1 { margin: 3mm 0 0; font-size: 38pt; line-height: 1.05; font-weight: 700; letter-spacing: -.01em; max-width: 140mm; }
 .date-pill { display: inline-block; margin-top: 6mm; padding: 1.8mm 5mm; border-radius: 20mm; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35); font-size: 11pt; font-weight: 600; }
 .stats { display: flex; gap: 4mm; margin-top: 9mm; }
@@ -335,6 +419,13 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .feat-h { font-size: 11pt; color: ${accent}; margin: 0 0 1mm; }
 .feat-src { margin-top: 4mm; font-size: 8.5pt; color: #64748b; }
 .rev .ans { font-weight: 700; color: ${accent}; }
+.images { margin-top: 2.5mm; }
+.img-row { display: flex; gap: ${GAP_MM}mm; align-items: flex-start; margin: 0 auto 2mm; break-inside: avoid; }
+.img-row figure { margin: 0; min-width: 0; }
+.img-row img { display: block; width: 100%; height: auto; border-radius: 1.5mm; background: #f1f5f9; object-fit: cover; }
+.img-row figcaption { margin-top: 1mm; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; font-size: 8pt; line-height: 1.35; color: #64748b; }
+html[lang="hi"] .eyebrow { letter-spacing: 0; font-size: 10pt; }
+a.cta { text-decoration: none; color: inherit; }
 ${VISUAL_CSS(accent)}
 `;
 
@@ -501,9 +592,12 @@ export function renderMagazine(opts: {
         `<div class="hl"><span class="hl-cat">${esc(categoryLabel(i.category)[lang])}</span><div class="hl-hi">${esc(pick(i.content.headline, lang))}</div></div>`,
     )
     .join("");
-  // A public @username (numeric chat ids are not shown): the issue's own channel.
-  const handle = (lang === "hi" ? s.channel_hi || s.channel : s.channel).trim();
-  const channel = /^@[A-Za-z0-9_]{4,}$/.test(handle) ? handle : "";
+  // The join link, shown as its @username (t.me/RASbandhu → @RASbandhu).
+  const joinUrl = safeUrl((s.join_url ?? DEFAULT_MAGAZINE_SETTINGS.join_url).trim());
+  const handle = /^https:\/\/t\.me\/([A-Za-z0-9_]{4,})\/?$/.exec(joinUrl)?.[1];
+  const joinText = esc(s.join_text?.trim() || DEFAULT_MAGAZINE_SETTINGS.join_text);
+  const tagline = esc((lang === "hi" ? s.tagline_hi || s.tagline_en : s.tagline_en) ?? "");
+  const boxes = boxNames(s);
   const questions =
     items.filter((i) => i.content.mcq).length +
     items.filter((i) => pick(i.content.mains, lang)).length;
@@ -520,7 +614,7 @@ export function renderMagazine(opts: {
   const sections = [...groups.entries()]
     .map(([cat, list]) => {
       return `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>${icon(cat)} ${esc(categoryLabel(cat)[lang])}</h2><span>${list.length} ${t.stories(list.length)}</span></div>${list
-        .map((it) => itemHtml(it, ++n, monthly, accent, lang))
+        .map((it) => itemHtml(it, ++n, monthly, accent, lang, boxes))
         .join("")}</section>`;
     })
     .join("");
@@ -561,7 +655,7 @@ ${watermark}
 <section class="cover">
   <div class="cover-logos">${logo(s.logo_main_url) || `<span class="brand">${esc(s.brand_line)}</span>`}${logo(s.logo_partner_url)}</div>
   <div class="cover-hero">
-    <div class="eyebrow">${t.eyebrow}</div>
+    ${tagline ? `<div class="eyebrow">${tagline}</div>` : ""}
     <h1>${esc(title)}</h1>
     <div class="date-pill">${esc(dateLine)}</div>
     <div class="stats">
@@ -576,8 +670,8 @@ ${watermark}
     <h3 class="cover-h">${t.contents}</h3>
     <div class="toc">${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}</div>
     ${
-      channel
-        ? `<div class="cta"><div><b>${t.ctaTitle}</b><span>${t.ctaText}</span></div><div class="cta-handle">${esc(channel)}</div></div>`
+      joinUrl
+        ? `<a class="cta" href="${esc(joinUrl)}"><div><b>${joinText}</b><span>${t.ctaText}</span></div><div class="cta-handle">${handle ? `@${esc(handle)}` : joinText}</div></a>`
         : ""
     }
   </div>

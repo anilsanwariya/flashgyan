@@ -184,7 +184,7 @@ export function triageMessages(
   return [
     {
       role: "system",
-      content: `You pick news for a daily current affairs magazine for RAS (Rajasthan Administrative Service) exam aspirants. From the numbered headlines (Hindi or English), choose only those RPSC is likely to ask about in the RAS Prelims or Mains exam. Be strict: a headline must clearly fit one of these story types: ${TYPE_LABELS}.
+      content: `You pick news for a daily current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). From the numbered headlines (Hindi or English), choose only those RPSC or RSSB is likely to ask about in its exams (RAS Prelims and Mains above all). Be strict: a headline must clearly fit one of these story types: ${TYPE_LABELS}.
 Skip: ${SKIP_STORIES.join("; ")}; opinion pieces; duplicate headlines about the same story (keep the most informative one).
 Rank by importance and leave out importance-1 headlines: ${IMPORTANCE_GUIDE}
 Reply with JSON only: an array of the chosen numbers, most exam-relevant first, at most ${max}. Reply [] if none.`,

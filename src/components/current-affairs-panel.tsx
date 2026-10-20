@@ -1249,11 +1249,17 @@ function SettingsPanel() {
       await saveFn({
         data: {
           channel: text("channel"),
-          channel_hi: text("channel_hi"),
           post_time: text("post_time"),
           title_en: text("title_en"),
           title_hi: text("title_hi"),
           brand_line: text("brand_line"),
+          tagline_en: text("tagline_en"),
+          tagline_hi: text("tagline_hi"),
+          box_static: text("box_static"),
+          box_dyk: text("box_dyk"),
+          box_why: text("box_why"),
+          join_text: text("join_text"),
+          join_url: text("join_url"),
           accent: text("accent"),
           test_chat_id: text("test_chat_id"),
           add_to_knowledge_base: Boolean(form!.add_to_knowledge_base),
@@ -1326,19 +1332,20 @@ function SettingsPanel() {
   return (
     <div className="space-y-5">
       <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
-        <h3 className="font-semibold">Telegram channels</h3>
+        <h3 className="font-semibold">Telegram channel</h3>
         <p className="text-sm text-muted-foreground">
-          Each day's stories become two issues: an English PDF and a Hindi PDF, each posted to its
-          own channel. Add the bot to each channel as an admin with “Post messages”.
+          Each day's stories become two issues, an English PDF and a Hindi PDF, both posted to this
+          channel. Add the bot to the channel as an admin with “Post messages”.
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
-          {field("channel", "English channel", "@yourchannel or -100…")}
+          {field("channel", "Channel", "@yourchannel or -100…")}
           {field(
-            "channel_hi",
-            "Hindi channel",
-            "@yourhindichannel or -100…",
-            "Leave empty to post the Hindi issue to the English channel too.",
+            "join_url",
+            "Join link",
+            "https://t.me/RASbandhu",
+            "Linked at the bottom of every page of both issues and on the cover.",
           )}
+          {field("join_text", "Join link text", "Join us on Telegram", "English letters only.")}
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           {field(
@@ -1400,6 +1407,13 @@ function SettingsPanel() {
           {field("title_hi", "Title (Hindi)")}
           {field("title_en", "Title (English)")}
           {field("brand_line", "Brand line", "FlashGyan by RASbandhu")}
+          {field(
+            "tagline_en",
+            "Tagline (English)",
+            "For all Rajasthan competitive exams · Special focus: RAS Mains",
+            "On the cover and in the post captions.",
+          )}
+          {field("tagline_hi", "Tagline (Hindi)")}
           <div className="space-y-1">
             <Label>Accent colour</Label>
             <div className="flex items-center gap-2">
@@ -1416,6 +1430,17 @@ function SettingsPanel() {
               />
             </div>
           </div>
+        </div>
+        <div className="space-y-1">
+          <p className="text-sm font-medium">Story box names</p>
+          <p className="text-xs text-muted-foreground">
+            Printed the same in the Hindi and English issues.
+          </p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {field("box_static", "Static concepts box", "Static Context")}
+          {field("box_dyk", "Related developments box", "Fact Bite")}
+          {field("box_why", "Syllabus link box", "Exam Angle")}
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           {(["main", "partner"] as const).map((kind) => {
@@ -1531,14 +1556,14 @@ function SettingsPanel() {
       </section>
 
       <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
-        <h3 className="font-semibold">“Did you know?”: related recent developments</h3>
+        <h3 className="font-semibold">“Fact Bite”: related recent developments</h3>
         <label className="flex items-start gap-3">
           <Switch
             checked={Boolean(form.do_you_know)}
             onCheckedChange={(v) => set("do_you_know", v)}
           />
           <span className="text-sm">
-            <span className="font-medium">Add a “क्या आप जानते हैं? / Did you know?” box</span>
+            <span className="font-medium">Add a “Fact Bite” box</span>
             <span className="block text-muted-foreground">
               For each news item SAATHI adds up to 3 developments of the same kind (other missiles
               tested, other amendments, other new Ramsar sites): first from this magazine's own
@@ -1582,8 +1607,8 @@ function SettingsPanel() {
             <span className="font-medium">Collect the day's news from the websites below</span>
             <span className="block text-muted-foreground">
               At the time below SAATHI reads each website's latest articles, picks the ones that
-              matter for RAS, fetches their text and writes the day's draft. Nothing is posted until
-              you approve it.
+              matter for Rajasthan exams, fetches their text and writes the day's draft. Nothing is
+              posted until you approve it.
             </span>
           </span>
         </label>

@@ -57,7 +57,7 @@ export function featureTopicMessages(
   return [
     {
       role: "system",
-      content: `You plan the background article of a monthly current affairs magazine for RAS (Rajasthan Administrative Service) exam aspirants. From the month's numbered headlines, suggest 5 static topics that explain the background of several stories at once and are themselves asked in RPSC exams: an institution or commission (its constitution, powers, members), a constitutional or legal provision, a scheme's history and design, a technology (drones, satellites), a geographical feature or region, or a Rajasthan topic (state commissions, policies, culture). Prefer topics behind 2 or more stories and topics about Rajasthan. Not a news summary: the article explains the lasting concept.
+      content: `You plan the background article of a monthly current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). From the month's numbered headlines, suggest 5 static topics that explain the background of several stories at once and are themselves asked in RPSC exams: an institution or commission (its constitution, powers, members), a constitutional or legal provision, a scheme's history and design, a technology (drones, satellites), a geographical feature or region, or a Rajasthan topic (state commissions, policies, culture). Prefer topics behind 2 or more stories and topics about Rajasthan. Not a news summary: the article explains the lasting concept.
 Reply with JSON only: [{"topic": {"en": "...", "hi": "..."}, "query": "English search words for the topic, 3-10 words", "stories": [headline numbers it explains]}].`,
     },
     {
@@ -99,7 +99,7 @@ export function featureMessages(opts: {
   return [
     {
       role: "system",
-      content: `You write the background article of a bilingual (Hindi and English) monthly current affairs magazine for RAS exam aspirants, on the topic given. Base it on the knowledge-base passages [K…] (the students' books) and list the ones you used in "from"; add well-established facts from your own knowledge to make it complete, but only facts you are sure of (no doubtful figures or dates). Reply {"error": "not covered"} only if you cannot write a reliable article on the topic.
+      content: `You write the background article of a bilingual (Hindi and English) monthly current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains), on the topic given. Base it on the knowledge-base passages [K…] (the students' books) and list the ones you used in "from"; add well-established facts from your own knowledge to make it complete, but only facts you are sure of (no doubtful figures or dates). Reply {"error": "not covered"} only if you cannot write a reliable article on the topic.
 Write for revision, not prose: an intro of 1-2 sentences linking the topic to this month's news, then 3-5 sections with short headings; each section body is 2-5 short lines (separated by line breaks, not numbered), each line one exam fact (articles, years, members, powers, places, figures). Hindi must be natural standard Hindi as used in RPSC exams (मानक हिंदी), with the same numbers and official names.
 Reply with JSON only: {"title": {"en": "...", "hi": "..."}, "intro": {"en": "...", "hi": "..."}, "sections": [{"heading": {"en": "...", "hi": "..."}, "body": {"en": "...", "hi": "..."}}], "from": ["K1", ...]}`,
     },

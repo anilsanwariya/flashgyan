@@ -1251,13 +1251,11 @@ async function runMagazineTick() {
       .maybeSingle();
     const magazine = (setting?.value ?? {}) as {
       channel?: string;
-      channel_hi?: string;
       channel_quiz?: boolean;
       channel_quiz_count?: number;
     };
     const channel = String(magazine.channel ?? "").trim();
     if (!channel) throw new Error("No channel set in Magazine settings");
-    const channelHi = String(magazine.channel_hi ?? "").trim() || channel;
     type Edition = {
       lang?: QuizLang;
       path: string;
@@ -1269,7 +1267,7 @@ async function runMagazineTick() {
     const editions: Edition[] = issue.pdf_path_hi
       ? [
           { lang: "en", path: issue.pdf_path, caption: issue.caption, channel, posted: issue.telegram_message_id, column: "telegram_message_id" },
-          { lang: "hi", path: issue.pdf_path_hi, caption: issue.caption_hi, channel: channelHi, posted: issue.telegram_message_id_hi, column: "telegram_message_id_hi" },
+          { lang: "hi", path: issue.pdf_path_hi, caption: issue.caption_hi, channel, posted: issue.telegram_message_id_hi, column: "telegram_message_id_hi" },
         ]
       : [{ path: issue.pdf_path, caption: issue.caption, channel, posted: issue.telegram_message_id, column: "telegram_message_id" }];
     const sentNow: Edition[] = [];
@@ -1294,12 +1292,11 @@ async function runMagazineTick() {
       .from("ca_issues")
       .update({ status: "posted", posted_at: new Date().toISOString(), error: null })
       .eq("id", issue.id);
-    // The quiz never fails the post: the PDFs are already out. One channel
-    // with both issues gets one quiz in both languages.
+    // The quiz never fails the post: the PDFs are already out. Both issues
+    // share the channel, so it gets one quiz in both languages.
     if (issue.kind === "daily" && magazine.channel_quiz !== false) {
       const count = Math.min(10, Math.max(1, magazine.channel_quiz_count ?? 5));
-      const shared = editions.length === 2 && channelHi === channel;
-      const quizzes = shared ? (sentNow.length ? [{ channel, lang: undefined }] : []) : sentNow;
+      const quizzes = sentNow.length ? [{ channel, lang: undefined }] : [];
       for (const q of quizzes) {
         try {
           await postChannelQuiz(q.channel, issue.period, count, q.lang);
@@ -1499,7 +1496,7 @@ async function askEdit(chat_id: number, item_id: string, part: string) {
     value: { item_id, part, at: new Date().toISOString() },
     updated_at: new Date().toISOString(),
   });
-  const label = part === "why" ? "“Why it matters” line" : partName(part).toLowerCase();
+  const label = part === "why" ? "“Exam Angle” line" : partName(part).toLowerCase();
   const headline = item.content.headline?.hi || item.content.headline?.en || "";
   const shown = now.map((t, i) => (i ? escHtml(t) : `<b>${escHtml(t)}</b>`)).join("\n") || "(empty)";
   await tg("sendMessage", {

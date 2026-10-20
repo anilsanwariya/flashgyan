@@ -65,7 +65,7 @@ export function sameStoryMessages(pairs: [StoryBrief, StoryBrief][]): ChatMessag
   return [
     {
       role: "system",
-      content: `You edit a daily current affairs magazine for RAS exam aspirants. For each numbered pair of news items, decide whether the magazine should print them as ONE story because they are about the same event, scheme, programme, report, decision or person, even if they come from different sources or angles (for example a scheme's new allocation and the same scheme's achievements, or a fair being planned and the same fair opening). Two different schemes, events, reports or people are NOT the same, even in the same field (Khelo India and a separate national sports policy are different stories).
+      content: `You edit a daily current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). For each numbered pair of news items, decide whether the magazine should print them as ONE story because they are about the same event, scheme, programme, report, decision or person, even if they come from different sources or angles (for example a scheme's new allocation and the same scheme's achievements, or a fair being planned and the same fair opening). Two different schemes, events, reports or people are NOT the same, even in the same field (Khelo India and a separate national sports policy are different stories).
 Reply with JSON only: an array of the numbers of the pairs that are the same story, e.g. [1, 3]. Reply [] if none.`,
     },
     {
