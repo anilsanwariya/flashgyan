@@ -209,6 +209,7 @@ export type Database = {
           chat_id: number
           created_at: string
           enabled: boolean
+          lang: string | null
           last_done_date: string | null
           last_sent_date: string | null
           quiz: Json | null
@@ -221,6 +222,7 @@ export type Database = {
           chat_id: number
           created_at?: string
           enabled?: boolean
+          lang?: string | null
           last_done_date?: string | null
           last_sent_date?: string | null
           quiz?: Json | null
@@ -233,6 +235,7 @@ export type Database = {
           chat_id?: number
           created_at?: string
           enabled?: boolean
+          lang?: string | null
           last_done_date?: string | null
           last_sent_date?: string | null
           quiz?: Json | null
@@ -606,52 +609,64 @@ export type Database = {
         Row: {
           approved_at: string | null
           caption: string | null
+          caption_hi: string | null
           created_at: string
           error: string | null
           id: string
           item_count: number
           kind: string
           pdf_path: string | null
+          pdf_path_hi: string | null
           pdf_url: string | null
+          pdf_url_hi: string | null
           period: string
           posted_at: string | null
           scheduled_for: string | null
           status: string
           telegram_message_id: number | null
+          telegram_message_id_hi: number | null
           updated_at: string
         }
         Insert: {
           approved_at?: string | null
           caption?: string | null
+          caption_hi?: string | null
           created_at?: string
           error?: string | null
           id?: string
           item_count?: number
           kind: string
           pdf_path?: string | null
+          pdf_path_hi?: string | null
           pdf_url?: string | null
+          pdf_url_hi?: string | null
           period: string
           posted_at?: string | null
           scheduled_for?: string | null
           status?: string
           telegram_message_id?: number | null
+          telegram_message_id_hi?: number | null
           updated_at?: string
         }
         Update: {
           approved_at?: string | null
           caption?: string | null
+          caption_hi?: string | null
           created_at?: string
           error?: string | null
           id?: string
           item_count?: number
           kind?: string
           pdf_path?: string | null
+          pdf_path_hi?: string | null
           pdf_url?: string | null
+          pdf_url_hi?: string | null
           period?: string
           posted_at?: string | null
           scheduled_for?: string | null
           status?: string
           telegram_message_id?: number | null
+          telegram_message_id_hi?: number | null
           updated_at?: string
         }
         Relationships: []
@@ -1841,6 +1856,7 @@ export type Database = {
           chat_id: number
           created_at: string
           enabled: boolean
+          lang: string | null
           last_done_date: string | null
           last_sent_date: string | null
           quiz: Json | null
@@ -1872,18 +1888,22 @@ export type Database = {
         Returns: {
           approved_at: string | null
           caption: string | null
+          caption_hi: string | null
           created_at: string
           error: string | null
           id: string
           item_count: number
           kind: string
           pdf_path: string | null
+          pdf_path_hi: string | null
           pdf_url: string | null
+          pdf_url_hi: string | null
           period: string
           posted_at: string | null
           scheduled_for: string | null
           status: string
           telegram_message_id: number | null
+          telegram_message_id_hi: number | null
           updated_at: string
         }[]
         SetofOptions: {
