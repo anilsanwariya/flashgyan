@@ -2,7 +2,7 @@
 // uses, so the editor can read them and make stories from what the AI left
 // out, most exam-worthy first once ranked. Opening one shows it in the article
 // reader, where highlights become a new story at the end of the day.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -41,10 +41,17 @@ export function SkippedNews({
   date,
   sourceCount,
   onChanged,
+  openSignal = 0,
+  onStats,
 }: {
   date: string;
   sourceCount: number;
   onChanged: () => void;
+  // Changes when the day's checklist asks to show the list.
+  openSignal?: number;
+  // Articles worth a story and not ranked yet (both without those marked
+  // "not needed"), once the list has loaded; for the day's checklist.
+  onStats?: (stats: { worth: number; unranked: number } | null) => void;
 }) {
   const skippedFn = useServerFn(getCaSkipped);
   const rankFn = useServerFn(rankCaSkipped);
@@ -65,10 +72,29 @@ export function SkippedNews({
   // The article being read stays set while the reader closes.
   const [reading, setReading] = useState<SkippedArticle | null>(null);
   const [readerOpen, setReaderOpen] = useState(false);
+  const boxRef = useRef<HTMLElement>(null);
   useEffect(() => {
     setHidden(readHidden(date));
     setOpen(false);
   }, [date]);
+  useEffect(() => {
+    if (!openSignal) return;
+    setOpen(true);
+    requestAnimationFrame(() =>
+      boxRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
+  }, [openSignal]);
+  useEffect(() => {
+    const list = q.data?.articles.filter((a) => !hidden.has(rowKey(a)));
+    onStats?.(
+      list
+        ? {
+            worth: list.filter((a) => (a.rank?.score ?? 0) >= 2).length,
+            unranked: list.filter((a) => !a.rank).length,
+          }
+        : null,
+    );
+  }, [q.data, hidden, onStats]);
 
   const articles = useMemo(() => q.data?.articles ?? [], [q.data]);
   const rajasthan = articles.filter((a) => a.rajasthan).length;
@@ -116,7 +142,7 @@ export function SkippedNews({
   const count = q.data ? articles.length - hiddenHere : null;
 
   return (
-    <section className="rounded-2xl border border-border bg-card">
+    <section ref={boxRef} className="scroll-mt-20 rounded-2xl border border-border bg-card">
       <button
         type="button"
         aria-expanded={open}

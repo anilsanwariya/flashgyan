@@ -395,6 +395,19 @@ export const createCaFromHighlights = createServerFn({ method: "POST" })
     );
   });
 
+// New key points from the reader, added without rewriting the story.
+export const addCaPoints = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({ id: z.string().uuid(), highlights: highlightsSchema, keywords: penKeywords })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<CaItem> => {
+    await assertAdmin(context.userId);
+    return (await server()).addPointsFromHighlights(data.id, data.highlights, data.keywords);
+  });
+
 // Green-pen keywords added to Static Connect without rewriting the story.
 export const addCaPenKeywords = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

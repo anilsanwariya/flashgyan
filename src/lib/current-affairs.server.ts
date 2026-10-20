@@ -27,6 +27,7 @@ import {
   relevantMatches,
   saathiComplete,
   saathiEmbed,
+  saathiEmbedMany,
   saathiSearchQuery,
   type SaathiRpc,
   saathiErrorDetail,
@@ -83,9 +84,16 @@ import {
   type UploadSection,
 } from "@/lib/current-affairs";
 import { VISUAL_LABELS, parseVisual, visualMessages, type Visual } from "@/lib/ca-visuals";
-import { isPaged, outline, type OutlineEntry } from "@/lib/ca-reader-format";
+import {
+  isPaged,
+  outline,
+  sourceArticles,
+  type ArticleText,
+  type OutlineEntry,
+} from "@/lib/ca-reader-format";
 import { missingMessages, parseMissing, type MissingCheck } from "@/lib/ca-missing";
-import { bestArticle, type CompareMatch } from "@/lib/ca-compare";
+import { bestArticle, cosine, meaningText, type CompareMatch } from "@/lib/ca-compare";
+import { ADD_POINTS_MAX, STORY_POINTS_MAX, parsePoints, pointsMessages } from "@/lib/ca-points";
 import {
   RANK_MAX,
   parseRanks,
@@ -1358,10 +1366,46 @@ export async function compareSources(sourceId: string, query: string): Promise<C
     .order("created_at")
     .limit(60);
   fail(lErr);
-  return ((data ?? []) as unknown as SourceRow[])
+  const rows = ((data ?? []) as unknown as SourceRow[])
     .filter((r) => r.content.trim())
-    .map(({ content, ...r }) => ({ ...r, match: bestArticle(query, { ...r, content }) }))
+    .map((r) => ({ row: r, articles: sourceArticles(r) }));
+  const cosines = await articleMeanings(
+    query,
+    rows.map((r) => r.articles),
+  );
+  return rows
+    .map(({ row: { content: _, ...r }, articles }, i) => ({
+      ...r,
+      match: bestArticle(query, articles, cosines[i]),
+    }))
     .sort((a, b) => (b.match?.score ?? 0) - (a.match?.score ?? 0));
+}
+
+// How close in meaning each article is to the text being read (null when
+// unknown): the same news in a Hindi and an English paper shares few words.
+// Embeddings are cached for the process; a failure leaves word matching.
+const MEANING_MAX = 300;
+const meaningCache = new Map<string, number[]>();
+
+async function articleMeanings(query: string, sources: ArticleText[][]) {
+  const out = sources.map((list) => list.map((): number | null => null));
+  const texts = sources.flatMap((list, s) => list.map((a, i) => ({ s, i, text: meaningText(a) })));
+  const todo = texts.slice(0, MEANING_MAX);
+  if (!query.trim() || !todo.length) return out;
+  try {
+    const want = [query.slice(0, 1500), ...todo.map((t) => t.text)];
+    const missing = [...new Set(want.filter((t) => !meaningCache.has(t)))];
+    if (missing.length) {
+      const vectors = await saathiEmbedMany(apiKey(), missing);
+      if (meaningCache.size + missing.length > 3000) meaningCache.clear();
+      missing.forEach((t, k) => meaningCache.set(t, vectors[k]));
+    }
+    const q = meaningCache.get(want[0])!;
+    for (const t of todo) out[t.s][t.i] = cosine(q, meaningCache.get(t.text)!);
+  } catch (e) {
+    console.error("compare by meaning:", saathiErrorDetail(e));
+  }
+  return out;
 }
 
 // Sources a story's highlights may come from: its own, and any other source
@@ -1601,6 +1645,61 @@ export async function rewriteFromHighlights(
   );
 }
 
+// New key points from the reader's highlights (in the story's sources or
+// another source of its day), added to the written story without writing it
+// again: one small AI call words them, and everything else stays.
+export async function addPointsFromHighlights(
+  id: string,
+  highlights: Highlight[],
+  keywords: string[] = [],
+): Promise<CaItem> {
+  const item = await loadItem(id);
+  const c = item.content;
+  if (!c) throw new Error("Write the story first.");
+  await assertDayEditable([item.issue_date]);
+  const ok = await allowedSources(
+    item.issue_date,
+    item.source_ids,
+    highlights.map((h) => h.source_id),
+  );
+  const allowed = highlights.filter((h) => h.point && ok.has(h.source_id));
+  const texts = await sourceTexts(uniq(allowed.map((h) => h.source_id)));
+  const have = new Set(item.facts.map((f) => normalizeForMatch(f.quote)));
+  const room = STORY_POINTS_MAX - item.facts.length;
+  if (room <= 0) throw new Error(`This story already has ${STORY_POINTS_MAX} key points.`);
+  const fresh = factsFromHighlights(allowed, texts, [])
+    .facts.filter((f) => !have.has(normalizeForMatch(f.quote)))
+    .slice(0, Math.min(room, ADD_POINTS_MAX));
+  if (!fresh.length) throw new Error("Highlight a new key point first.");
+  const points = parsePoints(
+    await saathiComplete(
+      apiKey(),
+      pointsMessages({
+        headline: c.headline.en || c.headline.hi || item.headline,
+        summary: c.summary.en || c.summary.hi,
+        points: c.points.map((p) => p.en || p.hi),
+        facts: fresh,
+      }),
+    ),
+    fresh.length,
+  );
+  if (!points) throw new Error("The AI's reply could not be read. Try again.");
+  const before = snapshotOf(item);
+  const { data, error } = await from("ca_items")
+    .update({
+      facts: [...item.facts, ...fresh],
+      source_ids: uniq([...item.source_ids, ...fresh.map((f) => f.source_id)]),
+      content: { ...c, points: [...c.points, ...points] },
+      updated_at: new Date().toISOString(),
+    } as never)
+    .eq("id", id)
+    .select(ITEM_COLS)
+    .single();
+  fail(error);
+  if (before) await saveVersion(id, before, "points");
+  return withKeywords(data as unknown as CaItem, keywords);
+}
+
 // A new story from highlights in another story's sources, or in a source no
 // story uses (news the AI skipped), written at once. It goes right after the
 // story it came from, or at the end of the source's day.
@@ -1693,8 +1792,9 @@ export type CaVersion = {
   // "write": written again; "rewrite": from the reader's highlights;
   // "restore": the story as it was before an older version was restored;
   // "edit": before the admin's own changes (one per editing session);
-  // "correction": before an approved correction.
-  reason: "write" | "rewrite" | "restore" | "edit" | "correction";
+  // "correction": before an approved correction; "points": before key points
+  // were added from the reader.
+  reason: "write" | "rewrite" | "restore" | "edit" | "correction" | "points";
   headline: string;
   snapshot: CaSnapshot;
 };

@@ -53,6 +53,8 @@ import {
 import { CollectionBox, WatchSitesSettings } from "@/components/ca-collect-panel";
 import { StoryList } from "@/components/ca-story-review";
 import { SkippedNews } from "@/components/ca-skipped-news";
+import { DayChecklist } from "@/components/ca-day-checklist";
+import { dayChecklist, type CheckAction } from "@/lib/ca-checklist";
 import { FeatureBox } from "@/components/ca-feature-box";
 import { Badge, BulkBar, errorText, useChosen } from "@/components/ca-ui";
 import { FileDropZone, FileQueueList, useFileQueue } from "@/components/saathi-file-queue";
@@ -112,6 +114,7 @@ function IssueBar({
   period,
   issue,
   blocking,
+  warnings = [],
   onChanged,
 }: {
   kind: "daily" | "monthly";
@@ -119,6 +122,8 @@ function IssueBar({
   issue: CaIssue | null;
   // Why the issue can't be approved yet, if anything.
   blocking: string | null;
+  // What the day's checklist still has open: approving asks first.
+  warnings?: string[];
   onChanged: () => void;
 }) {
   const previewFn = useServerFn(previewCaIssue);
@@ -254,6 +259,10 @@ function IssueBar({
               size="sm"
               disabled={!!busy || !!blocking}
               onClick={() =>
+                (!warnings.length ||
+                  confirm(
+                    `Still to do:\n${warnings.map((w) => `• ${w}`).join("\n")}\n\nApprove and schedule anyway?`,
+                  )) &&
                 run(
                   "approve",
                   () =>
@@ -379,6 +388,14 @@ function DailyPanel() {
   const daySettingsFn = useServerFn(getMagazineSettings);
   const daySettingsQ = useQuery({ queryKey: ["caSettings"], queryFn: () => daySettingsFn() });
   const refresh = () => qc.invalidateQueries({ queryKey: ["caDay"] });
+  // The day's checklist: what the review list and the skipped news report,
+  // and where its buttons go.
+  const [reviewed, setReviewed] = useState<Set<string>>(new Set());
+  const [skippedStats, setSkippedStats] = useState<{ worth: number; unranked: number } | null>(
+    null,
+  );
+  const [storyJump, setStoryJump] = useState<{ id: string; n: number } | null>(null);
+  const [skippedSignal, setSkippedSignal] = useState(0);
 
   const addFn = useServerFn(addCaSource);
   const extractFn = useServerFn(extractCaSourcePart);
@@ -534,6 +551,24 @@ function DailyPanel() {
       : included.length === 0
         ? "Upload the day's sources to make an issue."
         : null;
+  const dayCorrections = (day?.corrections ?? []).filter((c) => c.item_date === date).length;
+  const checks = dayChecklist({
+    items,
+    reviewed,
+    unfinishedSources: unfinished,
+    corrections: dayCorrections,
+    skipped: skippedStats,
+    minRajasthan: daySettingsQ.data?.min_rajasthan ?? DEFAULT_MIN_RAJASTHAN,
+    target: daySettingsQ.data?.daily_stories ?? 0,
+  });
+  const issueDone =
+    day?.issue?.status === "posted" || day?.issue?.status === "posting" || !included.length;
+  function onCheck(a: CheckAction) {
+    if (a.kind === "story") setStoryJump({ id: a.id, n: Date.now() });
+    else if (a.kind === "skipped") setSkippedSignal(Date.now());
+    else if (a.kind === "write") void retryAll();
+    else document.getElementById("ca-corrections")?.scrollIntoView({ behavior: "smooth" });
+  }
 
   return (
     <div className="space-y-5">
@@ -570,8 +605,11 @@ function DailyPanel() {
         period={date}
         issue={day?.issue ?? null}
         blocking={blocking}
+        warnings={issueDone ? [] : checks.filter((c) => c.state === "todo").map((c) => c.text)}
         onChanged={refresh}
       />
+
+      {!issueDone && <DayChecklist checks={checks} onAction={onCheck} />}
 
       <CollectionBox date={date} onChanged={refresh} />
 
@@ -653,10 +691,18 @@ function DailyPanel() {
       </section>
 
       {day && day.corrections.length > 0 && (
-        <CorrectionsBox corrections={day.corrections} onChanged={refresh} />
+        <div id="ca-corrections" className="scroll-mt-20">
+          <CorrectionsBox corrections={day.corrections} onChanged={refresh} />
+        </div>
       )}
 
-      <SkippedNews date={date} sourceCount={day?.sources.length ?? 0} onChanged={refresh} />
+      <SkippedNews
+        date={date}
+        sourceCount={day?.sources.length ?? 0}
+        onChanged={refresh}
+        openSignal={skippedSignal}
+        onStats={setSkippedStats}
+      />
 
       {/* Items */}
       {dayQ.isLoading ? (
@@ -690,7 +736,13 @@ function DailyPanel() {
               </span>
             </div>
           )}
-          <StoryList items={items} date={date} onChanged={refresh} />
+          <StoryList
+            items={items}
+            date={date}
+            onChanged={refresh}
+            jump={storyJump}
+            onReviewed={setReviewed}
+          />
         </>
       )}
     </div>
