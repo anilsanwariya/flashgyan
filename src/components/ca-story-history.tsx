@@ -22,6 +22,8 @@ const REASONS: Record<CaVersion["reason"], string> = {
   write: "Before writing again",
   rewrite: "Before rewrite from highlights",
   restore: "Before a restore",
+  edit: "Before your edits",
+  correction: "Before a correction",
 };
 
 const when = (iso: string) =>
@@ -88,8 +90,8 @@ export function StoryHistory({
         <div className="pr-8">
           <DialogTitle className="text-base">Story history</DialogTitle>
           <DialogDescription className="text-xs">
-            The last 5 versions from before each rewrite. Compare, then restore one if the old text
-            was better.
+            The last 10 versions: before each rewrite, your edits and approved corrections. Compare,
+            then restore one if the old text was better.
           </DialogDescription>
         </div>
 
@@ -97,8 +99,8 @@ export function StoryHistory({
           <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
         ) : !version ? (
           <p className="py-6 text-center text-sm text-muted-foreground">
-            No earlier versions yet. Each time this story is written again, the old text is kept
-            here so you can compare and undo.
+            No earlier versions yet. Each time this story is written again or edited, the old text
+            is kept here so you can compare and undo.
           </p>
         ) : (
           <>

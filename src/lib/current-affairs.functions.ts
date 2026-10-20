@@ -298,10 +298,11 @@ export const updateCaItem = createServerFn({ method: "POST" })
       const { cleanVisual } = await import("@/lib/ca-visuals");
       patch.content.visual = cleanVisual(patch.content.visual).visual;
     }
-    return (await server()).updateItem(
-      id,
-      patch as Parameters<Awaited<ReturnType<typeof server>>["updateItem"]>[1],
-    );
+    const s = await server();
+    const save = () =>
+      s.updateItem(id, patch as Parameters<Awaited<ReturnType<typeof server>>["updateItem"]>[1]);
+    // Text edits are kept in the story's history; moving or dropping isn't.
+    return patch.content ? s.asEdit(id, save) : save();
   });
 
 // ---------- Article reader and Static Connect ----------
@@ -408,8 +409,7 @@ export const addCaPenKeywords = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<CaItem> => {
     await assertAdmin(context.userId);
     const s = await server();
-    const item = await s.getItem(data.id);
-    return s.withKeywords(item, data.keywords);
+    return s.asEdit(data.id, async () => s.withKeywords(await s.getItem(data.id), data.keywords));
   });
 
 // A story's earlier versions (before each rewrite), and putting one back.
@@ -464,14 +464,40 @@ export const getCaSkipped = createServerFn({ method: "POST" })
     return (await server()).skippedNews(data.date);
   });
 
+// Ranks the day's skipped news by exam value (one AI call).
+export const rankCaSkipped = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ date: dateSchema }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).rankSkipped(data.date);
+  });
+
+// The day's other sources, each with its article most like the one being read.
+export const getCaCompareSources = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ source_id: z.string().uuid(), query: z.string().max(6000) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).compareSources(data.source_id, data.query);
+  });
+
 export const getCaSourceReader = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({ source_id: z.string().uuid(), at: z.number().int().min(0) }).parse(d),
+    z
+      .object({
+        source_id: z.string().uuid(),
+        at: z.number().int().min(0),
+        quote: z.string().max(2000).optional(),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }): Promise<ReaderSource[]> => {
     await assertAdmin(context.userId);
-    return (await server()).sourceReader(data.source_id, data.at);
+    return (await server()).sourceReader(data.source_id, data.at, data.quote);
   });
 
 export const setCaFactChecked = createServerFn({ method: "POST" })
@@ -501,7 +527,8 @@ export const addCaStaticFacts = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }): Promise<CaItem> => {
     await assertAdmin(context.userId);
-    return (await server()).addStaticFacts(data.id, data.keywords);
+    const s = await server();
+    return s.asEdit(data.id, () => s.addStaticFacts(data.id, data.keywords));
   });
 
 export const getCaKeywordBooks = createServerFn({ method: "POST" })
@@ -519,7 +546,8 @@ export const deleteCaPoint = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    return (await server()).deletePoint(data.id, data.text);
+    const s = await server();
+    return s.asEdit(data.id, () => s.deletePoint(data.id, data.text));
   });
 
 export const redoCaVisual = createServerFn({ method: "POST" })
@@ -527,7 +555,8 @@ export const redoCaVisual = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<CaItem> => {
     await assertAdmin(context.userId);
-    return (await server()).redoVisual(data.id);
+    const s = await server();
+    return s.asEdit(data.id, () => s.redoVisual(data.id));
   });
 
 export const decideCaCorrection = createServerFn({ method: "POST" })
