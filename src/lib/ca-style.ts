@@ -4,6 +4,15 @@
 // writing instructions of every story. Pure helpers, shared by the server and
 // tests.
 import { normalizeForMatch, type Bi, type CaContent } from "@/lib/current-affairs";
+// The style check's parts shared with the bot (a story's parts, what changed,
+// the open notes, fixes and the per-rule tally).
+import {
+  breakId,
+  storyParts,
+  type StyleBreak,
+  type StylePart,
+} from "../../supabase/functions/_shared/ca-style-check.ts";
+export * from "../../supabase/functions/_shared/ca-style-check.ts";
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
@@ -89,87 +98,9 @@ export function parseStyleRules(raw: string, existing: string[]): StyleSuggestio
 
 // ---------- Checking a day's stories against the rules ----------
 
-// One part of a story in one language: "headline", "summary", "point 2" or
-// "why", as the editor sees it.
-export type StylePart = { part: string; lang: "en" | "hi"; text: string };
-
-// Where the AI saw a rule broken, and the text it suggests instead. `text` is
-// the part as it was checked; once the story changes there, the note is gone.
-export type StyleBreak = StylePart & { id: string; item_id: string; rule: string; fix: string };
-
-export type StyleCheck = {
-  at: string;
-  // The rules checked against, and each story's text when it was checked.
-  rules: string;
-  stories: Record<string, string>;
-  breaks: StyleBreak[];
-  // Notes the editor waved through ("It's fine").
-  dismissed: string[];
-};
-
 // What one AI request checks, and the most notes it gives.
 export const STYLE_CHECK_STORIES = 30;
 const STYLE_BREAKS_MAX = 40;
-
-export function storyParts(c: CaContent): StylePart[] {
-  const out: StylePart[] = [];
-  const add = (part: string, b: Bi | null | undefined) => {
-    for (const lang of ["en", "hi"] as const) {
-      const text = b?.[lang]?.trim() ?? "";
-      if (text) out.push({ part, lang, text });
-    }
-  };
-  add("headline", c.headline);
-  add("summary", c.summary);
-  c.points.forEach((p, i) => add(`point ${i + 1}`, p));
-  add("why", c.why);
-  return out;
-}
-
-export function partText(c: CaContent | null, part: string, lang: "en" | "hi"): string {
-  if (!c) return "";
-  const p = /^point (\d+)$/.exec(part);
-  const b =
-    part === "headline"
-      ? c.headline
-      : part === "summary"
-        ? c.summary
-        : part === "why"
-          ? c.why
-          : p
-            ? c.points[Number(p[1]) - 1]
-            : null;
-  return b?.[lang]?.trim() ?? "";
-}
-
-export function withPart(c: CaContent, part: string, lang: "en" | "hi", text: string): CaContent {
-  const set = (b: Bi | null | undefined): Bi => ({ en: "", hi: "", ...b, [lang]: text });
-  const p = /^point (\d+)$/.exec(part);
-  if (p) {
-    const i = Number(p[1]) - 1;
-    return { ...c, points: c.points.map((x, j) => (j === i ? set(x) : x)) };
-  }
-  if (part === "headline" || part === "summary" || part === "why") {
-    return { ...c, [part]: set(c[part]) };
-  }
-  return c;
-}
-
-// A short hash (FNV-1a), the same in the browser and on the server: whether a
-// story's text or the rules changed since the check.
-function hash(s: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16).padStart(8, "0");
-}
-export const storyFingerprint = (c: CaContent) => hash(JSON.stringify(storyParts(c)));
-export const rulesFingerprint = (rules: string[]) =>
-  hash(JSON.stringify(rules.map(normalizeForMatch)));
-const breakId = (item_id: string, p: StylePart, rule: string) =>
-  hash(JSON.stringify([item_id, p.part, p.lang, p.text, rule]));
 
 const ref = (n: number, p: StylePart) => `S${n}.${p.part.replace(" ", "")}.${p.lang}`;
 
@@ -235,35 +166,4 @@ export function parseStyleBreaks(
     out.push({ id, item_id: at.id, ...at.p, rule, fix });
   }
   return out.slice(0, STYLE_BREAKS_MAX);
-}
-
-// How the day stands: whether it was checked against these rules, the notes
-// still in the text (not waved through), and the written stories not checked
-// as they are now. Null when there are no rules or nothing written to check.
-export type StyleStatus = { checked: boolean; open: StyleBreak[]; unchecked: string[] };
-
-export function styleStatus(
-  check: StyleCheck | null,
-  items: { id: string; status: string; content: CaContent | null }[],
-  rules: string[],
-): StyleStatus | null {
-  const written = items.filter((i) => i.status === "included" && i.content);
-  if (!rules.length || !written.length) return null;
-  if (!check || check.rules !== rulesFingerprint(rules)) {
-    return { checked: false, open: [], unchecked: written.map((i) => i.id) };
-  }
-  const byId = new Map(written.map((i) => [i.id, i.content]));
-  const dismissed = new Set(check.dismissed);
-  return {
-    checked: true,
-    open: check.breaks.filter(
-      (b) =>
-        !dismissed.has(b.id) &&
-        byId.has(b.item_id) &&
-        partText(byId.get(b.item_id)!, b.part, b.lang) === b.text,
-    ),
-    unchecked: written
-      .filter((i) => check.stories[i.id] !== storyFingerprint(i.content!))
-      .map((i) => i.id),
-  };
 }

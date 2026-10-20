@@ -182,7 +182,13 @@ export const getCaStyle = createServerFn({ method: "POST" })
       s.getMagazineSettings(),
       s.styleSuggestions(),
     ]);
-    return { rules: settings.style_rules, suggestions };
+    // Each rule's last 7 days in the style check.
+    const { istDate } = await import("@/lib/current-affairs");
+    const { styleWeek } = await import("@/lib/ca-report.server");
+    const today = istDate();
+    const weekAgo = istDate(new Date(Date.now() - 6 * 86_400_000));
+    const week = await styleWeek(weekAgo, today, settings.style_rules).catch(() => []);
+    return { rules: settings.style_rules, suggestions, week };
   });
 
 export const suggestCaStyle = createServerFn({ method: "POST" })

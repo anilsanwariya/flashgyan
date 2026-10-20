@@ -12,7 +12,7 @@ import {
   runCaStyleCheck,
 } from "@/lib/current-affairs.functions";
 import { CATEGORIES, type CaContent } from "@/lib/current-affairs";
-import type { StyleBreak, StyleStatus } from "@/lib/ca-style";
+import { orderBreaks, partName, type StyleBreak, type StyleStatus } from "@/lib/ca-style";
 import { errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -34,7 +34,7 @@ const when = (iso: string) =>
   });
 
 const partLabel = (b: StyleBreak) =>
-  `${b.part === "why" ? "Why it matters" : b.part[0].toUpperCase() + b.part.slice(1)} · ${b.lang === "en" ? "English" : "Hindi"}`;
+  `${partName(b.part)} · ${b.lang === "en" ? "English" : "Hindi"}`;
 
 export function StyleCheckDialog({
   date,
@@ -74,7 +74,10 @@ export function StyleCheckDialog({
       (a, b) =>
         (order.get(a.category) ?? 99) - (order.get(b.category) ?? 99) || a.position - b.position,
     );
-    const open = (status?.open ?? []).filter((b) => !handled.has(b.id));
+    const open = orderBreaks(
+      (status?.open ?? []).filter((b) => !handled.has(b.id)),
+      stories.map((s) => s.id),
+    );
     return stories
       .map((s) => ({ story: s, breaks: open.filter((b) => b.item_id === s.id) }))
       .filter((g) => g.breaks.length);

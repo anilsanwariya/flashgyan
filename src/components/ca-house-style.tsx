@@ -31,6 +31,8 @@ export function HouseStyle() {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState<"save" | "suggest" | null>(null);
   const rules = q.data?.rules ?? [];
+  // Each rule's last 7 days in the style check before scheduling.
+  const week = new Map((q.data?.week ?? []).map((w) => [w.rule, w]));
   const have = new Set(rules.map(normalizeForMatch));
   const suggested = q.data?.suggestions;
   const fresh = (suggested?.rules ?? []).filter((s) => !have.has(normalizeForMatch(s.rule)));
@@ -90,7 +92,15 @@ export function HouseStyle() {
           {rules.map((r, i) => (
             <li key={r} className="flex items-start gap-2 rounded-lg bg-muted/40 px-3 py-2 text-sm">
               <span className="shrink-0 text-xs font-semibold text-muted-foreground">{i + 1}.</span>
-              <span className="min-w-0 flex-1">{r}</span>
+              <span className="min-w-0 flex-1">
+                {r}
+                {week.get(r)?.found ? (
+                  <span className="block text-xs text-muted-foreground" data-rule-week>
+                    Last 7 days: {week.get(r)!.found} {week.get(r)!.found === 1 ? "note" : "notes"}{" "}
+                    · {week.get(r)!.fixed} fixed · {week.get(r)!.kept} kept
+                  </span>
+                ) : null}
+              </span>
               <button
                 type="button"
                 aria-label={`Remove rule ${i + 1}`}

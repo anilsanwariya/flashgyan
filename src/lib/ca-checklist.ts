@@ -5,6 +5,7 @@ import { CATEGORIES } from "@/lib/current-affairs";
 import { rajasthanBalance } from "@/lib/ca-report";
 import type { StyleStatus } from "@/lib/ca-style";
 import { TRIAGE } from "../../supabase/functions/_shared/ca-triage.ts";
+import { STYLE_TG } from "../../supabase/functions/_shared/ca-style-check.ts";
 
 export type CheckAction =
   | { kind: "story"; id: string }
@@ -241,15 +242,16 @@ export function draftButtons(checks: Check[], date: string, origin?: string): Tg
   const rows: TgButton[][] = [];
   if (!todo.length)
     rows.push([{ text: "✅ Approve & schedule", callback_data: `${APPROVE_DATA}${date}` }]);
+  // House style notes in the bot, one at a time: apply the fix or keep it.
+  if (todo.some((c) => c.key === "style")) {
+    rows.push([{ text: "✍️ Fix house style", callback_data: `${STYLE_TG}s:${date}` }]);
+  }
   // Story by story in the bot: keep or drop.
   rows.push([{ text: "📋 Keep or drop stories", callback_data: `${TRIAGE}s:${date}` }]);
   if (origin) {
     const page = `${origin}/admin?section=ca.daily&date=${date}`;
     if (todo.some((c) => c.key === "facts")) {
       rows.push([{ text: "🔍 Check facts", url: `${page}&open=facts` }]);
-    }
-    if (todo.some((c) => c.key === "style")) {
-      rows.push([{ text: "✍️ House style", url: `${page}&open=style` }]);
     }
     rows.push([{ text: "📝 Open review", url: page }]);
   }
