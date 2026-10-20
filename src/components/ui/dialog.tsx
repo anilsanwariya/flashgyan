@@ -42,6 +42,12 @@ const DialogContent = React.forwardRef<
         className,
       )}
       {...props}
+      // A tap on a toast (its Undo, say) isn't a tap outside: the dialog stays.
+      onInteractOutside={(e) => {
+        const target = e.target as Element | null;
+        if (target?.closest?.("[data-sonner-toaster]")) e.preventDefault();
+        props.onInteractOutside?.(e);
+      }}
     >
       {children}
       <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background cursor-pointer transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">

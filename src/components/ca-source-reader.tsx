@@ -268,6 +268,7 @@ export function SourceReader({
   open,
   onOpenChange,
   onChanged,
+  inline = false,
 }: {
   // The story whose sources are read; null when reading a source no story
   // uses yet (skipped news), which can only make new stories.
@@ -277,6 +278,9 @@ export function SourceReader({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onChanged: () => void;
+  // On the story editor's "Full article" tab, filling it, instead of a
+  // full-screen page of its own.
+  inline?: boolean;
 }) {
   // Drafts and the loaded text are kept per story, or per source.
   const key = item ? item.id : `src:${origin?.source_id ?? ""}`;
@@ -383,6 +387,8 @@ export function SourceReader({
       setMarks(draft.marks);
       setNote(draft.note ?? "");
       toast("Restored the highlights you hadn't used yet", {
+        // Once, however often the reader opens on it.
+        id: `draft:${key}`,
         action: {
           label: "Discard",
           onClick: () => {
@@ -671,6 +677,20 @@ export function SourceReader({
     window.addEventListener("keydown", on);
     return () => window.removeEventListener("keydown", on);
   }, [open]);
+  // Inline, Escape reaches the reader before the editor page (which would
+  // close): the reader's own panels close first.
+  const escape = useRef<(e: KeyboardEvent) => void>(() => undefined);
+  escape.current = (e) => onEscape(e);
+  useEffect(() => {
+    if (!open || !inline) return;
+    const on = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      escape.current(e);
+      if (e.defaultPrevented) e.stopPropagation();
+    };
+    window.addEventListener("keydown", on, true);
+    return () => window.removeEventListener("keydown", on, true);
+  }, [open, inline]);
   // Escape closes the innermost thing first: the sheet, the shortcuts, find,
   // the list of sources.
   function onEscape(e: KeyboardEvent) {
@@ -1206,542 +1226,550 @@ export function SourceReader({
     />
   );
 
+  const page = (
+    <>
+      {/* Top bar: hides while scrolling down. */}
+      <header
+        className={`overflow-hidden border-b border-border bg-background transition-all duration-200 ${headerHidden ? "max-h-0 border-b-0 opacity-0" : "max-h-72"}`}
+      >
+        <div className={`flex items-center gap-1.5 p-2 ${inline ? "" : "pr-11"}`}>
+          {inline ? (
+            <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">
+              {source?.title ?? "Full article"}
+            </h2>
+          ) : (
+            <DialogTitle className="min-w-0 flex-1 truncate text-sm font-semibold">
+              {source?.title ?? "Full article"}
+            </DialogTitle>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 px-2"
+            aria-label="Find in article"
+            aria-expanded={findOpen}
+            onClick={() => {
+              setFindOpen((v) => !v);
+              setFindIdx(0);
+            }}
+          >
+            <Search className="h-4 w-4" />
+          </Button>
+          {articles.length > 0 && view === "clean" && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 px-2"
+              aria-label="Articles on this page"
+              aria-expanded={articlesOpen}
+              onClick={() => setArticlesOpen((v) => !v)}
+            >
+              <Newspaper className="h-4 w-4" />
+            </Button>
+          )}
+          {wide && source && (
+            <Button
+              size="sm"
+              variant={compare ? "secondary" : "ghost"}
+              className="h-8 px-2"
+              aria-label="Read another source beside this"
+              title="Read another source beside this (C)"
+              aria-expanded={pickerOpen}
+              onClick={() => setPickerOpen((v) => !v)}
+            >
+              <Columns2 className="h-4 w-4" />
+            </Button>
+          )}
+          {source && source.outline.length > 0 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 px-2"
+              aria-label="Contents"
+              aria-expanded={contentsOpen}
+              onClick={() => setContentsOpen((v) => !v)}
+            >
+              <ListTree className="h-4 w-4" />
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 w-8 p-0"
+            aria-label="Smaller text"
+            disabled={size <= 13}
+            onClick={() => setSize((s) => s - 1)}
+          >
+            <Minus className="h-4 w-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 w-8 p-0"
+            aria-label="Larger text"
+            disabled={size >= 24}
+            onClick={() => setSize((s) => s + 1)}
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2">
+          {item ? (
+            (
+              [
+                ["rewrite", "Rewrite this story"],
+                ["new", "New story"],
+              ] as const
+            ).map(([m, label]) => (
+              <Chip key={m} on={mode === m} disabled={busy} onClick={() => switchMode(m)}>
+                {label}
+              </Chip>
+            ))
+          ) : (
+            <span className="rounded-full border border-primary/40 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+              New story from skipped news
+            </span>
+          )}
+          <span className="mx-1 h-4 w-px bg-border" />
+          <Chip on={view === "clean"} onClick={() => setView("clean")}>
+            Clean
+          </Chip>
+          <Chip on={view === "original"} onClick={() => setView("original")}>
+            Original text
+          </Chip>
+        </div>
+        {sources.length > 1 && (
+          <div className="flex gap-1 overflow-x-auto px-2 pb-2" role="tablist">
+            {sources.map((s, i) => (
+              <button
+                key={s.id}
+                type="button"
+                role="tab"
+                aria-selected={i === tab}
+                onClick={() => setTab(i)}
+                className={`shrink-0 rounded-md px-2 py-1 text-xs ${i === tab ? "bg-muted font-semibold" : "text-muted-foreground"}`}
+              >
+                {s.source_name || s.section.toUpperCase()} · {s.title.slice(0, 40)}
+              </button>
+            ))}
+          </div>
+        )}
+        {findOpen && (
+          <div className="flex items-center gap-1 border-t border-border px-2 py-1.5">
+            <Input
+              ref={findRef}
+              autoFocus
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setFindIdx(0);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  stepFind(e.shiftKey ? -1 : 1);
+                }
+              }}
+              placeholder="Find a word, name or number…"
+              aria-label="Find"
+              className="h-8 min-w-0 flex-1 text-sm"
+            />
+            <span
+              className="w-14 shrink-0 text-center text-xs text-muted-foreground"
+              aria-live="polite"
+            >
+              {query.trim().length < 2
+                ? ""
+                : matches.length
+                  ? `${findIdx + 1} of ${matches.length}`
+                  : "None"}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 w-8 p-0"
+              aria-label="Previous match"
+              disabled={!matches.length}
+              onClick={() => stepFind(-1)}
+            >
+              <ChevronUp className="h-4 w-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 w-8 p-0"
+              aria-label="Next match"
+              disabled={!matches.length}
+              onClick={() => stepFind(1)}
+            >
+              <ChevronDown className="h-4 w-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 w-8 p-0"
+              aria-label="Close find"
+              onClick={() => {
+                setFindOpen(false);
+                setQuery("");
+              }}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
+        {findOpen && part && (part.start > 0 || part.start + part.text.length < part.total) && (
+          <p className="px-3 pb-1.5 text-[11px] text-muted-foreground">
+            Searching the part shown; use “Show more” to search further.
+          </p>
+        )}
+        {articlesOpen && articles.length > 0 && (
+          <nav
+            aria-label="Articles on this page"
+            className="max-h-[45dvh] overflow-y-auto border-t border-border px-2 py-1"
+          >
+            <button
+              type="button"
+              onClick={() => pickArticle(null)}
+              className={`block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${focus === null ? "font-semibold text-primary" : ""}`}
+            >
+              Whole page
+            </button>
+            {articles.map((a, i) => (
+              <ArticleRow
+                key={a.at}
+                article={a}
+                info={articleInfo[i]}
+                on={focus === i}
+                onClick={() => pickArticle(i)}
+              />
+            ))}
+          </nav>
+        )}
+        {pickerOpen && wide && (
+          <nav
+            aria-label="Sources to read beside this"
+            className="max-h-[45dvh] overflow-y-auto border-t border-border px-2 py-1"
+          >
+            <p className="px-2 py-1 text-xs text-muted-foreground">
+              Read another of the day's sources beside this one, to take facts from both. Each opens
+              on its article most like the one you are reading, in Hindi or English.
+            </p>
+            {candQ.isLoading ? (
+              <p className="px-2 py-2 text-sm text-muted-foreground">
+                Finding the same news in other sources…
+              </p>
+            ) : candQ.isError ? (
+              <p className="px-2 py-2 text-sm text-destructive">
+                {errorText(candQ.error, "Couldn't list the sources")}
+              </p>
+            ) : candQ.data?.length ? (
+              candQ.data.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  data-compare={c.source_name || c.title}
+                  onClick={() => openBeside(c.id, c.match?.at ?? 0)}
+                  className={`block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${pane?.id === c.id ? "bg-muted" : ""}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate font-medium">
+                      {c.source_name || c.section.toUpperCase()} · {c.title}
+                    </span>
+                    {c.match?.meaning && (
+                      <Badge tone="primary" title="Same news in other words or another language">
+                        by meaning
+                      </Badge>
+                    )}
+                    {c.match && (
+                      <Badge tone={c.match.score >= 0.3 ? "good" : "muted"}>
+                        {Math.round(c.match.score * 100)}% match
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {c.match
+                      ? `${c.match.page !== null ? `Page ${c.match.page} · ` : ""}${c.match.title}`
+                      : "No matching article: opens at the start"}
+                  </div>
+                </button>
+              ))
+            ) : (
+              <p className="px-2 py-2 text-sm text-muted-foreground">
+                No other sources for this day.
+              </p>
+            )}
+          </nav>
+        )}
+        {contentsOpen && source && (
+          <nav
+            aria-label="Contents"
+            className="max-h-[40dvh] overflow-y-auto border-t border-border px-2 py-1"
+          >
+            {source.outline.map((e, i) => (
+              <button
+                key={`${e.at}-${i}`}
+                type="button"
+                onClick={() => void jumpTo(e)}
+                className={`block w-full truncate rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${e.level === 0 ? "font-semibold text-primary" : e.level > 1 ? "pl-5 text-muted-foreground" : ""}`}
+              >
+                {e.title}
+              </button>
+            ))}
+          </nav>
+        )}
+      </header>
+
+      <div className="flex min-h-0 flex-1">
+        <div ref={scrollRef} onScroll={onScroll} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-2xl px-4 py-3">
+            {q.isLoading && <p className="text-sm text-muted-foreground">Loading the article…</p>}
+            {q.isError && (
+              <p className="text-sm text-destructive">{errorText(q.error, "Couldn't load")}</p>
+            )}
+            {q.data && sources.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                This story has no source text to read.
+              </p>
+            )}
+            {source && part && (
+              <>
+                <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span>{source.source_name || source.section.toUpperCase()}</span>
+                  {source.url && (
+                    <a
+                      href={source.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-0.5 text-primary hover:underline"
+                    >
+                      Open page <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                  {view === "clean" && hidden > 0 && (
+                    <span>· {hidden} menu or ad lines hidden</span>
+                  )}
+                </div>
+                {part.start > 0 && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="mb-2 w-full"
+                    onClick={() => void loadMore("up")}
+                  >
+                    <ChevronUp className="mr-1 h-4 w-4" /> Show more above
+                  </Button>
+                )}
+                <div
+                  ref={textRef}
+                  data-testid="reader-text"
+                  data-mode={painting ? "highlight" : "read"}
+                  onPointerDown={onPointerDown}
+                  onPointerMove={onPointerMove}
+                  onPointerUp={onPointerUp}
+                  onPointerCancel={onPointerCancel}
+                  onContextMenu={onTextMenu}
+                  onClick={onTextClick}
+                  style={{ fontSize: size }}
+                  className={`leading-[1.75] ${painting ? "cursor-text select-none [-webkit-touch-callout:none]" : ""}`}
+                >
+                  {view === "clean" ? (
+                    <>
+                      {art && (
+                        <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+                          <span>
+                            Page {art.page} · article {focus! + 1} of {articles.length}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => pickArticle(null)}
+                            className="ml-auto rounded-full border border-border px-2.5 py-0.5"
+                          >
+                            Whole page
+                          </button>
+                        </div>
+                      )}
+                      {blocks.map((b) =>
+                        b.clutter || !inFocus(b.at) ? null : (
+                          <BlockView
+                            key={b.at}
+                            block={b}
+                            {...rangesFor(b, ranges, taken, found, flash)}
+                          />
+                        ),
+                      )}
+                      {art && (
+                        <ArticleFoot
+                          articles={articles}
+                          info={articleInfo}
+                          focus={focus!}
+                          onPick={pickArticle}
+                        />
+                      )}
+                    </>
+                  ) : (
+                    <div data-at={0} className="whitespace-pre-wrap">
+                      <Pieces
+                        run={{ text: part.text, at: 0 }}
+                        ranges={ranges}
+                        taken={taken}
+                        found={found}
+                        flash={flash}
+                      />
+                    </div>
+                  )}
+                </div>
+                {part.start + part.text.length < part.total && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="mt-2 w-full"
+                    onClick={() => void loadMore("down")}
+                  >
+                    <ChevronDown className="mr-1 h-4 w-4" /> Show more below
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+        {wide &&
+          compare &&
+          (pane ? (
+            <ComparePane
+              source={pane}
+              at={compare.at}
+              jump={paneJump}
+              marks={marks}
+              tool={tool}
+              painting={painting}
+              size={size}
+              commit={commit}
+              onSheet={openSheet}
+              onClose={() => setCompare(null)}
+            />
+          ) : (
+            <section className="w-[44%] max-w-2xl shrink-0 border-l border-border p-4 text-sm text-muted-foreground">
+              {paneQ.isError ? (
+                <span className="text-destructive">
+                  {errorText(paneQ.error, "Couldn't load the source")}
+                </span>
+              ) : (
+                "Loading the second source…"
+              )}
+            </section>
+          ))}
+        {/* Wide screens: highlights beside the article. */}
+        {wide && (
+          <aside
+            className={`flex shrink-0 flex-col overflow-y-auto border-l border-border bg-muted/20 ${compare ? "w-80" : "w-96"}`}
+          >
+            {tray}
+          </aside>
+        )}
+      </div>
+
+      <footer className="border-t border-border bg-background">
+        {selection && !painting && (
+          <div className="px-2 pt-2">
+            <Button size="sm" className="w-full" onClick={markSelection}>
+              {tool === "eraser"
+                ? "Erase selected words"
+                : `Mark selected words · ${PEN[tool].label}`}
+            </Button>
+          </div>
+        )}
+        {/* Phones: the highlights tray, opened from its handle. */}
+        <div className={wide ? "hidden" : ""}>
+          <button
+            type="button"
+            className="flex w-full items-center gap-1.5 px-3 pt-2 text-sm font-medium"
+            aria-expanded={trayOpen}
+            onClick={() => setTrayOpen((v) => !v)}
+            onPointerDown={(e) => (dragFrom.current = e.clientY)}
+            onPointerUp={(e) => {
+              const from = dragFrom.current;
+              dragFrom.current = null;
+              if (from === null) return;
+              if (from - e.clientY > 30) setTrayOpen(true);
+              else if (e.clientY - from > 30) setTrayOpen(false);
+            }}
+          >
+            <span className="mx-auto mb-1 block h-1 w-10 rounded-full bg-muted-foreground/30" />
+          </button>
+          <div className="flex items-center gap-1 px-3 pb-1">
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 items-center gap-1.5 text-sm font-medium"
+              onClick={() => setTrayOpen((v) => !v)}
+            >
+              <Highlighter className="h-4 w-4 shrink-0 text-amber-600" />
+              Highlights ({marks.length}) · {points} key point{points === 1 ? "" : "s"}
+            </button>
+            {ordered.length > 1 && <HighlightJump onStep={stepHighlight} />}
+            <button
+              type="button"
+              aria-label={trayOpen ? "Close highlights" : "Open highlights"}
+              onClick={() => setTrayOpen((v) => !v)}
+              className="grid h-7 w-7 place-items-center"
+            >
+              <ChevronUp
+                className={`h-4 w-4 transition-transform ${trayOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+          </div>
+          {trayOpen && !wide && <div className="max-h-[55dvh] overflow-y-auto">{tray}</div>}
+        </div>
+        <Toolbar
+          painting={painting}
+          keepMode={!!selection}
+          tool={tool}
+          canUndo={past.length > 0}
+          canRedo={future.length > 0}
+          onPainting={setPainting}
+          onTool={setTool}
+          onUndo={undo}
+          onRedo={redo}
+          onHelp={wide ? () => setHelpOpen((v) => !v) : undefined}
+        />
+      </footer>
+      {helpOpen && <ShortcutsHelp onClose={() => setHelpOpen(false)} />}
+      {sheet !== null && marks[sheet] && (
+        <MarkSheet
+          mark={marks[sheet]}
+          onClose={() => setSheet(null)}
+          onPen={(pen) => {
+            const i = sheet;
+            commit((cur) => cur.map((m, j) => (j === i ? { ...m, pen } : m)));
+          }}
+          onNote={(text) => {
+            const i = sheet;
+            commit((cur) =>
+              cur.map((m, j) => {
+                if (j !== i) return m;
+                const { note: _old, ...rest } = m;
+                return text ? { ...rest, note: text } : rest;
+              }),
+            );
+            setSheet(null);
+          }}
+          onRemove={() => {
+            const i = sheet;
+            commit((cur) => cur.filter((_, j) => j !== i));
+            setSheet(null);
+          }}
+        />
+      )}
+    </>
+  );
+  if (inline) return open ? <div className="flex h-full min-h-0 flex-col">{page}</div> : null;
   return (
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
       <DialogContent
         onEscapeKeyDown={onEscape}
         className="left-0 top-0 flex h-[100dvh] max-h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-0 p-0 sm:rounded-none"
       >
-        {/* Top bar: hides while scrolling down. */}
-        <header
-          className={`overflow-hidden border-b border-border bg-background transition-all duration-200 ${headerHidden ? "max-h-0 border-b-0 opacity-0" : "max-h-72"}`}
-        >
-          <div className="flex items-center gap-1.5 p-2 pr-11">
-            <DialogTitle className="min-w-0 flex-1 truncate text-sm font-semibold">
-              {source?.title ?? "Full article"}
-            </DialogTitle>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 px-2"
-              aria-label="Find in article"
-              aria-expanded={findOpen}
-              onClick={() => {
-                setFindOpen((v) => !v);
-                setFindIdx(0);
-              }}
-            >
-              <Search className="h-4 w-4" />
-            </Button>
-            {articles.length > 0 && view === "clean" && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8 px-2"
-                aria-label="Articles on this page"
-                aria-expanded={articlesOpen}
-                onClick={() => setArticlesOpen((v) => !v)}
-              >
-                <Newspaper className="h-4 w-4" />
-              </Button>
-            )}
-            {wide && source && (
-              <Button
-                size="sm"
-                variant={compare ? "secondary" : "ghost"}
-                className="h-8 px-2"
-                aria-label="Read another source beside this"
-                title="Read another source beside this (C)"
-                aria-expanded={pickerOpen}
-                onClick={() => setPickerOpen((v) => !v)}
-              >
-                <Columns2 className="h-4 w-4" />
-              </Button>
-            )}
-            {source && source.outline.length > 0 && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8 px-2"
-                aria-label="Contents"
-                aria-expanded={contentsOpen}
-                onClick={() => setContentsOpen((v) => !v)}
-              >
-                <ListTree className="h-4 w-4" />
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 w-8 p-0"
-              aria-label="Smaller text"
-              disabled={size <= 13}
-              onClick={() => setSize((s) => s - 1)}
-            >
-              <Minus className="h-4 w-4" />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 w-8 p-0"
-              aria-label="Larger text"
-              disabled={size >= 24}
-              onClick={() => setSize((s) => s + 1)}
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2">
-            {item ? (
-              (
-                [
-                  ["rewrite", "Rewrite this story"],
-                  ["new", "New story"],
-                ] as const
-              ).map(([m, label]) => (
-                <Chip key={m} on={mode === m} disabled={busy} onClick={() => switchMode(m)}>
-                  {label}
-                </Chip>
-              ))
-            ) : (
-              <span className="rounded-full border border-primary/40 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-                New story from skipped news
-              </span>
-            )}
-            <span className="mx-1 h-4 w-px bg-border" />
-            <Chip on={view === "clean"} onClick={() => setView("clean")}>
-              Clean
-            </Chip>
-            <Chip on={view === "original"} onClick={() => setView("original")}>
-              Original text
-            </Chip>
-          </div>
-          {sources.length > 1 && (
-            <div className="flex gap-1 overflow-x-auto px-2 pb-2" role="tablist">
-              {sources.map((s, i) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={i === tab}
-                  onClick={() => setTab(i)}
-                  className={`shrink-0 rounded-md px-2 py-1 text-xs ${i === tab ? "bg-muted font-semibold" : "text-muted-foreground"}`}
-                >
-                  {s.source_name || s.section.toUpperCase()} · {s.title.slice(0, 40)}
-                </button>
-              ))}
-            </div>
-          )}
-          {findOpen && (
-            <div className="flex items-center gap-1 border-t border-border px-2 py-1.5">
-              <Input
-                ref={findRef}
-                autoFocus
-                value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value);
-                  setFindIdx(0);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    stepFind(e.shiftKey ? -1 : 1);
-                  }
-                }}
-                placeholder="Find a word, name or number…"
-                aria-label="Find"
-                className="h-8 min-w-0 flex-1 text-sm"
-              />
-              <span
-                className="w-14 shrink-0 text-center text-xs text-muted-foreground"
-                aria-live="polite"
-              >
-                {query.trim().length < 2
-                  ? ""
-                  : matches.length
-                    ? `${findIdx + 1} of ${matches.length}`
-                    : "None"}
-              </span>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8 w-8 p-0"
-                aria-label="Previous match"
-                disabled={!matches.length}
-                onClick={() => stepFind(-1)}
-              >
-                <ChevronUp className="h-4 w-4" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8 w-8 p-0"
-                aria-label="Next match"
-                disabled={!matches.length}
-                onClick={() => stepFind(1)}
-              >
-                <ChevronDown className="h-4 w-4" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8 w-8 p-0"
-                aria-label="Close find"
-                onClick={() => {
-                  setFindOpen(false);
-                  setQuery("");
-                }}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          )}
-          {findOpen && part && (part.start > 0 || part.start + part.text.length < part.total) && (
-            <p className="px-3 pb-1.5 text-[11px] text-muted-foreground">
-              Searching the part shown; use “Show more” to search further.
-            </p>
-          )}
-          {articlesOpen && articles.length > 0 && (
-            <nav
-              aria-label="Articles on this page"
-              className="max-h-[45dvh] overflow-y-auto border-t border-border px-2 py-1"
-            >
-              <button
-                type="button"
-                onClick={() => pickArticle(null)}
-                className={`block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${focus === null ? "font-semibold text-primary" : ""}`}
-              >
-                Whole page
-              </button>
-              {articles.map((a, i) => (
-                <ArticleRow
-                  key={a.at}
-                  article={a}
-                  info={articleInfo[i]}
-                  on={focus === i}
-                  onClick={() => pickArticle(i)}
-                />
-              ))}
-            </nav>
-          )}
-          {pickerOpen && wide && (
-            <nav
-              aria-label="Sources to read beside this"
-              className="max-h-[45dvh] overflow-y-auto border-t border-border px-2 py-1"
-            >
-              <p className="px-2 py-1 text-xs text-muted-foreground">
-                Read another of the day's sources beside this one, to take facts from both. Each
-                opens on its article most like the one you are reading, in Hindi or English.
-              </p>
-              {candQ.isLoading ? (
-                <p className="px-2 py-2 text-sm text-muted-foreground">
-                  Finding the same news in other sources…
-                </p>
-              ) : candQ.isError ? (
-                <p className="px-2 py-2 text-sm text-destructive">
-                  {errorText(candQ.error, "Couldn't list the sources")}
-                </p>
-              ) : candQ.data?.length ? (
-                candQ.data.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    data-compare={c.source_name || c.title}
-                    onClick={() => openBeside(c.id, c.match?.at ?? 0)}
-                    className={`block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${pane?.id === c.id ? "bg-muted" : ""}`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate font-medium">
-                        {c.source_name || c.section.toUpperCase()} · {c.title}
-                      </span>
-                      {c.match?.meaning && (
-                        <Badge tone="primary" title="Same news in other words or another language">
-                          by meaning
-                        </Badge>
-                      )}
-                      {c.match && (
-                        <Badge tone={c.match.score >= 0.3 ? "good" : "muted"}>
-                          {Math.round(c.match.score * 100)}% match
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {c.match
-                        ? `${c.match.page !== null ? `Page ${c.match.page} · ` : ""}${c.match.title}`
-                        : "No matching article: opens at the start"}
-                    </div>
-                  </button>
-                ))
-              ) : (
-                <p className="px-2 py-2 text-sm text-muted-foreground">
-                  No other sources for this day.
-                </p>
-              )}
-            </nav>
-          )}
-          {contentsOpen && source && (
-            <nav
-              aria-label="Contents"
-              className="max-h-[40dvh] overflow-y-auto border-t border-border px-2 py-1"
-            >
-              {source.outline.map((e, i) => (
-                <button
-                  key={`${e.at}-${i}`}
-                  type="button"
-                  onClick={() => void jumpTo(e)}
-                  className={`block w-full truncate rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${e.level === 0 ? "font-semibold text-primary" : e.level > 1 ? "pl-5 text-muted-foreground" : ""}`}
-                >
-                  {e.title}
-                </button>
-              ))}
-            </nav>
-          )}
-        </header>
-
-        <div className="flex min-h-0 flex-1">
-          <div
-            ref={scrollRef}
-            onScroll={onScroll}
-            className="min-h-0 min-w-0 flex-1 overflow-y-auto"
-          >
-            <div className="mx-auto max-w-2xl px-4 py-3">
-              {q.isLoading && <p className="text-sm text-muted-foreground">Loading the article…</p>}
-              {q.isError && (
-                <p className="text-sm text-destructive">{errorText(q.error, "Couldn't load")}</p>
-              )}
-              {q.data && sources.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  This story has no source text to read.
-                </p>
-              )}
-              {source && part && (
-                <>
-                  <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span>{source.source_name || source.section.toUpperCase()}</span>
-                    {source.url && (
-                      <a
-                        href={source.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-0.5 text-primary hover:underline"
-                      >
-                        Open page <ExternalLink className="h-3 w-3" />
-                      </a>
-                    )}
-                    {view === "clean" && hidden > 0 && (
-                      <span>· {hidden} menu or ad lines hidden</span>
-                    )}
-                  </div>
-                  {part.start > 0 && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="mb-2 w-full"
-                      onClick={() => void loadMore("up")}
-                    >
-                      <ChevronUp className="mr-1 h-4 w-4" /> Show more above
-                    </Button>
-                  )}
-                  <div
-                    ref={textRef}
-                    data-testid="reader-text"
-                    data-mode={painting ? "highlight" : "read"}
-                    onPointerDown={onPointerDown}
-                    onPointerMove={onPointerMove}
-                    onPointerUp={onPointerUp}
-                    onPointerCancel={onPointerCancel}
-                    onContextMenu={onTextMenu}
-                    onClick={onTextClick}
-                    style={{ fontSize: size }}
-                    className={`leading-[1.75] ${painting ? "cursor-text select-none [-webkit-touch-callout:none]" : ""}`}
-                  >
-                    {view === "clean" ? (
-                      <>
-                        {art && (
-                          <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-                            <span>
-                              Page {art.page} · article {focus! + 1} of {articles.length}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => pickArticle(null)}
-                              className="ml-auto rounded-full border border-border px-2.5 py-0.5"
-                            >
-                              Whole page
-                            </button>
-                          </div>
-                        )}
-                        {blocks.map((b) =>
-                          b.clutter || !inFocus(b.at) ? null : (
-                            <BlockView
-                              key={b.at}
-                              block={b}
-                              {...rangesFor(b, ranges, taken, found, flash)}
-                            />
-                          ),
-                        )}
-                        {art && (
-                          <ArticleFoot
-                            articles={articles}
-                            info={articleInfo}
-                            focus={focus!}
-                            onPick={pickArticle}
-                          />
-                        )}
-                      </>
-                    ) : (
-                      <div data-at={0} className="whitespace-pre-wrap">
-                        <Pieces
-                          run={{ text: part.text, at: 0 }}
-                          ranges={ranges}
-                          taken={taken}
-                          found={found}
-                          flash={flash}
-                        />
-                      </div>
-                    )}
-                  </div>
-                  {part.start + part.text.length < part.total && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="mt-2 w-full"
-                      onClick={() => void loadMore("down")}
-                    >
-                      <ChevronDown className="mr-1 h-4 w-4" /> Show more below
-                    </Button>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-          {wide &&
-            compare &&
-            (pane ? (
-              <ComparePane
-                source={pane}
-                at={compare.at}
-                jump={paneJump}
-                marks={marks}
-                tool={tool}
-                painting={painting}
-                size={size}
-                commit={commit}
-                onSheet={openSheet}
-                onClose={() => setCompare(null)}
-              />
-            ) : (
-              <section className="w-[44%] max-w-2xl shrink-0 border-l border-border p-4 text-sm text-muted-foreground">
-                {paneQ.isError ? (
-                  <span className="text-destructive">
-                    {errorText(paneQ.error, "Couldn't load the source")}
-                  </span>
-                ) : (
-                  "Loading the second source…"
-                )}
-              </section>
-            ))}
-          {/* Wide screens: highlights beside the article. */}
-          {wide && (
-            <aside
-              className={`flex shrink-0 flex-col overflow-y-auto border-l border-border bg-muted/20 ${compare ? "w-80" : "w-96"}`}
-            >
-              {tray}
-            </aside>
-          )}
-        </div>
-
-        <footer className="border-t border-border bg-background">
-          {selection && !painting && (
-            <div className="px-2 pt-2">
-              <Button size="sm" className="w-full" onClick={markSelection}>
-                {tool === "eraser"
-                  ? "Erase selected words"
-                  : `Mark selected words · ${PEN[tool].label}`}
-              </Button>
-            </div>
-          )}
-          {/* Phones: the highlights tray, opened from its handle. */}
-          <div className={wide ? "hidden" : ""}>
-            <button
-              type="button"
-              className="flex w-full items-center gap-1.5 px-3 pt-2 text-sm font-medium"
-              aria-expanded={trayOpen}
-              onClick={() => setTrayOpen((v) => !v)}
-              onPointerDown={(e) => (dragFrom.current = e.clientY)}
-              onPointerUp={(e) => {
-                const from = dragFrom.current;
-                dragFrom.current = null;
-                if (from === null) return;
-                if (from - e.clientY > 30) setTrayOpen(true);
-                else if (e.clientY - from > 30) setTrayOpen(false);
-              }}
-            >
-              <span className="mx-auto mb-1 block h-1 w-10 rounded-full bg-muted-foreground/30" />
-            </button>
-            <div className="flex items-center gap-1 px-3 pb-1">
-              <button
-                type="button"
-                className="flex min-w-0 flex-1 items-center gap-1.5 text-sm font-medium"
-                onClick={() => setTrayOpen((v) => !v)}
-              >
-                <Highlighter className="h-4 w-4 shrink-0 text-amber-600" />
-                Highlights ({marks.length}) · {points} key point{points === 1 ? "" : "s"}
-              </button>
-              {ordered.length > 1 && <HighlightJump onStep={stepHighlight} />}
-              <button
-                type="button"
-                aria-label={trayOpen ? "Close highlights" : "Open highlights"}
-                onClick={() => setTrayOpen((v) => !v)}
-                className="grid h-7 w-7 place-items-center"
-              >
-                <ChevronUp
-                  className={`h-4 w-4 transition-transform ${trayOpen ? "rotate-180" : ""}`}
-                />
-              </button>
-            </div>
-            {trayOpen && !wide && <div className="max-h-[55dvh] overflow-y-auto">{tray}</div>}
-          </div>
-          <Toolbar
-            painting={painting}
-            keepMode={!!selection}
-            tool={tool}
-            canUndo={past.length > 0}
-            canRedo={future.length > 0}
-            onPainting={setPainting}
-            onTool={setTool}
-            onUndo={undo}
-            onRedo={redo}
-            onHelp={wide ? () => setHelpOpen((v) => !v) : undefined}
-          />
-        </footer>
-        {helpOpen && <ShortcutsHelp onClose={() => setHelpOpen(false)} />}
-        {sheet !== null && marks[sheet] && (
-          <MarkSheet
-            mark={marks[sheet]}
-            onClose={() => setSheet(null)}
-            onPen={(pen) => {
-              const i = sheet;
-              commit((cur) => cur.map((m, j) => (j === i ? { ...m, pen } : m)));
-            }}
-            onNote={(text) => {
-              const i = sheet;
-              commit((cur) =>
-                cur.map((m, j) => {
-                  if (j !== i) return m;
-                  const { note: _old, ...rest } = m;
-                  return text ? { ...rest, note: text } : rest;
-                }),
-              );
-              setSheet(null);
-            }}
-            onRemove={() => {
-              const i = sheet;
-              commit((cur) => cur.filter((_, j) => j !== i));
-              setSheet(null);
-            }}
-          />
-        )}
+        {page}
       </DialogContent>
     </Dialog>
   );
