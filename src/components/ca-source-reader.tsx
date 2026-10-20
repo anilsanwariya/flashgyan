@@ -13,10 +13,10 @@
 // (a PDF) is split into its articles and opens on the story's own article,
 // with the page's other articles listed and marked by their stories ("No
 // story yet" is news the AI skipped). "What's missing?" asks SAATHI which
-// exam facts the highlights don't cover and where the article says them.
-// Highlights are
-// kept as a draft on the device until the story is rewritten or a new story
-// is made from them.
+// exam facts the highlights don't cover and where the article says them. On
+// a laptop another of the day's sources (the same news in another paper) can
+// be read and highlighted beside it. Highlights are kept as a draft on the
+// device until the story is rewritten or a new story is made from them.
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -27,6 +27,7 @@ import {
   BookOpen,
   ChevronDown,
   ChevronUp,
+  Columns2,
   Eraser,
   ExternalLink,
   Highlighter,
@@ -46,6 +47,7 @@ import {
   checkCaMissing,
   createCaFromHighlights,
   deleteCaItems,
+  getCaCompareSources,
   getCaReader,
   getCaReaderText,
   getCaSourceReader,
@@ -165,8 +167,9 @@ const factsKey = (item: CaItem) =>
     .join("|")
     .slice(0, 4000);
 
-// The raw offset under a screen point, from the piece of text there.
-function offsetAt(x: number, y: number): number | null {
+// The raw offset under a screen point, from the piece of text there (only
+// inside root, when given).
+function offsetAt(x: number, y: number, root?: HTMLElement | null): number | null {
   const doc = document as Document & {
     caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
   };
@@ -186,8 +189,65 @@ function offsetAt(x: number, y: number): number | null {
   const el = (
     node?.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element | null)
   )?.closest?.("[data-raw]") as HTMLElement | null;
-  if (!el) return null;
+  if (!el || (root && !root.contains(el))) return null;
   return Number(el.dataset.raw) + (node?.nodeType === Node.TEXT_NODE ? offset : 0);
+}
+
+// ---------- Highlights in a source's loaded text (both reading panes) ----------
+
+// The highlight (its index in marks) at an offset of the text, or -1.
+function markIndexIn(marks: Mark[], sourceId: string, text: string, offset: number): number {
+  return marks.findIndex((m) => {
+    if (m.source_id !== sourceId) return false;
+    const s = findQuote(text, m.quote);
+    return !!s && s[0] <= offset && offset < s[1];
+  });
+}
+
+const markable = (text: string, span: Span, pen: Pen) =>
+  cleanQuote(plainText(text, span[0], span[1])).length >= (pen === "keyword" ? 2 : 8);
+
+// The marks with [a, b) of the text highlighted; marks inside it are replaced.
+function withMark(marks: Mark[], sourceId: string, text: string, span: Span, pen: Pen): Mark[] {
+  const quote = cleanQuote(plainText(text, span[0], span[1]));
+  return [
+    ...marks.filter((m) => {
+      if (m.source_id !== sourceId) return true;
+      const s = findQuote(text, m.quote);
+      return !(s && s[0] >= span[0] && s[1] <= span[1]);
+    }),
+    { source_id: sourceId, quote, pen },
+  ];
+}
+
+function withoutSpan(marks: Mark[], sourceId: string, text: string, span: Span): Mark[] {
+  return marks.filter((m) => {
+    if (m.source_id !== sourceId) return true;
+    const s = findQuote(text, m.quote);
+    return !(s && overlaps(s, span));
+  });
+}
+
+// A tap: on a highlight it removes it (or recolours it with another pen);
+// elsewhere it highlights the sentence. Null when nothing changes.
+function tapped(
+  marks: Mark[],
+  sourceId: string,
+  text: string,
+  sentences: Span[],
+  offset: number,
+  tool: Tool,
+): Mark[] | "short" | null {
+  const hit = markIndexIn(marks, sourceId, text, offset);
+  if (hit >= 0) {
+    if (tool === "eraser" || marks[hit].pen === tool) return marks.filter((_, i) => i !== hit);
+    const pen = tool;
+    return marks.map((m, i) => (i === hit ? { ...m, pen } : m));
+  }
+  if (tool === "eraser") return null;
+  const s = sentences.find(([a, b]) => a <= offset && offset < b);
+  if (!s) return null;
+  return markable(text, s, tool) ? withMark(marks, sourceId, text, s, tool) : "short";
 }
 
 // The raw offset of a DOM selection end.
@@ -228,6 +288,7 @@ export function SourceReader({
   const missingFn = useServerFn(checkCaMissing);
   const restoreFn = useServerFn(restoreCaVersion);
   const deleteFn = useServerFn(deleteCaItems);
+  const compareFn = useServerFn(getCaCompareSources);
   const q = useQuery({
     queryKey: ["caReader", key, item ? null : origin?.at],
     queryFn: () =>
@@ -266,6 +327,13 @@ export function SourceReader({
   const [focus, setFocus] = useState<number | null>(null);
   const [articlesOpen, setArticlesOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  // Laptops: a second source read beside this one (where it opens, or a
+  // highlight to open it at), and the list of the day's sources to pick from.
+  const [compare, setCompare] = useState<{ source_id: string; at: number; quote?: string } | null>(
+    null,
+  );
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [paneJump, setPaneJump] = useState<{ quote: string; n: number } | null>(null);
   const findRef = useRef<HTMLInputElement>(null);
   const focusInit = useRef<Set<string>>(new Set());
   const [missing, setMissing] = useState<MissingCheck | null>(null);
@@ -295,6 +363,8 @@ export function SourceReader({
     focusInit.current = new Set();
     setFocus(null);
     setMissing(null);
+    setCompare(null);
+    setPickerOpen(false);
     restoreDraft(start);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, key]);
@@ -462,6 +532,45 @@ export function SourceReader({
     });
   }
 
+  // ---------- A second source beside this one (laptops) ----------
+  const paneQ = useQuery({
+    queryKey: ["caReader", "beside", compare?.source_id, compare?.at, compare?.quote],
+    queryFn: () =>
+      sourceFn({
+        data: {
+          source_id: compare!.source_id,
+          at: compare!.at,
+          ...(compare!.quote ? { quote: compare!.quote } : {}),
+        },
+      }),
+    enabled: open && wide && !!compare,
+    staleTime: 60_000,
+  });
+  const pane = compare && paneQ.data?.[0]?.id === compare.source_id ? paneQ.data[0] : undefined;
+  // What is being read, to find the same news in the other sources.
+  const compareQuery = useMemo(() => {
+    if (!pickerOpen || !part) return "";
+    if (art) return `${art.title} ${plainText(part.text, art.at, art.end)}`.slice(0, 4000);
+    if (item) return [item.headline, ...item.facts.map((f) => f.text)].join(" ").slice(0, 4000);
+    return plainText(part.text, 0, Math.min(part.text.length, 8000)).slice(0, 4000);
+  }, [pickerOpen, part, art, item]);
+  const candQ = useQuery({
+    queryKey: ["caCompare", source?.id, compareQuery],
+    queryFn: () => compareFn({ data: { source_id: source!.id, query: compareQuery } }),
+    enabled: open && pickerOpen && !!source && !!compareQuery,
+    staleTime: 60_000,
+  });
+  function openBeside(sourceId: string, at: number, quote?: string) {
+    setCompare({ source_id: sourceId, at, ...(quote ? { quote } : {}) });
+    setPaneJump(quote ? { quote, n: Date.now() } : null);
+    setPickerOpen(false);
+  }
+  const sourceName = (id: string) =>
+    sources.find((x) => x.id === id)?.source_name ||
+    (pane?.id === id ? pane.source_name : "") ||
+    candQ.data?.find((c) => c.id === id)?.source_name ||
+    "another source";
+
   // Find bar: every match in the loaded part, and the current one.
   const matches = useMemo<Span[]>(
     () =>
@@ -547,6 +656,7 @@ export function SourceReader({
     else if (k === "k") stepHighlight(-1);
     else if (k === "n" && focus !== null && focus < articles.length - 1) pickArticle(focus + 1);
     else if (k === "p" && focus !== null && focus > 0) pickArticle(focus - 1);
+    else if (k === "c" && wide) setPickerOpen((v) => !v);
     else if (e.key === "?") setHelpOpen((v) => !v);
     else return;
     e.preventDefault();
@@ -557,71 +667,48 @@ export function SourceReader({
     window.addEventListener("keydown", on);
     return () => window.removeEventListener("keydown", on);
   }, [open]);
-  // Escape closes the innermost thing first: the sheet, the shortcuts, find.
+  // Escape closes the innermost thing first: the sheet, the shortcuts, find,
+  // the list of sources.
   function onEscape(e: KeyboardEvent) {
     if (sheet !== null) setSheet(null);
     else if (helpOpen) setHelpOpen(false);
     else if (findOpen) {
       setFindOpen(false);
       setQuery("");
-    } else return;
+    } else if (pickerOpen) setPickerOpen(false);
+    else return;
     e.preventDefault();
   }
 
   // ---------- Marking ----------
   const markIndexAt = (offset: number) =>
-    marks.findIndex((m) => {
-      if (!part || !source || m.source_id !== source.id) return false;
-      const s = findQuote(part.text, m.quote);
-      return !!s && s[0] <= offset && offset < s[1];
-    });
+    part && source ? markIndexIn(marks, source.id, part.text, offset) : -1;
 
   function addMark(span: Span, pen: Pen) {
     if (!part || !source) return;
-    const quote = cleanQuote(plainText(part.text, span[0], span[1]));
-    if (quote.length < (pen === "keyword" ? 2 : 8)) {
+    const id = source.id;
+    const text = part.text;
+    if (!markable(text, span, pen)) {
       toast("Mark a little more text");
       return;
     }
-    commit((cur) => [
-      // Marks inside the new one are replaced by it.
-      ...cur.filter((m) => {
-        if (m.source_id !== source.id) return true;
-        const s = findQuote(part.text, m.quote);
-        return !(s && s[0] >= span[0] && s[1] <= span[1]);
-      }),
-      { source_id: source.id, quote, pen },
-    ]);
+    commit((cur) => withMark(cur, id, text, span, pen));
   }
 
   function erase(span: Span) {
     if (!part || !source) return;
-    commit((cur) =>
-      cur.filter((m) => {
-        if (m.source_id !== source.id) return true;
-        const s = findQuote(part.text, m.quote);
-        return !(s && overlaps(s, span));
-      }),
-    );
+    const id = source.id;
+    const text = part.text;
+    commit((cur) => withoutSpan(cur, id, text, span));
   }
 
-  // A tap: on a highlight it removes it (or recolours it with another pen);
-  // elsewhere it highlights the sentence.
   function tapAt(offset: number) {
-    if (!part) return;
-    const hit = markIndexAt(offset);
-    if (hit >= 0) {
-      if (tool === "eraser" || marks[hit].pen === tool) {
-        commit((cur) => cur.filter((_, i) => i !== hit));
-      } else {
-        const pen = tool;
-        commit((cur) => cur.map((m, i) => (i === hit ? { ...m, pen } : m)));
-      }
-      return;
-    }
-    if (tool === "eraser") return;
-    const s = sentences.find(([a, b]) => a <= offset && offset < b);
-    if (s) addMark(s, tool);
+    if (!part || !source) return;
+    const id = source.id;
+    const text = part.text;
+    const next = tapped(marks, id, text, sentences, offset, tool);
+    if (next === "short") toast("Mark a little more text");
+    else if (next) commit(next);
   }
 
   // ---------- Pointer: tap, press-and-hold to paint, drag to paint with a mouse ----------
@@ -649,7 +736,7 @@ export function SourceReader({
 
   function onPointerDown(e: React.PointerEvent) {
     if (!painting || e.button !== 0 || !part) return;
-    const at = offsetAt(e.clientX, e.clientY);
+    const at = offsetAt(e.clientX, e.clientY, textRef.current);
     const g = {
       id: e.pointerId,
       x: e.clientX,
@@ -692,7 +779,7 @@ export function SourceReader({
         textRef.current?.setPointerCapture?.(g.id);
       } else return;
     }
-    const at = offsetAt(e.clientX, e.clientY);
+    const at = offsetAt(e.clientX, e.clientY, textRef.current);
     if (at === null || !paintRef.current) return;
     paintRef.current.focus = at;
     setPreview(snapToWords(part.text, paintRef.current.anchor, at));
@@ -738,14 +825,14 @@ export function SourceReader({
     if (painting) return;
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed) return;
-    const at = offsetAt(e.clientX, e.clientY);
+    const at = offsetAt(e.clientX, e.clientY, textRef.current);
     const hit = at === null ? -1 : markIndexAt(at);
     if (hit >= 0) openSheet(hit);
   }
   function onTextMenu(e: React.MouseEvent) {
     if (!painting) return;
     e.preventDefault();
-    const at = offsetAt(e.clientX, e.clientY);
+    const at = offsetAt(e.clientX, e.clientY, textRef.current);
     const hit = at === null ? -1 : markIndexAt(at);
     if (hit >= 0) openSheet(hit);
   }
@@ -1037,6 +1124,12 @@ export function SourceReader({
       onShow={(m) => {
         if (!part || !source) return;
         const i = sources.findIndex((s) => s.id === m.source_id);
+        // A highlight in a source read beside this one: shown there.
+        if (i < 0 && wide) {
+          if (pane?.id === m.source_id) setPaneJump({ quote: m.quote, n: Date.now() });
+          else openBeside(m.source_id, 0, m.quote);
+          return;
+        }
         if (i >= 0 && i !== tab) setTab(i);
         const s = m.source_id === source.id ? findQuote(part.text, m.quote) : null;
         if (s) scrollToOffset(part.start + s[0]);
@@ -1045,6 +1138,7 @@ export function SourceReader({
       onSubmit={() => void submit()}
       onAddKeywords={() => void addKeywordsOnly()}
       onEdit={(i) => openSheet(i)}
+      sourceName={(id) => (id === source?.id ? null : sourceName(id))}
       missing={(mode === "rewrite" || !item) && source ? missing : undefined}
       checking={checking}
       onCheckMissing={() => void checkWhatsMissing()}
@@ -1090,6 +1184,19 @@ export function SourceReader({
                 onClick={() => setArticlesOpen((v) => !v)}
               >
                 <Newspaper className="h-4 w-4" />
+              </Button>
+            )}
+            {wide && source && (
+              <Button
+                size="sm"
+                variant={compare ? "secondary" : "ghost"}
+                className="h-8 px-2"
+                aria-label="Read another source beside this"
+                title="Read another source beside this (C)"
+                aria-expanded={pickerOpen}
+                onClick={() => setPickerOpen((v) => !v)}
+              >
+                <Columns2 className="h-4 w-4" />
               </Button>
             )}
             {source && source.outline.length > 0 && (
@@ -1258,6 +1365,56 @@ export function SourceReader({
               ))}
             </nav>
           )}
+          {pickerOpen && wide && (
+            <nav
+              aria-label="Sources to read beside this"
+              className="max-h-[45dvh] overflow-y-auto border-t border-border px-2 py-1"
+            >
+              <p className="px-2 py-1 text-xs text-muted-foreground">
+                Read another of the day's sources beside this one, to take facts from both. Each
+                opens on its article most like the one you are reading.
+              </p>
+              {candQ.isLoading ? (
+                <p className="px-2 py-2 text-sm text-muted-foreground">
+                  Finding the same news in other sources…
+                </p>
+              ) : candQ.isError ? (
+                <p className="px-2 py-2 text-sm text-destructive">
+                  {errorText(candQ.error, "Couldn't list the sources")}
+                </p>
+              ) : candQ.data?.length ? (
+                candQ.data.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    data-compare={c.source_name || c.title}
+                    onClick={() => openBeside(c.id, c.match?.at ?? 0)}
+                    className={`block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${pane?.id === c.id ? "bg-muted" : ""}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate font-medium">
+                        {c.source_name || c.section.toUpperCase()} · {c.title}
+                      </span>
+                      {c.match && (
+                        <Badge tone={c.match.score >= 0.3 ? "good" : "muted"}>
+                          {Math.round(c.match.score * 100)}% match
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {c.match
+                        ? `${c.match.page !== null ? `Page ${c.match.page} · ` : ""}${c.match.title}`
+                        : "No matching article: opens at the start"}
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <p className="px-2 py-2 text-sm text-muted-foreground">
+                  No other sources for this day.
+                </p>
+              )}
+            </nav>
+          )}
           {contentsOpen && source && (
             <nav
               aria-label="Contents"
@@ -1394,9 +1551,37 @@ export function SourceReader({
               )}
             </div>
           </div>
+          {wide &&
+            compare &&
+            (pane ? (
+              <ComparePane
+                source={pane}
+                at={compare.at}
+                jump={paneJump}
+                marks={marks}
+                tool={tool}
+                painting={painting}
+                size={size}
+                commit={commit}
+                onSheet={openSheet}
+                onClose={() => setCompare(null)}
+              />
+            ) : (
+              <section className="w-[44%] max-w-2xl shrink-0 border-l border-border p-4 text-sm text-muted-foreground">
+                {paneQ.isError ? (
+                  <span className="text-destructive">
+                    {errorText(paneQ.error, "Couldn't load the source")}
+                  </span>
+                ) : (
+                  "Loading the second source…"
+                )}
+              </section>
+            ))}
           {/* Wide screens: highlights beside the article. */}
           {wide && (
-            <aside className="flex w-96 shrink-0 flex-col overflow-y-auto border-l border-border bg-muted/20">
+            <aside
+              className={`flex shrink-0 flex-col overflow-y-auto border-l border-border bg-muted/20 ${compare ? "w-80" : "w-96"}`}
+            >
               {tray}
             </aside>
           )}
@@ -1663,6 +1848,7 @@ const SHORTCUTS: [string, string][] = [
   ["F or /", "Find in article"],
   ["J / K", "Next / previous highlight"],
   ["N / P", "Next / previous article"],
+  ["C", "Read another source beside this one"],
   ["Esc", "Close find, a highlight's actions, or this list"],
   ["?", "Show or hide this list"],
 ];
@@ -1792,6 +1978,252 @@ function ArticleFoot({
     </div>
   );
 }
+
+// Laptops: another of the day's sources beside the one being read (the same
+// news in another paper), opened on its article most like it. Highlights
+// made here join the same list and can go into the story.
+function ComparePane({
+  source,
+  at,
+  jump,
+  marks,
+  tool,
+  painting,
+  size,
+  commit,
+  onSheet,
+  onClose,
+}: {
+  source: ReaderSource;
+  // Where it opened, in the whole source.
+  at: number;
+  // A highlight to show (from the list), with a counter so it can repeat.
+  jump: { quote: string; n: number } | null;
+  marks: Mark[];
+  tool: Tool;
+  painting: boolean;
+  size: number;
+  commit: (next: Mark[] | ((cur: Mark[]) => Mark[])) => void;
+  onSheet: (i: number) => void;
+  onClose: () => void;
+}) {
+  const text = source.text;
+  const paged = isPaged(source.url);
+  const firstPage =
+    source.outline.filter((e) => e.level === 0 && e.at > 0 && e.at < source.start).length + 1;
+  const blocks = useMemo(() => parseBlocks(text, paged, firstPage), [text, paged, firstPage]);
+  const articles = useMemo<Article[]>(() => {
+    if (!paged) return [];
+    const list = splitArticles(blocks, firstPage);
+    return list.length >= 2 ? list : [];
+  }, [blocks, paged, firstPage]);
+  const sentences = useMemo(() => sentenceSpans(text), [text]);
+  const [focus, setFocus] = useState<number | null>(null);
+  const [preview, setPreview] = useState<Span | null>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLDivElement>(null);
+  const start = useRef<number | null>(null);
+
+  // Opens on the matching article; a highlight picked in the list wins.
+  useEffect(() => {
+    const rel = at - source.start;
+    const i = articles.findIndex((a) => rel >= a.at && rel < a.end);
+    start.current = articles.length ? Math.max(0, i) : null;
+    setFocus(start.current);
+    if (boxRef.current) boxRef.current.scrollTop = 0;
+  }, [source.id, source.start, at, articles]);
+  useEffect(() => {
+    if (!jump) return;
+    const s = findQuote(text, jump.quote);
+    if (!s) return;
+    if (articles.length) {
+      const i = articles.findIndex((a) => s[0] >= a.at && s[0] < a.end);
+      setFocus(i >= 0 ? i : null);
+    }
+    requestAnimationFrame(() =>
+      textRef.current
+        ?.querySelector(`[data-mark-start="${s[0]}"]`)
+        ?.scrollIntoView({ block: "center" }),
+    );
+  }, [jump, text, articles]);
+
+  const art = focus !== null ? articles[focus] : undefined;
+  const inFocus = (x: number) => !art || (x >= art.at && x < art.end);
+  const ranges = useMemo<Range[]>(() => {
+    const out: Range[] = [];
+    for (const m of marks) {
+      if (m.source_id !== source.id) continue;
+      const span = findQuote(text, m.quote);
+      if (span) out.push({ span, pen: m.pen, note: m.note });
+    }
+    if (preview && tool !== "eraser") out.push({ span: preview, pen: tool, preview: true });
+    return out;
+  }, [marks, text, source.id, preview, tool]);
+
+  // A click marks the sentence (or changes the highlight there); a drag
+  // paints words; a right-click on a highlight opens its actions.
+  const drag = useRef<{
+    id: number;
+    x: number;
+    y: number;
+    at: number;
+    to: number;
+    paint: boolean;
+  } | null>(null);
+  function onDown(e: React.PointerEvent) {
+    if (!painting || e.button !== 0) return;
+    const at = offsetAt(e.clientX, e.clientY, textRef.current);
+    drag.current =
+      at === null
+        ? null
+        : { id: e.pointerId, x: e.clientX, y: e.clientY, at, to: at, paint: false };
+  }
+  function onMove(e: React.PointerEvent) {
+    const g = drag.current;
+    if (!g || g.id !== e.pointerId) return;
+    if (!g.paint) {
+      if (Math.hypot(e.clientX - g.x, e.clientY - g.y) <= 4) return;
+      g.paint = true;
+      textRef.current?.setPointerCapture?.(g.id);
+    }
+    const at = offsetAt(e.clientX, e.clientY, textRef.current);
+    if (at === null) return;
+    g.to = at;
+    setPreview(snapToWords(text, g.at, at));
+  }
+  function onUp(e: React.PointerEvent) {
+    const g = drag.current;
+    drag.current = null;
+    if (!g || g.id !== e.pointerId) return;
+    if (g.paint) {
+      setPreview(null);
+      const span = snapToWords(text, Math.min(g.at, g.to), Math.max(g.at, g.to) + 1);
+      if (span[1] <= span[0]) return;
+      if (tool === "eraser") commit((cur) => withoutSpan(cur, source.id, text, span));
+      else if (markable(text, span, tool)) {
+        const pen = tool;
+        commit((cur) => withMark(cur, source.id, text, span, pen));
+      } else toast("Mark a little more text");
+      return;
+    }
+    const next = tapped(marks, source.id, text, sentences, g.at, tool);
+    if (next === "short") toast("Mark a little more text");
+    else if (next) commit(next);
+  }
+  function onMenu(e: React.MouseEvent) {
+    const at = offsetAt(e.clientX, e.clientY, textRef.current);
+    const hit = at === null ? -1 : markIndexIn(marks, source.id, text, at);
+    if (hit < 0) return;
+    e.preventDefault();
+    onSheet(hit);
+  }
+
+  return (
+    <section
+      aria-label="Second source"
+      className="flex min-h-0 w-[44%] max-w-2xl shrink-0 flex-col border-l border-border"
+    >
+      <div className="flex items-center gap-1.5 border-b border-border bg-muted/30 px-3 py-1.5 text-xs">
+        <Columns2 className="h-3.5 w-3.5 shrink-0 text-primary" />
+        <span className="min-w-0 flex-1 truncate font-medium">
+          {source.source_name || source.section.toUpperCase()} · {source.title}
+        </span>
+        {source.url && (
+          <a
+            href={source.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex shrink-0 items-center gap-0.5 text-primary hover:underline"
+          >
+            Open page <ExternalLink className="h-3 w-3" />
+          </a>
+        )}
+        <button
+          type="button"
+          aria-label="Close second source"
+          onClick={onClose}
+          className="grid h-6 w-6 shrink-0 place-items-center rounded hover:bg-muted"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      {articles.length > 0 && (
+        <div className="flex items-center gap-1.5 border-b border-border px-3 py-1 text-xs text-muted-foreground">
+          {art ? (
+            <>
+              <span className="min-w-0 flex-1 truncate">
+                Page {art.page} · article {focus! + 1} of {articles.length}
+              </span>
+              <button
+                type="button"
+                aria-label="Previous article in second source"
+                disabled={focus === 0}
+                onClick={() => setFocus(focus! - 1)}
+                className="rounded px-1.5 disabled:opacity-30"
+              >
+                ←
+              </button>
+              <button
+                type="button"
+                aria-label="Next article in second source"
+                disabled={focus === articles.length - 1}
+                onClick={() => setFocus(focus! + 1)}
+                className="rounded px-1.5 disabled:opacity-30"
+              >
+                →
+              </button>
+              <button
+                type="button"
+                onClick={() => setFocus(null)}
+                className="rounded-full border border-border px-2 py-0.5"
+              >
+                Whole page
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="flex-1">Whole page</span>
+              <button
+                type="button"
+                onClick={() => setFocus(start.current ?? 0)}
+                className="rounded-full border border-border px-2 py-0.5"
+              >
+                One article
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      <div ref={boxRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <div
+          ref={textRef}
+          data-testid="compare-text"
+          onPointerDown={onDown}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          onPointerCancel={() => {
+            drag.current = null;
+            setPreview(null);
+          }}
+          onContextMenu={onMenu}
+          onClick={(e) => {
+            const sel = window.getSelection();
+            if (!painting && (!sel || sel.isCollapsed)) onMenu(e);
+          }}
+          style={{ fontSize: size }}
+          className={`leading-[1.75] ${painting ? "cursor-text select-none" : ""}`}
+        >
+          {blocks.map((b) =>
+            b.clutter || !inFocus(b.at) ? null : (
+              <BlockView key={b.at} block={b} {...rangesFor(b, ranges, NONE, NONE, null)} />
+            ),
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+const NONE: never[] = [];
 
 // "What's missing?": the exam facts the highlights don't cover yet, each with
 // the article's words for it, one tap from being a key point.
@@ -2000,6 +2432,7 @@ function Tray({
   onSubmit,
   onAddKeywords,
   onEdit,
+  sourceName,
   jump,
   missing,
   checking,
@@ -2021,6 +2454,8 @@ function Tray({
   onSubmit: () => void;
   onAddKeywords: () => void;
   onEdit: (i: number) => void;
+  // The source a highlight is from, when it isn't the one being read.
+  sourceName: (id: string) => string | null;
   // Previous / next highlight buttons, on wide screens.
   jump: React.ReactNode;
   // "What's missing?": undefined when not offered (new story mode).
@@ -2061,6 +2496,11 @@ function Tray({
               <button type="button" onClick={() => onShow(m)} className="line-clamp-2 text-left">
                 {m.quote}
               </button>
+              {sourceName(m.source_id) && (
+                <div className="mt-0.5 text-[11px] text-muted-foreground">
+                  from {sourceName(m.source_id)}
+                </div>
+              )}
               {m.note && (
                 <div className="mt-0.5 flex items-start gap-1 italic text-primary">
                   <StickyNote className="mt-0.5 h-3 w-3 shrink-0" /> {m.note}

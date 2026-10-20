@@ -1,17 +1,24 @@
 // Admin: the day's skipped news. Articles in the day's sources that no story
 // uses, so the editor can read them and make stories from what the AI left
-// out. Opening one shows it in the article reader, where highlights become a
-// new story at the end of the day.
+// out, most exam-worthy first once ranked. Opening one shows it in the article
+// reader, where highlights become a new story at the end of the day.
 import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, ChevronDown, EyeOff, Newspaper } from "lucide-react";
-import { getCaSkipped, type SkippedArticle } from "@/lib/current-affairs.functions";
+import { toast } from "sonner";
+import { BookOpen, ChevronDown, EyeOff, Newspaper, RefreshCw, Sparkles } from "lucide-react";
+import { getCaSkipped, rankCaSkipped, type SkippedArticle } from "@/lib/current-affairs.functions";
 import { SourceReader } from "@/components/ca-source-reader";
 import { Badge, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 
 const hiddenKey = (date: string) => `ca-skipped-hidden:${date}`;
+const SCORES = [
+  { label: "Not exam material", tone: "muted" },
+  { label: "Low exam value", tone: "muted" },
+  { label: "Useful", tone: "primary" },
+  { label: "High exam value", tone: "good" },
+] as const;
 const rowKey = (a: SkippedArticle) => `${a.source_id}:${a.at}`;
 
 function readHidden(date: string): Set<string> {
@@ -40,7 +47,12 @@ export function SkippedNews({
   onChanged: () => void;
 }) {
   const skippedFn = useServerFn(getCaSkipped);
+  const rankFn = useServerFn(rankCaSkipped);
   const [open, setOpen] = useState(false);
+  const [ranking, setRanking] = useState(false);
+  // Most exam-worthy first, or in the order of the papers.
+  const [byValue, setByValue] = useState(true);
+  const [worthOnly, setWorthOnly] = useState(false);
   const q = useQuery({
     // Under "caDay", so it refreshes with the day's stories.
     queryKey: ["caDay", date, "skipped"],
@@ -61,9 +73,36 @@ export function SkippedNews({
   const articles = useMemo(() => q.data?.articles ?? [], [q.data]);
   const rajasthan = articles.filter((a) => a.rajasthan).length;
   const hiddenHere = articles.filter((a) => hidden.has(rowKey(a))).length;
-  const shown = articles.filter(
-    (a) => (!onlyRajasthan || a.rajasthan) && (showHidden || !hidden.has(rowKey(a))),
-  );
+  const ranked = articles.filter((a) => a.rank).length;
+  const worth = articles.filter((a) => (a.rank?.score ?? 0) >= 2).length;
+  const unranked = articles.length - ranked;
+  const shown = useMemo(() => {
+    const list = articles.filter(
+      (a) =>
+        (!onlyRajasthan || a.rajasthan) &&
+        (!worthOnly || (a.rank?.score ?? 0) >= 2) &&
+        (showHidden || !hidden.has(rowKey(a))),
+    );
+    // Not ranked yet sits between useful and low.
+    const value = (a: SkippedArticle) => (a.rank ? a.rank.score : 1.5);
+    return byValue && ranked ? [...list].sort((a, b) => value(b) - value(a)) : list;
+  }, [articles, onlyRajasthan, worthOnly, showHidden, hidden, byValue, ranked]);
+
+  async function rank() {
+    setRanking(true);
+    try {
+      const r = await rankFn({ data: { date } });
+      toast.success(
+        `Ranked ${r.ranked} article${r.ranked === 1 ? "" : "s"}${r.left ? ` · ${r.left} more to rank` : ""}`,
+      );
+      setByValue(true);
+      await q.refetch();
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't rank the articles"));
+    } finally {
+      setRanking(false);
+    }
+  }
   const toggleHidden = (a: SkippedArticle) =>
     setHidden((cur) => {
       const next = new Set(cur);
@@ -105,7 +144,50 @@ export function SkippedNews({
             <p className="text-sm text-destructive">{errorText(q.error, "Couldn't check")}</p>
           ) : (
             <>
+              {articles.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {unranked > 0 && (
+                    <Button size="sm" disabled={ranking} onClick={() => void rank()}>
+                      {ranking ? (
+                        <RefreshCw className="mr-1 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="mr-1 h-4 w-4" />
+                      )}
+                      {ranking
+                        ? "Ranking…"
+                        : ranked
+                          ? `Rank ${unranked} new`
+                          : "Rank by exam value"}
+                    </Button>
+                  )}
+                  <span className="min-w-0 flex-1 text-xs text-muted-foreground">
+                    {ranked
+                      ? `${worth} of ${articles.length} worth a story.`
+                      : "SAATHI rates each article for the RAS exam, so you read the important ones first (one AI request)."}
+                  </span>
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-2 text-xs">
+                {ranked > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      aria-pressed={byValue}
+                      onClick={() => setByValue((v) => !v)}
+                      className={`rounded-full border px-3 py-1 font-medium ${byValue ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-muted-foreground"}`}
+                    >
+                      {byValue ? "Most exam value first" : "Paper order"}
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={worthOnly}
+                      onClick={() => setWorthOnly((v) => !v)}
+                      className={`rounded-full border px-3 py-1 font-medium ${worthOnly ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "border-border text-muted-foreground"}`}
+                    >
+                      Worth a story ({worth})
+                    </button>
+                  </>
+                )}
                 <button
                   type="button"
                   aria-pressed={onlyRajasthan}
@@ -153,8 +235,21 @@ export function SkippedNews({
                           </span>
                           <Badge>{a.words} words</Badge>
                           {a.rajasthan && <Badge tone="warn">Rajasthan</Badge>}
+                          {a.rank && (
+                            <Badge tone={SCORES[a.rank.score].tone}>
+                              {SCORES[a.rank.score].label}
+                            </Badge>
+                          )}
                         </div>
                         <div className="mt-1 font-semibold leading-snug">{a.title}</div>
+                        {a.rank?.why && (
+                          <p
+                            data-rank-why
+                            className={`mt-0.5 text-xs font-medium ${a.rank.score >= 2 ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground"}`}
+                          >
+                            {a.rank.why}
+                          </p>
+                        )}
                         {a.preview && (
                           <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">
                             {a.preview}

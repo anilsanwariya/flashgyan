@@ -1,11 +1,12 @@
 -- Earlier versions of current affairs stories, kept when a story is written
--- again (a rewrite from highlights, "Write text", or restoring a version), so
--- the admin can compare and restore them. The latest few per story are kept.
+-- again (a rewrite from highlights, "Write text", restoring a version), edited
+-- by the admin or corrected, so the admin can compare and restore them. The
+-- latest few per story are kept.
 CREATE TABLE IF NOT EXISTS public.ca_item_versions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   item_id uuid NOT NULL REFERENCES public.ca_items (id) ON DELETE CASCADE,
   created_at timestamptz NOT NULL DEFAULT now(),
-  -- What replaced it: 'rewrite', 'write' or 'restore'.
+  -- What replaced it: 'rewrite', 'write', 'restore', 'edit' or 'correction'.
   reason text NOT NULL DEFAULT 'rewrite',
   headline text NOT NULL DEFAULT '',
   -- The story as it was: content, facts, sources and Static Connect books.

@@ -333,3 +333,40 @@ export function splitArticles(blocks: Block[], firstPage = 1): Article[] {
   close();
   return out;
 }
+
+// A source's articles with their shown text: a newspaper page split into its
+// articles, a web page as one article.
+export type ArticleText = Omit<Article, "page"> & { page: number | null; text: string };
+
+export function sourceArticles(source: {
+  title: string;
+  url: string | null;
+  content: string;
+}): ArticleText[] {
+  const { content } = source;
+  const paged = isPaged(source.url);
+  const blocks = parseBlocks(content, paged).filter((b) => !b.clutter);
+  const textOf = (at: number, end: number) =>
+    blocks
+      .filter((b) => b.at >= at && b.end <= end)
+      .map((b) =>
+        blockRuns(b)
+          .map((r) => r.text)
+          .join(""),
+      )
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+  if (!paged) {
+    return [
+      {
+        title: source.title,
+        at: 0,
+        end: content.length,
+        page: null,
+        text: textOf(0, content.length),
+      },
+    ];
+  }
+  return splitArticles(blocks).map((a) => ({ ...a, text: textOf(a.at, a.end) }));
+}

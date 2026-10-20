@@ -85,7 +85,17 @@ import {
 import { VISUAL_LABELS, parseVisual, visualMessages, type Visual } from "@/lib/ca-visuals";
 import { isPaged, outline, type OutlineEntry } from "@/lib/ca-reader-format";
 import { missingMessages, parseMissing, type MissingCheck } from "@/lib/ca-missing";
-import { uncoveredArticles, type SkippedArticle } from "@/lib/ca-skipped";
+import { bestArticle, type CompareMatch } from "@/lib/ca-compare";
+import {
+  RANK_MAX,
+  parseRanks,
+  rankMessages,
+  skippedKey,
+  uncoveredArticles,
+  type FoundArticle,
+  type SkippedArticle,
+  type SkippedRank,
+} from "@/lib/ca-skipped";
 
 export type { SkippedArticle };
 import {
@@ -1302,8 +1312,13 @@ export async function itemReader(id: string): Promise<ReaderSource[]> {
     });
 }
 
-// A source no story uses yet (skipped news), opened at one of its articles.
-export async function sourceReader(sourceId: string, at: number): Promise<ReaderSource[]> {
+// One source, opened at one of its articles (skipped news, or read beside
+// another source), or where a quote is when one is given.
+export async function sourceReader(
+  sourceId: string,
+  at0: number,
+  quote?: string,
+): Promise<ReaderSource[]> {
   const { data, error } = await from("ca_sources")
     .select(READER_SOURCE_COLS)
     .eq("id", sourceId)
@@ -1311,6 +1326,8 @@ export async function sourceReader(sourceId: string, at: number): Promise<Reader
   fail(error);
   const row = data as unknown as SourceRow;
   const len = row.content.length;
+  const found = quote ? findQuote(row.content, quote) : null;
+  const at = found ? found[0] : at0;
   const span: Span =
     len <= READER_WHOLE
       ? [0, len]
@@ -1318,11 +1335,50 @@ export async function sourceReader(sourceId: string, at: number): Promise<Reader
   return [readerSource(row, span, await storiesOn([sourceId], null))];
 }
 
+// The day's other sources, for reading one beside the source open in the
+// reader: each with its article most like what is being read (`query`), best
+// matches first.
+export type CompareSource = Omit<
+  ReaderSource,
+  "text" | "start" | "total" | "outline" | "stories"
+> & {
+  match: CompareMatch | null;
+};
+
+export async function compareSources(sourceId: string, query: string): Promise<CompareSource[]> {
+  const { data: cur, error } = await from("ca_sources")
+    .select("issue_date")
+    .eq("id", sourceId)
+    .single();
+  fail(error);
+  const { data, error: lErr } = await from("ca_sources")
+    .select(READER_SOURCE_COLS)
+    .eq("issue_date", (cur as unknown as { issue_date: string }).issue_date)
+    .neq("id", sourceId)
+    .order("created_at")
+    .limit(60);
+  fail(lErr);
+  return ((data ?? []) as unknown as SourceRow[])
+    .filter((r) => r.content.trim())
+    .map(({ content, ...r }) => ({ ...r, match: bestArticle(query, { ...r, content }) }))
+    .sort((a, b) => (b.match?.score ?? 0) - (a.match?.score ?? 0));
+}
+
+// Sources a story's highlights may come from: its own, and any other source
+// of the same day (read beside them).
+async function allowedSources(date: string, own: string[], wanted: string[]) {
+  const ok = new Set(own);
+  const extra = uniq(wanted.filter((id) => !ok.has(id)));
+  if (extra.length) {
+    const { data } = await from("ca_sources").select("id").in("id", extra).eq("issue_date", date);
+    for (const r of (data ?? []) as { id: string }[]) ok.add(r.id);
+  }
+  return ok;
+}
+
 // The day's articles that no story uses: what the AI left out. Sources still
 // being read are counted, not checked.
-export async function skippedNews(
-  date: string,
-): Promise<{ articles: SkippedArticle[]; reading: number }> {
+async function findSkipped(date: string): Promise<{ found: FoundArticle[]; reading: number }> {
   const { data, error } = await from("ca_sources")
     .select(`${READER_SOURCE_COLS},status`)
     .eq("issue_date", date)
@@ -1331,7 +1387,7 @@ export async function skippedNews(
   const all = (data ?? []) as unknown as (SourceRow & { status: CaSource["status"] })[];
   const rows = all.filter((r) => (r.status === "done" || r.status === "error") && r.content.trim());
   const reading = all.filter((r) => r.status === "new" || r.status === "extracting").length;
-  if (!rows.length) return { articles: [], reading };
+  if (!rows.length) return { found: [], reading };
   const { data: its, error: iErr } = await from("ca_items")
     .select("facts,source_ids,context_facts:content->context_facts")
     .overlaps(
@@ -1342,7 +1398,7 @@ export async function skippedNews(
   const items = (its ?? []) as unknown as (Pick<CaItem, "facts" | "source_ids"> & {
     context_facts: CaFact[] | null;
   })[];
-  const articles = rows.flatMap((r) => {
+  const found = rows.flatMap((r) => {
     const using = items.filter((i) => i.source_ids.includes(r.id));
     const quotes = using
       .flatMap((i) => [...i.facts, ...(i.context_facts ?? [])])
@@ -1350,7 +1406,65 @@ export async function skippedNews(
       .map((f) => f.quote);
     return uncoveredArticles(r, quotes, using.length > 0, r.section === "dipr");
   });
-  return { articles: articles.slice(0, 300), reading };
+  return { found: found.slice(0, 300), reading };
+}
+
+// The exam-value ranks given so far for a day's skipped news, by article.
+type SkippedRanks = { ranked_at: string; ranks: Record<string, SkippedRank> };
+const ranksKey = (date: string) => `ca_skipped_rank:${date}`;
+
+async function loadRanks(date: string): Promise<SkippedRanks | null> {
+  const { data } = await from("bot_settings")
+    .select("value")
+    .eq("key", ranksKey(date))
+    .maybeSingle();
+  return (data as { value: SkippedRanks } | null)?.value ?? null;
+}
+
+export async function skippedNews(date: string): Promise<{
+  articles: SkippedArticle[];
+  reading: number;
+  ranked_at: string | null;
+}> {
+  const [{ found, reading }, saved] = await Promise.all([findSkipped(date), loadRanks(date)]);
+  return {
+    articles: found.map(({ snippet: _, ...a }) => ({
+      ...a,
+      rank: saved?.ranks[skippedKey(a)] ?? null,
+    })),
+    reading,
+    ranked_at: saved?.ranked_at ?? null,
+  };
+}
+
+// Ranks the day's skipped articles that have no rank yet, by their value for
+// the exam: one AI call for up to RANK_MAX of them.
+export async function rankSkipped(date: string): Promise<{ ranked: number; left: number }> {
+  const [{ found }, saved] = await Promise.all([findSkipped(date), loadRanks(date)]);
+  const ranks = { ...(saved?.ranks ?? {}) };
+  const todo = found.filter((a) => !ranks[skippedKey(a)]);
+  if (!todo.length) return { ranked: 0, left: 0 };
+  const batch = todo.slice(0, RANK_MAX);
+  const parsed = parseRanks(await saathiComplete(apiKey(), rankMessages(batch)), batch.length);
+  if (!parsed) throw new Error("The AI's reply could not be read. Try again.");
+  let ranked = 0;
+  batch.forEach((a, i) => {
+    const r = parsed[i];
+    if (r) {
+      ranks[skippedKey(a)] = r;
+      ranked++;
+    }
+  });
+  // Ranks of articles no longer skipped (made into stories) are dropped.
+  const live = new Set(found.map(skippedKey));
+  const kept = Object.fromEntries(Object.entries(ranks).filter(([k]) => live.has(k)));
+  const { error } = await from("bot_settings").upsert({
+    key: ranksKey(date),
+    value: { ranked_at: new Date().toISOString(), ranks: kept } satisfies SkippedRanks,
+    updated_at: new Date().toISOString(),
+  } as never);
+  fail(error);
+  return { ranked, left: todo.length - ranked };
 }
 
 // "What's missing?": the facts an examiner asks for that the highlights don't
@@ -1441,7 +1555,12 @@ export async function rewriteFromHighlights(
 ): Promise<CaItem> {
   const item = await loadItem(id);
   await assertDayEditable([item.issue_date]);
-  const allowed = highlights.filter((h) => item.source_ids.includes(h.source_id));
+  const ok = await allowedSources(
+    item.issue_date,
+    item.source_ids,
+    highlights.map((h) => h.source_id),
+  );
+  const allowed = highlights.filter((h) => ok.has(h.source_id));
   const texts = await sourceTexts(uniq(allowed.map((h) => h.source_id)));
   const { facts, context } = factsFromHighlights(allowed, texts, [
     ...item.facts,
@@ -1509,7 +1628,12 @@ export async function createFromHighlights(
     origin = { issue_date: date, position: top, source_ids: [from0.sourceId] };
   }
   await assertDayEditable([origin.issue_date]);
-  const allowed = highlights.filter((h) => origin.source_ids.includes(h.source_id));
+  const ok = await allowedSources(
+    origin.issue_date,
+    origin.source_ids,
+    highlights.map((h) => h.source_id),
+  );
+  const allowed = highlights.filter((h) => ok.has(h.source_id));
   const texts = await sourceTexts(uniq(allowed.map((h) => h.source_id)));
   const { facts, context } = factsFromHighlights(allowed, texts, []);
   if (!facts.length) throw new Error("Mark at least one highlight as a key point.");
@@ -1567,12 +1691,14 @@ export type CaVersion = {
   id: string;
   created_at: string;
   // "write": written again; "rewrite": from the reader's highlights;
-  // "restore": the story as it was before an older version was restored.
-  reason: "write" | "rewrite" | "restore";
+  // "restore": the story as it was before an older version was restored;
+  // "edit": before the admin's own changes (one per editing session);
+  // "correction": before an approved correction.
+  reason: "write" | "rewrite" | "restore" | "edit" | "correction";
   headline: string;
   snapshot: CaSnapshot;
 };
-export const VERSIONS_KEPT = 5;
+export const VERSIONS_KEPT = 10;
 
 const snapshotOf = (item: CaItem): CaSnapshot | null =>
   item.content
@@ -1611,6 +1737,28 @@ async function saveVersion(itemId: string, snap: CaSnapshot, reason: CaVersion["
   } catch (e) {
     console.error("story version not saved:", (e instanceof Error && e.message) || e);
   }
+}
+
+// The admin's own changes keep the story as it was before them: one version
+// per editing session, so a run of small edits doesn't push out the rewrites.
+export const EDIT_SESSION_MS = 30 * 60_000;
+
+export async function asEdit<T>(itemId: string, change: () => Promise<T>): Promise<T> {
+  const before = await loadItem(itemId).catch(() => null);
+  const result = await change();
+  const snap = before && snapshotOf(before);
+  if (snap) {
+    const { data, error } = await from("ca_item_versions")
+      .select("reason,created_at")
+      .eq("item_id", itemId)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const last = ((data ?? []) as Pick<CaVersion, "reason" | "created_at">[])[0];
+    const sameSession =
+      last?.reason === "edit" && Date.now() - Date.parse(last.created_at) < EDIT_SESSION_MS;
+    if (!error && !sameSession) await saveVersion(itemId, snap, "edit");
+  }
+  return result;
 }
 
 // The story's earlier versions, newest first.
@@ -1832,6 +1980,8 @@ export async function decideCorrection(id: string, approve: boolean) {
     const { data: it } = await from("ca_items").select(ITEM_COLS).eq("id", corr.item_id).single();
     const item = it as unknown as CaItem;
     const next = applyChanges(item.facts, item.content, corr.changes);
+    const before = snapshotOf(item);
+    if (before) await saveVersion(item.id, before, "correction");
     fail(
       (
         await from("ca_items")
