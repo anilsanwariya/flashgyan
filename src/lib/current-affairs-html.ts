@@ -761,6 +761,20 @@ export function footerTemplate(settings: MagazineSettings): string {
   return `<div style="width:100%;font-size:8px;color:#94a3b8;padding:0 12mm;display:flex;justify-content:space-between;font-family:sans-serif"><span>${esc(settings.brand_line)}</span><span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>`;
 }
 
+// One story as the issue prints it, in one language, for the editor's
+// preview.
+export function storyPreviewHtml(
+  item: MagazineItem,
+  lang: Lang,
+  settings: MagazineSettings,
+): string {
+  const accent = safeColor(settings.accent);
+  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600;700&family=Noto+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+<style>${CSS(accent)} body { margin: 0; padding: 8px; background: #fff; } .item { margin: 0; }</style></head>
+<body>${itemHtml(item, 1, false, accent, lang, boxNames(settings))}</body></html>`;
+}
+
 // One visual on its own page, for the admin preview.
 export function visualPreviewHtml(visual: Visual, accent = "#6d28d9"): string {
   const a = safeColor(accent);

@@ -7,18 +7,11 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import {
   AlertTriangle,
-  ArrowDown,
-  ArrowUp,
   BarChart3,
-  BookOpen,
   Plus,
   Check,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  History,
+  Image as ImageIcon,
   Pencil,
-  RefreshCw,
   Trash2,
   X,
   XCircle,
@@ -26,11 +19,8 @@ import {
 import {
   addCaStaticFacts,
   deleteCaItems,
-  deleteCaPoint,
   enrichCaItem,
-  setCaFactChecked,
   getCaKeywordBooks,
-  redoCaVisual,
   updateCaItem,
   type CaItem,
 } from "@/lib/current-affairs.functions";
@@ -44,26 +34,14 @@ import {
   type CaContent,
   type StaticFact,
 } from "@/lib/current-affairs";
-import { SourceReader } from "@/components/ca-source-reader";
-import { StoryHistory } from "@/components/ca-story-history";
-import { StoryImages } from "@/components/ca-story-images";
-import { StoryVisuals } from "@/components/ca-story-visuals";
-import { StoryMaterial } from "@/components/ca-story-material";
+import { StoryEditor } from "@/components/ca-story-editor";
 import { useQuery } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { VISUAL_LABELS } from "@/lib/ca-visuals";
-import { unitLabel } from "../../supabase/functions/_shared/ras-syllabus.ts";
 import { Badge, BulkBar, errorText, useChosen } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 export type Lang = "hi" | "en" | "both";
 
@@ -133,10 +111,11 @@ export function StoryList({
     writeStore(LANG_KEY, l);
   };
 
-  const [open, setOpen] = useState<Set<string>>(new Set());
+  // The story open in the editor.
+  const [editing, setEditing] = useState<string | null>(null);
   const [reviewed, setReviewed] = useState<Set<string>>(new Set());
   useEffect(() => {
-    setOpen(new Set());
+    setEditing(null);
     setReviewed(new Set(readStore<string[]>(reviewedKey(date), [])));
   }, [date]);
   const markReviewed = (id: string) =>
@@ -148,43 +127,26 @@ export function StoryList({
     });
 
   const cards = useRef(new Map<string, HTMLElement>());
-  const toggle = (id: string) =>
-    setOpen((cur) => {
-      const next = new Set(cur);
-      if (next.has(id)) next.delete(id);
-      else {
-        next.add(id);
-        markReviewed(id);
-      }
-      return next;
-    });
+  const openStory = (id: string) => {
+    setEditing(id);
+    markReviewed(id);
+  };
+  // Back in the list at the story last open.
+  const closeEditor = () => {
+    const id = editing;
+    setEditing(null);
+    if (id)
+      requestAnimationFrame(() =>
+        cards.current.get(id)?.scrollIntoView({ behavior: "smooth", block: "center" }),
+      );
+  };
   useEffect(() => {
     onReviewed?.(reviewed);
   }, [reviewed, onReviewed]);
   useEffect(() => {
-    if (!jump) return;
-    setOpen((cur) => new Set(cur).add(jump.id));
-    markReviewed(jump.id);
-    requestAnimationFrame(() =>
-      cards.current.get(jump.id)?.scrollIntoView({ behavior: "smooth", block: "start" }),
-    );
+    if (jump) openStory(jump.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jump]);
-  const goNext = (id: string) => {
-    const i = ordered.findIndex((it) => it.id === id);
-    const next = ordered[i + 1];
-    setOpen((cur) => {
-      const s = new Set(cur);
-      s.delete(id);
-      if (next) s.add(next.id);
-      return s;
-    });
-    if (!next) return;
-    markReviewed(next.id);
-    requestAnimationFrame(() =>
-      cards.current.get(next.id)?.scrollIntoView({ behavior: "smooth", block: "start" }),
-    );
-  };
 
   const included = items.filter((i) => i.status === "included").length;
   const unverified = items.reduce((n, i) => n + i.facts.filter((f) => !f.verified).length, 0);
@@ -278,22 +240,20 @@ export function StoryList({
             {done} of {ordered.length}
           </b>
         </span>
-        <div className="ml-auto flex gap-1">
+        {ordered.length > 0 && (
           <Button
             size="sm"
-            variant="ghost"
-            className="h-8"
-            onClick={() => {
-              setOpen(new Set(ordered.map((it) => it.id)));
-              ordered.forEach((it) => markReviewed(it.id));
-            }}
+            className="ml-auto h-8"
+            onClick={() => openStory((ordered.find((it) => !reviewed.has(it.id)) ?? ordered[0]).id)}
           >
-            Expand all
+            <Pencil className="mr-1 h-3.5 w-3.5" />
+            {done === 0
+              ? "Start reviewing"
+              : done < ordered.length
+                ? "Continue"
+                : "Open first story"}
           </Button>
-          <Button size="sm" variant="ghost" className="h-8" onClick={() => setOpen(new Set())}>
-            Collapse all
-          </Button>
-        </div>
+        )}
       </div>
 
       <BulkBar
@@ -310,7 +270,7 @@ export function StoryList({
           <h3 className="pt-2 text-sm font-semibold">
             {categoryLabel(cat).hi} · {categoryLabel(cat).en}
           </h3>
-          {list.map((it, i) => (
+          {list.map((it) => (
             <StoryCard
               key={it.id}
               ref={(el) => {
@@ -320,19 +280,26 @@ export function StoryList({
               item={it}
               number={number.get(it.id) ?? 0}
               lang={lang}
-              open={open.has(it.id)}
               reviewed={reviewed.has(it.id)}
-              onToggle={() => toggle(it.id)}
-              onNext={number.get(it.id) === ordered.length ? undefined : () => goNext(it.id)}
+              onOpen={() => openStory(it.id)}
               selected={chosen.has(it.id)}
               onSelect={(on) => choose(it.id, on)}
-              above={list[i - 1]}
-              below={list[i + 1]}
               onChanged={onChanged}
             />
           ))}
         </section>
       ))}
+      {editing && ordered.some((it) => it.id === editing) && (
+        <StoryEditor
+          items={ordered}
+          id={editing}
+          lang={lang}
+          setLang={setLang}
+          onNavigate={openStory}
+          onClose={closeEditor}
+          onChanged={onChanged}
+        />
+      )}
     </div>
   );
 }
@@ -343,62 +310,48 @@ type CardProps = {
   item: CaItem;
   number: number;
   lang: Lang;
-  open: boolean;
   reviewed: boolean;
-  onToggle: () => void;
-  onNext?: () => void;
+  onOpen: () => void;
   selected: boolean;
   onSelect: (on: boolean) => void;
-  above?: CaItem;
-  below?: CaItem;
   onChanged: () => void;
   ref?: React.Ref<HTMLElement>;
 };
 
-const UNDO_MS = 5000;
-
+// A story in the day's list: its headline, state and summary. Tapping it
+// opens the story editor.
 function StoryCard({
   item,
   number,
   lang,
-  open,
   reviewed,
-  onToggle,
-  onNext,
+  onOpen,
   selected,
   onSelect,
-  above,
-  below,
   onChanged,
   ref,
 }: CardProps) {
   const updateFn = useServerFn(updateCaItem);
   const enrichFn = useServerFn(enrichCaItem);
-  const redoFn = useServerFn(redoCaVisual);
-  const checkFn = useServerFn(setCaFactChecked);
-  const deletePointFn = useServerFn(deleteCaPoint);
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [showFacts, setShowFacts] = useState(false);
-  const [reading, setReading] = useState(false);
-  const [history, setHistory] = useState(false);
   const c = item.content;
   const dropped = item.status === "dropped";
   const unverified = item.facts.filter((f) => !f.verified).length;
-  const inVisual = new Set([
-    ...(c?.visual ? (c.visual_covers ?? []) : []),
-    ...(c?.visual2 ? (c.visual2_covers ?? []) : []),
-  ]);
+  const headHi = c?.headline.hi || item.headline;
+  const headEn = c?.headline.en || "";
+  const summary = c
+    ? lang === "en"
+      ? c.summary.en || c.summary.hi
+      : c.summary.hi || c.summary.en
+    : "";
 
-  useEffect(() => {
-    if (!open) setEditing(false);
-  }, [open]);
-
-  async function act(fn: () => Promise<unknown>, ok?: string) {
+  async function toggleDrop() {
     setBusy(true);
     try {
-      await fn();
-      if (ok) toast.success(ok);
+      await updateFn({ data: { id: item.id, status: dropped ? "included" : "dropped" } });
+      // Stories that arrived dropped were never written.
+      if (dropped && item.needs_enrich) await enrichFn({ data: { id: item.id } });
+      toast.success(dropped ? "Back in the issue" : "Dropped from the issue");
       onChanged();
     } catch (e) {
       toast.error(errorText(e, "Failed"));
@@ -406,117 +359,24 @@ function StoryCard({
       setBusy(false);
     }
   }
-  // Saves one changed part of the text.
-  const save = async (patch: Partial<CaContent>) => {
-    if (!c) return;
-    await updateFn({ data: { id: item.id, content: { ...c, ...patch } } });
-    onChanged();
-  };
-  const swap = (other?: CaItem) =>
-    other &&
-    act(async () => {
-      await updateFn({ data: { id: item.id, position: other.position } });
-      await updateFn({
-        data: {
-          id: other.id,
-          position: item.position === other.position ? item.position + 1 : item.position,
-        },
-      });
-    });
-
-  // A deleted key point is hidden at once and removed (with its fact) after a
-  // few seconds, unless undone. Pending deletes are sent if the card goes away.
-  const [hidden, setHidden] = useState<Set<string>>(new Set());
-  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
-  const latest = useRef({ deletePointFn, id: item.id, onChanged, redoFn });
-  latest.current = { deletePointFn, id: item.id, onChanged, redoFn };
-  const commitDelete = async (text: string) => {
-    clearTimeout(timers.current.get(text));
-    timers.current.delete(text);
-    const { deletePointFn: del, id, onChanged: changed, redoFn: redo } = latest.current;
-    try {
-      const r = await del({ data: { id, text } });
-      changed();
-      if (r.visualShowsIt) {
-        toast("The visual still shows the deleted point", {
-          duration: 10_000,
-          action: {
-            label: "Redo visual",
-            onClick: () => void redo({ data: { id } }).then(changed, () => undefined),
-          },
-        });
-      }
-    } catch (e) {
-      setHidden((cur) => {
-        const next = new Set(cur);
-        next.delete(text);
-        return next;
-      });
-      toast.error(errorText(e, "Couldn't delete the point"));
-    }
-  };
-  const deletePoint = (text: string) => {
-    setHidden((cur) => new Set(cur).add(text));
-    timers.current.set(
-      text,
-      setTimeout(() => void commitDelete(text), UNDO_MS),
-    );
-    toast("Key point deleted", {
-      duration: UNDO_MS,
-      action: {
-        label: "Undo",
-        onClick: () => {
-          clearTimeout(timers.current.get(text));
-          timers.current.delete(text);
-          setHidden((cur) => {
-            const next = new Set(cur);
-            next.delete(text);
-            return next;
-          });
-        },
-      },
-    });
-  };
-  useEffect(() => {
-    const flush = () => {
-      for (const text of [...timers.current.keys()]) void commitDelete(text);
-    };
-    window.addEventListener("pagehide", flush);
-    return () => {
-      window.removeEventListener("pagehide", flush);
-      flush();
-    };
-  }, []);
-  // Forget hidden points once the server copy no longer has them.
-  useEffect(() => {
-    setHidden((cur) => {
-      const live = new Set(item.facts.map((f) => f.text));
-      const next = new Set([...cur].filter((t) => live.has(t) && timers.current.has(t)));
-      return next.size === cur.size ? cur : next;
-    });
-  }, [item.facts]);
-
-  const headHi = c?.headline.hi || item.headline;
-  const headEn = c?.headline.en || "";
 
   return (
     <article
       ref={ref}
-      className={`scroll-mt-32 overflow-hidden rounded-2xl border bg-card transition-shadow lg:scroll-mt-20 ${selected ? "border-primary ring-1 ring-primary/30" : "border-border"} ${open ? "shadow-sm" : ""} ${dropped ? "opacity-60" : ""}`}
+      className={`scroll-mt-32 overflow-hidden rounded-2xl border bg-card lg:scroll-mt-20 ${selected ? "border-primary ring-1 ring-primary/30" : "border-border"} ${dropped ? "opacity-60" : ""}`}
     >
-      {/* Collapsed header: tap to open or close. */}
       <div
         role="button"
         tabIndex={0}
-        aria-expanded={open}
-        onClick={onToggle}
+        aria-label={`Open story ${number}`}
+        onClick={onOpen}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            onToggle();
+            onOpen();
           }
         }}
-        className="flex cursor-pointer items-start gap-3 p-3 sm:p-4"
+        className="flex cursor-pointer items-start gap-3 p-3 hover:bg-muted/30 sm:p-4"
       >
         <span onClick={(e) => e.stopPropagation()} className="pt-1">
           <Checkbox
@@ -546,8 +406,15 @@ function StoryCard({
               {headEn}
             </div>
           )}
+          {summary && (
+            <p
+              lang={lang === "en" ? "en" : "hi"}
+              className="mt-1 line-clamp-2 text-sm text-muted-foreground"
+            >
+              {summary}
+            </p>
+          )}
           <div className="mt-1.5 flex flex-wrap items-center gap-1">
-            <Badge>{categoryLabel(item.category).en}</Badge>
             <Badge title="Exam importance">
               {"★".repeat(item.importance)}
               {"☆".repeat(3 - item.importance)}
@@ -565,6 +432,11 @@ function StoryCard({
                   </Badge>
                 ),
             )}
+            {(c?.images?.length ?? 0) > 0 && (
+              <Badge>
+                <ImageIcon className="h-3 w-3" /> {c!.images!.length}
+              </Badge>
+            )}
             {item.related_item_id && <Badge tone="primary">Follow-up</Badge>}
             {dropped && <Badge tone="bad">Dropped</Badge>}
             {item.enrich_error && <Badge tone="bad">Writing failed</Badge>}
@@ -573,473 +445,30 @@ function StoryCard({
             )}
           </div>
         </div>
-        <ChevronDown
-          className={`mt-1 h-5 w-5 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
-        />
-      </div>
-
-      {open && (
-        <div className="space-y-4 border-t border-border p-3 text-[15px] leading-relaxed sm:p-4 sm:text-sm">
-          {/* Section, importance and notes */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Select
-              value={item.category}
-              onValueChange={(v) => act(() => updateFn({ data: { id: item.id, category: v } }))}
-            >
-              <SelectTrigger className="h-8 w-auto gap-1 rounded-full px-3 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CATEGORIES.map((cat) => (
-                  <SelectItem key={cat.id} value={cat.id}>
-                    {cat.en}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                act(() =>
-                  updateFn({ data: { id: item.id, importance: (item.importance % 3) + 1 } }),
-                )
-              }
-              className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground"
-              title="Exam importance (tap to change)"
-            >
-              {"★".repeat(item.importance)}
-              {"☆".repeat(3 - item.importance)}
-            </button>
-            {item.rajasthan && <Badge tone="warn">Rajasthan</Badge>}
-            {item.unit && <Badge>{unitLabel(item.unit)}</Badge>}
-            {c?.background || c?.statics?.length ? (
-              <Badge tone={item.context_sources.length ? "good" : "muted"}>
-                {STATIC_CONNECT.en}:{" "}
-                {item.context_sources.map((s) => s.title).join(", ") ||
-                  "SAATHI's own knowledge (no book)"}
-              </Badge>
+        <div
+          className="flex shrink-0 flex-col items-end gap-1"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Button size="sm" variant="outline" className="h-8" onClick={onOpen}>
+            <Pencil className="mr-1 h-3.5 w-3.5" /> Open
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs"
+            disabled={busy}
+            onClick={() => void toggleDrop()}
+          >
+            {dropped ? (
+              "Include"
             ) : (
-              c && <Badge>No {STATIC_CONNECT.en}</Badge>
+              <>
+                <XCircle className="mr-1 h-3.5 w-3.5" /> Drop
+              </>
             )}
-            {item.enrich_error && (
-              <span className="w-full text-xs text-destructive">{item.enrich_error}</span>
-            )}
-            {(item.needs_enrich || !c) && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8"
-                disabled={busy}
-                onClick={() => act(() => enrichFn({ data: { id: item.id } }))}
-              >
-                <RefreshCw className="mr-1 h-3.5 w-3.5" /> Write text
-              </Button>
-            )}
-          </div>
-
-          {c ? (
-            <>
-              {editing && (
-                <Part title="Headline · शीर्षक">
-                  <BiLine
-                    value={c.headline}
-                    lang={lang}
-                    editing
-                    strong
-                    onSave={(v) => save({ headline: v })}
-                  />
-                </Part>
-              )}
-
-              <BiLine
-                value={c.summary}
-                lang={lang}
-                editing={editing}
-                onSave={(v) => save({ summary: v })}
-              />
-
-              <StoryImages
-                itemId={item.id}
-                content={c}
-                lang={lang}
-                editing={editing}
-                onSave={save}
-              />
-
-              <StoryVisuals item={item} content={c} busy={busy} onSave={save} />
-
-              <Part title="Key points · मुख्य बिंदु">
-                <ul className="space-y-2">
-                  {c.points.map((p, i) => {
-                    const factText = item.facts[i]?.text ?? "";
-                    if (hidden.has(factText)) return null;
-                    return (
-                      <li key={`${i}-${factText}`} className="flex gap-2">
-                        <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-                        <div className="min-w-0 flex-1">
-                          <BiLine
-                            value={p}
-                            lang={lang}
-                            editing={editing}
-                            faded={inVisual.has(i)}
-                            onSave={(v) =>
-                              save({ points: c.points.map((x, j) => (j === i ? v : x)) })
-                            }
-                            onDelete={
-                              item.facts[i] ? () => deletePoint(item.facts[i].text) : undefined
-                            }
-                          />
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </Part>
-
-              {(c.why.en || c.why.hi || editing) && (
-                <Part title="Exam Angle" tone="why">
-                  <BiLine
-                    value={c.why}
-                    lang={lang}
-                    editing={editing}
-                    onSave={(v) => save({ why: v })}
-                  />
-                </Part>
-              )}
-
-              {c.quick && (
-                <Part title="Quick revision question · त्वरित प्रश्न">
-                  <BiLine
-                    value={c.quick.q}
-                    lang={lang}
-                    editing={editing}
-                    onSave={(v) => save({ quick: { ...c.quick!, q: v } })}
-                    onDelete={() => act(() => save({ quick: null }), "Question removed")}
-                  />
-                  <div className="mt-1 flex gap-2">
-                    <span className="mt-0.5 shrink-0 text-sm font-semibold text-primary">→</span>
-                    <div className="min-w-0 flex-1">
-                      <BiLine
-                        value={c.quick.a}
-                        lang={lang}
-                        editing={editing}
-                        strong
-                        onSave={(v) => save({ quick: { ...c.quick!, a: v } })}
-                      />
-                    </div>
-                  </div>
-                </Part>
-              )}
-
-              <StaticConnect
-                item={item}
-                content={c}
-                lang={lang}
-                editing={editing}
-                busy={busy}
-                save={save}
-                act={act}
-              />
-
-              {c.dyk && c.dyk.length > 0 && (
-                <Part title="Fact Bite" tone="dyk">
-                  <ul className="space-y-2">
-                    {c.dyk.map((d, i) => (
-                      <li key={d.url + i} className="flex items-start gap-2">
-                        <div className="min-w-0 flex-1">
-                          <BiLine value={d} lang={lang} />
-                          {d.url ? (
-                            <a
-                              href={d.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-xs text-primary hover:underline"
-                              title={`“${d.quote}”`}
-                            >
-                              {d.site}
-                            </a>
-                          ) : (
-                            <span className="text-xs text-muted-foreground" title={`“${d.quote}”`}>
-                              {d.site}
-                            </span>
-                          )}
-                        </div>
-                        <IconButton
-                          label="Remove this fact"
-                          disabled={busy}
-                          onClick={() => act(() => save({ dyk: c.dyk!.filter((_, j) => j !== i) }))}
-                        >
-                          <X className="h-4 w-4" />
-                        </IconButton>
-                      </li>
-                    ))}
-                  </ul>
-                </Part>
-              )}
-
-              {c.mcq && (
-                <Part title="Practice MCQ · अभ्यास प्रश्न">
-                  <div className="space-y-2">
-                    <BiLine
-                      value={c.mcq.question}
-                      lang={lang}
-                      editing={editing}
-                      preLine
-                      onSave={(v) => save({ mcq: { ...c.mcq!, question: v } })}
-                    />
-                    <ol className="space-y-1.5">
-                      {c.mcq.options.map((o, i) => {
-                        const right = c.mcq!.answer === i;
-                        return (
-                          <li
-                            key={i}
-                            className={`flex items-start gap-2 rounded-lg px-2 py-1 ${right ? "bg-emerald-500/10" : ""}`}
-                          >
-                            <span
-                              className={`mt-0.5 font-semibold ${right ? "text-emerald-700 dark:text-emerald-400" : "text-primary"}`}
-                            >
-                              ({"abcd"[i]})
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <BiLine
-                                value={o}
-                                lang={lang}
-                                editing={editing}
-                                onSave={(v) =>
-                                  save({
-                                    mcq: {
-                                      ...c.mcq!,
-                                      options: c.mcq!.options.map((x, j) => (j === i ? v : x)),
-                                    },
-                                  })
-                                }
-                              />
-                            </div>
-                            {right ? (
-                              <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-emerald-600" />
-                            ) : (
-                              editing && (
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-7 shrink-0 px-2 text-xs"
-                                  disabled={busy}
-                                  onClick={() =>
-                                    act(
-                                      () => save({ mcq: { ...c.mcq!, answer: i } }),
-                                      "Answer changed",
-                                    )
-                                  }
-                                >
-                                  Mark correct
-                                </Button>
-                              )
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ol>
-                    <div className="rounded-lg bg-muted/50 p-2 text-sm">
-                      <span className="text-xs font-semibold text-muted-foreground">
-                        Explanation · व्याख्या
-                      </span>
-                      <BiLine
-                        value={c.mcq.explanation}
-                        lang={lang}
-                        editing={editing}
-                        onSave={(v) => save({ mcq: { ...c.mcq!, explanation: v } })}
-                      />
-                    </div>
-                    {editing && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-destructive hover:text-destructive"
-                        disabled={busy}
-                        onClick={() => {
-                          if (confirm("Remove this MCQ from the story?"))
-                            void act(() => save({ mcq: null }), "MCQ removed");
-                        }}
-                      >
-                        <Trash2 className="mr-1 h-4 w-4" /> Remove MCQ
-                      </Button>
-                    )}
-                  </div>
-                </Part>
-              )}
-
-              {c.mains && (
-                <Part title="Mains question · मुख्य परीक्षा प्रश्न">
-                  <BiLine
-                    value={c.mains}
-                    lang={lang}
-                    editing={editing}
-                    onSave={(v) => save({ mains: v })}
-                    onDelete={() => act(() => save({ mains: null }), "Mains question removed")}
-                  />
-                </Part>
-              )}
-            </>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              This story hasn't been written yet. Press “Write text”.
-            </p>
-          )}
-
-          {/* Facts and the source quotes behind them */}
-          <div>
-            <button
-              type="button"
-              onClick={() => setShowFacts((v) => !v)}
-              className="inline-flex items-center gap-1 text-xs font-medium text-primary"
-            >
-              <ChevronRight
-                className={`h-3.5 w-3.5 transition-transform ${showFacts ? "rotate-90" : ""}`}
-              />
-              Facts and source quotes ({item.facts.length})
-              {unverified > 0 && <span className="text-amber-600"> · {unverified} to check</span>}
-            </button>
-            {item.source_ids.length > 0 && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="ml-2 h-7 px-2 text-xs"
-                onClick={() => setReading(true)}
-              >
-                <BookOpen className="mr-1 h-3.5 w-3.5" /> Read full article
-              </Button>
-            )}
-            <SourceReader
-              item={item}
-              open={reading}
-              onOpenChange={setReading}
-              onChanged={onChanged}
-            />
-            {showFacts && (
-              <ul className="mt-2 space-y-1.5 text-xs">
-                {item.facts.map((f, i) => (
-                  <li
-                    key={i}
-                    className={`rounded-lg border p-2 ${f.verified ? "border-border" : "border-amber-500/50 bg-amber-500/5"}`}
-                  >
-                    <div className="flex items-start gap-1.5">
-                      {f.verified ? (
-                        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                      ) : (
-                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
-                      )}
-                      <span>
-                        {f.text}
-                        {f.corrected && <Badge tone="primary">corrected</Badge>}
-                      </span>
-                    </div>
-                    <div className="mt-1 pl-5 italic text-muted-foreground">“{f.quote}”</div>
-                    {!f.verified && (
-                      <div className="flex flex-wrap items-center gap-2 pl-5 text-amber-700 dark:text-amber-400">
-                        <span className="min-w-0 flex-1">
-                          Marked to check: the quote wasn't found word-for-word in the source, or
-                          you marked it with the pink pen. Check the fact, then mark it checked.
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 px-2 text-xs"
-                          disabled={busy}
-                          onClick={() =>
-                            act(
-                              () => checkFn({ data: { id: item.id, text: f.text, checked: true } }),
-                              "Marked checked",
-                            )
-                          }
-                        >
-                          <Check className="mr-1 h-3.5 w-3.5" /> Mark checked
-                        </Button>
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          {/* Actions, in thumb reach at the end of the story */}
-          <div className="-mx-3 -mb-3 flex flex-wrap items-center gap-1.5 border-t border-border bg-muted/30 p-2 sm:-mx-4 sm:-mb-4 sm:px-4">
-            {c && (
-              <Button
-                size="sm"
-                variant={editing ? "default" : "outline"}
-                onClick={() => setEditing((v) => !v)}
-              >
-                {editing ? (
-                  <>
-                    <Check className="mr-1 h-4 w-4" /> Done editing
-                  </>
-                ) : (
-                  <>
-                    <Pencil className="mr-1 h-4 w-4" /> Edit
-                  </>
-                )}
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={busy}
-              onClick={() =>
-                act(
-                  async () => {
-                    await updateFn({
-                      data: { id: item.id, status: dropped ? "included" : "dropped" },
-                    });
-                    // Stories that arrived dropped were never written.
-                    if (dropped && item.needs_enrich) await enrichFn({ data: { id: item.id } });
-                  },
-                  dropped ? "Back in the issue" : "Dropped from the issue",
-                )
-              }
-            >
-              {dropped ? (
-                "Include"
-              ) : (
-                <>
-                  <XCircle className="mr-1 h-4 w-4" /> Drop
-                </>
-              )}
-            </Button>
-            <StoryMaterial item={item} onChanged={onChanged} />
-            {c && (
-              <Button size="sm" variant="ghost" onClick={() => setHistory(true)}>
-                <History className="mr-1 h-4 w-4" /> History
-              </Button>
-            )}
-            <StoryHistory
-              item={item}
-              lang={lang}
-              open={history}
-              onOpenChange={setHistory}
-              onChanged={onChanged}
-            />
-            <IconButton label="Move up" disabled={busy || !above} onClick={() => swap(above)}>
-              <ArrowUp className="h-4 w-4" />
-            </IconButton>
-            <IconButton label="Move down" disabled={busy || !below} onClick={() => swap(below)}>
-              <ArrowDown className="h-4 w-4" />
-            </IconButton>
-            <div className="ml-auto">
-              {onNext ? (
-                <Button size="sm" onClick={onNext}>
-                  Next story <ChevronRight className="ml-0.5 h-4 w-4" />
-                </Button>
-              ) : (
-                <Button size="sm" variant="ghost" onClick={onToggle}>
-                  Close
-                </Button>
-              )}
-            </div>
-          </div>
+          </Button>
         </div>
-      )}
+      </div>
     </article>
   );
 }
@@ -1057,7 +486,7 @@ const keywordLabel = (k: Bi, lang: Lang) =>
 // Static Context: textbook facts on the concepts the news links to. Each fact
 // can be edited or removed; more are written for keywords the admin picks
 // from SAATHI's suggestions or types in.
-function StaticConnect({
+export function StaticConnect({
   item,
   content: c,
   lang,
@@ -1257,7 +686,7 @@ function StaticConnect({
   );
 }
 
-function IconButton({
+export function IconButton({
   label,
   children,
   onClick,
@@ -1292,7 +721,7 @@ const PART_TONES = {
   dyk: "rounded-xl border border-dashed border-sky-400/50 bg-sky-500/5 p-2.5",
 };
 
-function Part({
+export function Part({
   title,
   tone = "plain",
   children,
@@ -1382,8 +811,8 @@ export function BiLine({
   }
 
   const cls = `${strong ? "font-semibold" : ""} ${preLine ? "whitespace-pre-line" : ""}`;
-  const hi = value.hi.trim();
-  const en = value.en.trim();
+  const hi = (value.hi ?? "").trim();
+  const en = (value.en ?? "").trim();
   const same = hi === en;
   const text =
     lang === "hi" ? (
