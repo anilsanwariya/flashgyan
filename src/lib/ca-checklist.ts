@@ -4,6 +4,7 @@
 import { CATEGORIES } from "@/lib/current-affairs";
 import { rajasthanBalance } from "@/lib/ca-report";
 import type { StyleStatus } from "@/lib/ca-style";
+import type { LangStatus } from "@/lib/ca-bilingual";
 import { TRIAGE } from "../../supabase/functions/_shared/ca-triage.ts";
 import { STYLE_TG } from "../../supabase/functions/_shared/ca-style-check.ts";
 
@@ -13,7 +14,8 @@ export type CheckAction =
   | { kind: "skipped" }
   | { kind: "corrections" }
   | { kind: "facts" }
-  | { kind: "style" };
+  | { kind: "style" }
+  | { kind: "lang" };
 
 // "todo": should be done before scheduling; "note": worth a look; "done".
 export type Check = {
@@ -51,6 +53,8 @@ export function dayChecklist(o: {
   target: number;
   // The house style check (null: no rules, or not known).
   style?: StyleStatus | null;
+  // Hindi and English saying the same (null: nothing written, or not known).
+  lang?: LangStatus | null;
 }): Check[] {
   const order = new Map<string, number>(CATEGORIES.map((c, i) => [c.id, i]));
   // In the order the review list shows them.
@@ -140,6 +144,35 @@ export function dayChecklist(o: {
                 action: { kind: "style", label: "Check" },
               }
             : { key: "style", state: "done", text: "Stories follow your house style" },
+    );
+  }
+
+  const lang = o.lang;
+  if (lang) {
+    const stories = new Set(lang.open.map((n) => n.item_id)).size;
+    out.push(
+      lang.open.length
+        ? {
+            key: "lang",
+            state: "todo",
+            text: `${plural(lang.open.length, "Hindi–English mismatch", "Hindi–English mismatches")} in ${plural(stories, "story", "stories")}`,
+            action: { kind: "lang", label: "Show" },
+          }
+        : !lang.checked
+          ? {
+              key: "lang",
+              state: "note",
+              text: "Names not compared in Hindi and English yet",
+              action: { kind: "lang", label: "Check" },
+            }
+          : lang.unchecked.length
+            ? {
+                key: "lang",
+                state: "note",
+                text: `${plural(lang.unchecked.length, "story", "stories")} changed since names were compared`,
+                action: { kind: "lang", label: "Check" },
+              }
+            : { key: "lang", state: "done", text: "Hindi and English match" },
     );
   }
 
@@ -242,6 +275,14 @@ export function draftButtons(checks: Check[], date: string, origin?: string): Tg
   const rows: TgButton[][] = [];
   if (!todo.length)
     rows.push([{ text: "✅ Approve & schedule", callback_data: `${APPROVE_DATA}${date}` }]);
+  if (origin && todo.some((c) => c.key === "lang")) {
+    rows.push([
+      {
+        text: "🔤 Hindi–English",
+        url: `${origin}/admin?section=ca.daily&date=${date}&open=lang`,
+      },
+    ]);
+  }
   // House style notes in the bot, one at a time: apply the fix or keep it.
   if (todo.some((c) => c.key === "style")) {
     rows.push([{ text: "✍️ Fix house style", callback_data: `${STYLE_TG}s:${date}` }]);

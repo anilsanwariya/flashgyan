@@ -32,6 +32,7 @@ import {
   getCaDay,
   getCaSkippedSummary,
   getCaStyleCheck,
+  getCaLangCheck,
   getCaMonth,
   sendCaWeeklyReport,
   getMagazineSettings,
@@ -58,9 +59,11 @@ import { SkippedNews } from "@/components/ca-skipped-news";
 import { DayChecklist } from "@/components/ca-day-checklist";
 import { FactCheckDialog } from "@/components/ca-fact-check";
 import { StyleCheckDialog } from "@/components/ca-style-check";
+import { LangCheckDialog } from "@/components/ca-lang-check";
 import { HouseStyle } from "@/components/ca-house-style";
 import { dayChecklist, type CheckAction } from "@/lib/ca-checklist";
 import { styleStatus } from "@/lib/ca-style";
+import { langStatus } from "@/lib/ca-bilingual";
 import { FeatureBox } from "@/components/ca-feature-box";
 import { Badge, BulkBar, errorText, useChosen } from "@/components/ca-ui";
 import { FileDropZone, FileQueueList, useFileQueue } from "@/components/saathi-file-queue";
@@ -404,6 +407,7 @@ function DailyPanel() {
   const [skippedSignal, setSkippedSignal] = useState(0);
   const [factsOpen, setFactsOpen] = useState(false);
   const [styleOpen, setStyleOpen] = useState(false);
+  const [langOpen, setLangOpen] = useState(false);
   // A link from the Telegram message: the day, and fact-check mode or the
   // house style check.
   useEffect(() => {
@@ -412,6 +416,7 @@ function DailyPanel() {
     if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) setDate(d);
     if (p.get("open") === "facts") setFactsOpen(true);
     if (p.get("open") === "style") setStyleOpen(true);
+    if (p.get("open") === "lang") setLangOpen(true);
   }, []);
   // Until the skipped news list is opened, its last saved counts (kept up to
   // date by the evening collection's ranking).
@@ -428,6 +433,12 @@ function DailyPanel() {
     queryKey: ["caDay", date, "styleCheck"],
     queryFn: () => styleFn({ data: { date } }),
     enabled: styleRules.length > 0,
+  });
+  // SAATHI's last comparison of names in Hindi and English.
+  const langFn = useServerFn(getCaLangCheck);
+  const langQ = useQuery({
+    queryKey: ["caDay", date, "langCheck"],
+    queryFn: () => langFn({ data: { date } }),
   });
 
   const addFn = useServerFn(addCaSource);
@@ -586,6 +597,7 @@ function DailyPanel() {
         : null;
   const dayCorrections = (day?.corrections ?? []).filter((c) => c.item_date === date).length;
   const style = styleStatus(styleQ.data ?? null, items, styleRules);
+  const lang = langQ.isSuccess ? langStatus(langQ.data ?? null, items) : null;
   const checks = dayChecklist({
     items,
     reviewed,
@@ -599,6 +611,7 @@ function DailyPanel() {
     minRajasthan: daySettingsQ.data?.min_rajasthan ?? DEFAULT_MIN_RAJASTHAN,
     target: daySettingsQ.data?.daily_stories ?? 0,
     style: styleQ.isSuccess ? style : null,
+    lang,
   });
   const issueDone =
     day?.issue?.status === "posted" || day?.issue?.status === "posting" || !included.length;
@@ -608,6 +621,7 @@ function DailyPanel() {
     else if (a.kind === "write") void retryAll();
     else if (a.kind === "facts") setFactsOpen(true);
     else if (a.kind === "style") setStyleOpen(true);
+    else if (a.kind === "lang") setLangOpen(true);
     else document.getElementById("ca-corrections")?.scrollIntoView({ behavior: "smooth" });
   }
 
@@ -664,6 +678,16 @@ function DailyPanel() {
         status={style}
         checkedAt={styleQ.data?.at ?? null}
         rules={styleRules.length}
+        items={included}
+        onChanged={refresh}
+        onOpenStory={(id) => setStoryJump({ id, n: Date.now() })}
+      />
+      <LangCheckDialog
+        date={date}
+        open={langOpen}
+        onOpenChange={setLangOpen}
+        status={lang}
+        checkedAt={langQ.data?.at || null}
         items={included}
         onChanged={refresh}
         onOpenStory={(id) => setStoryJump({ id, n: Date.now() })}

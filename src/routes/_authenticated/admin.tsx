@@ -94,16 +94,18 @@ export const Route = createFileRoute("/_authenticated/admin")({
   ] }),
   // The open section lives in the URL (?section=bot.commands), so refresh,
   // links and the Back button keep your place. Links from Telegram can also
-  // name the day (?date=2026-10-20) and what to open on it (?open=facts or
-  // ?open=style).
+  // name the day (?date=2026-10-20) and what to open on it (?open=facts,
+  // ?open=style or ?open=lang).
   validateSearch: (
     search: Record<string, unknown>,
-  ): { section?: AdminSectionId; date?: string; open?: "facts" | "style" } => ({
+  ): { section?: AdminSectionId; date?: string; open?: "facts" | "style" | "lang" } => ({
     ...(isAdminSection(search.section) ? { section: search.section } : {}),
     ...(typeof search.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(search.date)
       ? { date: search.date }
       : {}),
-    ...(search.open === "facts" || search.open === "style" ? { open: search.open } : {}),
+    ...(search.open === "facts" || search.open === "style" || search.open === "lang"
+      ? { open: search.open }
+      : {}),
   }),
   component: Admin,
 });

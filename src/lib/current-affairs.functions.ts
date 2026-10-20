@@ -244,6 +244,34 @@ export const dismissCaStyleBreak = createServerFn({ method: "POST" })
     return (await server()).dismissStyleBreak(data.date, data.id);
   });
 
+// Hindi and English saying the same: SAATHI's last names check, running it
+// (the stories not compared as they are), and "It's fine" on a note.
+export const getCaLangCheck = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ date: dateSchema }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).getLangCheck(data.date);
+  });
+
+export const runCaLangCheck = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ date: dateSchema }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).checkLanguages(data.date);
+  });
+
+export const dismissCaLangNote = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ date: dateSchema, id: z.string().regex(/^[0-9a-f]{8}$/) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).dismissLangNote(data.date, data.id);
+  });
+
 // One tiny request to each AI service, to see which one is failing and why.
 export const checkAiServices = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
