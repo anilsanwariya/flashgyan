@@ -1330,6 +1330,40 @@ export async function findDidYouKnow(
   return [...found, ...web].slice(0, 3);
 }
 
+// More Fact Bite entries for the editor to choose from: related earlier
+// stories of the magazine and pages of the trusted sites (searched for the
+// editor's words, when given), leaving out what the box already has. Nothing
+// is saved; the editor picks.
+export async function suggestFactBites(itemId: string, search?: string): Promise<DykFact[]> {
+  const item = await loadItem(itemId);
+  const { trusted_domains } = await getMagazineSettings();
+  const headline = item.content?.headline.en || item.headline;
+  const { data } = await from("ca_items").select("embedding").eq("id", itemId).single();
+  const raw = (data as { embedding: string | number[] | null } | null)?.embedding;
+  const embedding = typeof raw === "string" ? (JSON.parse(raw) as number[]) : raw;
+  const [archive, web] = await Promise.all([
+    embedding && !search?.trim()
+      ? relatedFromArchive(item, embedding, headline).catch((e) => {
+          console.error("fact bite (archive):", e);
+          return [];
+        })
+      : Promise.resolve([]),
+    relatedFromWeb(
+      search?.trim() ? { facts: item.facts, concept: search.trim() } : item,
+      headline,
+      trusted_domains,
+    ),
+  ]);
+  const have = (item.content?.dyk ?? []).map((d) => normalizeForMatch(d.en || d.hi));
+  const seen = new Set(have);
+  return [...archive, ...web].filter((d) => {
+    const k = normalizeForMatch(d.en || d.hi);
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 async function relatedFromArchive(
   item: Pick<CaItem, "id" | "issue_date" | "facts">,
   embedding: number[],

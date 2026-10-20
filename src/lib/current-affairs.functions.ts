@@ -505,6 +505,17 @@ export const updateCaItem = createServerFn({ method: "POST" })
     return patch.content ? s.asEdit(id, save) : save();
   });
 
+// More Fact Bite entries to choose from (nothing saved).
+export const suggestCaFactBites = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), search: z.string().trim().max(200).optional() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).suggestFactBites(data.id, data.search);
+  });
+
 // ---------- Material the editor adds to a story ----------
 
 const materialTarget = z.enum(["facts", "static", "context"]);
