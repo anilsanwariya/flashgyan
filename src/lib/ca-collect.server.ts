@@ -7,6 +7,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { saathiComplete, saathiErrorDetail } from "../../supabase/functions/_shared/saathi-core.ts";
 import {
   collectionDue,
+  decodeEntities,
   editorialLinks,
   editorialTriageMessages,
   extractLinks,
@@ -621,6 +622,43 @@ async function triage(run: CaRun, sites: WatchSite[]): Promise<number> {
 }
 
 // ---------- 3) Fetching articles ----------
+
+// One page's text, for material the editor adds to a story: a PDF is parsed,
+// a web page read (Tavily first, then the page itself). Null when nothing
+// readable came back.
+export async function readPage(url: string): Promise<{ title: string; text: string } | null> {
+  const res = await fetch(url, {
+    headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,application/pdf,*/*" },
+    redirect: "follow",
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`The page answered ${res.status}`);
+  const type = res.headers.get("content-type") ?? "";
+  const name = decodeURIComponent(new URL(res.url || url).pathname.split("/").pop() ?? "");
+  if (/application\/pdf/i.test(type) || /\.pdf$/i.test(name)) {
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const { parsePdfBytes } = await import("@/lib/saathi-pdf.server");
+    const { markdown } = await parsePdfBytes(bytes, {
+      filename: name || "material.pdf",
+      medium: "Bilingual",
+    });
+    return markdown.trim() ? { title: name.replace(/\.pdf$/i, "") || "PDF", text: markdown } : null;
+  }
+  const html = (await res.text()).slice(0, 3_000_000);
+  const title =
+    decodeEntities(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] ?? "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 300) || new URL(url).hostname;
+  let text = "";
+  try {
+    text = (await tavilyExtract([url])).get(url) ?? "";
+  } catch (e) {
+    console.error("tavily extract:", e);
+  }
+  if (!usableText(text)) text = readableText(html);
+  return text.trim().length >= 200 ? { title, text } : null;
+}
 
 async function tavilyExtract(urls: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();

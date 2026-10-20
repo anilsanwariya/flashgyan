@@ -502,6 +502,86 @@ export const updateCaItem = createServerFn({ method: "POST" })
     return patch.content ? s.asEdit(id, save) : save();
   });
 
+// ---------- Material the editor adds to a story ----------
+
+const materialTarget = z.enum(["facts", "static", "context"]);
+
+// Reads a link, a file's text or an image and returns what SAATHI found in
+// it for the story (nothing in the story changes yet).
+export const readCaMaterial = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        target: materialTarget,
+        note: z.string().trim().max(500).optional(),
+        url: z
+          .string()
+          .trim()
+          .max(2000)
+          .regex(/^https?:\/\/\S+$/, "Use a link starting with http:// or https://")
+          .optional(),
+        text: z
+          .object({
+            title: z.string().trim().min(1).max(300),
+            content: z.string().trim().min(20, "Add a few sentences at least").max(600_000),
+          })
+          .optional(),
+        image: z
+          .object({
+            name: z.string().trim().min(1).max(300),
+            contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+            base64: z.string().min(1).max(7_000_000),
+          })
+          .optional(),
+      })
+      .refine(
+        (o) => [o.url, o.text, o.image].filter(Boolean).length === 1,
+        "Add one link, file or text",
+      )
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    const { id, ...input } = data;
+    return (await server()).readMaterial(id, input);
+  });
+
+const bi2 = z.object({ en: z.string().max(400), hi: z.string().max(400) });
+
+// What the editor picked goes into the story.
+export const applyCaMaterial = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        source_id: z.string().uuid(),
+        target: materialTarget,
+        note: z.string().trim().max(500).optional(),
+        facts: z
+          .array(z.object({ text: z.string().trim().min(1).max(300), quote: z.string().max(600) }))
+          .max(8),
+        statics: z.array(z.object({ keyword: bi2, text: bi2, quote: z.string().max(600) })).max(4),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<CaItem> => {
+    await assertAdmin(context.userId);
+    const { id, ...input } = data;
+    return (await server()).applyMaterial(id, input);
+  });
+
+// The material wasn't used: its source is removed.
+export const discardCaMaterial = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ source_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).discardMaterial(data.source_id);
+  });
+
 // One image for a story, resized in the browser; the editor's next save adds
 // it to the story.
 export const uploadCaImage = createServerFn({ method: "POST" })

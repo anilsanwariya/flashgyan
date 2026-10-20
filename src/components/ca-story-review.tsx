@@ -48,6 +48,7 @@ import { SourceReader } from "@/components/ca-source-reader";
 import { StoryHistory } from "@/components/ca-story-history";
 import { StoryImages } from "@/components/ca-story-images";
 import { StoryVisuals } from "@/components/ca-story-visuals";
+import { StoryMaterial } from "@/components/ca-story-material";
 import { useQuery } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { VISUAL_LABELS } from "@/lib/ca-visuals";
@@ -1006,6 +1007,7 @@ function StoryCard({
                 </>
               )}
             </Button>
+            <StoryMaterial item={item} onChanged={onChanged} />
             {c && (
               <Button size="sm" variant="ghost" onClick={() => setHistory(true)}>
                 <History className="mr-1 h-4 w-4" /> History

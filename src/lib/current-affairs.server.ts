@@ -29,9 +29,20 @@ import {
   saathiEmbed,
   saathiEmbedMany,
   saathiSearchQuery,
+  type SaathiImage,
   type SaathiRpc,
   saathiErrorDetail,
 } from "../../supabase/functions/_shared/saathi-core.ts";
+import {
+  imageTextMessages,
+  materialMessages,
+  materialName,
+  parseMaterial,
+  type MaterialFact,
+  type MaterialFind,
+  type MaterialStatic,
+  type MaterialTarget,
+} from "@/lib/ca-material";
 import {
   DEFAULT_MAGAZINE_SETTINGS,
   applyChanges,
@@ -71,6 +82,7 @@ import {
   staticSources,
   type StaticFact,
   normalizeForMatch,
+  quoteInSource,
   removePoint,
   shiftChanges,
   splitSource,
@@ -88,6 +100,7 @@ import {
 import {
   VISUAL_LABELS,
   parseVisual,
+  unverifiedNumbers,
   visualMessages,
   type Visual,
   type VisualType,
@@ -880,8 +893,13 @@ export async function enrichItem(
         context_facts: context,
         dyk,
         ...look,
-        // The editor's images survive rewriting the story.
+        // The editor's images survive rewriting the story, and so does a
+        // second visual whose numbers are all still in the facts (its facts
+        // print as points again, as their order may have changed).
         ...(item.content?.images?.length ? { images: item.content.images } : {}),
+        ...(item.content?.visual2 && !unverifiedNumbers(item.content.visual2, item.facts).length
+          ? { visual2: item.content.visual2, visual2_covers: [] }
+          : {}),
       },
       context_sources: staticSources(statics),
       syllabus_topic_id: syllabusId,
@@ -1117,6 +1135,171 @@ export async function redoVisual(itemId: string): Promise<CaItem> {
     throw new Error("SAATHI couldn't make a visual from these facts that passed the number check.");
   }
   return updateItem(itemId, { content: { ...item.content, ...look } });
+}
+
+// ---------- Material the editor adds to a story ----------
+
+// Reads the material (a page, typed or file text, or an image), keeps it
+// as one of the day's sources (so its facts have a source and a quote), and
+// asks SAATHI what the story lacks from it, for the place the editor chose.
+// Nothing in the story changes until the editor picks what goes in.
+export async function readMaterial(
+  itemId: string,
+  input: {
+    target: MaterialTarget;
+    note?: string | null;
+    url?: string;
+    text?: { title: string; content: string };
+    image?: { name: string; contentType: SaathiImage["media_type"]; base64: string };
+  },
+): Promise<{ source_id: string; title: string } & MaterialFind & { dropped: number }> {
+  const item = await loadItem(itemId);
+  let title: string;
+  let content: string;
+  let url: string | null = null;
+  if (input.url) {
+    const { readPage } = await import("@/lib/ca-collect.server");
+    const page = await readPage(input.url);
+    if (!page)
+      throw new Error(
+        "Couldn't read this page (it may be blocked or behind a login). Copy its text and paste it instead.",
+      );
+    ({ title, text: content } = page);
+    url = input.url;
+  } else if (input.image) {
+    content = (
+      await saathiComplete(apiKey(), imageTextMessages(), undefined, [
+        { media_type: input.image.contentType, data: input.image.base64 },
+      ])
+    ).trim();
+    if (content.length < 20) throw new Error("No readable text in this image.");
+    title = input.image.name;
+  } else if (input.text) {
+    ({ title, content } = input.text);
+  } else throw new Error("Add a link, a file or some text.");
+  const name = materialName({ url, fileName: input.image?.name ?? input.text?.title });
+  const source = await addSource({
+    issue_date: item.issue_date,
+    section: "other",
+    source_name: name,
+    title: title.slice(0, 300) || name,
+    content: content.slice(0, 600_000),
+    url,
+  });
+  // Already read: it isn't split into stories of its own.
+  fail(
+    (
+      await from("ca_sources")
+        .update({ chunks_done: source.chunks, status: "done" } as never)
+        .eq("id", source.id)
+    ).error,
+  );
+  const c = item.content;
+  const known =
+    input.target === "static"
+      ? (c?.statics ?? []).map((f) => f.keyword.en)
+      : [...item.facts, ...(c?.context_facts ?? [])].map((f) => f.text);
+  const raw = await saathiComplete(
+    apiKey(),
+    materialMessages({
+      headline: c?.headline.en || item.headline,
+      facts: item.facts.map((f) => f.text),
+      material: content,
+      title: source.title,
+      target: input.target,
+      note: input.note,
+    }),
+  );
+  return {
+    source_id: source.id,
+    title: source.title,
+    ...parseMaterial(raw, content, input.target, known),
+  };
+}
+
+// The material wasn't used: its source goes, unless a story already uses it.
+export async function discardMaterial(sourceId: string) {
+  const { data } = await from("ca_items").select("id").contains("source_ids", [sourceId]).limit(1);
+  if ((data ?? []).length) return { deleted: false };
+  fail((await from("ca_sources").delete().eq("id", sourceId)).error);
+  return { deleted: true };
+}
+
+// What the editor picked from the material goes into the story: new facts or
+// background, with the story written again around them, or Static Context
+// entries added as they are.
+export async function applyMaterial(
+  itemId: string,
+  input: {
+    source_id: string;
+    target: MaterialTarget;
+    facts: MaterialFact[];
+    statics: MaterialStatic[];
+    note?: string | null;
+  },
+): Promise<CaItem> {
+  const item = await loadItem(itemId);
+  const { data: src, error } = await from("ca_sources")
+    .select("id,title,content")
+    .eq("id", input.source_id)
+    .single();
+  fail(error);
+  const source = src as unknown as { id: string; title: string; content: string };
+  const c = item.content;
+  if (!c) throw new Error("Write the story first.");
+  if (input.target === "static") {
+    const add = input.statics
+      .filter((s) => quoteInSource(s.quote, source.content))
+      .map((s) => ({ keyword: s.keyword, text: s.text, source: source.title }));
+    if (!add.length) throw new Error("Pick at least one entry.");
+    const statics = mergeStatics(c.statics ?? [], add);
+    // The story uses the material (so it isn't listed as skipped news).
+    fail(
+      (
+        await from("ca_items")
+          .update({ source_ids: [...new Set([...item.source_ids, source.id])] } as never)
+          .eq("id", itemId)
+      ).error,
+    );
+    return asEdit(itemId, () =>
+      updateItem(itemId, {
+        content: {
+          ...c,
+          statics,
+          keywords: mergeKeywords(c.keywords ?? [], statics),
+          statics_edited: true,
+        },
+      }),
+    );
+  }
+  const have = new Set(
+    [...item.facts, ...(c.context_facts ?? [])].map((f) => normalizeForMatch(f.quote)),
+  );
+  const picked: CaFact[] = input.facts
+    .filter((f) => quoteInSource(f.quote, source.content))
+    .filter((f) => !have.has(normalizeForMatch(f.quote)))
+    .map((f) => ({ text: f.text, quote: f.quote, source_id: source.id, verified: true }));
+  if (!picked.length) throw new Error("Pick at least one fact.");
+  const before = snapshotOf(item);
+  const facts = input.target === "facts" ? [...item.facts, ...picked] : item.facts;
+  const context = input.target === "context" ? [...(c.context_facts ?? []), ...picked] : undefined;
+  fail(
+    (
+      await from("ca_items")
+        .update({
+          facts,
+          source_ids: [...new Set([...item.source_ids, source.id])],
+          updated_at: new Date().toISOString(),
+        } as never)
+        .eq("id", itemId)
+    ).error,
+  );
+  return enrichItem(itemId, {
+    ...(context ? { context } : {}),
+    note: input.note,
+    before,
+    reason: "rewrite",
+  });
 }
 
 // ---------- "Fact Bite" from trusted websites ----------
