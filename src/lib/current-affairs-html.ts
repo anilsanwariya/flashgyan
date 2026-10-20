@@ -26,7 +26,14 @@ export type MagazineItem = {
   source_names: string[];
 };
 
-export type MagazineCorrection = { date: string; summary: Bi };
+// A correction approved this month: the story's day and headline, what
+// changed, and the values before and after.
+export type MagazineCorrection = {
+  date: string;
+  summary: Bi;
+  headline?: Bi;
+  changes?: { from: Bi; to: Bi }[];
+};
 
 const esc = (s: string | null | undefined) =>
   String(s ?? "")
@@ -209,7 +216,14 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .answers td { padding: 1.5mm 2.5mm; border: 1px solid #e5e7eb; font-size: 9pt; vertical-align: top; }
 .answers .kn, .answers .ka { width: 9mm; text-align: center; font-weight: 600; }
 .answers .en { color: #475569; }
-.corrections li { margin-bottom: 2mm; }
+.corrections { list-style: none; margin: 0; padding: 0; }
+.corrections li { margin-bottom: 3.5mm; padding-bottom: 3mm; border-bottom: 1px dashed #e5e7eb; break-inside: avoid; }
+.corrections .c-date { font-size: 8.5pt; font-weight: 600; color: ${accent}; text-transform: uppercase; letter-spacing: .04em; }
+.corrections .c-head { font-weight: 700; margin: .5mm 0 1mm; }
+.corrections .en { color: #475569; }
+.corrections .c-change { margin-top: 1mm; font-size: 9.5pt; }
+.corrections .c-change s { color: #94a3b8; }
+.corrections-intro { color: #475569; font-size: 9.5pt; margin: 0 0 4mm; }
 .icon { width: 1.15em; height: 1.15em; vertical-align: -0.2em; flex: none; }
 .section-title h2 { display: flex; align-items: center; gap: 2.5mm; }
 .toc-row span { display: inline-flex; align-items: center; gap: 2mm; }
@@ -415,13 +429,29 @@ export function renderMagazine(opts: {
     })
     .join("");
 
-  const corrections = opts.corrections?.length
-    ? `<section class="section"><div class="section-title"><h2>Updates &amp; corrections</h2><span>This month</span></div><ul class="corrections">${opts.corrections
+  // The month's corrections, on a page of their own: the facts that changed
+  // after a day's issue was posted (this issue already prints them corrected).
+  const fixes = opts.corrections ?? [];
+  const change = (c: NonNullable<MagazineCorrection["changes"]>[number]) =>
+    [
+      c.from.hi && c.to.hi
+        ? `<div class="c-change" lang="hi"><s>${esc(c.from.hi)}</s> → <b>${esc(c.to.hi)}</b></div>`
+        : "",
+      c.from.en || c.to.en
+        ? `<div class="c-change en"><s>${esc(c.from.en)}</s> → <b>${esc(c.to.en)}</b></div>`
+        : "",
+    ].join("");
+  const corrections = fixes.length
+    ? `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>✏️ सुधार · Corrections</h2><span>${fixes.length} this month</span></div><p class="corrections-intro"><span lang="hi">ये तथ्य दैनिक अंक प्रकाशित होने के बाद बदले। इस अंक की खबरों में सही तथ्य दिए गए हैं।</span><br/>These facts changed after the day's issue was posted. The stories in this issue already show them corrected.</p><ol class="corrections">${fixes
         .map(
           (c) =>
-            `<li><b>${esc(formatDate(c.date, "en"))}:</b> <span lang="hi">${esc(c.summary.hi)}</span><br/><span class="en">${esc(c.summary.en)}</span></li>`,
+            `<li><div class="c-date">${esc(formatDate(c.date, "hi"))} · ${esc(formatDate(c.date, "en"))}</div>${
+              c.headline && (c.headline.hi || c.headline.en)
+                ? `<div class="c-head"><span lang="hi">${esc(c.headline.hi || c.headline.en)}</span>${c.headline.hi && c.headline.en ? ` <span class="en">· ${esc(c.headline.en)}</span>` : ""}</div>`
+                : ""
+            }<div lang="hi">${esc(c.summary.hi)}</div><div class="en">${esc(c.summary.en)}</div>${(c.changes ?? []).map(change).join("")}</li>`,
         )
-        .join("")}</ul></section>`
+        .join("")}</ol></section>`
     : "";
 
   return `<!doctype html>
@@ -452,7 +482,7 @@ ${watermark}
   <div class="cover-body">
     ${highlights ? `<h3 class="cover-h">In this issue</h3><div class="hl-grid">${highlights}</div>` : ""}
     <h3 class="cover-h">Contents</h3>
-    <div class="toc">${toc}${opts.feature ? `<div class="toc-row"><span>${icon("background")} Background: ${esc(opts.feature.title.en)}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} 60-Second Revision</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} Practice Questions</span><b>${questions}</b></div>` : ""}</div>
+    <div class="toc">${toc}${fixes.length ? `<div class="toc-row"><span>✏️ Corrections</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} Background: ${esc(opts.feature.title.en)}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} 60-Second Revision</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} Practice Questions</span><b>${questions}</b></div>` : ""}</div>
     ${
       channel
         ? `<div class="cta"><div><b>Get it every morning on Telegram</b><span>Daily current affairs for RAS, bilingual, free.</span></div><div class="cta-handle">${esc(channel)}</div></div>`

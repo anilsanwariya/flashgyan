@@ -98,12 +98,21 @@ import { bestArticle, cosine, meaningText, type CompareMatch } from "@/lib/ca-co
 import { ADD_POINTS_MAX, STORY_POINTS_MAX, parsePoints, pointsMessages } from "@/lib/ca-points";
 import { dayChecklist, type Check } from "@/lib/ca-checklist";
 import {
+  STYLE_CHECK_STORIES,
   STYLE_MIN_EDITS,
   STYLE_RULES_MAX,
   editPairs,
+  parseStyleBreaks,
   parseStyleRules,
+  partText,
+  rulesFingerprint,
+  storyFingerprint,
+  styleCheckMessages,
   styleMessages,
+  styleStatus,
+  withPart,
   type EditPair,
+  type StyleCheck,
   type StyleSuggestion,
 } from "@/lib/ca-style";
 import {
@@ -1232,6 +1241,7 @@ export async function listCorrections(
         ...c,
         item_date: it?.issue_date ?? "",
         headline: it?.content?.headline.en || it?.headline || "",
+        headline_bi: it?.content?.headline ?? { en: it?.headline ?? "", hi: "" },
       };
     })
     .filter((c) => c.item_date >= fromDate && c.item_date <= toDate);
@@ -1630,10 +1640,11 @@ export async function rankSkipped(date: string): Promise<{ ranked: number; left:
 // The day's checklist as the server sees it (what was opened in the review
 // list is only known in the browser), for the "draft ready" message.
 export async function dayChecks(date: string): Promise<Check[]> {
-  const [day, settings, counts] = await Promise.all([
+  const [day, settings, counts, style] = await Promise.all([
     getDay(date),
     getMagazineSettings(),
     skippedSummary(date),
+    getStyleCheck(date),
   ]);
   return dayChecklist({
     items: day.items,
@@ -1643,6 +1654,7 @@ export async function dayChecks(date: string): Promise<Check[]> {
     skipped: counts,
     minRajasthan: settings.min_rajasthan,
     target: settings.daily_stories,
+    style: styleStatus(style, day.items, settings.style_rules),
   });
 }
 
@@ -2266,6 +2278,138 @@ export async function saveStyleRules(rules: string[]): Promise<string[]> {
   return (await saveMagazineSettings({ style_rules: clean })).style_rules;
 }
 
+// ---------- House style check before scheduling ----------
+
+const styleCheckKey = (date: string) => `ca_style_check:${date}`;
+
+export async function getStyleCheck(date: string): Promise<StyleCheck | null> {
+  const { data } = await from("bot_settings")
+    .select("value")
+    .eq("key", styleCheckKey(date))
+    .maybeSingle();
+  return (data as { value: StyleCheck } | null)?.value ?? null;
+}
+
+async function saveStyleCheck(date: string, value: StyleCheck) {
+  fail(
+    (
+      await from("bot_settings").upsert({
+        key: styleCheckKey(date),
+        value,
+        updated_at: new Date().toISOString(),
+      } as never)
+    ).error,
+  );
+}
+
+// Checks the day's written stories against the house style rules (one AI
+// call): the stories not yet checked as they are now, or all of them when the
+// rules changed. Notes on stories that weren't checked again are kept.
+export async function checkStyle(
+  date: string,
+): Promise<{ check: StyleCheck; checked: number; found: number; left: number }> {
+  const { style_rules: rules } = await getMagazineSettings();
+  if (!rules.length) throw new Error("Add your house style rules in Magazine settings first.");
+  const { data, error } = await from("ca_items")
+    .select("id,category,position,content")
+    .eq("issue_date", date)
+    .eq("status", "included");
+  fail(error);
+  const order = new Map<string, number>(CATEGORIES.map((c, i) => [c.id, i]));
+  const items = (
+    (data ?? []) as unknown as Pick<CaItem, "id" | "category" | "position" | "content">[]
+  )
+    .filter((i): i is typeof i & { content: CaContent } => !!i.content)
+    .sort(
+      (a, b) =>
+        (order.get(normalizeCategory(a.category)) ?? 99) -
+          (order.get(normalizeCategory(b.category)) ?? 99) || a.position - b.position,
+    );
+  const saved = await getStyleCheck(date);
+  const key = rulesFingerprint(rules);
+  const same = saved?.rules === key ? saved : null;
+  const todo = items.filter((i) => same?.stories[i.id] !== storyFingerprint(i.content));
+  const batch = todo.slice(0, STYLE_CHECK_STORIES);
+  const found = batch.length
+    ? parseStyleBreaks(
+        await saathiComplete(apiKey(), styleCheckMessages(rules, batch)),
+        rules,
+        batch,
+      )
+    : [];
+  if (!found) throw new Error("The AI's reply could not be read. Try again.");
+  const live = new Set(items.map((i) => i.id));
+  const done = new Set(batch.map((i) => i.id));
+  const value: StyleCheck = {
+    at: new Date().toISOString(),
+    rules: key,
+    stories: {
+      ...Object.fromEntries(Object.entries(same?.stories ?? {}).filter(([id]) => live.has(id))),
+      ...Object.fromEntries(batch.map((i) => [i.id, storyFingerprint(i.content)])),
+    },
+    breaks: [
+      ...(same?.breaks ?? []).filter((b) => live.has(b.item_id) && !done.has(b.item_id)),
+      ...found,
+    ],
+    dismissed: (saved?.dismissed ?? []).slice(-200),
+  };
+  await saveStyleCheck(date, value);
+  const waved = new Set(value.dismissed);
+  return {
+    check: value,
+    checked: batch.length,
+    found: found.filter((b) => !waved.has(b.id)).length,
+    left: todo.length - batch.length,
+  };
+}
+
+// Puts the AI's suggested text in place of the part that breaks a rule, kept
+// in the story's History like the editor's own edits.
+export async function applyStyleFix(date: string, breakId: string): Promise<CaItem> {
+  const saved = await getStyleCheck(date);
+  const b = saved?.breaks.find((x) => x.id === breakId);
+  if (!saved || !b) throw new Error("That house style note is no longer there. Check again.");
+  const item = await loadItem(b.item_id);
+  await assertDayEditable([item.issue_date]);
+  const content = item.content;
+  if (!content || partText(content, b.part, b.lang) !== b.text) {
+    throw new Error("That part of the story has changed since the check. Check again.");
+  }
+  const wasChecked = saved.stories[item.id] === storyFingerprint(content);
+  const updated = await asEdit(item.id, () =>
+    updateItem(item.id, { content: withPart(content, b.part, b.lang, b.fix) }),
+  );
+  // The fix is the only change, so the story stays checked, unless another
+  // note was on the same text: the new text needs checking again.
+  const dismissed = new Set(saved.dismissed);
+  const sameText = saved.breaks.filter(
+    (x) => x.item_id === b.item_id && x.part === b.part && x.lang === b.lang,
+  );
+  const stories = { ...saved.stories };
+  if (wasChecked && updated.content) {
+    if (sameText.some((x) => x.id !== b.id && !dismissed.has(x.id))) delete stories[item.id];
+    else stories[item.id] = storyFingerprint(updated.content);
+  }
+  await saveStyleCheck(date, {
+    ...saved,
+    stories,
+    breaks: saved.breaks.filter((x) => !sameText.includes(x)),
+  });
+  return updated;
+}
+
+// "It's fine": the note stays out of the list (and out of later checks that
+// find the same thing in the same text).
+export async function dismissStyleBreak(date: string, breakId: string): Promise<StyleCheck> {
+  const saved = await getStyleCheck(date);
+  if (!saved?.breaks.some((b) => b.id === breakId)) {
+    throw new Error("That house style note is no longer there.");
+  }
+  const next = { ...saved, dismissed: uniq([...saved.dismissed, breakId]).slice(-200) };
+  await saveStyleCheck(date, next);
+  return next;
+}
+
 // ---------- Fact-check mode ----------
 
 // A fact marked "to check", with its printed point and what its source says.
@@ -2546,10 +2690,19 @@ export async function issueHtml(kind: "daily" | "monthly", period: string) {
   const items = await magazineItems(range.from, range.to);
   let corrections: MagazineCorrection[] = [];
   if (kind === "monthly") {
-    corrections = (await listCorrections(range.from, range.to, "approved")).map((c) => ({
-      date: c.item_date,
-      summary: { en: c.summary_en, hi: c.summary_hi },
-    }));
+    corrections = (await listCorrections(range.from, range.to, "approved"))
+      .sort((a, b) => a.item_date.localeCompare(b.item_date))
+      .map((c) => ({
+        date: c.item_date,
+        headline: c.headline_bi,
+        summary: { en: c.summary_en, hi: c.summary_hi },
+        changes: c.changes
+          .filter((ch) => ch.old_value || ch.new_value)
+          .map((ch) => ({
+            from: { en: ch.old_value, hi: ch.old_value_hi },
+            to: { en: ch.new_value, hi: ch.new_value_hi },
+          })),
+      }));
   }
   const feature = kind === "monthly" ? await getFeature(range.from) : null;
   return {
