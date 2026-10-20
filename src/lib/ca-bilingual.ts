@@ -446,41 +446,23 @@ export function langStatus(
 
 export const langPartLabel = (n: LangNote) => langPartName(n.part);
 
-// ---------- SAATHI writing the other language ----------
+// ---------- Keeping both languages in step ----------
 
-// One line into the other language, in the magazine's style, for the editor
-// to check before saving.
-export function translateMessages(o: {
-  part: string;
-  text: string;
-  to: "en" | "hi";
-  headline: string;
-}): ChatMessage[] {
-  const to = o.to === "hi" ? "Hindi" : "English";
-  return [
-    {
-      role: "system",
-      content: `Translate this line of a bilingual current affairs magazine for RAS exam aspirants into ${to}. Keep every fact, number, date and official name; add nothing. ${
-        o.to === "hi"
-          ? "Write natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी), with the same numbers (in digits) and official names."
-          : "Write plain, exam-style English with the same numbers and official names."
-      } Keep its form: a headline stays a short headline, a point a short phrase, a question a question.
-Reply with the ${to} line only.`,
-    },
-    {
-      role: "user",
-      content: `Story: ${o.headline}\nPart: ${langPartName(o.part)}\nLine: ${o.text}`,
-    },
-  ];
-}
-
-// The translation as one clean line; null when there is none.
-export function parseTranslation(raw: string): string | null {
-  const line = raw
-    .replace(/^```\w*\s*|\s*```$/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^["“]|["”]$/g, "")
-    .slice(0, 500);
-  return line.length >= 2 ? line : null;
+// The lines to write again in the other language after an edit: the parts
+// where the editor changed one language and left the other as it was (a new
+// part written in one language too). Parts changed in both are the editor's.
+export function syncLines(
+  before: CaContent | null,
+  after: CaContent,
+): { part: string; to: "en" | "hi"; text: string }[] {
+  const was = new Map((before ? bilingualParts(before) : []).map((p) => [p.part, p]));
+  const out: { part: string; to: "en" | "hi"; text: string }[] = [];
+  for (const p of bilingualParts(after)) {
+    const o = was.get(p.part) ?? { en: "", hi: "" };
+    const en = p.en !== o.en;
+    const hi = p.hi !== o.hi;
+    if (en && !hi && p.en) out.push({ part: p.part, to: "hi", text: p.en });
+    else if (hi && !en && p.hi) out.push({ part: p.part, to: "en", text: p.hi });
+  }
+  return out;
 }

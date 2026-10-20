@@ -141,7 +141,7 @@ export function LangCheckDialog({
     }
     setBusy(n.id);
     try {
-      await saveFn({ data: { id: n.item_id, content } });
+      await saveFn({ data: { id: n.item_id, content, sync: false } });
       // The part's text changed, so every note on it goes.
       setHandled((cur) => {
         const next = new Set(cur);

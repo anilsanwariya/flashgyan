@@ -139,6 +139,7 @@ export const saveMagazineSettings = createServerFn({ method: "POST" })
     z
       .object({
         channel: z.string().trim().max(100),
+        channel_hi: z.string().trim().max(100).default(""),
         post_time: z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/, "Use HH:MM"),
         title_en: z.string().trim().min(1).max(80),
         title_hi: z.string().trim().min(1).max(80),
@@ -409,17 +410,28 @@ export const updateCaItem = createServerFn({ method: "POST" })
         position: z.number().int().min(0).max(100_000).optional(),
         importance: z.number().int().min(1).max(3).optional(),
         content: contentSchema.optional(),
+        // Off for the Hindi–English check's own edits, which already set both.
+        sync: z.boolean().optional(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }): Promise<CaItem> => {
     await assertAdmin(context.userId);
-    const { id, ...patch } = data;
+    const { id, sync, ...patch } = data;
     if (patch.content && patch.content.visual !== undefined) {
       const { cleanVisual } = await import("@/lib/ca-visuals");
       patch.content.visual = cleanVisual(patch.content.visual).visual;
     }
     const s = await server();
+    // Where the editor changed one language, the other is written to match.
+    if (patch.content && sync !== false) {
+      const item = await s.getItem(id);
+      patch.content = (await s.syncLanguages(
+        item.content,
+        patch.content as CaItem["content"] & object,
+        item.content?.headline.en || item.headline,
+      )) as typeof patch.content;
+    }
     const save = () =>
       s.updateItem(id, patch as Parameters<Awaited<ReturnType<typeof server>>["updateItem"]>[1]);
     // Text edits are kept in the story's history; moving or dropping isn't.
@@ -766,10 +778,14 @@ export const decideCaCorrection = createServerFn({ method: "POST" })
 
 export const previewCaIssue = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ kind: kindSchema, period: dateSchema }).parse(d))
+  .inputValidator((d: unknown) =>
+    z
+      .object({ kind: kindSchema, period: dateSchema, lang: z.enum(["en", "hi"]).default("en") })
+      .parse(d),
+  )
   .handler(async ({ data, context }): Promise<{ html: string; count: number }> => {
     await assertAdmin(context.userId);
-    const { html, count } = await (await server()).issueHtml(data.kind, data.period);
+    const { html, count } = await (await server()).issueHtml(data.kind, data.period, data.lang);
     return { html, count };
   });
 
