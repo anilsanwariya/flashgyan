@@ -67,7 +67,9 @@ const factSchema = z.object({
   slot: z.string().max(80).optional(),
   note: z.string().max(200).optional(),
 });
-const contentSchema = z.object({
+// Exported for tests: every story the server writes must pass it, or the
+// editor's next save is refused.
+export const contentSchema = z.object({
   headline: bi,
   summary: bi,
   points: z.array(bi).max(20),
@@ -92,7 +94,8 @@ const contentSchema = z.object({
   dyk: z
     .array(
       bi.extend({
-        url: z.string().url().max(2000),
+        // Empty for a development from the magazine's own earlier issues.
+        url: z.union([z.literal(""), z.string().url().max(2000)]),
         site: z.string().max(200),
         quote: z.string().max(1000),
       }),
