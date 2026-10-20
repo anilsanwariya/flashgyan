@@ -399,6 +399,13 @@ function DailyPanel() {
   const [storyJump, setStoryJump] = useState<{ id: string; n: number } | null>(null);
   const [skippedSignal, setSkippedSignal] = useState(0);
   const [factsOpen, setFactsOpen] = useState(false);
+  // A link from the Telegram message: the day, and fact-check mode.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const d = p.get("date");
+    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) setDate(d);
+    if (p.get("open") === "facts") setFactsOpen(true);
+  }, []);
   // Until the skipped news list is opened, its last saved counts (kept up to
   // date by the evening collection's ranking).
   const skippedSummaryFn = useServerFn(getCaSkippedSummary);

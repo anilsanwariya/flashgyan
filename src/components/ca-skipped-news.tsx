@@ -7,7 +7,12 @@ import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { BookOpen, ChevronDown, EyeOff, Newspaper, RefreshCw, Sparkles } from "lucide-react";
-import { getCaSkipped, rankCaSkipped, type SkippedArticle } from "@/lib/current-affairs.functions";
+import {
+  getCaSkipped,
+  rankCaSkipped,
+  setCaSkippedHidden,
+  type SkippedArticle,
+} from "@/lib/current-affairs.functions";
 import { SourceReader } from "@/components/ca-source-reader";
 import { Badge, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
@@ -21,19 +26,15 @@ const SCORES = [
 ] as const;
 const rowKey = (a: SkippedArticle) => `${a.source_id}:${a.at}`;
 
-function readHidden(date: string): Set<string> {
+// "Not needed" used to be kept on the device; those marks move to the
+// server (where every device sees them) the first time the list loads.
+function takeDeviceHidden(date: string): string[] {
   try {
-    return new Set(JSON.parse(localStorage.getItem(hiddenKey(date)) ?? "[]") as string[]);
+    const keys = JSON.parse(localStorage.getItem(hiddenKey(date)) ?? "[]") as string[];
+    localStorage.removeItem(hiddenKey(date));
+    return keys;
   } catch {
-    return new Set();
-  }
-}
-function writeHidden(date: string, hidden: Set<string>) {
-  try {
-    if (hidden.size) localStorage.setItem(hiddenKey(date), JSON.stringify([...hidden]));
-    else localStorage.removeItem(hiddenKey(date));
-  } catch {
-    // storage unavailable
+    return [];
   }
 }
 
@@ -55,6 +56,7 @@ export function SkippedNews({
 }) {
   const skippedFn = useServerFn(getCaSkipped);
   const rankFn = useServerFn(rankCaSkipped);
+  const hideFn = useServerFn(setCaSkippedHidden);
   const [open, setOpen] = useState(false);
   const [ranking, setRanking] = useState(false);
   // Most exam-worthy first, or in the order of the papers.
@@ -74,9 +76,21 @@ export function SkippedNews({
   const [readerOpen, setReaderOpen] = useState(false);
   const boxRef = useRef<HTMLElement>(null);
   useEffect(() => {
-    setHidden(readHidden(date));
     setOpen(false);
   }, [date]);
+  // "Not needed" as the server has it (every device), plus marks moved from
+  // this device.
+  useEffect(() => {
+    if (!q.data) return;
+    const server = q.data.articles.filter((a) => a.hidden).map(rowKey);
+    const listed = new Set(q.data.articles.map(rowKey));
+    const moved = takeDeviceHidden(date).filter((k) => listed.has(k) && !server.includes(k));
+    setHidden(new Set([...server, ...moved]));
+    if (moved.length) {
+      void hideFn({ data: { date, keys: moved, hidden: true } }).catch(() => undefined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q.data]);
   useEffect(() => {
     if (!openSignal) return;
     setOpen(true);
@@ -100,8 +114,10 @@ export function SkippedNews({
   const rajasthan = articles.filter((a) => a.rajasthan).length;
   const hiddenHere = articles.filter((a) => hidden.has(rowKey(a))).length;
   const ranked = articles.filter((a) => a.rank).length;
-  const worth = articles.filter((a) => (a.rank?.score ?? 0) >= 2).length;
-  const unranked = articles.length - ranked;
+  const visible = articles.filter((a) => !hidden.has(rowKey(a)));
+  const worth = visible.filter((a) => (a.rank?.score ?? 0) >= 2).length;
+  // Articles marked "not needed" are not ranked.
+  const unranked = visible.filter((a) => !a.rank).length;
   const shown = useMemo(() => {
     const list = articles.filter(
       (a) =>
@@ -129,14 +145,23 @@ export function SkippedNews({
       setRanking(false);
     }
   }
-  const toggleHidden = (a: SkippedArticle) =>
-    setHidden((cur) => {
-      const next = new Set(cur);
-      if (next.has(rowKey(a))) next.delete(rowKey(a));
-      else next.add(rowKey(a));
-      writeHidden(date, next);
-      return next;
+  // Shown at once; saved for every device.
+  function toggleHidden(a: SkippedArticle) {
+    const key = rowKey(a);
+    const hide = !hidden.has(key);
+    const flip = (on: boolean) =>
+      setHidden((cur) => {
+        const next = new Set(cur);
+        if (on) next.add(key);
+        else next.delete(key);
+        return next;
+      });
+    flip(hide);
+    hideFn({ data: { date, keys: [key], hidden: hide } }).catch((e) => {
+      flip(!hide);
+      toast.error(errorText(e, "Couldn't save"));
     });
+  }
 
   if (!sourceCount) return null;
   const count = q.data ? articles.length - hiddenHere : null;

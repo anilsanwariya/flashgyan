@@ -196,3 +196,23 @@ export function checklistText(checks: Check[], skip: string[] = []): string {
     ? `\n\nStill to do:\n${todo.map((c) => `• ${c.text}`).join("\n")}`
     : "\n\n✅ Nothing left to check.";
 }
+
+// Buttons under the "draft ready" message: links to what is left, or, when
+// nothing is, approving the issue from Telegram.
+export const APPROVE_DATA = "ca_ok:";
+export type TgButton = { text: string; url?: string; callback_data?: string };
+
+export function draftButtons(checks: Check[], date: string, origin?: string): TgButton[][] {
+  const todo = checks.filter((c) => c.state === "todo");
+  const rows: TgButton[][] = [];
+  if (!todo.length)
+    rows.push([{ text: "✅ Approve & schedule", callback_data: `${APPROVE_DATA}${date}` }]);
+  if (origin) {
+    const page = `${origin}/admin?section=ca.daily&date=${date}`;
+    if (todo.some((c) => c.key === "facts")) {
+      rows.push([{ text: "🔍 Check facts", url: `${page}&open=facts` }]);
+    }
+    rows.push([{ text: "📝 Open review", url: page }]);
+  }
+  return rows;
+}

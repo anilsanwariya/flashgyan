@@ -8,6 +8,7 @@ import {
   reportWeek,
   weeklyReportDue,
   weeklyReportText,
+  type Accuracy,
   type WeeklyStats,
 } from "@/lib/ca-report";
 import { getMagazineSettings } from "@/lib/current-affairs.server";
@@ -16,6 +17,7 @@ const from = (table: string) => supabaseAdmin.from(table as never);
 const STATE_KEY = "ca_weekly_report";
 
 type ItemRow = {
+  id: string;
   issue_date: string;
   category: string;
   rajasthan: boolean;
@@ -40,7 +42,7 @@ export async function weeklyStats(fromDate: string, toDate: string): Promise<Wee
     await Promise.all([
       from("ca_items")
         .select(
-          "issue_date,category,rajasthan,status,facts,source_ids,concept,headline,background:content->background,statics:content->statics,context_sources",
+          "id,issue_date,category,rajasthan,status,facts,source_ids,concept,headline,background:content->background,statics:content->statics,context_sources",
         )
         .gte("issue_date", fromDate)
         .lte("issue_date", toDate)
@@ -110,6 +112,90 @@ export async function weeklyStats(fromDate: string, toDate: string): Promise<Wee
     saathiDown,
     knowledgeGaps,
     quiz: await quizStats(fromDate, toDate),
+    accuracy: await accuracyStats(fromDate, toDate, kept, news.length),
+  };
+}
+
+// How much fixing SAATHI's drafts needed, day by day: facts whose quote
+// wasn't in the source as written (still to check, or checked by hand),
+// stories edited or rewritten (from their history), corrections approved,
+// and skipped articles worth a story (the day's saved counts).
+async function accuracyStats(
+  fromDate: string,
+  toDate: string,
+  kept: ItemRow[],
+  stories: number,
+): Promise<Accuracy> {
+  const ids = kept.map((i) => i.id);
+  const dateOf = new Map(kept.map((i) => [i.id, i.issue_date]));
+  const edited = new Set<string>();
+  const rewritten = new Set<string>();
+  const corrected = new Map<string, number>();
+  for (let k = 0; k < ids.length; k += 200) {
+    const chunk = ids.slice(k, k + 200);
+    const [versions, corrections] = await Promise.all([
+      from("ca_item_versions").select("item_id,reason").in("item_id", chunk).limit(10_000),
+      from("ca_corrections")
+        .select("item_id")
+        .eq("status", "approved")
+        .in("item_id", chunk)
+        .limit(10_000),
+    ]);
+    // Story history may not be there yet (before its migration).
+    for (const v of (versions.data ?? []) as { item_id: string; reason: string }[]) {
+      if (v.reason === "edit") edited.add(v.item_id);
+      else if (v.reason === "rewrite" || v.reason === "write" || v.reason === "points")
+        rewritten.add(v.item_id);
+    }
+    for (const c of (corrections.data ?? []) as { item_id: string }[]) {
+      corrected.set(c.item_id, (corrected.get(c.item_id) ?? 0) + 1);
+    }
+  }
+  const dates: string[] = [];
+  for (let d = fromDate; d <= toDate;) {
+    dates.push(d);
+    const next = new Date(`${d}T00:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    d = next.toISOString().slice(0, 10);
+  }
+  const { data: saved } = await from("bot_settings")
+    .select("key,value")
+    .in(
+      "key",
+      dates.map((d) => `ca_skipped_rank:${d}`),
+    );
+  const worth = new Map(
+    ((saved ?? []) as { key: string; value: { counts?: { worth: number } } }[]).map((r) => [
+      r.key.slice("ca_skipped_rank:".length),
+      r.value.counts?.worth ?? 0,
+    ]),
+  );
+  const count = (d: string, ofItem: Set<string> | Map<string, number>) =>
+    [...ofItem.keys()].reduce(
+      (n, id) =>
+        dateOf.get(id) === d ? n + (ofItem instanceof Map ? (ofItem.get(id) ?? 0) : 1) : n,
+      0,
+    );
+  return {
+    stories,
+    days: dates
+      .map((d) => {
+        const day = kept.filter((i) => i.issue_date === d);
+        return {
+          date: d,
+          facts: day.reduce((n, i) => n + i.facts.length, 0),
+          misses: day.reduce(
+            (n, i) => n + i.facts.filter((f) => !f.verified || f.checked).length,
+            0,
+          ),
+          edited: count(d, edited),
+          rewritten: count(d, rewritten),
+          corrections: count(d, corrected),
+          skippedWorth: worth.get(d) ?? 0,
+        };
+      })
+      // Days without an issue (nothing collected) are left out.
+      .filter((d) => d.facts || d.skippedWorth),
   };
 }
 

@@ -60,6 +60,7 @@ const factSchema = z.object({
   quote: z.string().max(4000),
   source_id: z.string().uuid(),
   verified: z.boolean(),
+  checked: z.boolean().optional(),
   corrected: z.boolean().optional(),
   slot: z.string().max(80).optional(),
   note: z.string().max(200).optional(),
@@ -486,6 +487,23 @@ export const getCaSkippedSummary = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return (await server()).skippedSummary(data.date);
+  });
+
+// Marks skipped articles "not needed" (or needed again) on every device.
+export const setCaSkippedHidden = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        date: dateSchema,
+        keys: z.array(z.string().min(3).max(80)).min(1).max(500),
+        hidden: z.boolean(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).setSkippedHidden(data.date, data.keys, data.hidden);
   });
 
 // Ranks the day's skipped news by exam value (one AI call).

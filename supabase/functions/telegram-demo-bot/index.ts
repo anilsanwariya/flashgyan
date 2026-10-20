@@ -1260,6 +1260,49 @@ async function runMagazineTick() {
   }
 }
 
+// "Approve & schedule" under the magazine's "draft ready" message. Only the
+// magazine's admin chat (its test chat) may approve. The website makes the
+// PDF and schedules the issue on its next minute tick, and answers here.
+type InlineKeyboard = { inline_keyboard?: { text: string; url?: string; callback_data?: string }[][] };
+
+async function requestIssueApproval(
+  chat_id: number,
+  message_id: number,
+  date: string,
+  markup: InlineKeyboard | undefined,
+) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+  const { data: setting } = await supabase
+    .from("bot_settings")
+    .select("value")
+    .eq("key", "ca_magazine")
+    .maybeSingle();
+  const admin = String((setting?.value as { test_chat_id?: string } | null)?.test_chat_id ?? "").trim();
+  if (!admin || admin !== String(chat_id)) {
+    await tg("sendMessage", { chat_id, text: "Only the magazine's admin chat can approve an issue." });
+    return;
+  }
+  const { error } = await supabase.from("bot_settings").upsert({
+    key: `ca_approve:${date}`,
+    value: { chat_id, at: new Date().toISOString() },
+    updated_at: new Date().toISOString(),
+  });
+  if (error) {
+    console.error("ca approve", error.message);
+    await tg("sendMessage", { chat_id, text: "Couldn't record the approval. Approve it in the admin panel." });
+    return;
+  }
+  // The button goes, so it can't be tapped twice; the links stay.
+  const rows = (markup?.inline_keyboard ?? []).filter(
+    (row) => !row.some((b) => b.callback_data?.startsWith("ca_ok:")),
+  );
+  await tg("editMessageReplyMarkup", { chat_id, message_id, reply_markup: { inline_keyboard: rows } });
+  await tg("sendMessage", {
+    chat_id,
+    text: "⏳ Approving: the PDF is being made. I'll tell you here when the issue is scheduled (usually within two minutes).",
+  });
+}
+
 // ---------- Daily quiz with a streak ----------
 // Students who opt in get the latest issue's MCQs as quiz polls at the hour
 // they pick (India time). Finishing every quiz they are sent keeps the streak;
@@ -1754,6 +1797,8 @@ Deno.serve(async (req) => {
       } else if (data === "check_cancel") {
         await supabase.from("bot_check_sessions").delete().eq("chat_id", chat_id);
         await tg("sendMessage", { chat_id, text: "Answer check cancelled. Start again any time: /check" });
+      } else if (data.startsWith("ca_ok:")) {
+        await requestIssueApproval(chat_id, message_id, data.slice("ca_ok:".length), cq.message.reply_markup);
       } else if (data === "daily_menu") {
         await sendDailyMenu(chat_id);
       } else if (data.startsWith("daily_on_")) {

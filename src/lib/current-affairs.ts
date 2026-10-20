@@ -77,6 +77,9 @@ export type CaFact = {
   source_id: string;
   // The quote was found in the source text.
   verified: boolean;
+  // The editor checked it by hand: the AI's quote wasn't in the source as
+  // written (for the weekly report's accuracy count).
+  checked?: boolean;
   // Set when an approved correction replaced this fact.
   corrected?: boolean;
   // Which blueprint slot the fact fills (launch date, ministry, rank…);
