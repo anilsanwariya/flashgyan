@@ -126,7 +126,7 @@ export function StoryEditor({
 }) {
   const updateFn = useServerFn(updateCaItem);
   const enrichFn = useServerFn(enrichCaItem);
-  const [tab, setTab] = useState<TabId>("summary");
+  const [tab, setTab] = useState<TabId>("preview");
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState(false);
   const main = useRef<HTMLDivElement>(null);
@@ -185,6 +185,7 @@ export function StoryEditor({
     count?: number;
     warn?: boolean;
   }[] = [
+    { id: "preview", label: "Preview", icon: Eye },
     { id: "summary", label: "Summary", icon: FileText },
     {
       id: "points",
@@ -215,7 +216,6 @@ export function StoryEditor({
     },
     { id: "material", label: "Add material", icon: Paperclip },
     { id: "article", label: "Full article", icon: BookOpen },
-    { id: "preview", label: "Preview", icon: Eye },
   ];
 
   const ctx: Ctx | null = c ? { item, c, lang, busy, save, act, onChanged, goTo: setTab } : null;
@@ -434,62 +434,67 @@ export function StoryEditor({
             })}
           </nav>
 
-          <main ref={main} className="min-h-0 flex-1 overflow-y-auto">
-            <div className="mx-auto max-w-3xl space-y-4 p-3 text-[15px] leading-relaxed sm:p-5 sm:text-sm">
-              {!ctx ? (
-                <NotWritten item={item} busy={busy} act={act} />
-              ) : tab === "summary" ? (
-                <SummaryTab {...ctx} />
-              ) : tab === "points" ? (
-                <PointsTab key={item.id} {...ctx} />
-              ) : tab === "images" ? (
-                <Section
-                  title="Images"
-                  hint="Photos, maps or diagrams for this story. Crop, turn, caption and place each one."
-                >
-                  <StoryImages itemId={item.id} content={c!} lang={lang} editing onSave={save} />
-                </Section>
-              ) : tab === "visuals" ? (
-                <Section
-                  title="Visuals"
-                  hint="Up to two per story. Rebuild one as the type you pick, or edit its text and numbers."
-                >
-                  <StoryVisuals item={item} content={c!} busy={busy} onSave={save} />
-                </Section>
-              ) : tab === "static" ? (
-                <StaticConnect
-                  item={item}
-                  content={c!}
-                  lang={lang}
-                  editing
-                  busy={busy}
-                  save={save}
-                  act={act}
-                />
-              ) : tab === "factbite" ? (
-                <FactBiteTab key={item.id} {...ctx} />
-              ) : tab === "questions" ? (
-                <QuestionsTab {...ctx} />
-              ) : tab === "material" ? (
-                <Section
-                  title="Add material"
-                  hint="A link, PDF, Word or text file, a photo of a page, or your own text."
-                >
-                  <MaterialPanel
-                    key={item.id}
+          {ctx && tab === "article" ? (
+            // The reader and its toolbar fill the tab.
+            <main className="min-h-0 flex-1 overflow-hidden">
+              <ArticleTab {...ctx} />
+            </main>
+          ) : (
+            <main ref={main} className="min-h-0 flex-1 overflow-y-auto">
+              <div className="mx-auto max-w-3xl space-y-4 p-3 text-[15px] leading-relaxed sm:p-5 sm:text-sm">
+                {!ctx ? (
+                  <NotWritten item={item} busy={busy} act={act} />
+                ) : tab === "summary" ? (
+                  <SummaryTab {...ctx} />
+                ) : tab === "points" ? (
+                  <PointsTab key={item.id} {...ctx} />
+                ) : tab === "images" ? (
+                  <Section
+                    title="Images"
+                    hint="Photos, maps or diagrams for this story. Crop, turn, caption and place each one."
+                  >
+                    <StoryImages itemId={item.id} content={c!} lang={lang} editing onSave={save} />
+                  </Section>
+                ) : tab === "visuals" ? (
+                  <Section
+                    title="Visuals"
+                    hint="Up to two per story. Rebuild one as the type you pick, or edit its text and numbers."
+                  >
+                    <StoryVisuals item={item} content={c!} busy={busy} onSave={save} />
+                  </Section>
+                ) : tab === "static" ? (
+                  <StaticConnect
                     item={item}
-                    inline
-                    onClose={() => undefined}
-                    onDone={onChanged}
+                    content={c!}
+                    lang={lang}
+                    editing
+                    busy={busy}
+                    save={save}
+                    act={act}
                   />
-                </Section>
-              ) : tab === "article" ? (
-                <ArticleTab {...ctx} />
-              ) : (
-                <PreviewTab {...ctx} />
-              )}
-            </div>
-          </main>
+                ) : tab === "factbite" ? (
+                  <FactBiteTab key={item.id} {...ctx} />
+                ) : tab === "questions" ? (
+                  <QuestionsTab {...ctx} />
+                ) : tab === "material" ? (
+                  <Section
+                    title="Add material"
+                    hint="A link, PDF, Word or text file, a photo of a page, or your own text."
+                  >
+                    <MaterialPanel
+                      key={item.id}
+                      item={item}
+                      inline
+                      onClose={() => undefined}
+                      onDone={onChanged}
+                    />
+                  </Section>
+                ) : (
+                  <PreviewTab {...ctx} />
+                )}
+              </div>
+            </main>
+          )}
         </div>
 
         <footer className="flex items-center gap-2 border-t border-border bg-background p-2 sm:px-4">
@@ -1140,27 +1145,22 @@ function QuestionsTab({ c, lang, busy, save, act }: Ctx) {
 
 // ---------- The full article ----------
 
-function ArticleTab({ item, onChanged }: Ctx) {
-  const [reading, setReading] = useState(false);
-  return (
-    <Section
-      title="Full article"
-      hint="Read the story's sources with the highlighter pens: rewrite the story from your highlights, add facts as key points, or pick Static Context keywords."
-    >
-      {item.source_ids.length > 0 ? (
-        <Button onClick={() => setReading(true)}>
-          <BookOpen className="mr-1 h-4 w-4" /> Open the article
-        </Button>
-      ) : (
-        <p className="text-sm text-muted-foreground">This story has no source to read.</p>
-      )}
-      <p className="text-xs text-muted-foreground">
-        {item.source_ids.length} source{item.source_ids.length === 1 ? "" : "s"} ·{" "}
-        {item.facts.length} fact
-        {item.facts.length === 1 ? "" : "s"} taken from them
+function ArticleTab({ item, onChanged, goTo }: Ctx) {
+  if (!item.source_ids.length)
+    return (
+      <p className="p-6 text-center text-sm text-muted-foreground">
+        This story has no source to read.
       </p>
-      <SourceReader item={item} open={reading} onOpenChange={setReading} onChanged={onChanged} />
-    </Section>
+    );
+  // After a rewrite or new points, the story is shown as it now prints.
+  return (
+    <SourceReader
+      item={item}
+      inline
+      open
+      onOpenChange={(o) => !o && goTo("preview")}
+      onChanged={onChanged}
+    />
   );
 }
 
