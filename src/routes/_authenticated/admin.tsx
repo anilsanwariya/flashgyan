@@ -93,9 +93,17 @@ export const Route = createFileRoute("/_authenticated/admin")({
     { name: "twitter:card", content: "summary" },
   ] }),
   // The open section lives in the URL (?section=bot.commands), so refresh,
-  // links and the Back button keep your place.
-  validateSearch: (search: Record<string, unknown>): { section?: AdminSectionId } =>
-    isAdminSection(search.section) ? { section: search.section } : {},
+  // links and the Back button keep your place. Links from Telegram can also
+  // name the day (?date=2026-10-20) and what to open on it (?open=facts).
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { section?: AdminSectionId; date?: string; open?: "facts" } => ({
+    ...(isAdminSection(search.section) ? { section: search.section } : {}),
+    ...(typeof search.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(search.date)
+      ? { date: search.date }
+      : {}),
+    ...(search.open === "facts" ? { open: "facts" as const } : {}),
+  }),
   component: Admin,
 });
 

@@ -22,7 +22,7 @@ import {
 } from "@/lib/ca-collect";
 import { formatDate, istDate, type UploadSection } from "@/lib/current-affairs";
 import { rajasthanBalance, rajasthanWarningLine } from "@/lib/ca-report";
-import { checklistText } from "@/lib/ca-checklist";
+import { checklistText, draftButtons, type TgButton } from "@/lib/ca-checklist";
 import * as CA from "@/lib/current-affairs.server";
 
 const from = (table: string) => supabaseAdmin.from(table as never);
@@ -118,6 +118,11 @@ export type TickResult = { run: string | null; steps: string[]; error?: string }
 
 export async function tick(origin?: string): Promise<TickResult> {
   const settings = await CA.getMagazineSettings();
+  try {
+    await processApprovals();
+  } catch (e) {
+    console.error("telegram approvals:", e);
+  }
   // Sunday's weekly report rides on the same once-a-minute schedule.
   try {
     await (await import("@/lib/ca-report.server")).maybeSendWeeklyReport(origin);
@@ -254,6 +259,64 @@ async function nextStep(run: CaRun): Promise<string | "wait" | null> {
   return null;
 }
 
+async function sendTelegram(chatId: string | number, text: string, buttons: TgButton[][] = []) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text,
+      ...(buttons.length ? { reply_markup: { inline_keyboard: buttons } } : {}),
+    }),
+  }).catch(() => undefined);
+}
+
+// "Approve & schedule" tapped under the "draft ready" message: the bot keeps
+// the request (after checking it came from the magazine's admin chat), and
+// the next tick makes the PDF and schedules the issue if nothing is left to
+// do, answering on Telegram either way.
+export const APPROVE_KEY = "ca_approve:";
+
+async function processApprovals() {
+  const { data, error } = await from("bot_settings")
+    .select("key,value")
+    .like("key", `${APPROVE_KEY}%`)
+    .limit(5);
+  if (error) return;
+  for (const row of (data ?? []) as { key: string; value: { chat_id: string | number } }[]) {
+    // Taken by deleting it, so two ticks never approve the same day twice.
+    const { data: taken } = await from("bot_settings").delete().eq("key", row.key).select("key");
+    if (!(taken ?? []).length) continue;
+    const date = row.key.slice(APPROVE_KEY.length);
+    const day = formatDate(date, "en");
+    const reply = (text: string) => sendTelegram(row.value.chat_id, text);
+    try {
+      const left = (await CA.dayChecks(date)).filter((c) => c.state === "todo");
+      if (left.length) {
+        await reply(
+          `Not approved: the issue for ${day} still has things to do:\n${left.map((c) => `• ${c.text}`).join("\n")}`,
+        );
+        continue;
+      }
+      const issue = await CA.buildIssue("daily", date, { schedule: true });
+      const at = issue.scheduled_for
+        ? new Date(issue.scheduled_for).toLocaleString("en-IN", {
+            timeZone: "Asia/Kolkata",
+            day: "numeric",
+            month: "short",
+            hour: "numeric",
+            minute: "2-digit",
+          })
+        : "the set time";
+      await reply(`✅ Approved. The issue for ${day} posts on ${at} (IST).`);
+    } catch (e) {
+      await reply(`❌ Couldn't approve the issue for ${day}: ${saathiErrorDetail(e)}`);
+    }
+  }
+}
+
 async function finishRun(
   run: CaRun,
   origin: string | undefined,
@@ -294,20 +357,17 @@ async function finishRun(
     ),
   );
   // What is still to do before scheduling (the Rajasthan share is the line
-  // above; what was opened is only known in the browser).
-  const left = await CA.dayChecks(run.issue_date).then(
-    (checks) => checklistText(checks, ["rajasthan"]),
-    () => "",
-  );
+  // above; what was opened is only known in the browser), with buttons to
+  // it, or to approve the issue when nothing is left.
+  const checks = await CA.dayChecks(run.issue_date).catch(() => null);
+  const left = checks ? checklistText(checks, ["rajasthan"]) : "";
+  const buttons = checks ? draftButtons(checks, run.issue_date, origin) : [];
   const link = origin ? `\n\nReview: ${origin}/admin?section=ca.daily` : "";
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      chat_id: settings.test_chat_id,
-      text: `📰 Current affairs draft for ${formatDate(run.issue_date, "en")} is ready: ${stories ?? 0} stories from ${articles ?? 0} articles. Review and approve it before ${settings.post_time} tomorrow.${rajasthan}${left}${link}`,
-    }),
-  }).catch(() => undefined);
+  await sendTelegram(
+    settings.test_chat_id,
+    `📰 Current affairs draft for ${formatDate(run.issue_date, "en")} is ready: ${stories ?? 0} stories from ${articles ?? 0} articles. Review and approve it before ${settings.post_time} tomorrow.${rajasthan}${left}${link}`,
+    buttons,
+  );
   await from("ca_runs")
     .update({ notified: true } as never)
     .eq("id", run.id);

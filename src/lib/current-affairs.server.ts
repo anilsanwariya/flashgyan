@@ -1464,12 +1464,39 @@ async function findSkipped(date: string): Promise<{ found: FoundArticle[]; readi
 // The exam-value ranks given so far for a day's skipped news, by article.
 // `counts`: how many skipped articles are worth a story and not ranked yet,
 // as last worked out, for the day's checklist without reading every source.
+// `hidden`: articles the editor marked "not needed" (on any device); they
+// are not ranked or counted.
 type SkippedCounts = { worth: number; unranked: number; at: string };
 type SkippedRanks = {
   ranked_at: string;
   ranks: Record<string, SkippedRank>;
   counts?: SkippedCounts;
+  hidden?: string[];
 };
+
+async function saveRanks(date: string, value: SkippedRanks) {
+  const { error } = await from("bot_settings").upsert({
+    key: ranksKey(date),
+    value,
+    updated_at: new Date().toISOString(),
+  } as never);
+  fail(error);
+}
+
+// What counts: articles worth a story, and not ranked yet, leaving out those
+// marked "not needed".
+function countSkipped(
+  articles: { source_id: string; at: number }[],
+  ranks: Record<string, SkippedRank>,
+  hidden: Set<string>,
+): SkippedCounts {
+  const shown = articles.filter((a) => !hidden.has(skippedKey(a)));
+  return {
+    worth: shown.filter((a) => (ranks[skippedKey(a)]?.score ?? 0) >= 2).length,
+    unranked: shown.filter((a) => !ranks[skippedKey(a)]).length,
+    at: new Date().toISOString(),
+  };
+}
 const ranksKey = (date: string) => `ca_skipped_rank:${date}`;
 
 async function loadRanks(date: string): Promise<SkippedRanks | null> {
@@ -1486,34 +1513,65 @@ export async function skippedNews(date: string): Promise<{
   ranked_at: string | null;
 }> {
   const [{ found, reading }, saved] = await Promise.all([findSkipped(date), loadRanks(date)]);
+  const hidden = new Set(saved?.hidden ?? []);
   const articles = found.map(({ snippet: _, ...a }) => ({
     ...a,
     rank: saved?.ranks[skippedKey(a)] ?? null,
+    hidden: hidden.has(skippedKey(a)),
   }));
   await saveCounts(date, saved, articles);
   return { articles, reading, ranked_at: saved?.ranked_at ?? null };
+}
+
+// Marks skipped articles "not needed" (or needed again), for every device.
+export async function setSkippedHidden(date: string, keys: string[], hide: boolean) {
+  const saved = await loadRanks(date);
+  const before = new Set(saved?.hidden ?? []);
+  const changed = keys.filter((k) => before.has(k) !== hide);
+  const hidden = new Set(before);
+  for (const k of changed) {
+    if (hide) hidden.add(k);
+    else hidden.delete(k);
+  }
+  // The counts follow without reading the sources again: the articles were
+  // just listed as skipped.
+  const ranks = saved?.ranks ?? {};
+  const step = hide ? -1 : 1;
+  const counts = saved?.counts && {
+    worth: Math.max(
+      0,
+      saved.counts.worth + step * changed.filter((k) => (ranks[k]?.score ?? 0) >= 2).length,
+    ),
+    unranked: Math.max(0, saved.counts.unranked + step * changed.filter((k) => !ranks[k]).length),
+    at: new Date().toISOString(),
+  };
+  await saveRanks(date, {
+    ranked_at: saved?.ranked_at ?? "",
+    ranks,
+    hidden: [...hidden],
+    ...(counts ? { counts } : {}),
+  });
+  return { hidden: [...hidden] };
 }
 
 // Keeps the day's counts up to date (only written when they change).
 async function saveCounts(
   date: string,
   saved: SkippedRanks | null,
-  articles: { rank?: SkippedRank | null }[],
+  articles: { source_id: string; at: number }[],
 ) {
-  const worth = articles.filter((a) => (a.rank?.score ?? 0) >= 2).length;
-  const unranked = articles.filter((a) => !a.rank).length;
-  if (saved?.counts?.worth === worth && saved.counts.unranked === unranked) return;
-  const value: SkippedRanks = {
-    ranked_at: saved?.ranked_at ?? "",
-    ranks: saved?.ranks ?? {},
-    counts: { worth, unranked, at: new Date().toISOString() },
-  };
-  const { error } = await from("bot_settings").upsert({
-    key: ranksKey(date),
-    value,
-    updated_at: new Date().toISOString(),
-  } as never);
-  if (error) console.error("skipped news counts:", error.message);
+  const counts = countSkipped(articles, saved?.ranks ?? {}, new Set(saved?.hidden ?? []));
+  if (saved?.counts?.worth === counts.worth && saved.counts.unranked === counts.unranked) return;
+  try {
+    await saveRanks(date, {
+      ranked_at: saved?.ranked_at ?? "",
+      ranks: saved?.ranks ?? {},
+      ...(saved?.hidden ? { hidden: saved.hidden } : {}),
+      counts,
+    });
+  } catch (e) {
+    console.error("skipped news counts:", e instanceof Error ? e.message : e);
+  }
 }
 
 // The day's skipped-news counts as last worked out (no sources are read).
@@ -1526,14 +1584,12 @@ export async function skippedSummary(date: string): Promise<SkippedCounts | null
 export async function rankSkipped(date: string): Promise<{ ranked: number; left: number }> {
   const [{ found }, saved] = await Promise.all([findSkipped(date), loadRanks(date)]);
   const ranks = { ...(saved?.ranks ?? {}) };
-  const todo = found.filter((a) => !ranks[skippedKey(a)]);
+  const hidden = new Set(saved?.hidden ?? []);
+  // Articles marked "not needed" are not ranked.
+  const todo = found.filter((a) => !ranks[skippedKey(a)] && !hidden.has(skippedKey(a)));
   if (!todo.length) {
     // Nothing new to rank: the counts still follow the stories made since.
-    await saveCounts(
-      date,
-      saved,
-      found.map((a) => ({ rank: ranks[skippedKey(a)] })),
-    );
+    await saveCounts(date, saved, found);
     return { ranked: 0, left: 0 };
   }
   const batch = todo.slice(0, RANK_MAX);
@@ -1550,17 +1606,12 @@ export async function rankSkipped(date: string): Promise<{ ranked: number; left:
   // Ranks of articles no longer skipped (made into stories) are dropped.
   const live = new Set(found.map(skippedKey));
   const kept = Object.fromEntries(Object.entries(ranks).filter(([k]) => live.has(k)));
-  const counts: SkippedCounts = {
-    worth: found.filter((a) => (kept[skippedKey(a)]?.score ?? 0) >= 2).length,
-    unranked: found.filter((a) => !kept[skippedKey(a)]).length,
-    at: new Date().toISOString(),
-  };
-  const { error } = await from("bot_settings").upsert({
-    key: ranksKey(date),
-    value: { ranked_at: new Date().toISOString(), ranks: kept, counts } satisfies SkippedRanks,
-    updated_at: new Date().toISOString(),
-  } as never);
-  fail(error);
+  await saveRanks(date, {
+    ranked_at: new Date().toISOString(),
+    ranks: kept,
+    ...(saved?.hidden ? { hidden: saved.hidden.filter((k) => live.has(k)) } : {}),
+    counts: countSkipped(found, kept, hidden),
+  });
   return { ranked, left: todo.length - ranked };
 }
 
@@ -2090,6 +2141,14 @@ export async function keywordBooks(id: string): Promise<{ keyword: Bi; book: str
   );
 }
 
+// A fact the editor checked by hand (it stays marked as such, for the weekly
+// report), or wants checked again.
+function markChecked(f: CaFact, checked: boolean): CaFact {
+  if (checked) return { ...f, verified: true, checked: true };
+  const { checked: _, ...rest } = f;
+  return { ...rest, verified: false };
+}
+
 // The editor checked a fact against the source (or wants it checked again).
 export async function setFactChecked(
   id: string,
@@ -2099,7 +2158,7 @@ export async function setFactChecked(
   const item = await loadItem(id);
   const index = item.facts.findIndex((f) => f.text === factText);
   if (index < 0) throw new Error("That fact is no longer in the story");
-  const facts = item.facts.map((f, i) => (i === index ? { ...f, verified: checked } : f));
+  const facts = item.facts.map((f, i) => (i === index ? markChecked(f, checked) : f));
   const { data, error } = await from("ca_items")
     .update({ facts, updated_at: new Date().toISOString() } as never)
     .eq("id", id)
@@ -2193,7 +2252,7 @@ export async function checkFact(id: string, factText: string, point?: Bi): Promi
   const item = await loadItem(id);
   const index = item.facts.findIndex((f) => f.text === factText);
   if (index < 0) throw new Error("That fact is no longer in the story");
-  const facts = item.facts.map((f, i) => (i === index ? { ...f, verified: true } : f));
+  const facts = item.facts.map((f, i) => (i === index ? markChecked(f, true) : f));
   const content =
     point && item.content
       ? { ...item.content, points: item.content.points.map((p, i) => (i === index ? point : p)) }

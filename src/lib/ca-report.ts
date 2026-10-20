@@ -79,7 +79,70 @@ export type WeeklyStats = {
   saathiDown: number;
   knowledgeGaps: number;
   quiz: { on: number; joined: number; finished: number; streak3: number; topStreak: number } | null;
+  // How much fixing SAATHI's drafts needed, by day.
+  accuracy?: Accuracy;
 };
+
+// One day's fixing: facts in the issue, facts whose quote wasn't in the source
+// as written, stories edited by hand, rewritten (from highlights or written
+// again), corrections approved, and skipped articles worth a story.
+export type DayAccuracy = {
+  date: string;
+  facts: number;
+  misses: number;
+  edited: number;
+  rewritten: number;
+  corrections: number;
+  skippedWorth: number;
+};
+export type Accuracy = { stories: number; days: DayAccuracy[] };
+
+const sum = (days: DayAccuracy[], k: keyof Omit<DayAccuracy, "date">) =>
+  days.reduce((n, d) => n + d[k], 0);
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const dayLabel = (date: string) => {
+  const d = new Date(`${date}T00:00:00Z`);
+  return `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()}`;
+};
+
+// Where SAATHI's drafts needed the most fixing, as one line for the admin.
+export function accuracyHint(a: Accuracy): string {
+  const facts = sum(a.days, "misses");
+  const quoteRate = facts / Math.max(1, sum(a.days, "facts"));
+  const editRate = (sum(a.days, "edited") + sum(a.days, "rewritten")) / Math.max(1, a.stories);
+  const worth = sum(a.days, "skippedWorth");
+  const skipRate = worth / Math.max(1, a.stories + worth);
+  const [rate, which] = [
+    [quoteRate, "quotes"],
+    [editRate, "edits"],
+    [skipRate, "skips"],
+  ].sort((x, y) => (y[0] as number) - (x[0] as number))[0] as [number, string];
+  if (rate < 0.1) return "✅ SAATHI's drafts needed little fixing this week.";
+  if (which === "quotes")
+    return "👉 Most fixing: facts whose words weren't in the source. SAATHI should copy the source's words exactly when it picks facts.";
+  if (which === "edits")
+    return "👉 Most fixing: stories edited or rewritten by hand. Note what you change most (headline, points, Hindi) so the writing instructions can say it.";
+  return "👉 Most fixing: good news left out. Raise the daily story count or add sites in Magazine settings.";
+}
+
+export function accuracyLines(a: Accuracy): string[] {
+  const facts = sum(a.days, "facts");
+  const misses = sum(a.days, "misses");
+  const rows = a.days.map(
+    (d) =>
+      `${dayLabel(d.date).padEnd(7)}${String(d.misses).padStart(5)}${String(d.edited).padStart(5)}${String(d.rewritten).padStart(5)}${String(d.skippedWorth).padStart(5)}`,
+  );
+  return [
+    "",
+    `<b>AI accuracy</b>`,
+    `🎯 Facts not word for word in the source: ${misses} of ${facts} (${pct(misses, facts)})`,
+    `✏️ Stories edited by hand: ${sum(a.days, "edited")} · rewritten: ${sum(a.days, "rewritten")} · corrections approved: ${sum(a.days, "corrections")}`,
+    `🗞 Skipped articles worth a story: ${sum(a.days, "skippedWorth")}`,
+    ...(rows.length ? [`<pre>Day    Quote Edit Rewr Skip\n${rows.join("\n")}</pre>`] : []),
+    accuracyHint(a),
+  ];
+}
 
 const pct = (n: number, of: number) => (of ? `${Math.round((n / of) * 100)}%` : "–");
 
@@ -98,12 +161,13 @@ export function weeklyReportText(s: WeeklyStats, adminUrl?: string): string {
     }`,
     `✍️ Editorials: ${s.editorials}`,
     `🔗 Built from 2+ sources: ${s.multiSource}`,
-    `${s.unverifiedFacts ? "⚠️" : "✅"} Facts not found word for word in their source: ${s.unverifiedFacts}`,
+    `${s.unverifiedFacts ? "⚠️" : "✅"} Facts still to check: ${s.unverifiedFacts}`,
     `📚 Stories whose Static Connect has no book: ${s.missingBackground}`,
   ];
   if (s.uncoveredConcepts.length)
     lines.push(`   Books needed for: ${esc(s.uncoveredConcepts.slice(0, 5).join(", "))}`);
   if (s.pendingCorrections) lines.push(`📝 Corrections waiting for you: ${s.pendingCorrections}`);
+  if (s.accuracy) lines.push(...accuracyLines(s.accuracy));
   lines.push(
     "",
     `<b>SAATHI</b>`,
@@ -112,6 +176,7 @@ export function weeklyReportText(s: WeeklyStats, adminUrl?: string): string {
     }`,
     `❓ Questions it couldn't answer: ${s.knowledgeGaps}`,
   );
+
   if (s.quiz)
     lines.push(
       "",

@@ -19,6 +19,8 @@ export type SkippedArticle = {
   rajasthan: boolean;
   // Its exam value, once ranked.
   rank?: SkippedRank | null;
+  // Marked "not needed" by the editor.
+  hidden?: boolean;
 };
 
 // 3 = likely in the exam, 2 = useful, 1 = minor, 0 = not exam material.
