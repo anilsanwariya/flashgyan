@@ -1625,7 +1625,7 @@ function SettingsPanel() {
       <div
         className="space-y-4"
         role="tabpanel"
-        aria-label={SETTINGS_TABS.find((t) => t.id === tab)?.label}
+        aria-label={`${SETTINGS_TABS.find((t) => t.id === tab)?.label} settings`}
       >
         {tab === "channel" && (
           <>
