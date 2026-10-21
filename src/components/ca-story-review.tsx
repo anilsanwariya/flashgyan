@@ -11,7 +11,9 @@ import {
   Plus,
   Check,
   Image as ImageIcon,
+  Library,
   Pencil,
+  Sparkles,
   Trash2,
   X,
   XCircle,
@@ -347,7 +349,7 @@ function StoryCard({
             onOpen();
           }
         }}
-        className="flex cursor-pointer items-start gap-3 p-3 hover:bg-muted/30 sm:p-4"
+        className="flex cursor-pointer flex-wrap items-start gap-x-3 gap-y-2 p-3 hover:bg-muted/30 sm:flex-nowrap sm:p-4"
       >
         <span onClick={(e) => e.stopPropagation()} className="pt-1">
           <Checkbox
@@ -362,7 +364,7 @@ function StoryCard({
         >
           {reviewed ? <Check className="h-3.5 w-3.5" /> : number}
         </span>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 basis-[calc(100%-4.5rem)] sm:basis-auto">
           {lang !== "en" && (
             <div lang="hi" className="font-semibold leading-snug">
               {headHi}
@@ -404,8 +406,27 @@ function StoryCard({
                 ),
             )}
             {(c?.images?.length ?? 0) > 0 && (
-              <Badge>
+              <Badge title="Images">
                 <ImageIcon className="h-3 w-3" /> {c!.images!.length}
+              </Badge>
+            )}
+            {/* The boxes the story has, and Static Context when it's missing. */}
+            {c &&
+              ((c.statics?.length ?? 0) + (c.background ? 1 : 0) > 0 ? (
+                <Badge tone="good" title={STATIC_CONNECT.en}>
+                  <Library className="h-3 w-3" />{" "}
+                  {(c.statics?.length ?? 0) + (c.background ? 1 : 0)}
+                </Badge>
+              ) : (
+                !dropped && (
+                  <Badge title={`No ${STATIC_CONNECT.en} yet`}>
+                    <Library className="h-3 w-3 opacity-50" /> 0
+                  </Badge>
+                )
+              ))}
+            {(c?.dyk?.length ?? 0) > 0 && (
+              <Badge title="Fact Bite">
+                <Sparkles className="h-3 w-3" /> {c!.dyk!.length}
               </Badge>
             )}
             {item.related_item_id && <Badge tone="primary">Follow-up</Badge>}
@@ -416,8 +437,9 @@ function StoryCard({
             )}
           </div>
         </div>
+        {/* Beside the story on wider screens, a row under it on phones. */}
         <div
-          className="flex shrink-0 flex-col items-end gap-1"
+          className="flex w-full shrink-0 items-center justify-end gap-1 sm:w-auto sm:flex-col sm:items-end"
           onClick={(e) => e.stopPropagation()}
         >
           <Button size="sm" variant="outline" className="h-8" onClick={onOpen}>

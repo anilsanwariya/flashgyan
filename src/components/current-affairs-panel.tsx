@@ -292,13 +292,17 @@ function IssueBar({
         {!posted && (
           <>
             {kind === "monthly" && (
-              <Input
-                type="datetime-local"
-                value={when}
-                onChange={(e) => setWhen(e.target.value)}
-                className="h-9 w-56"
-                title="Post time (your local time); empty = as soon as approved"
-              />
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                Post at
+                <Input
+                  type="datetime-local"
+                  value={when}
+                  onChange={(e) => setWhen(e.target.value)}
+                  className="h-9 w-56"
+                  aria-label="Post at"
+                  title="Your local time; leave empty to post as soon as you approve"
+                />
+              </label>
             )}
             <Button
               size="sm"
@@ -367,7 +371,10 @@ function IssueBar({
       </div>
       {!posted && (
         <p className="text-xs text-muted-foreground">
-          {defaultWhen}. Approving remakes both PDFs with your latest edits.
+          {kind === "monthly" && when
+            ? `Posts ${new Date(when).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`
+            : defaultWhen}
+          . Approving remakes both PDFs with your latest edits.
         </p>
       )}
 
@@ -1140,24 +1147,7 @@ function MonthlyPanel() {
             <Badge tone="good">{applied.length} corrections applied</Badge>
             {pending.length > 0 && <Badge tone="warn">{pending.length} corrections pending</Badge>}
           </div>
-          <ul className="grid gap-1 text-sm sm:grid-cols-2 lg:grid-cols-3">
-            {data.days.map((d) => (
-              <li
-                key={d.date}
-                className="flex items-center justify-between rounded-lg border border-border px-3 py-1.5"
-              >
-                <span>{formatDate(d.date, "en")}</span>
-                <span className="flex items-center gap-1.5">
-                  <span className="text-xs text-muted-foreground">{d.items} items</span>
-                  {d.status ? (
-                    <Badge tone={STATUS_TEXT[d.status].tone}>{d.status}</Badge>
-                  ) : (
-                    <Badge tone="warn">not approved</Badge>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <MonthCalendar month={month} days={data.days} />
           {applied.length > 0 && (
             <div className="pt-2">
               <div className="text-sm font-medium">Corrections in this month's magazine</div>
@@ -1172,6 +1162,95 @@ function MonthlyPanel() {
           )}
         </section>
       )}
+    </div>
+  );
+}
+
+// The month's days at a glance: how many stories each had and whether its
+// issue went out. A day opens on the Daily page.
+const CELL_TONES = {
+  muted: "border-border bg-muted/40",
+  primary: "border-primary/40 bg-primary/10",
+  warn: "border-amber-400/60 bg-amber-500/10",
+  good: "border-emerald-500/40 bg-emerald-500/10",
+  bad: "border-destructive/50 bg-destructive/10",
+} as const;
+
+function MonthCalendar({
+  month,
+  days,
+}: {
+  month: string;
+  days: { date: string; items: number; status: CaIssue["status"] | null }[];
+}) {
+  const byDate = new Map(days.map((d) => [d.date, d]));
+  const first = new Date(`${month}T00:00:00Z`);
+  const count = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+  // Weeks start on Monday.
+  const lead = (first.getUTCDay() + 6) % 7;
+  const today = istDate();
+  const cells = Array.from({ length: count }, (_, i) => {
+    const d = new Date(first);
+    d.setUTCDate(i + 1);
+    return d.toISOString().slice(0, 10);
+  });
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-medium text-muted-foreground">
+        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((w) => (
+          <span key={w}>{w}</span>
+        ))}
+      </div>
+      <ol className="grid grid-cols-7 gap-1" aria-label="Days of the month">
+        {Array.from({ length: lead }, (_, i) => (
+          <li key={`x${i}`} aria-hidden />
+        ))}
+        {cells.map((date) => {
+          const d = byDate.get(date);
+          const future = date > today;
+          const tone = d?.status ? STATUS_TEXT[d.status].tone : d?.items ? "warn" : "muted";
+          const state = d?.status
+            ? STATUS_TEXT[d.status].label
+            : d?.items
+              ? "Not approved"
+              : future
+                ? "Still to come"
+                : "No issue";
+          return (
+            <li key={date}>
+              <a
+                href={`/admin?section=ca.daily&date=${date}`}
+                title={`${formatDate(date, "en")}: ${d?.items ?? 0} stories · ${state}`}
+                aria-label={`${formatDate(date, "en")}: ${d?.items ?? 0} stories, ${state}`}
+                className={`flex min-h-14 flex-col rounded-lg border p-1 text-left text-xs hover:ring-2 hover:ring-primary/30 sm:p-1.5 ${future && !d ? "border-dashed border-border opacity-50" : CELL_TONES[tone]} ${date === today ? "ring-2 ring-primary" : ""}`}
+              >
+                <span className="font-semibold">{Number(date.slice(8))}</span>
+                {!!d?.items && (
+                  <span className="mt-auto text-[10px] text-muted-foreground sm:text-[11px]">
+                    {d.items}
+                    <span className="hidden sm:inline"> stories</span>
+                  </span>
+                )}
+              </a>
+            </li>
+          );
+        })}
+      </ol>
+      <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+        {(
+          [
+            ["good", "Posted"],
+            ["primary", "Scheduled"],
+            ["warn", "Not approved"],
+            ["bad", "Failed"],
+            ["muted", "No issue"],
+          ] as const
+        ).map(([t, label]) => (
+          <span key={t} className="inline-flex items-center gap-1">
+            <span className={`h-3 w-3 rounded border ${CELL_TONES[t]}`} /> {label}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1513,7 +1592,14 @@ function SettingsPanel() {
             "For all Rajasthan competitive exams · Special focus: RAS Mains",
             "On the cover and in the post captions.",
           )}
-          {field("tagline_hi", "Tagline (Hindi)")}
+          {field(
+            "tagline_hi",
+            "Tagline (Hindi)",
+            "",
+            text("tagline_hi").trim()
+              ? "On the Hindi issue's cover and post captions."
+              : "Empty: the Hindi issue uses the English tagline.",
+          )}
           <div className="space-y-1">
             <Label>Accent colour</Label>
             <div className="flex items-center gap-2">

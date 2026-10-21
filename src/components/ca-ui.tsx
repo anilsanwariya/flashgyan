@@ -1,8 +1,14 @@
 // Small pieces shared by the current affairs admin screens.
 import { useEffect, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { MoreHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 // A server check that failed arrives as a list of problems in JSON: shown as
 // a sentence ("Invalid url (content › Fact Bite 1 › url)").
@@ -112,15 +118,28 @@ export function BulkBar({
           </Button>
         </>
       )}
-      <Button
-        size="sm"
-        variant="ghost"
-        className="ml-auto h-7 text-destructive hover:text-destructive"
-        disabled={busy || !ids.length}
-        onClick={() => onDelete(ids, true)}
-      >
-        Delete all {noun}
-      </Button>
+      {/* Deleting everything is kept a step away, in a menu. */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="ml-auto h-7 w-7 p-0"
+            disabled={busy || !ids.length}
+            aria-label={`More for all ${noun}`}
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            className="text-destructive focus:text-destructive"
+            onSelect={() => onDelete(ids, true)}
+          >
+            <Trash2 className="mr-2 h-4 w-4" /> Delete all {noun}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }

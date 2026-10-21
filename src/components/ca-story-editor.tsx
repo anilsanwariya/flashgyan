@@ -163,6 +163,14 @@ export function StoryEditor({
     });
   }, [tab]);
 
+  // Alt+N / Alt+P: next or previous story; Alt+1…9, Alt+0: a tab.
+  const keys = useRef<(e: KeyboardEvent) => void>(() => undefined);
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => keys.current(e);
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  }, []);
+
   if (!item) return null;
   const c = item.content;
   const dropped = item.status === "dropped";
@@ -228,16 +236,26 @@ export function StoryEditor({
     label: string;
     icon: typeof FileText;
     count?: number;
-    warn?: boolean;
+    // What still needs a look, shown as a dot on the tab.
+    warn?: string | false;
   }[] = [
     { id: "preview", label: "Preview", icon: Eye },
-    { id: "summary", label: "Summary", icon: FileText },
+    {
+      id: "summary",
+      label: "Summary",
+      icon: FileText,
+      warn:
+        !!c &&
+        (!(c.summary.en || c.summary.hi)
+          ? "No summary"
+          : !(c.why.en || c.why.hi) && "No Exam Angle"),
+    },
     {
       id: "points",
       label: "Key points",
       icon: ListChecks,
       count: c?.points.length,
-      warn: unverified > 0,
+      warn: unverified > 0 && `${unverified} to check`,
     },
     { id: "images", label: "Images", icon: ImageIcon, count: c?.images?.length },
     {
@@ -251,6 +269,7 @@ export function StoryEditor({
       label: STATIC_CONNECT.en,
       icon: Library,
       count: (c?.statics?.length ?? 0) + (c?.background ? 1 : 0),
+      warn: !!c && !c.statics?.length && !c.background && `No ${STATIC_CONNECT.en} yet`,
     },
     { id: "factbite", label: "Fact Bite", icon: Sparkles, count: c?.dyk?.length },
     {
@@ -258,12 +277,23 @@ export function StoryEditor({
       label: "Questions",
       icon: HelpCircle,
       count: (c?.mcq ? 1 : 0) + (c?.mains ? 1 : 0) + (c?.quick ? 1 : 0),
+      warn: !!c && !c.mcq && !c.mains && !c.quick && "No questions",
     },
     { id: "material", label: "Add material", icon: Paperclip },
     { id: "article", label: "Full article", icon: BookOpen },
   ];
 
   const ctx: Ctx | null = c ? { item, c, lang, busy, save, act, onChanged, goTo: setTab } : null;
+  keys.current = (e) => {
+    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const digit = /^Digit(\d)$/.exec(e.code)?.[1];
+    if (e.code === "KeyN" && next) leave(() => onNavigate(next.id));
+    else if (e.code === "KeyP" && prev) leave(() => onNavigate(prev.id));
+    else if (digit && tabs[digit === "0" ? 9 : Number(digit) - 1])
+      setTab(tabs[digit === "0" ? 9 : Number(digit) - 1].id);
+    else return;
+    e.preventDefault();
+  };
 
   return (
     <Dialog open onOpenChange={(o) => !o && leave(onClose)}>
@@ -458,6 +488,7 @@ export function StoryEditor({
                   type="button"
                   role="tab"
                   aria-selected={on}
+                  title={`${t.label} (Alt+${(tabs.indexOf(t) + 1) % 10})`}
                   onClick={() => setTab(t.id)}
                   className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
                     on ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-muted"
@@ -468,7 +499,9 @@ export function StoryEditor({
                   {t.warn && (
                     <span
                       className={`h-2 w-2 rounded-full ${on ? "bg-primary-foreground" : "bg-amber-500"}`}
-                      aria-label="needs checking"
+                      role="img"
+                      aria-label={`needs checking: ${t.warn}`}
+                      title={t.warn}
                     />
                   )}
                   {!!t.count && (
@@ -554,11 +587,14 @@ export function StoryEditor({
           )}
         </div>
 
-        <footer className="flex items-center gap-2 border-t border-border bg-background p-2 sm:px-4">
+        <footer
+          className={`items-center gap-2 border-t border-border bg-background p-2 sm:px-4 ${tab === "article" ? "hidden lg:flex" : "flex"}`}
+        >
           <Button
             size="sm"
             variant="ghost"
             disabled={!prev}
+            title="Previous story (Alt+P)"
             onClick={() => prev && leave(() => onNavigate(prev.id))}
           >
             <ChevronLeft className="mr-0.5 h-4 w-4" /> Previous
@@ -581,6 +617,7 @@ export function StoryEditor({
           <Button
             size="sm"
             disabled={!next}
+            title="Next story (Alt+N)"
             onClick={() => next && leave(() => onNavigate(next.id))}
           >
             Next story <ChevronRight className="ml-0.5 h-4 w-4" />
@@ -866,6 +903,7 @@ function FactBiteTab({ item, c, lang, busy, save, act }: Ctx) {
   const [found, setFound] = useState<DykFact[] | null>(null);
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [own, setOwn] = useState({ hi: "", en: "", site: "", url: "" });
+  const [writing, setWriting] = useState(false);
   const setDyk = (next: DykFact[], ok: string) => act(() => save({ dyk: next }), ok);
   const find = async () => {
     setFinding(true);
@@ -1043,8 +1081,20 @@ function FactBiteTab({ item, c, lang, busy, save, act }: Ctx) {
       <Section
         title="Add your own"
         hint="Write it in one language; the other is written when you add it."
+        action={
+          !writing && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={room <= 0}
+              onClick={() => setWriting(true)}
+            >
+              <Plus className="mr-1 h-3.5 w-3.5" /> Write one
+            </Button>
+          )
+        }
       >
-        <div className="space-y-2">
+        <div className={writing ? "space-y-2" : "hidden"}>
           <Textarea
             lang="hi"
             aria-label="Hindi"
@@ -1074,7 +1124,16 @@ function FactBiteTab({ item, c, lang, busy, save, act }: Ctx) {
               onChange={(e) => setOwn({ ...own, url: e.target.value })}
             />
           </div>
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setWriting(false);
+                setOwn({ hi: "", en: "", site: "", url: "" });
+              }}
+            >
+              Cancel
+            </Button>
             <Button
               disabled={busy || room <= 0 || !ownOk}
               onClick={async () => {
@@ -1087,6 +1146,7 @@ function FactBiteTab({ item, c, lang, busy, save, act }: Ctx) {
                 };
                 await setDyk([...dyk, entry], "Added to Fact Bite");
                 setOwn({ hi: "", en: "", site: "", url: "" });
+                setWriting(false);
               }}
             >
               <Plus className="mr-1 h-4 w-4" /> Add to Fact Bite

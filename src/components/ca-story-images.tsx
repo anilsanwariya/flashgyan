@@ -2,7 +2,7 @@
 // can't take images from the sources), any shape, several at once. They are
 // shown in the rows the magazine prints them in, the same in the Hindi and
 // English issues, each with an optional caption.
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { ArrowLeft, ArrowRight, Crop, ImagePlus, Trash2 } from "lucide-react";
@@ -75,8 +75,41 @@ export function StoryImages({
   const [uploading, setUploading] = useState(0);
   const [busy, setBusy] = useState(false);
   const [editingImage, setEditingImage] = useState<number | null>(null);
+  const [over, setOver] = useState(false);
   const images = content.images ?? [];
   const room = MAX_IMAGES - images.length;
+  // A screenshot pasted (Ctrl+V) while editing is added like a chosen file.
+  const addRef = useRef<(files: File[]) => Promise<void>>(async () => undefined);
+  useEffect(() => {
+    if (!editing) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const files = [...(e.clipboardData?.files ?? [])].filter((f) => /^image\//.test(f.type));
+      if (!files.length) return;
+      e.preventDefault();
+      void addRef.current(files);
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [editing]);
+  // Files dropped anywhere on the images are added too.
+  const dropProps = editing
+    ? {
+        onDragOver: (e: React.DragEvent) => {
+          if (![...e.dataTransfer.types].includes("Files")) return;
+          e.preventDefault();
+          setOver(true);
+        },
+        onDragLeave: (e: React.DragEvent) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false);
+        },
+        onDrop: (e: React.DragEvent) => {
+          if (!e.dataTransfer.files.length) return;
+          e.preventDefault();
+          setOver(false);
+          void add([...e.dataTransfer.files]);
+        },
+      }
+    : {};
 
   async function add(files: File[]) {
     const picked = files.filter((f) => /^image\//.test(f.type));
@@ -118,6 +151,7 @@ export function StoryImages({
     }
     setUploading(0);
   }
+  addRef.current = add;
 
   async function change(next: CaImage[], ok: string) {
     setBusy(true);
@@ -163,7 +197,23 @@ export function StoryImages({
     </>
   );
 
-  if (!images.length) return <div className="flex">{picker}</div>;
+  if (!images.length)
+    return editing ? (
+      <div
+        {...dropProps}
+        data-testid="story-image-drop"
+        className={`flex flex-col items-center gap-2 rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground ${over ? "border-primary bg-primary/5" : "border-border"}`}
+      >
+        {picker}
+        <span>Or drop images here, or paste a screenshot (Ctrl+V).</span>
+        <span className="text-xs">
+          Wide images print in rows across the page; square or tall ones save room placed right or
+          left of the text.
+        </span>
+      </div>
+    ) : (
+      <div className="flex">{picker}</div>
+    );
 
   // The rows as printed: equal heights, filling the width; images beside
   // the text after them.
@@ -276,7 +326,12 @@ export function StoryImages({
   );
   const side = images.filter(isSideImage);
   return (
-    <section className="space-y-2" aria-label="Images">
+    <section
+      {...dropProps}
+      data-testid="story-image-drop"
+      className={`space-y-2 rounded-xl ${over ? "outline-dashed outline-2 outline-offset-4 outline-primary" : ""}`}
+      aria-label="Images"
+    >
       {editingImage !== null && images[editingImage] && (
         <ImageEditor
           image={images[editingImage]}
@@ -341,7 +396,10 @@ export function StoryImages({
       <div className="flex flex-wrap items-center gap-2">
         {picker}
         <span className="text-xs text-muted-foreground">
-          Printed in these rows in both issues. {editing ? "" : "Edit the story to add captions."}
+          Printed in these rows in both issues.{" "}
+          {editing
+            ? "Drop or paste (Ctrl+V) more here. Square or tall images save room beside the text."
+            : "Edit the story to add captions."}
         </span>
       </div>
     </section>
