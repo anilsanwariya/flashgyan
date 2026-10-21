@@ -114,6 +114,11 @@ import {
 } from "@/lib/ca-reader-format";
 import { missingMessages, parseMissing, type MissingCheck } from "@/lib/ca-missing";
 import { parseSummaryOptions, summaryOptionsMessages } from "@/lib/ca-summary";
+import {
+  parseSuggestedMarks,
+  suggestMarksMessages,
+  type SuggestedMark,
+} from "@/lib/ca-suggest-marks";
 import { fixShortFormsDeep } from "../../supabase/functions/_shared/ca-hindi.ts";
 import {
   glossaryMessages,
@@ -2067,6 +2072,48 @@ export async function dayChecks(date: string): Promise<Check[]> {
 // cover, with where this source states them. One AI call, on request.
 // With no story (skipped news), the source's article is checked on its own.
 // `article`: the part of the source the reader shows as one article.
+// "Suggest facts": the exam facts in the article being read, as its own
+// words (one AI request; nothing saved).
+export async function suggestMarks(
+  id: string | null,
+  sourceId: string,
+  marked: string[],
+  article?: Span,
+): Promise<SuggestedMark[]> {
+  const item = id ? await loadItem(id) : null;
+  if (item && !item.source_ids.includes(sourceId)) {
+    throw new Error("That source isn't part of this story");
+  }
+  const { data, error } = await from("ca_sources")
+    .select("title,content")
+    .eq("id", sourceId)
+    .single();
+  fail(error);
+  const { title, content } = data as unknown as { title: string; content: string };
+  // The article shown, or the part around the story's facts.
+  const spans = (item?.facts ?? [])
+    .filter((f) => f.source_id === sourceId)
+    .map((f) => findQuote(content, f.quote))
+    .filter((x): x is Span => !!x);
+  let from0 = spans.length ? Math.max(0, Math.min(...spans.map((x) => x[0])) - 4000) : 0;
+  let to0 = Math.min(content.length, from0 + 16_000);
+  if (article) {
+    from0 = Math.max(0, Math.min(article[0], content.length));
+    to0 = Math.min(content.length, Math.max(from0, article[1]), from0 + 16_000);
+  }
+  const [a, b] = snapToLines(content, from0, to0);
+  const text = content.slice(a, b);
+  const raw = await saathiComplete(
+    apiKey(),
+    suggestMarksMessages({
+      headline: item ? item.content?.headline.en || item.headline : title,
+      article: text,
+      marked,
+    }),
+  );
+  return parseSuggestedMarks(raw, text, marked);
+}
+
 export async function checkMissing(
   id: string | null,
   sourceId: string,
@@ -2200,15 +2247,24 @@ export async function rewriteFromHighlights(
 // New key points from the reader's highlights (in the story's sources or
 // another source of its day), added to the written story without writing it
 // again: one small AI call words them, and everything else stays.
-export async function addPointsFromHighlights(
+// The new key points highlights would add, and SAATHI's points for them
+// (nothing saved): shown before they are added.
+export async function previewPoints(
   id: string,
   highlights: Highlight[],
-  keywords: string[] = [],
-): Promise<CaItem> {
+): Promise<{ facts: CaFact[]; points: Bi[] }> {
   const item = await loadItem(id);
+  const { fresh, points } = await newPoints(item, highlights);
+  return { facts: fresh, points };
+}
+
+async function newPoints(
+  item: CaItem,
+  highlights: Highlight[],
+  given?: Bi[],
+): Promise<{ fresh: CaFact[]; points: Bi[] }> {
   const c = item.content;
   if (!c) throw new Error("Write the story first.");
-  await assertDayEditable([item.issue_date]);
   const ok = await allowedSources(
     item.issue_date,
     item.source_ids,
@@ -2223,6 +2279,9 @@ export async function addPointsFromHighlights(
     .facts.filter((f) => !have.has(normalizeForMatch(f.quote)))
     .slice(0, Math.min(room, ADD_POINTS_MAX));
   if (!fresh.length) throw new Error("Highlight a new key point first.");
+  // Points the editor saw (and maybe changed) in the preview are kept.
+  if (given?.length === fresh.length && given.every((p) => p.en.trim() && p.hi.trim()))
+    return { fresh, points: given };
   const points = parsePoints(
     await saathiComplete(
       apiKey(),
@@ -2238,6 +2297,20 @@ export async function addPointsFromHighlights(
     fresh.length,
   );
   if (!points) throw new Error("The AI's reply could not be read. Try again.");
+  return { fresh, points };
+}
+
+export async function addPointsFromHighlights(
+  id: string,
+  highlights: Highlight[],
+  keywords: string[] = [],
+  given?: Bi[],
+): Promise<CaItem> {
+  const item = await loadItem(id);
+  const c = item.content;
+  if (!c) throw new Error("Write the story first.");
+  await assertDayEditable([item.issue_date]);
+  const { fresh, points } = await newPoints(item, highlights, given);
   const before = snapshotOf(item);
   const { data, error } = await from("ca_items")
     .update({
