@@ -10,7 +10,7 @@ import { Plus, RefreshCw, Sparkles, X } from "lucide-react";
 import { getCaStyle, saveCaStyleRules, suggestCaStyle } from "@/lib/current-affairs.functions";
 import { normalizeForMatch } from "@/lib/current-affairs";
 import { STYLE_RULES_MAX } from "@/lib/ca-style";
-import { errorText } from "@/components/ca-ui";
+import { errorText, SavesInstantly } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -77,7 +77,10 @@ export function HouseStyle() {
       className="space-y-3 rounded-2xl border border-border bg-card p-4"
     >
       <div>
-        <h3 className="font-semibold">House style</h3>
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="font-semibold">House style</h3>
+          <SavesInstantly />
+        </div>
         <p className="text-sm text-muted-foreground">
           Your writing rules for SAATHI. They go into the instructions for every story it writes
           (and points it adds), so you fix the same things less often. Up to {STYLE_RULES_MAX}.

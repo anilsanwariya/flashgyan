@@ -84,27 +84,41 @@ import { exportFlashcardsToXlsx, exportMcqToXlsx } from "@/lib/deck-export";
 
 export const Route = createFileRoute("/_authenticated/admin")({
   ssr: false,
-  head: () => ({ meta: [
-    { title: "Admin — FlashGyan" },
-    { name: "description", content: "Manage FlashGyan learning content and homepage settings." },
-    { property: "og:title", content: "Admin — FlashGyan" },
-    { property: "og:description", content: "Manage FlashGyan learning content and homepage settings." },
-    { property: "og:type", content: "website" },
-    { name: "twitter:card", content: "summary" },
-  ] }),
+  head: () => ({
+    meta: [
+      { title: "Admin — FlashGyan" },
+      { name: "description", content: "Manage FlashGyan learning content and homepage settings." },
+      { property: "og:title", content: "Admin — FlashGyan" },
+      {
+        property: "og:description",
+        content: "Manage FlashGyan learning content and homepage settings.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+    ],
+  }),
   // The open section lives in the URL (?section=bot.commands), so refresh,
   // links and the Back button keep your place. Links from Telegram can also
   // name the day (?date=2026-10-20) and what to open on it (?open=facts,
   // ?open=style or ?open=lang).
   validateSearch: (
     search: Record<string, unknown>,
-  ): { section?: AdminSectionId; date?: string; open?: "facts" | "style" | "lang" } => ({
+  ): {
+    section?: AdminSectionId;
+    date?: string;
+    open?: "facts" | "style" | "lang";
+    tab?: string;
+  } => ({
     ...(isAdminSection(search.section) ? { section: search.section } : {}),
     ...(typeof search.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(search.date)
       ? { date: search.date }
       : {}),
     ...(search.open === "facts" || search.open === "style" || search.open === "lang"
       ? { open: search.open }
+      : {}),
+    // A page's open tab (Magazine settings, Monthly magazine).
+    ...(typeof search.tab === "string" && /^[a-z-]{2,20}$/.test(search.tab)
+      ? { tab: search.tab }
       : {}),
   }),
   component: Admin,
@@ -117,8 +131,6 @@ import { HomePanel } from "@/components/home-panel";
 import { BotManagerPanel, type BotSection } from "@/components/bot-manager-panel";
 import { AdminShell, isAdminSection, type AdminSectionId } from "@/components/admin-shell";
 import { setAdminDevice } from "@/lib/pwa";
-
-
 
 // ---------- Flashcard Excel parsing ----------
 
@@ -147,7 +159,8 @@ function parseFcWorkbook(file: ArrayBuffer) {
   const wb = XLSX.read(file, { type: "array" });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-  if (json.length === 0) return { rows: [] as ParsedFcRow[], invalid: 0, missingCols: [] as string[] };
+  if (json.length === 0)
+    return { rows: [] as ParsedFcRow[], invalid: 0, missingCols: [] as string[] };
   const originalKeys = Object.keys(json[0]);
   const headerMap: Record<string, string> = {};
   for (const k of originalKeys) headerMap[normalizeKey(k)] = k;
@@ -174,8 +187,12 @@ function parseFcWorkbook(file: ArrayBuffer) {
     const answer = pick(row, "answer");
     const orderNum = Number(orderRaw);
     if (
-      !prompt || !question || !answer || !orderRaw ||
-      !Number.isFinite(orderNum) || !Number.isInteger(orderNum)
+      !prompt ||
+      !question ||
+      !answer ||
+      !orderRaw ||
+      !Number.isFinite(orderNum) ||
+      !Number.isInteger(orderNum)
     ) {
       invalid++;
       continue;
@@ -230,8 +247,8 @@ function Admin() {
           <div className="rounded-2xl border border-border bg-card p-6">
             <h2 className="font-semibold">Not authorized</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Your account exists but isn't an admin yet. Ask your project owner to grant
-              admin to user id:
+              Your account exists but isn't an admin yet. Ask your project owner to grant admin to
+              user id:
             </p>
             <code className="mt-3 block break-all bg-muted rounded-lg p-3 text-xs">
               {adminQ.data.userId}
@@ -285,10 +302,7 @@ function FlashcardsPanel() {
 
   const decks = decksQ.data ?? [];
 
-  const subjects = useMemo(
-    () => Array.from(new Set(decks.map((d) => d.subject))).sort(),
-    [decks],
-  );
+  const subjects = useMemo(() => Array.from(new Set(decks.map((d) => d.subject))).sort(), [decks]);
   const topics = useMemo(
     () =>
       filterSubject
@@ -368,10 +382,7 @@ function FlashcardsPanel() {
           {filtered.map((d) => (
             <li key={d.id} className="rounded-xl bg-card border border-border p-3">
               <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setViewingDeckId(d.id)}
-                  className="min-w-0 flex-1 text-left"
-                >
+                <button onClick={() => setViewingDeckId(d.id)} className="min-w-0 flex-1 text-left">
                   <div className="text-xs text-muted-foreground">
                     Order {d.order_index} · {d.subject} · {d.topic}
                   </div>
@@ -408,7 +419,9 @@ function FlashcardsPanel() {
         </ul>
       ) : (
         <p className="text-sm text-muted-foreground">
-          {decks.length === 0 ? "No decks yet. Add your first deck." : "No decks match the filters."}
+          {decks.length === 0
+            ? "No decks yet. Add your first deck."
+            : "No decks match the filters."}
         </p>
       )}
 
@@ -558,7 +571,9 @@ function DeckFormDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
           <Button onClick={onSave} disabled={saving}>
             {saving ? "Saving…" : "Save"}
           </Button>
@@ -568,13 +583,7 @@ function DeckFormDialog({
   );
 }
 
-function DeckCardsView({
-  deckId,
-  onBack,
-}: {
-  deckId: string;
-  onBack: () => void;
-}) {
+function DeckCardsView({ deckId, onBack }: { deckId: string; onBack: () => void }) {
   const qc = useQueryClient();
   const getFn = useServerFn(getDeck);
   const importFn = useServerFn(bulkImportCards);
@@ -659,9 +668,7 @@ function DeckCardsView({
             </div>
             <h2 className="text-xl font-semibold mt-1">{deckQ.data.deck.name}</h2>
             {deckQ.data.deck.description && (
-              <p className="text-sm text-muted-foreground mt-1">
-                {deckQ.data.deck.description}
-              </p>
+              <p className="text-sm text-muted-foreground mt-1">{deckQ.data.deck.description}</p>
             )}
           </div>
 
@@ -670,14 +677,11 @@ function DeckCardsView({
               <Upload className="h-4 w-4" /> Upload cards Excel
             </h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              Columns: order, prompt, question, answer, optional
-              explanation_&lt;title&gt; columns.
+              Columns: order, prompt, question, answer, optional explanation_&lt;title&gt; columns.
             </p>
             <label className="mt-4 flex items-center justify-center h-24 rounded-xl border-2 border-dashed border-border cursor-pointer hover:bg-accent/40">
               <div className="text-center">
-                <div className="text-sm font-medium">
-                  {fileName || "Tap to choose .xlsx file"}
-                </div>
+                <div className="text-sm font-medium">{fileName || "Tap to choose .xlsx file"}</div>
                 {parsed && (
                   <div className="text-xs text-muted-foreground mt-1">
                     {parsed.length} valid rows{invalid ? ` · ${invalid} skipped` : ""}
@@ -714,17 +718,13 @@ function DeckCardsView({
 
           <section>
             <div className="flex items-center justify-between mb-3 gap-2">
-              <h3 className="font-semibold">
-                Cards ({deckQ.data.cards.length})
-              </h3>
+              <h3 className="font-semibold">Cards ({deckQ.data.cards.length})</h3>
               <div className="flex items-center gap-2">
                 <Button
                   size="sm"
                   variant="outline"
                   disabled={deckQ.data.cards.length === 0}
-                  onClick={() =>
-                    exportFlashcardsToXlsx(deckQ.data!.deck.name, deckQ.data!.cards)
-                  }
+                  onClick={() => exportFlashcardsToXlsx(deckQ.data!.deck.name, deckQ.data!.cards)}
                 >
                   <Download className="h-4 w-4" /> Download Deck
                 </Button>
@@ -784,9 +784,7 @@ function CardRow({
           #{c.order_index}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground">
-            {c.prompt}
-          </div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">{c.prompt}</div>
           <div className="text-sm font-medium mt-0.5">{c.question}</div>
           {c.image_url && (
             <img
@@ -867,9 +865,7 @@ function CardEditDialog({
     setUploading(true);
     try {
       const buf = await file.arrayBuffer();
-      const dataBase64 = btoa(
-        new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), ""),
-      );
+      const dataBase64 = btoa(new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), ""));
       const { path, url } = await uploadFn({
         data: {
           id: card.id,
@@ -1056,10 +1052,7 @@ function CardEditDialog({
                     value={s.body}
                     onChange={(e) => updateSection(i, "body", e.target.value)}
                   />
-                  <button
-                    onClick={() => removeSection(i)}
-                    className="text-xs text-destructive"
-                  >
+                  <button onClick={() => removeSection(i)} className="text-xs text-destructive">
                     Remove section
                   </button>
                 </div>
@@ -1068,7 +1061,9 @@ function CardEditDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
           <Button onClick={onSave} disabled={saving}>
             {saving ? "Saving…" : "Save"}
           </Button>
@@ -1084,7 +1079,10 @@ function McqPanel() {
   const qc = useQueryClient();
   const listFn = useServerFn(listMcqTests);
   const deleteFn = useServerFn(deleteMcqTest);
-  const testsQ = useQuery<McqTestSummary[]>({ queryKey: ["mcqTestsAdmin"], queryFn: () => listFn() });
+  const testsQ = useQuery<McqTestSummary[]>({
+    queryKey: ["mcqTestsAdmin"],
+    queryFn: () => listFn(),
+  });
 
   const [editing, setEditing] = useState<McqTestSummary | "new" | null>(null);
   const [viewingTestId, setViewingTestId] = useState<string | null>(null);
@@ -1128,10 +1126,7 @@ function McqPanel() {
           {testsQ.data.map((t) => (
             <li key={t.id} className="rounded-xl bg-card border border-border p-3">
               <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setViewingTestId(t.id)}
-                  className="min-w-0 flex-1 text-left"
-                >
+                <button onClick={() => setViewingTestId(t.id)} className="min-w-0 flex-1 text-left">
                   <div className="text-xs text-muted-foreground">
                     Order {t.order_index} · {Math.round(t.duration_seconds / 60)} min
                   </div>
@@ -1284,7 +1279,9 @@ function TestFormDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
           <Button onClick={onSave} disabled={saving}>
             {saving ? "Saving…" : "Save"}
           </Button>
@@ -1294,13 +1291,7 @@ function TestFormDialog({
   );
 }
 
-function McqQuestionsView({
-  testId,
-  onBack,
-}: {
-  testId: string;
-  onBack: () => void;
-}) {
+function McqQuestionsView({ testId, onBack }: { testId: string; onBack: () => void }) {
   const qc = useQueryClient();
   const getFn = useServerFn(getMcqTest);
   const importFn = useServerFn(bulkImportMcq);
@@ -1382,9 +1373,7 @@ function McqQuestionsView({
           <div>
             <h2 className="text-xl font-semibold">{testQ.data.test.name}</h2>
             {testQ.data.test.description && (
-              <p className="text-sm text-muted-foreground mt-1">
-                {testQ.data.test.description}
-              </p>
+              <p className="text-sm text-muted-foreground mt-1">{testQ.data.test.description}</p>
             )}
           </div>
 
@@ -1393,15 +1382,13 @@ function McqQuestionsView({
               <Upload className="h-4 w-4" /> Upload questions Excel
             </h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              Columns: order, question, option_1, option_2, option_3, option_4, answer,
-              optional question_ext (extra question detail), optional explanation_&lt;title&gt; columns. Answer accepts 1–4,
-              A–D, option_1..option_4, or option text.
+              Columns: order, question, option_1, option_2, option_3, option_4, answer, optional
+              question_ext (extra question detail), optional explanation_&lt;title&gt; columns.
+              Answer accepts 1–4, A–D, option_1..option_4, or option text.
             </p>
             <label className="mt-4 flex items-center justify-center h-24 rounded-xl border-2 border-dashed border-border cursor-pointer hover:bg-accent/40">
               <div className="text-center">
-                <div className="text-sm font-medium">
-                  {fileName || "Tap to choose .xlsx file"}
-                </div>
+                <div className="text-sm font-medium">{fileName || "Tap to choose .xlsx file"}</div>
                 {parsed && (
                   <div className="text-xs text-muted-foreground mt-1">
                     {parsed.length} valid rows{invalid ? ` · ${invalid} skipped` : ""}
@@ -1438,16 +1425,12 @@ function McqQuestionsView({
 
           <section>
             <div className="flex items-center justify-between mb-3 gap-2">
-              <h3 className="font-semibold">
-                Questions ({testQ.data.questions.length})
-              </h3>
+              <h3 className="font-semibold">Questions ({testQ.data.questions.length})</h3>
               <Button
                 size="sm"
                 variant="outline"
                 disabled={testQ.data.questions.length === 0}
-                onClick={() =>
-                  exportMcqToXlsx(testQ.data!.test.name, testQ.data!.questions)
-                }
+                onClick={() => exportMcqToXlsx(testQ.data!.test.name, testQ.data!.questions)}
               >
                 <Download className="h-4 w-4" /> Download Deck
               </Button>
@@ -1570,9 +1553,7 @@ function QuestionEditDialog({
     setUploading(true);
     try {
       const buf = await file.arrayBuffer();
-      const dataBase64 = btoa(
-        new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), ""),
-      );
+      const dataBase64 = btoa(new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), ""));
       const { url } = await uploadFn({
         data: {
           id: q.id,
@@ -1753,10 +1734,7 @@ function QuestionEditDialog({
                     value={s.body}
                     onChange={(e) => updateSection(i, "body", e.target.value)}
                   />
-                  <button
-                    onClick={() => removeSection(i)}
-                    className="text-xs text-destructive"
-                  >
+                  <button onClick={() => removeSection(i)} className="text-xs text-destructive">
                     Remove section
                   </button>
                 </div>
@@ -1765,7 +1743,9 @@ function QuestionEditDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
           <Button onClick={onSave} disabled={saving}>
             {saving ? "Saving…" : "Save"}
           </Button>
@@ -1781,7 +1761,10 @@ function Header({ onSignOut }: { onSignOut: () => void }) {
   return (
     <header className="px-5 py-4 border-b border-border bg-background">
       <div className="max-w-2xl w-full mx-auto flex items-center justify-between">
-        <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        <Link
+          to="/"
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
           <ArrowLeft className="h-4 w-4" /> Home
         </Link>
         <h1 className="text-base font-semibold">Admin</h1>
@@ -1873,10 +1856,7 @@ function McqPracticePanel() {
           {testsQ.data.map((t) => (
             <li key={t.id} className="rounded-xl bg-card border border-border p-3">
               <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setViewingTestId(t.id)}
-                  className="min-w-0 flex-1 text-left"
-                >
+                <button onClick={() => setViewingTestId(t.id)} className="min-w-0 flex-1 text-left">
                   <div className="text-xs text-muted-foreground">Order {t.order_index}</div>
                   <div className="font-medium truncate">{t.name}</div>
                   <div className="text-xs text-muted-foreground truncate">
@@ -1997,19 +1977,11 @@ function PracticeTestFormDialog({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="p-subject">Subject</Label>
-              <Input
-                id="p-subject"
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-              />
+              <Input id="p-subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
             </div>
             <div>
               <Label htmlFor="p-topic">Topic</Label>
-              <Input
-                id="p-topic"
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-              />
+              <Input id="p-topic" value={topic} onChange={(e) => setTopic(e.target.value)} />
             </div>
           </div>
           <div>
@@ -2023,7 +1995,9 @@ function PracticeTestFormDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
           <Button onClick={onSave} disabled={saving}>
             {saving ? "Saving…" : "Save"}
           </Button>
@@ -2033,13 +2007,7 @@ function PracticeTestFormDialog({
   );
 }
 
-function McqPracticeQuestionsView({
-  testId,
-  onBack,
-}: {
-  testId: string;
-  onBack: () => void;
-}) {
+function McqPracticeQuestionsView({ testId, onBack }: { testId: string; onBack: () => void }) {
   const qc = useQueryClient();
   const getFn = useServerFn(getMcqPracticeTest);
   const importFn = useServerFn(bulkImportMcqPractice);
@@ -2121,9 +2089,7 @@ function McqPracticeQuestionsView({
           <div>
             <h2 className="text-xl font-semibold">{testQ.data.test.name}</h2>
             {testQ.data.test.description && (
-              <p className="text-sm text-muted-foreground mt-1">
-                {testQ.data.test.description}
-              </p>
+              <p className="text-sm text-muted-foreground mt-1">{testQ.data.test.description}</p>
             )}
           </div>
 
@@ -2132,14 +2098,12 @@ function McqPracticeQuestionsView({
               <Upload className="h-4 w-4" /> Upload questions Excel
             </h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              Same schema as MCQ Tests: order, question, option_1..option_4, answer,
-              optional question_ext (extra question detail), optional explanation_&lt;title&gt; columns.
+              Same schema as MCQ Tests: order, question, option_1..option_4, answer, optional
+              question_ext (extra question detail), optional explanation_&lt;title&gt; columns.
             </p>
             <label className="mt-4 flex items-center justify-center h-24 rounded-xl border-2 border-dashed border-border cursor-pointer hover:bg-accent/40">
               <div className="text-center">
-                <div className="text-sm font-medium">
-                  {fileName || "Tap to choose .xlsx file"}
-                </div>
+                <div className="text-sm font-medium">{fileName || "Tap to choose .xlsx file"}</div>
                 {parsed && (
                   <div className="text-xs text-muted-foreground mt-1">
                     {parsed.length} valid rows{invalid ? ` · ${invalid} skipped` : ""}
@@ -2176,16 +2140,12 @@ function McqPracticeQuestionsView({
 
           <section>
             <div className="flex items-center justify-between mb-3 gap-2">
-              <h3 className="font-semibold">
-                Questions ({testQ.data.questions.length})
-              </h3>
+              <h3 className="font-semibold">Questions ({testQ.data.questions.length})</h3>
               <Button
                 size="sm"
                 variant="outline"
                 disabled={testQ.data.questions.length === 0}
-                onClick={() =>
-                  exportMcqToXlsx(testQ.data!.test.name, testQ.data!.questions)
-                }
+                onClick={() => exportMcqToXlsx(testQ.data!.test.name, testQ.data!.questions)}
               >
                 <Download className="h-4 w-4" /> Download Deck
               </Button>
@@ -2308,9 +2268,7 @@ function PracticeQuestionEditDialog({
     setUploading(true);
     try {
       const buf = await file.arrayBuffer();
-      const dataBase64 = btoa(
-        new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), ""),
-      );
+      const dataBase64 = btoa(new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), ""));
       const { url } = await uploadFn({
         data: {
           id: q.id,
@@ -2491,10 +2449,7 @@ function PracticeQuestionEditDialog({
                     value={s.body}
                     onChange={(e) => updateSection(i, "body", e.target.value)}
                   />
-                  <button
-                    onClick={() => removeSection(i)}
-                    className="text-xs text-destructive"
-                  >
+                  <button onClick={() => removeSection(i)} className="text-xs text-destructive">
                     Remove section
                   </button>
                 </div>
@@ -2503,7 +2458,9 @@ function PracticeQuestionEditDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
           <Button onClick={onSave} disabled={saving}>
             {saving ? "Saving…" : "Save"}
           </Button>
@@ -2527,7 +2484,8 @@ function TelegramUsersPanel() {
       <div>
         <h2 className="text-xl font-semibold">Telegram Users</h2>
         <p className="text-sm text-muted-foreground">
-          People who opened the app via Telegram. Signed-in browser users live in your auth Users list.
+          People who opened the app via Telegram. Signed-in browser users live in your auth Users
+          list.
         </p>
       </div>
 
@@ -2549,7 +2507,9 @@ function TelegramUsersPanel() {
           <ul className="divide-y divide-border">
             {data.map((u) => {
               const name =
-                [u.first_name, u.last_name].filter(Boolean).join(" ") || u.username || `#${u.telegram_id}`;
+                [u.first_name, u.last_name].filter(Boolean).join(" ") ||
+                u.username ||
+                `#${u.telegram_id}`;
               return (
                 <li key={u.id} className="flex items-center gap-3 px-4 py-3">
                   {u.photo_url ? (

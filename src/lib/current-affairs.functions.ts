@@ -1231,6 +1231,8 @@ export type MonthSummary = {
   days: { date: string; items: number; status: CaIssue["status"] | null }[];
   issue: CaIssue | null;
   corrections: (CaCorrection & { item_date: string; headline: string })[];
+  // Stories this month in each section.
+  sections: Record<string, number>;
 };
 
 export const getCaMonth = createServerFn({ method: "POST" })
@@ -1240,12 +1242,12 @@ export const getCaMonth = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     const s = await server();
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { monthRange } = await import("@/lib/current-affairs");
+    const { monthRange, normalizeCategory } = await import("@/lib/current-affairs");
     const range = monthRange(data.month);
     const [items, issues, corrections] = await Promise.all([
       supabaseAdmin
         .from("ca_items" as never)
-        .select("issue_date")
+        .select("issue_date, category")
         .gte("issue_date", range.from)
         .lte("issue_date", range.to)
         .eq("status", "included"),
@@ -1257,8 +1259,11 @@ export const getCaMonth = createServerFn({ method: "POST" })
       s.listCorrections(range.from, range.to),
     ]);
     const counts = new Map<string, number>();
-    for (const r of (items.data ?? []) as { issue_date: string }[]) {
+    const sections: Record<string, number> = {};
+    for (const r of (items.data ?? []) as { issue_date: string; category: string }[]) {
       counts.set(r.issue_date, (counts.get(r.issue_date) ?? 0) + 1);
+      const cat = normalizeCategory(r.category);
+      sections[cat] = (sections[cat] ?? 0) + 1;
     }
     const all = (issues.data ?? []) as unknown as CaIssue[];
     const daily = new Map(all.filter((i) => i.kind === "daily").map((i) => [i.period, i.status]));
@@ -1269,6 +1274,7 @@ export const getCaMonth = createServerFn({ method: "POST" })
       days,
       issue: all.find((i) => i.kind === "monthly" && i.period === range.from) ?? null,
       corrections,
+      sections,
     };
   });
 

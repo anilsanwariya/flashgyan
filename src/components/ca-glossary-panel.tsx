@@ -14,7 +14,7 @@ import {
   suggestCaGlossary,
 } from "@/lib/current-affairs.functions";
 import { GLOSSARY_MAX, type GlossaryEntry, type GlossarySuggestion } from "@/lib/ca-glossary";
-import { errorText } from "@/components/ca-ui";
+import { errorText, SavesInstantly } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -77,7 +77,10 @@ export function Glossary() {
       className="space-y-3 rounded-2xl border border-border bg-card p-4"
     >
       <div>
-        <h3 className="font-semibold">Glossary</h3>
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="font-semibold">Glossary</h3>
+          <SavesInstantly />
+        </div>
         <p className="text-sm text-muted-foreground">
           The Hindi SAATHI always uses for an English term, or terms kept in English. Every story,
           summary, point and translation follows it, and the Hindi–English check flags a story that

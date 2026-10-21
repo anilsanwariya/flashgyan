@@ -1,6 +1,7 @@
 // Small pieces shared by the current affairs admin screens.
 import { useEffect, useState } from "react";
 import { MoreHorizontal, Trash2 } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -141,5 +142,75 @@ export function BulkBar({
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
+  );
+}
+
+// A page's tabs: one row that scrolls sideways on phones. The open tab is
+// kept in the address (?tab=…), so a link can open it.
+export function useUrlTab<T extends string>(tabs: readonly T[], fallback: T): [T, (t: T) => void] {
+  const navigate = useNavigate();
+  const [tab, setTab] = useState<T>(fallback);
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t && (tabs as readonly string[]).includes(t)) setTab(t as T);
+    // The tabs are fixed for the page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const choose = (t: T) => {
+    setTab(t);
+    void navigate({
+      to: ".",
+      search: (s: Record<string, unknown>) => ({ ...s, tab: t }),
+      replace: true,
+    } as never);
+  };
+  return [tab, choose];
+}
+
+export function PageTabs<T extends string>({
+  label,
+  tabs,
+  value,
+  onChange,
+}: {
+  label: string;
+  tabs: readonly { id: T; label: string; dot?: boolean }[];
+  value: T;
+  onChange: (t: T) => void;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label={label}
+      className="-mx-1 flex gap-1 overflow-x-auto border-b border-border px-1 [scrollbar-width:none]"
+    >
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          aria-selected={value === t.id}
+          onClick={() => onChange(t.id)}
+          className={`-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors ${value === t.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+        >
+          {t.label}
+          {t.dot && (
+            <span
+              className="h-1.5 w-1.5 rounded-full bg-amber-500"
+              aria-label="has changes that aren't saved"
+            />
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// For cards whose changes save at once, unlike the form's Save button.
+export function SavesInstantly() {
+  return (
+    <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-normal text-muted-foreground">
+      Saves instantly
+    </span>
   );
 }
