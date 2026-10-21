@@ -60,6 +60,8 @@ export type CaRun = {
   status: "running" | "done" | "failed";
   started_by: string;
   discovered: string[];
+  // The websites this collection reads (null: every website switched on).
+  sites: string[] | null;
   notified: boolean;
   error: string | null;
   started_at: string;
@@ -92,7 +94,14 @@ async function getSites(): Promise<WatchSite[]> {
 
 // ---------- Runs ----------
 
-export async function startRun(issueDate: string, by: string): Promise<CaRun> {
+// `siteIds`: the websites the admin picked for this collection; without
+// them, the websites switched on in Settings.
+export async function startRun(issueDate: string, by: string, siteIds?: string[]): Promise<CaRun> {
+  const all = await getSites();
+  const sites = siteIds
+    ? all.filter((s) => siteIds.includes(s.id)).map((s) => s.id)
+    : all.filter((s) => s.enabled).map((s) => s.id);
+  if (siteIds && !sites.length) throw new Error("Pick at least one website.");
   const { data, error } = await from("ca_runs")
     .upsert(
       {
@@ -100,6 +109,7 @@ export async function startRun(issueDate: string, by: string): Promise<CaRun> {
         status: "running",
         started_by: by,
         discovered: [],
+        sites,
         locked_until: null,
         notified: false,
         error: null,
@@ -181,8 +191,12 @@ export async function tick(origin?: string): Promise<TickResult> {
 // Does one unit of work. Returns what it did, "wait" when only PDF parsing is
 // left, or null when the run is complete.
 async function nextStep(run: CaRun): Promise<string | "wait" | null> {
-  // 1) Read the next site.
-  const sites = (await getSites()).filter((s) => s.enabled);
+  // 1) Read the next site: those picked for this collection (older runs:
+  // every website switched on).
+  const all = await getSites();
+  const sites = run.sites
+    ? all.filter((s) => run.sites!.includes(s.id))
+    : all.filter((s) => s.enabled);
   const site = sites.find((s) => !run.discovered.includes(s.id));
   if (site) {
     const n = await discoverSite(site, run);

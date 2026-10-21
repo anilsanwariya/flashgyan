@@ -27,6 +27,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -98,6 +105,8 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
   });
   const [work, setWork] = useState<string | null>(null);
   const [show, setShow] = useState<"picked" | "other">("picked");
+  // The websites picked for the next collection (null: picker closed).
+  const [pick, setPick] = useState<Set<string> | null>(null);
   const stop = useRef(false);
 
   // A new day starts with nothing selected.
@@ -119,11 +128,11 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
 
   // Runs ticks from this page until the collection is finished. The
   // once-a-minute schedule does the same when this page is closed.
-  async function drive(start: boolean) {
+  async function drive(start: boolean, sites?: string[]) {
     if (work) return;
     setWork("Starting…");
     try {
-      if (start) await startFn({ data: { date } });
+      if (start) await startFn({ data: { date, ...(sites ? { sites } : {}) } });
       for (let i = 0; i < 400 && !stop.current; i++) {
         const r = await tickFn({ data: { origin: window.location.origin } });
         if (r.error) toast.error(r.error);
@@ -200,6 +209,11 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
 
   const articles = data?.articles ?? [];
   const siteName = new Map((data?.sites ?? []).map((s) => [s.id, s.name]));
+  // Which websites this day's collection read.
+  const readNames = (run?.sites ?? []).map((id) => siteName.get(id)).filter(Boolean);
+  const readNote = readNames.length
+    ? `Read ${readNames.length} of ${data?.sites.length ?? readNames.length} websites: ${readNames.join(", ")}`
+    : "";
   const picked = articles.filter((a) => a.status !== "found" && a.status !== "skipped");
   const other = articles.filter((a) => a.status === "found" || a.status === "skipped");
   const count = (st: CaArticle["status"]) => articles.filter((a) => a.status === st).length;
@@ -251,15 +265,13 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
               size="sm"
               variant={run && run.started_by !== "cleared" ? "outline" : "default"}
               onClick={() => {
-                if (
-                  run &&
-                  run.started_by !== "cleared" &&
-                  !confirm(
-                    "Read all websites again for this day? Articles already added stay; new ones are picked and added.",
-                  )
-                )
+                // The picker starts from the websites switched on in Settings.
+                const sites = data?.sites ?? [];
+                if (!sites.length) {
+                  toast.error("Add websites in Magazine settings → Websites to watch first.");
                   return;
-                void drive(true);
+                }
+                setPick(new Set(sites.filter((s) => s.enabled).map((s) => s.id)));
               }}
             >
               {run && run.started_by !== "cleared" ? "Collect again" : "Collect now"}
@@ -283,6 +295,7 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
         <p className="text-xs text-muted-foreground">
           Started {timeIst(run.started_at)} ({run.started_by === "admin" ? "by you" : "on schedule"}
           ){run.finished_at ? ` · finished ${timeIst(run.finished_at)}` : ""}
+          {readNote ? ` · ${readNote}` : ""}
           {run.error ? ` · last error: ${run.error}` : ""}
         </p>
       ) : (
@@ -413,7 +426,104 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
           </p>
         </>
       )}
+      {pick && (
+        <SitePicker
+          sites={data?.sites ?? []}
+          pick={pick}
+          setPick={setPick}
+          again={!!run && run.started_by !== "cleared"}
+          onCollect={() => {
+            const sites = [...pick];
+            setPick(null);
+            void drive(true, sites);
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+// "Collect now": which websites to read this time. Starts from the websites
+// switched on in Settings; the choice is for this collection only (Settings
+// and the evening collection stay as they are).
+function SitePicker({
+  sites,
+  pick,
+  setPick,
+  again,
+  onCollect,
+}: {
+  sites: WatchSite[];
+  pick: Set<string>;
+  setPick: (p: Set<string> | null) => void;
+  again: boolean;
+  onCollect: () => void;
+}) {
+  const label = (id: UploadSection) => UPLOAD_SECTIONS.find((u) => u.id === id)?.label ?? id;
+  return (
+    <Dialog open onOpenChange={(o) => !o && setPick(null)}>
+      <DialogContent className="flex max-h-[85dvh] flex-col gap-3 max-sm:bottom-0 max-sm:top-auto max-sm:translate-y-0 max-sm:rounded-b-none sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Collect from websites</DialogTitle>
+          <DialogDescription>
+            {again
+              ? "Read the websites again for this day. Articles already added stay; new ones are picked and added."
+              : "Pick the websites to read this time. Settings and the evening collection don't change."}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="flex-1 text-muted-foreground">
+            {pick.size} of {sites.length} selected
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setPick(new Set(sites.map((s) => s.id)))}
+          >
+            All
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setPick(new Set())}>
+            None
+          </Button>
+        </div>
+        <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto" aria-label="Websites">
+          {sites.map((s) => {
+            const on = pick.has(s.id);
+            return (
+              <li key={s.id}>
+                <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-border px-3 py-2 hover:bg-muted/40">
+                  <Switch
+                    checked={on}
+                    aria-label={s.name}
+                    onCheckedChange={(v) => {
+                      const next = new Set(pick);
+                      if (v) next.add(s.id);
+                      else next.delete(s.id);
+                      setPick(next);
+                    }}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">{s.name}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {label(s.section)} · {s.language}
+                      {!s.enabled ? " · off in Settings" : ""}
+                    </span>
+                  </span>
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setPick(null)}>
+            Cancel
+          </Button>
+          <Button disabled={!pick.size} onClick={onCollect}>
+            Collect from {pick.size} website{pick.size === 1 ? "" : "s"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
