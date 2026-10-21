@@ -44,8 +44,13 @@ const when = (iso: string) =>
     minute: "2-digit",
   });
 
-const KIND = { missing: "One language only", numbers: "Numbers and dates", names: "Names" };
-const KIND_ORDER = { missing: 0, numbers: 1, names: 2 };
+const KIND = {
+  missing: "One language only",
+  numbers: "Numbers and dates",
+  names: "Names",
+  hindi: "Hindi style",
+};
+const KIND_ORDER = { missing: 0, numbers: 1, names: 2, hindi: 3 };
 
 export function LangCheckDialog({
   date,

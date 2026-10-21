@@ -4,6 +4,7 @@
 // server and tests.
 import { numbersIn } from "@/lib/ca-bilingual";
 import { clampSummaryWords, styleBlock, summaryRule, type Bi } from "@/lib/current-affairs";
+import { hindiGuide, type GlossaryEntry } from "../../supabase/functions/_shared/ca-hindi.ts";
 
 export const SUMMARY_OPTIONS = 3;
 export const SUMMARY_LENGTHS = [40, 60, 80, 100] as const;
@@ -11,6 +12,8 @@ export const SUMMARY_LENGTHS = [40, 60, 80, 100] as const;
 type ChatMessage = { role: "system" | "user"; content: string };
 
 export function summaryOptionsMessages(opts: {
+  // The editor's glossary (Magazine settings).
+  glossary?: GlossaryEntry[];
   headline: string;
   facts: string[];
   // Background the editor gave for the summary and Exam Angle only.
@@ -31,7 +34,7 @@ export function summaryOptionsMessages(opts: {
       content: `You write the summary of one news item in a bilingual (Hindi and English) current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). The editor wants other summaries than the one the story has.
 ${summaryRule(words)}
 Write ${SUMMARY_OPTIONS} summaries that differ from the current one and from each other in approach (for example: one opens with the news itself, one with the background or the problem it answers, one with what it means for Rajasthan or for students), all with the same facts.
-RULES: Use only the numbered facts and the background given. Never add a number, name, date or claim that is not in them. Follow the editor's note when one is given. Hindi must be natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी), with the same numbers and official names; it says what the English says.${styleBlock(opts.style)}
+RULES: Use only the numbered facts and the background given. Never add a number, name, date or claim that is not in them. Follow the editor's note when one is given.${styleBlock(opts.style)}${hindiGuide(opts.glossary)}
 Reply with JSON only: {"summaries": [{"en": "...", "hi": "..."}, …]}`,
     },
     {

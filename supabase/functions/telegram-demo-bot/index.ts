@@ -20,6 +20,7 @@ import {
   type StyleContent,
 } from "../_shared/ca-style-check.ts";
 import { parseSync, syncMessages } from "../_shared/ca-translate.ts";
+import { fixShortForms, type GlossaryEntry } from "../_shared/ca-hindi.ts";
 import { CHECK_PHOTO_MAX_BYTES, checkQuestionInput, pickCheckPhoto, validCheckAnswer, type CheckPhoto } from "../_shared/telegram-check-input.ts";
 import {
   SaathiAiError,
@@ -1465,11 +1466,22 @@ async function syncOther(
   if (!text) return { content, synced: false };
   try {
     const headline = content.headline?.en || content.headline?.hi || "";
+    // The editor's glossary (Magazine settings) keeps terms the same as on the website.
+    const { data: setting } = await supabase
+      .from("bot_settings")
+      .select("value")
+      .eq("key", "ca_magazine")
+      .maybeSingle();
+    const glossary = ((setting?.value as { glossary?: GlossaryEntry[] } | null)?.glossary ?? []) as GlossaryEntry[];
     const out = parseSync(
-      await saathiComplete(LOVABLE_API_KEY, syncMessages(headline, [{ label: partName(part), to, text }])),
+      await saathiComplete(
+        LOVABLE_API_KEY,
+        syncMessages(headline, [{ label: partName(part), to, text }], glossary),
+      ),
       1,
     );
-    return out ? { content: withPart(content, part, to, out[0]), synced: true } : { content, synced: false };
+    const line = out ? (to === "hi" ? fixShortForms(out[0]) : out[0]) : null;
+    return line ? { content: withPart(content, part, to, line), synced: true } : { content, synced: false };
   } catch (e) {
     console.error("ca language sync", e instanceof Error ? e.message : e);
     return { content, synced: false };

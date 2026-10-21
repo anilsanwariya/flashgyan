@@ -114,6 +114,16 @@ import {
 } from "@/lib/ca-reader-format";
 import { missingMessages, parseMissing, type MissingCheck } from "@/lib/ca-missing";
 import { parseSummaryOptions, summaryOptionsMessages } from "@/lib/ca-summary";
+import { fixShortFormsDeep } from "../../supabase/functions/_shared/ca-hindi.ts";
+import {
+  glossaryMessages,
+  normalizeGlossary,
+  parseGlossary,
+  GLOSSARY_MIN_EDITS,
+  type GlossaryEntry,
+  type GlossarySuggestion,
+  type HindiEdit,
+} from "@/lib/ca-glossary";
 import { bestArticle, cosine, meaningText, type CompareMatch } from "@/lib/ca-compare";
 import { ADD_POINTS_MAX, STORY_POINTS_MAX, parsePoints, pointsMessages } from "@/lib/ca-points";
 import { dayChecklist, type Check } from "@/lib/ca-checklist";
@@ -194,7 +204,29 @@ import {
 import { syllabusTopics } from "../../supabase/functions/_shared/ras-syllabus.ts";
 
 // The generated types don't know these tables yet.
-const from = (table: string) => supabaseAdmin.from(table as never);
+const from = (table: string) => {
+  const q = supabaseAdmin.from(table as never);
+  return table === "ca_items" ? withShortForms(q) : q;
+};
+
+// Every story saved, whoever wrote it, has its short forms in Latin letters
+// in the Hindi (SCO, not एससीओ).
+function withShortForms<T extends object>(q: T): T {
+  const fix = (row: unknown): unknown =>
+    row && typeof row === "object" && !Array.isArray(row) && "content" in row
+      ? { ...row, content: fixShortFormsDeep((row as { content: unknown }).content) }
+      : row;
+  return new Proxy(q, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value !== "function") return value;
+      if (prop === "update" || prop === "insert" || prop === "upsert")
+        return (rows: unknown, ...rest: unknown[]) =>
+          value.call(target, Array.isArray(rows) ? rows.map(fix) : fix(rows), ...rest);
+      return value.bind(target);
+    },
+  });
+}
 const rpc: SaathiRpc = (fn, args) => supabaseAdmin.rpc(fn as never, args as never);
 
 function apiKey(): string {
@@ -216,6 +248,9 @@ const BUCKET = "ca-magazines";
 // ---------- Settings ----------
 
 const SETTINGS_KEY = "ca_magazine";
+
+// The editor's glossary, for prompts that write Hindi.
+const glossaryNow = async () => (await getMagazineSettings()).glossary ?? [];
 
 export async function getMagazineSettings(): Promise<MagazineSettings> {
   const { data } = await from("bot_settings").select("value").eq("key", SETTINGS_KEY).maybeSingle();
@@ -825,7 +860,7 @@ export async function enrichItem(
   const before = opts.before !== undefined ? opts.before : snapshotOf(item);
   const context = opts.context ?? item.content?.context_facts ?? [];
   const key = apiKey();
-  const { style_rules: style, summary_words: summaryWords } = await getMagazineSettings();
+  const { style_rules: style, summary_words: summaryWords, glossary } = await getMagazineSettings();
   try {
     // The background explains the story's static concept, so the books are
     // searched for the concept, and for the headline in case the concept's
@@ -865,6 +900,7 @@ export async function enrichItem(
         note: opts.note,
         style,
         summaryWords,
+        glossary,
         visual: look.visual
           ? { type: VISUAL_LABELS[look.visual.type].toLowerCase(), covers: look.visual_covers }
           : null,
@@ -941,7 +977,8 @@ export async function getFeature(month: string): Promise<CaFeature | null> {
 }
 
 // Saves the month's article (edits, or in/out of the issue); null deletes it.
-export async function saveFeature(month: string, feature: CaFeature | null) {
+export async function saveFeature(month: string, given: CaFeature | null) {
+  const feature = given && fixShortFormsDeep(given);
   if (!feature) {
     fail((await from("bot_settings").delete().eq("key", featureKey(month))).error);
     return null;
@@ -1016,7 +1053,13 @@ export async function writeFeature(
   for (let attempt = 0; attempt < 2; attempt++) {
     const raw = await saathiComplete(
       apiKey(),
-      featureMessages({ topic: topic.topic, stories: topic.stories, passages, problem }),
+      featureMessages({
+        topic: topic.topic,
+        stories: topic.stories,
+        passages,
+        problem,
+        glossary: await glossaryNow(),
+      }),
     );
     const r = parseFeature(raw, passages);
     if (r.ok) {
@@ -1058,6 +1101,7 @@ export async function makeVisual(item: Pick<CaItem, "headline" | "category" | "f
       const raw = await saathiComplete(
         apiKey(),
         visualMessages({
+          glossary: await glossaryNow(),
           headline: item.headline,
           category: item.category,
           facts: item.facts,
@@ -1096,6 +1140,7 @@ export async function previewVisual(
     const raw = await saathiComplete(
       apiKey(),
       visualMessages({
+        glossary: await glossaryNow(),
         headline: item.headline,
         category: item.category,
         facts: item.facts,
@@ -1204,6 +1249,7 @@ export async function readMaterial(
   const raw = await saathiComplete(
     apiKey(),
     materialMessages({
+      glossary: await glossaryNow(),
       headline: c?.headline.en || item.headline,
       facts: item.facts.map((f) => f.text),
       material: content,
@@ -1402,7 +1448,10 @@ async function relatedFromArchive(
     .map((r) => ({ date: r.issue_date, headline: r.headline, facts: r.facts.map((f) => f.text) }));
   if (!stories.length) return [];
   return parseRelated(
-    await saathiComplete(apiKey(), relatedMessages({ headline, facts: item.facts, stories })),
+    await saathiComplete(
+      apiKey(),
+      relatedMessages({ headline, facts: item.facts, stories, glossary: await glossaryNow() }),
+    ),
     stories,
   );
 }
@@ -1442,7 +1491,10 @@ async function relatedFromWeb(
       }));
     if (!pages.length) return [];
     return parseDyk(
-      await saathiComplete(apiKey(), dykMessages({ headline, facts: item.facts, pages })),
+      await saathiComplete(
+        apiKey(),
+        dykMessages({ headline, facts: item.facts, pages, glossary: await glossaryNow() }),
+      ),
       pages,
     );
   } catch (e) {
@@ -1468,6 +1520,7 @@ async function checkForCorrections(earlierId: string, laterId: string) {
   const raw = await saathiComplete(
     apiKey(),
     changeCheckMessages({
+      glossary: await glossaryNow(),
       earlier: {
         date: earlier.issue_date,
         facts: earlier.facts,
@@ -1583,10 +1636,11 @@ export async function suggestSummaries(
   if (!c) throw new Error("Write the story first.");
   const context = (c.context_facts ?? []).map((f) => f.text);
   const facts = item.facts.map((f) => f.text);
-  const { style_rules } = await getMagazineSettings();
+  const { style_rules, glossary } = await getMagazineSettings();
   const raw = await saathiComplete(
     apiKey(),
     summaryOptionsMessages({
+      glossary,
       headline: c.headline.en || c.headline.hi || item.headline,
       facts,
       context,
@@ -2005,7 +2059,7 @@ export async function dayChecks(date: string): Promise<Check[]> {
     minRajasthan: settings.min_rajasthan,
     target: settings.daily_stories,
     style: styleStatus(style, day.items, settings.style_rules),
-    lang: langStatus(lang, day.items),
+    lang: langStatus(lang, day.items, settings.glossary),
   });
 }
 
@@ -2173,6 +2227,7 @@ export async function addPointsFromHighlights(
     await saathiComplete(
       apiKey(),
       pointsMessages({
+        glossary: await glossaryNow(),
         headline: c.headline.en || c.headline.hi || item.headline,
         summary: c.summary.en || c.summary.hi,
         points: c.points.map((p) => p.en || p.hi),
@@ -2482,6 +2537,7 @@ export async function addStaticFacts(id: string, keywords: Bi[]): Promise<CaItem
     })),
   );
   const { messages, kbTitles } = staticFactsMessages({
+    glossary: await glossaryNow(),
     headline: c.headline.en || item.headline,
     facts: item.facts.map((f) => f.text),
     keywords: found,
@@ -2608,6 +2664,71 @@ export async function suggestStyleRules(): Promise<StyleSuggestions> {
     ).error,
   );
   return value;
+}
+
+// Hindi lines the editor changed in the last days, with the English of the
+// same part, for glossary suggestions.
+export async function hindiEdits(days = 30): Promise<HindiEdit[]> {
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const { data, error } = await from("ca_item_versions")
+    .select("item_id,reason,created_at,snapshot")
+    .gte("created_at", since)
+    .eq("reason", "edit")
+    .order("created_at")
+    .limit(500);
+  if (error) return [];
+  const first = new Map<string, CaSnapshot>();
+  for (const v of (data ?? []) as { item_id: string; snapshot: CaSnapshot }[])
+    if (!first.has(v.item_id)) first.set(v.item_id, v.snapshot);
+  if (!first.size) return [];
+  const { data: items } = await from("ca_items")
+    .select("id,content")
+    .in("id", [...first.keys()]);
+  return ((items ?? []) as Pick<CaItem, "id" | "content">[]).flatMap((it) => {
+    const was = first.get(it.id)?.content;
+    if (!was || !it.content) return [];
+    const now = it.content;
+    const pairs: [Bi | null | undefined, Bi | null | undefined][] = [
+      [was.headline, now.headline],
+      [was.summary, now.summary],
+      [was.why, now.why],
+      ...was.points.map((p, i) => [p, now.points[i]] as [Bi, Bi | undefined]),
+    ];
+    return pairs.flatMap(([a, b]) =>
+      a?.hi?.trim() && b?.hi?.trim() && b.en?.trim() && a.hi.trim() !== b.hi.trim()
+        ? [
+            {
+              en: b.en.trim().slice(0, 300),
+              before: a.hi.trim().slice(0, 300),
+              after: b.hi.trim().slice(0, 300),
+            },
+          ]
+        : [],
+    );
+  });
+}
+
+// Glossary entries SAATHI suggests from the Hindi the editor corrected
+// (one AI call); nothing is added until the editor picks one.
+export async function suggestGlossary(): Promise<GlossarySuggestion[]> {
+  const edits = await hindiEdits();
+  if (edits.length < GLOSSARY_MIN_EDITS)
+    throw new Error(
+      `Not enough Hindi edits in the last 30 days to see a pattern yet (${edits.length}; at least ${GLOSSARY_MIN_EDITS} needed).`,
+    );
+  const { glossary } = await getMagazineSettings();
+  const terms = parseGlossary(
+    await saathiComplete(apiKey(), glossaryMessages(edits, glossary)),
+    glossary,
+  );
+  if (!terms) throw new Error("The AI's reply could not be read. Try again.");
+  return terms;
+}
+
+export async function saveGlossary(entries: GlossaryEntry[]): Promise<GlossaryEntry[]> {
+  const glossary = normalizeGlossary(entries);
+  await saveMagazineSettings({ glossary });
+  return glossary;
 }
 
 export async function styleSuggestions(): Promise<StyleSuggestions | null> {
@@ -2847,7 +2968,11 @@ export async function translatePart(id: string, part: string, to: "en" | "hi"): 
   const out = parseSync(
     await saathiComplete(
       apiKey(),
-      syncMessages(headlineOf(item), [{ label: langPartName(part), to, text }]),
+      syncMessages(
+        headlineOf(item),
+        [{ label: langPartName(part), to, text }],
+        await glossaryNow(),
+      ),
     ),
     1,
   );
@@ -2876,6 +3001,7 @@ export async function syncLanguages(
         syncMessages(
           headline,
           lines.map((l) => ({ label: langPartName(l.part), to: l.to, text: l.text })),
+          await glossaryNow(),
         ),
       ),
       lines.length,

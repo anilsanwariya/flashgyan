@@ -6,6 +6,7 @@
 // editor sees the list and chooses what goes in. Pure helpers, shared by the
 // server, the admin panel and tests.
 import { quoteInSource, type Bi } from "@/lib/current-affairs";
+import { hindiGuide, type GlossaryEntry } from "../../supabase/functions/_shared/ca-hindi.ts";
 
 export type MaterialTarget = "facts" | "static" | "context";
 
@@ -41,6 +42,8 @@ const MAX_STATICS = 4;
 type ChatMessage = { role: "system" | "user"; content: string };
 
 export function materialMessages(opts: {
+  // The editor's glossary (Magazine settings).
+  glossary?: GlossaryEntry[];
   headline: string;
   facts: string[];
   material: string;
@@ -51,13 +54,14 @@ export function materialMessages(opts: {
   const ask: Record<MaterialTarget, string> = {
     facts: `Pick up to ${MAX_FACTS} facts about THIS news from the material that the story's facts don't already state and that an RPSC or RSSB examiner could ask: numbers, names, dates, places, provisions, targets, firsts. Each is one short fact (at most 25 words, in the material's language) with "quote": the material's words that state it (5 to 40 words). Reply {"facts": [{"text": "...", "quote": "..."}]}.`,
     context: `Pick up to ${MAX_FACTS} pieces of background from the material that help explain this news (why it happened, what led to it, what it means), for the story's summary and exam relevance; not new key points. Each is one short line (at most 30 words, in the material's language) with "quote": the material's words for it (5 to 40 words). Reply {"facts": [{"text": "...", "quote": "..."}]}.`,
-    static: `Write up to ${MAX_STATICS} "Static Context" entries from the material: textbook facts on the static concepts this news links to (an institution, act, article, scheme, place, technology or term), each explained the way a textbook does in 1-2 sentences of at most 40 words, without retelling the news. Give each a short "keyword" (at most 5 words) and the explanation in both languages, and "quote": the material's words it is based on (5 to 40 words). Hindi is natural standard Hindi as used in RPSC exams (मानक हिंदी). Reply {"statics": [{"keyword": {"en": "...", "hi": "..."}, "text": {"en": "...", "hi": "..."}, "quote": "..."}]}.`,
+    static: `Write up to ${MAX_STATICS} "Static Context" entries from the material: textbook facts on the static concepts this news links to (an institution, act, article, scheme, place, technology or term), each explained the way a textbook does in 1-2 sentences of at most 40 words, without retelling the news. Give each a short "keyword" (at most 5 words) and the explanation in both languages, and "quote": the material's words it is based on (5 to 40 words). Reply {"statics": [{"keyword": {"en": "...", "hi": "..."}, "text": {"en": "...", "hi": "..."}, "quote": "..."}]}.`,
   };
   return [
     {
       role: "system",
       content: `You help the editor of a bilingual (Hindi and English) current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). The editor added material to one story. ${ask[opts.target]}
-Use only the material. Every "quote" must be copied from the material character for character (no changes, no joining of separate sentences). Leave out anything not about this news or its concepts, and anything the story's facts already say. Follow the editor's note when one is given. Use an empty list when the material has nothing useful. Reply with JSON only.`,
+Use only the material. Every "quote" must be copied from the material character for character (no changes, no joining of separate sentences). Leave out anything not about this news or its concepts, and anything the story's facts already say. Follow the editor's note when one is given. Use an empty list when the material has nothing useful.${hindiGuide(opts.glossary)}
+Reply with JSON only.`,
     },
     {
       role: "user",

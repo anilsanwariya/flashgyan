@@ -3,6 +3,7 @@
 // defence technology…), written only from SAATHI's knowledge base. Pure
 // helpers: prompts, parsing and checks; no network here.
 import type { Bi } from "@/lib/current-affairs";
+import { hindiGuide, type GlossaryEntry } from "../../supabase/functions/_shared/ca-hindi.ts";
 
 export type FeatureSection = { heading: Bi; body: Bi };
 
@@ -88,6 +89,8 @@ export function parseFeatureTopics(raw: string, stories: { headline: string }[])
 }
 
 export function featureMessages(opts: {
+  // The editor's glossary (Magazine settings).
+  glossary?: GlossaryEntry[];
   topic: Bi;
   stories: string[];
   passages: Passage[];
@@ -100,7 +103,7 @@ export function featureMessages(opts: {
     {
       role: "system",
       content: `You write the background article of a bilingual (Hindi and English) monthly current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains), on the topic given. Base it on the knowledge-base passages [K…] (the students' books) and list the ones you used in "from"; add well-established facts from your own knowledge to make it complete, but only facts you are sure of (no doubtful figures or dates). Reply {"error": "not covered"} only if you cannot write a reliable article on the topic.
-Write for revision, not prose: an intro of 1-2 sentences linking the topic to this month's news, then 3-5 sections with short headings; each section body is 2-5 short lines (separated by line breaks, not numbered), each line one exam fact (articles, years, members, powers, places, figures). Hindi must be natural standard Hindi as used in RPSC exams (मानक हिंदी), with the same numbers and official names.
+Write for revision, not prose: an intro of 1-2 sentences linking the topic to this month's news, then 3-5 sections with short headings; each section body is 2-5 short lines (separated by line breaks, not numbered), each line one exam fact (articles, years, members, powers, places, figures).${hindiGuide(opts.glossary)}
 Reply with JSON only: {"title": {"en": "...", "hi": "..."}, "intro": {"en": "...", "hi": "..."}, "sections": [{"heading": {"en": "...", "hi": "..."}, "body": {"en": "...", "hi": "..."}}], "from": ["K1", ...]}`,
     },
     {

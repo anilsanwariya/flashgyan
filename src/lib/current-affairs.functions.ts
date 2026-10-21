@@ -517,6 +517,37 @@ export const suggestCaFactBites = createServerFn({ method: "POST" })
     return (await server()).suggestFactBites(data.id, data.search);
   });
 
+// The editor's glossary (saved on its own, like the house style rules).
+export const saveCaGlossary = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        entries: z
+          .array(
+            z.object({
+              en: z.string().trim().min(1).max(80),
+              hi: z.string().trim().max(120),
+              keep: z.boolean().optional(),
+            }),
+          )
+          .max(200),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).saveGlossary(data.entries);
+  });
+
+// Glossary entries suggested from the Hindi the editor corrected.
+export const suggestCaGlossary = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).suggestGlossary();
+  });
+
 // Three other summaries for a story, of the length the editor picks.
 export const suggestCaSummaries = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

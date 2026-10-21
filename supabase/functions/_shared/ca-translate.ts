@@ -4,6 +4,8 @@
 // lines go in one request. Pure prompt and parsing, shared by the website and
 // the bot.
 
+import { hindiGuide, type GlossaryEntry } from "./ca-hindi.ts";
+
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 // One line to write in the other language; `label` names the part for SAATHI
@@ -12,12 +14,17 @@ export type SyncLine = { label: string; to: "en" | "hi"; text: string };
 
 export const SYNC_LINES_MAX = 20;
 
-export function syncMessages(headline: string, lines: SyncLine[]): ChatMessage[] {
+export function syncMessages(
+  headline: string,
+  lines: SyncLine[],
+  // The editor's glossary (Magazine settings).
+  glossary: GlossaryEntry[] = [],
+): ChatMessage[] {
   return [
     {
       role: "system",
       content: `You keep a current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains) the same in Hindi and English. The editor changed some lines in one language; write each of them in the other language.
-RULES: Keep every fact, number (in digits), date and official name; add nothing and leave nothing out. Keep each line's form: a headline stays a short headline, a point a short phrase, a question a question. Hindi must be natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी); English plain exam-style English.
+RULES: Keep every fact, number (in digits), date and official name; add nothing and leave nothing out. Keep each line's form: a headline stays a short headline, a point a short phrase, a question a question. Write it the way that language is naturally written, not word for word.${hindiGuide(glossary)}
 Reply with JSON only: {"lines": ["...", "..."]} with one line for each numbered line, in the same order.`,
     },
     {
