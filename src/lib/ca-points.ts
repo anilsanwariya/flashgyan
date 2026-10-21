@@ -3,6 +3,7 @@
 // them) become extra points in Hindi and English, in the story's style, and
 // the rest of the story stays as it is. Pure prompt and parsing.
 import { styleBlock, type Bi } from "@/lib/current-affairs";
+import { hindiGuide, type GlossaryEntry } from "../../supabase/functions/_shared/ca-hindi.ts";
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
@@ -11,6 +12,8 @@ export const ADD_POINTS_MAX = 5;
 export const STORY_POINTS_MAX = 12;
 
 export function pointsMessages(opts: {
+  // The editor's glossary (Magazine settings).
+  glossary?: GlossaryEntry[];
   headline: string;
   summary: string;
   points: string[];
@@ -21,7 +24,7 @@ export function pointsMessages(opts: {
     {
       role: "system",
       content: `You write key points, in Hindi and English, for a current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). Add key points to a written story, one for each new fact.
-RULES: Use only the new fact's words: never add a number, name, date or claim that is not in it. Each point is a short phrase (at most 15 words) that starts with the key term or number, not a full explanatory sentence, and does not repeat what the story's summary or points already say. Follow an [Editor's note] on a fact. Hindi must be natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी), with the same numbers and official names.${styleBlock(opts.style)}
+RULES: Use only the new fact's words: never add a number, name, date or claim that is not in it. Each point is a short phrase (at most 15 words) that starts with the key term or number, not a full explanatory sentence, and does not repeat what the story's summary or points already say. Follow an [Editor's note] on a fact.${styleBlock(opts.style)}${hindiGuide(opts.glossary)}
 Reply with JSON only: {"points": [{"en": "...", "hi": "..."}]} with exactly one point per new fact, in the same order.`,
     },
     {

@@ -7,6 +7,7 @@
 // change a visual's text and numbers by hand. Rendered as plain HTML/SVG so
 // the PDF stays sharp.
 import type { Bi, CaFact, CaQuick } from "@/lib/current-affairs";
+import { hindiGuide, type GlossaryEntry } from "../../supabase/functions/_shared/ca-hindi.ts";
 
 export type Visual =
   | { type: "stats"; title: Bi; stats: { value: string; label: Bi }[] }
@@ -236,6 +237,8 @@ export function unverifiedNumbers(v: Visual, facts: CaFact[], headline = ""): st
 // ---------- Asking SAATHI ----------
 
 export function visualMessages(opts: {
+  // The editor's glossary (Magazine settings).
+  glossary?: GlossaryEntry[];
   headline: string;
   category: string;
   facts: CaFact[];
@@ -270,7 +273,7 @@ export function visualMessages(opts: {
 STRICT RULES: Use only the numbered facts. Every number you write (in values, labels, dates and in both languages) must appear in the facts exactly as written there: no totals, differences, percentages, conversions (no lakh/crore/हजार conversions) or rounding of your own. Never number the steps or branches yourself. Keep every label short (at most 8 words; table cells at most 12). Hindi is natural standard Hindi as used in RPSC exams; use the same digits as English. If the facts are too thin for a useful visual, use null.
 The visual replaces text: the story's written points leave out every fact the visual shows completely, so prefer a visual that carries as many facts as possible. List those facts in "covers": the numbers of facts whose every figure, name and date is in the visual.
 "oneliner" is the single most exam-worthy line of the story, at most 20 words, for a last-minute revision page.
-"quick" is one short exam question on the fact RPSC is most likely to ask (where, which district, who, how many, which edition), with its answer in at most 8 words, taken exactly from the facts. Ask it the way exam papers do ("Where will the ₹300 crore AI Hub be built?" → "Jodhpur"); never ask about something the facts don't state.
+"quick" is one short exam question on the fact RPSC is most likely to ask (where, which district, who, how many, which edition), with its answer in at most 8 words, taken exactly from the facts. Ask it the way exam papers do ("Where will the ₹300 crore AI Hub be built?" → "Jodhpur"); never ask about something the facts don't state.${hindiGuide(opts.glossary)}
 Reply with JSON only: {"visual": {...} or null, "covers": [fact numbers], "oneliner": {"en": "...", "hi": "..."}, "quick": {"q": {"en": "...", "hi": "..."}, "a": {"en": "...", "hi": "..."}}}`,
     },
     {

@@ -8,6 +8,7 @@
 // Pure helpers, shared by the server, the admin panel and tests.
 import { normalizeForMatch, type Bi, type CaContent } from "@/lib/current-affairs";
 import { partName } from "@/lib/ca-style";
+import { hindiIssues, type GlossaryEntry } from "../../supabase/functions/_shared/ca-hindi.ts";
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
@@ -18,7 +19,7 @@ export type LangNote = {
   id: string;
   item_id: string;
   part: string;
-  kind: "numbers" | "names" | "missing";
+  kind: "numbers" | "names" | "missing" | "hindi";
   en: string;
   hi: string;
   issue: string;
@@ -264,6 +265,30 @@ export function missingNotes(story: Story): LangNote[] {
     }));
 }
 
+// ---------- The magazine's Hindi style ----------
+
+// Hindi lines that break the magazine's style: a short form in Devanagari
+// (with the line fixed), a glossary term written another way, or a Hindi
+// line much shorter than its English.
+export function hindiNotes(story: Story, glossary: GlossaryEntry[] = []): LangNote[] {
+  if (!story.content) return [];
+  return bilingualParts(story.content).flatMap(({ part, en, hi }) =>
+    en && hi
+      ? hindiIssues(en, hi, glossary).map((x) => ({
+          id: noteId(story.id, part, "hindi", en, hi + x.issue),
+          item_id: story.id,
+          part,
+          kind: "hindi" as const,
+          en,
+          hi,
+          issue: x.issue,
+          wrong: "hi" as const,
+          fix: x.fix,
+        }))
+      : [],
+  );
+}
+
 // ---------- Numbers and dates ----------
 
 const DEVANAGARI_DIGITS = "०१२३४५६७८९";
@@ -402,7 +427,7 @@ export function langCheckMessages(stories: { content: CaContent }[]): ChatMessag
     {
       role: "system",
       content: `You compare the Hindi and English versions of a bilingual current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains) before it is published. Each part of a story is given in English (en) and Hindi (hi), labelled like S2.point3 (story 2, point 3); both must say the same thing.
-RULES: Report only clear differences in names (people, places, schemes, missions, organisations, acts, awards) and in what the facts say (a different subject, or a fact one language leaves out). Ignore numbers and dates (they are checked separately), word order, style, translation choices, and different spellings of the same name in Devanagari. For each difference say which language is wrong and give that language's whole line corrected, changing only what differs. At most ${LANG_NOTES_MAX} notes, the clearest first; an empty list is fine.
+RULES: Report only clear differences in names (people, places, schemes, missions, organisations, acts, awards) and in what the facts say (a different subject, or a fact one language leaves out). Ignore numbers and dates (they are checked separately), word order, style, translation choices, and different spellings of the same name in Devanagari. Short forms written in Latin letters in the Hindi (SCO, RBI), a full Hindi name with the short form in brackets, and English terms in brackets are the magazine's style: never report them. For each difference say which language is wrong and give that language's whole line corrected, changing only what differs. At most ${LANG_NOTES_MAX} notes, the clearest first; an empty list is fine.
 Reply with JSON only: {"notes": [{"ref": "S1.point2", "wrong": "hi", "issue": "Hindi names Jodhpur, English names Jaipur", "fix": "..."}]}`,
     },
     {
@@ -480,6 +505,7 @@ export type LangStatus = { checked: boolean; open: LangNote[]; unchecked: string
 export function langStatus(
   check: LangCheck | null,
   items: (Story & { status: string })[],
+  glossary: GlossaryEntry[] = [],
 ): LangStatus | null {
   const written = items.filter((i) => i.status === "included" && i.content);
   if (!written.length) return null;
@@ -495,9 +521,12 @@ export function langStatus(
   });
   return {
     checked: !!check?.at,
-    open: [...written.flatMap(missingNotes), ...written.flatMap(numberNotes), ...names].filter(
-      (n) => !dismissed.has(n.id),
-    ),
+    open: [
+      ...written.flatMap(missingNotes),
+      ...written.flatMap(numberNotes),
+      ...written.flatMap((i) => hindiNotes(i, glossary)),
+      ...names,
+    ].filter((n) => !dismissed.has(n.id)),
     unchecked: written
       .filter((i) => check?.stories[i.id] !== langFingerprint(i.content!))
       .map((i) => i.id),

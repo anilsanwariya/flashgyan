@@ -4,6 +4,7 @@
 
 import { unverifiedNumbers, type Visual } from "@/lib/ca-visuals";
 import { DEFAULT_MIN_RAJASTHAN } from "@/lib/ca-report";
+import { hindiGuide, type GlossaryEntry } from "../../supabase/functions/_shared/ca-hindi.ts";
 import {
   DEFAULT_DAILY_STORIES,
   REPEATABLE_SLOTS,
@@ -35,6 +36,7 @@ export const UPLOAD_SECTIONS = [
     source: "",
   },
 ] as const;
+
 export type UploadSection = (typeof UPLOAD_SECTIONS)[number]["id"];
 
 // Magazine sections, in the order they appear. Practice questions are the
@@ -482,6 +484,8 @@ export function summaryRule(words: number): string {
 }
 
 export function enrichMessages(opts: {
+  // The editor's glossary (Magazine settings).
+  glossary?: GlossaryEntry[];
   headline: string;
   category: Category;
   facts: CaFact[];
@@ -526,9 +530,9 @@ export function enrichMessages(opts: {
     {
       role: "system",
       content: `You write a bilingual (Hindi and English) current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). Write one news item from the numbered facts.
-RULES: Use only the facts given (numbered facts and any Context). Never add a number, name, date or claim that is not in them. Follow the editor's instruction when one is given, and an [Editor's note] on a fact (for example: put it in the headline, build the MCQ or the Mains question on it, keep it word for word), within these rules. Hindi must be natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी), with the same numbers and official names (give the English name in brackets the first time if it helps).
+RULES: Use only the facts given (numbered facts and any Context). Never add a number, name, date or claim that is not in them. Follow the editor's instruction when one is given, and an [Editor's note] on a fact (for example: put it in the headline, build the MCQ or the Mains question on it, keep it word for word), within these rules.
 BE BRIEF: students revise from this, so less theory, more memorable facts. ${summaryRule(words)} Nothing is repeated between the points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}${styleBlock(opts.style)}
-STATIC CONNECT links the news to the static syllabus. "keywords" lists up to ${MAX_KEYWORDS} static concepts the news links to that RPSC could ask about (constitutional articles, acts, institutions, technologies, schemes, places, conventions, terms), most important first (the "Static concept" in the message, when given), whether or not the passages explain them; each is a short name of at most 5 words. "statics" explains the first 1 or 2 keywords the way a textbook does: what it is, what it says, how it works, in 1-2 sentences of at most 40 words each, without retelling the news. Base each on the knowledge-base passages [K…] that explain it, even if they never mention the news, and list them in "from"; when no passage explains it, write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. Use [] for both when the news has no static concept worth explaining.
+STATIC CONNECT links the news to the static syllabus. "keywords" lists up to ${MAX_KEYWORDS} static concepts the news links to that RPSC could ask about (constitutional articles, acts, institutions, technologies, schemes, places, conventions, terms), most important first (the "Static concept" in the message, when given), whether or not the passages explain them; each is a short name of at most 5 words. "statics" explains the first 1 or 2 keywords the way a textbook does: what it is, what it says, how it works, in 1-2 sentences of at most 40 words each, without retelling the news. Base each on the knowledge-base passages [K…] that explain it, even if they never mention the news, and list them in "from"; when no passage explains it, write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. Use [] for both when the news has no static concept worth explaining.${hindiGuide(opts.glossary)}
 Reply with JSON only:
 {"headline": {"en": "...", "hi": "..."},
  "summary": {"en": ${editorial ? `"3-4 connected sentences, about ${words} words: the issue, the main argument and the suggested way forward"` : `"3-4 connected sentences, about ${words} words (never more than ${words + 15}): the complete context of the news"`}, "hi": "..."},
@@ -670,6 +674,8 @@ export function parseContent(
 // More Static Context facts, for keywords the admin picked. Each keyword
 // comes with the passages its search found.
 export function staticFactsMessages(opts: {
+  // The editor's glossary (Magazine settings).
+  glossary?: GlossaryEntry[];
   headline: string;
   facts: string[];
   keywords: { keyword: Bi; passages: KbPassage[] }[];
@@ -687,7 +693,7 @@ export function staticFactsMessages(opts: {
     messages: [
       {
         role: "system",
-        content: `You write the "Static Context" box of a bilingual (Hindi and English) current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains): textbook facts on the static concepts a news item links to. For each keyword, explain the concept the way a textbook does (what it is, what it says, how it works), linked to the news where it helps, in 1-2 sentences of at most 40 words, without retelling the news. Base it on that keyword's knowledge-base passages [K…] when they explain it and list them in "from"; otherwise write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. Hindi must be natural standard Hindi as used in RPSC exams (मानक हिंदी).
+        content: `You write the "Static Context" box of a bilingual (Hindi and English) current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains): textbook facts on the static concepts a news item links to. For each keyword, explain the concept the way a textbook does (what it is, what it says, how it works), linked to the news where it helps, in 1-2 sentences of at most 40 words, without retelling the news. Base it on that keyword's knowledge-base passages [K…] when they explain it and list them in "from"; otherwise write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "from" empty.${hindiGuide(opts.glossary)}
 Reply with JSON only: [{"keyword": the keyword's number, "keyword_hi": the keyword in Hindi, "keyword_en": the keyword in English, "en": "...", "hi": "...", "from": ["K1", ...]}], one per keyword.`,
       },
       {
@@ -734,6 +740,8 @@ export type CaChange = {
 };
 
 export function changeCheckMessages(opts: {
+  // The editor's glossary (Magazine settings).
+  glossary?: GlossaryEntry[];
   earlier: { date: string; facts: CaFact[]; points: Bi[] };
   later: { date: string; facts: CaFact[] };
 }): ChatMessage[] {
@@ -747,7 +755,7 @@ export function changeCheckMessages(opts: {
   return [
     {
       role: "system",
-      content: `You check current affairs for corrections. An earlier news item and a later report are about the same story. Find facts of the earlier item that the later report changes or corrects (a figure, date, name, place or status). New information that does not contradict an earlier fact is NOT a change.
+      content: `You check current affairs for corrections. An earlier news item and a later report are about the same story. Find facts of the earlier item that the later report changes or corrects (a figure, date, name, place or status). New information that does not contradict an earlier fact is NOT a change.${hindiGuide(opts.glossary)}
 Reply with JSON only: {"changes": [{"fact": index of the earlier fact, "new_en": the corrected fact in English, "new_hi": the corrected fact in Hindi, "old_value": the exact changed words in the earlier English fact, "new_value": what replaces them, "old_value_hi": the exact changed words in the earlier Hindi text (or ""), "new_value_hi": the Hindi replacement (or ""), "note": short reason in English}]}. Reply {"changes": []} if nothing changed.`,
     },
     {
@@ -972,6 +980,8 @@ export type MagazineSettings = {
   daily_editorials: number;
   // About how many words SAATHI writes for each story's summary.
   summary_words: number;
+  // English terms and the Hindi always used for them (or kept in English).
+  glossary: GlossaryEntry[];
   // After each daily PDF, post its MCQs to the channel as quiz polls.
   channel_quiz: boolean;
   channel_quiz_count: number;
@@ -1034,6 +1044,7 @@ export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   daily_stories: DEFAULT_DAILY_STORIES,
   daily_editorials: 2,
   summary_words: DEFAULT_SUMMARY_WORDS,
+  glossary: [],
   channel_quiz: true,
   channel_quiz_count: 5,
   add_to_flashcards: true,
@@ -1237,6 +1248,8 @@ export function uncoveredConcepts(
 export type EarlierStory = { date: string; headline: string; facts: string[] };
 
 export function relatedMessages(opts: {
+  // The editor's glossary (Magazine settings).
+  glossary?: GlossaryEntry[];
   headline: string;
   facts: CaFact[];
   stories: EarlierStory[];
@@ -1249,8 +1262,8 @@ export function relatedMessages(opts: {
   return [
     {
       role: "system",
-      content: `You add a "Fact Bite" box to a current affairs news item for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains): related recent developments an examiner would link to this news. From the numbered earlier stories of the same magazine, pick at most 3 developments of the SAME KIND as the news (other missiles tested, other constitutional amendments, other Ramsar sites declared, other judgments on the same article…) and write each as one line that names it, with its month and year and one key detail. Skip stories of a different kind and anything about this same news. Use only what the stories state.
-Reply with JSON only: [{"en": one line in English, "hi": the same in standard exam Hindi, "story": "S1", "quote": the exact words from that story's text that state it (5 to 40 words, copied character for character)}]. Reply [] if none is of the same kind.`,
+      content: `You add a "Fact Bite" box to a current affairs news item for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains): related recent developments an examiner would link to this news. From the numbered earlier stories of the same magazine, pick at most 3 developments of the SAME KIND as the news (other missiles tested, other constitutional amendments, other Ramsar sites declared, other judgments on the same article…) and write each as one line that names it, with its month and year and one key detail. Skip stories of a different kind and anything about this same news. Use only what the stories state.${hindiGuide(opts.glossary)}
+Reply with JSON only: [{"en": one line in English, "hi": the same in Hindi, "story": "S1", "quote": the exact words from that story's text that state it (5 to 40 words, copied character for character)}]. Reply [] if none is of the same kind.`,
     },
     {
       role: "user",
@@ -1286,6 +1299,8 @@ export function parseRelated(raw: string, stories: EarlierStory[]): DykFact[] {
 }
 
 export function dykMessages(opts: {
+  // The editor's glossary (Magazine settings).
+  glossary?: GlossaryEntry[];
   headline: string;
   facts: CaFact[];
   pages: WebPage[];
@@ -1296,8 +1311,8 @@ export function dykMessages(opts: {
   return [
     {
       role: "system",
-      content: `You add a "Fact Bite" box to a current affairs news item for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains): related recent developments an examiner would link to this news. Using ONLY the web pages given, write up to 3 developments of the SAME KIND as the news from roughly the last two years (other missiles tested, other constitutional amendments, other Ramsar sites declared…), each one line naming it with its month and year and one key detail. Do not repeat the news or explain its background. Skip anything undated, older, or not clearly stated. Each line must quote the page word for word.
-Reply with JSON only: [{"en": one sentence in English, "hi": the same in standard exam Hindi, "page": "W1", "quote": the exact words from that page that state it (8 to 40 words, copied character for character)}]. Reply [] if the pages have nothing suitable.`,
+      content: `You add a "Fact Bite" box to a current affairs news item for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains): related recent developments an examiner would link to this news. Using ONLY the web pages given, write up to 3 developments of the SAME KIND as the news from roughly the last two years (other missiles tested, other constitutional amendments, other Ramsar sites declared…), each one line naming it with its month and year and one key detail. Do not repeat the news or explain its background. Skip anything undated, older, or not clearly stated. Each line must quote the page word for word.${hindiGuide(opts.glossary)}
+Reply with JSON only: [{"en": one sentence in English, "hi": the same in Hindi, "page": "W1", "quote": the exact words from that page that state it (8 to 40 words, copied character for character)}]. Reply [] if the pages have nothing suitable.`,
     },
     {
       role: "user",

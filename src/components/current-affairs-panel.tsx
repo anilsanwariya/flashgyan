@@ -68,6 +68,7 @@ import { FactCheckDialog } from "@/components/ca-fact-check";
 import { StyleCheckDialog } from "@/components/ca-style-check";
 import { LangCheckDialog } from "@/components/ca-lang-check";
 import { HouseStyle } from "@/components/ca-house-style";
+import { Glossary } from "@/components/ca-glossary-panel";
 import { dayChecklist, type CheckAction } from "@/lib/ca-checklist";
 import { styleStatus } from "@/lib/ca-style";
 import { langStatus } from "@/lib/ca-bilingual";
@@ -648,7 +649,9 @@ function DailyPanel() {
         : null;
   const dayCorrections = (day?.corrections ?? []).filter((c) => c.item_date === date).length;
   const style = styleStatus(styleQ.data ?? null, items, styleRules);
-  const lang = langQ.isSuccess ? langStatus(langQ.data ?? null, items) : null;
+  const lang = langQ.isSuccess
+    ? langStatus(langQ.data ?? null, items, daySettingsQ.data?.glossary ?? [])
+    : null;
   const checks = dayChecklist({
     items,
     reviewed,
@@ -1339,6 +1342,7 @@ const SETTINGS_PARTS = [
   ["set-factbite", "Fact Bite"],
   ["set-collect", "Collection"],
   ["set-style", "House style"],
+  ["set-glossary", "Glossary"],
 ] as const;
 
 function SettingsPanel() {
@@ -1369,7 +1373,7 @@ function SettingsPanel() {
   useEffect(() => {
     if (q.data && !form) {
       // House style rules are edited (and saved) on their own, below.
-      const { style_rules: _rules, ...rest } = q.data;
+      const { style_rules: _rules, glossary: _glossary, ...rest } = q.data;
       const loaded = {
         ...rest,
         trusted_domains: q.data.trusted_domains.join("\n"),
@@ -1896,6 +1900,9 @@ function SettingsPanel() {
 
       <div id="set-style" className="scroll-mt-20">
         <HouseStyle />
+      </div>
+      <div id="set-glossary" className="scroll-mt-20">
+        <Glossary />
       </div>
     </div>
   );
