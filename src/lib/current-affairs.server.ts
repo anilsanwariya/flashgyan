@@ -1,5 +1,14 @@
 // Server-only current affairs magazine: sources → news items → bilingual
 // issues → PDF (Cloudflare browser rendering) → scheduled Telegram post.
+import {
+  adImage,
+  fillerPages,
+  normalizeAds,
+  normalizeIssueDesign,
+  normalizePresets,
+  type DailyLayout,
+  type IssueDesign,
+} from "@/lib/ca-covers";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { startsIncluded } from "@/lib/ca-blueprint";
 import {
@@ -3376,8 +3385,20 @@ async function magazineItems(fromDate: string, toDate: string): Promise<Magazine
   }));
 }
 
-export async function issueHtml(kind: "daily" | "monthly", period: string, lang: Lang) {
-  const settings = await getMagazineSettings();
+export async function issueHtml(
+  kind: "daily" | "monthly",
+  period: string,
+  lang: Lang,
+  opts: {
+    fillers?: number;
+    design?: IssueDesign;
+    coverOnly?: boolean;
+    // A daily layout being tried in Settings, before it is saved.
+    dailyCover?: DailyLayout;
+  } = {},
+) {
+  const saved = await getMagazineSettings();
+  const settings = opts.dailyCover ? { ...saved, daily_cover: opts.dailyCover } : saved;
   const range = kind === "daily" ? { from: period, to: period } : monthRange(period);
   const items = await magazineItems(range.from, range.to);
   let corrections: MagazineCorrection[] = [];
@@ -3397,6 +3418,7 @@ export async function issueHtml(kind: "daily" | "monthly", period: string, lang:
       }));
   }
   const feature = kind === "monthly" ? await getFeature(range.from) : null;
+  const design = kind === "monthly" ? (opts.design ?? (await getIssueDesign(range.from))) : null;
   return {
     html: renderMagazine({
       kind,
@@ -3406,14 +3428,28 @@ export async function issueHtml(kind: "daily" | "monthly", period: string, lang:
       items,
       corrections,
       feature: feature?.included ? feature : null,
+      design,
+      fillers: opts.fillers,
+      coverOnly: opts.coverOnly,
     }),
-    settings,
+    // A monthly cover's own colour, when it is the whole issue's, also
+    // colours the Telegram link on every page.
+    settings:
+      design?.cover.color && design.cover.color_scope !== "cover"
+        ? { ...settings, accent: design.cover.color }
+        : settings,
     count: items.length,
   };
 }
 
-// Cloudflare Browser Rendering (REST API) turns the HTML into a PDF.
-export async function renderPdf(html: string, settings: MagazineSettings): Promise<Uint8Array> {
+// Cloudflare Browser Rendering (REST API) turns the HTML into a PDF; the
+// finishing step makes the ad pages clean and adds the Telegram link. Says
+// how many pages the PDF has.
+export async function renderPdf(
+  html: string,
+  settings: MagazineSettings,
+  lang: Lang = "en",
+): Promise<{ pdf: Uint8Array; pages: number }> {
   const account = process.env.CLOUDFLARE_ACCOUNT_ID;
   const token = process.env.CLOUDFLARE_API_TOKEN;
   if (!account || !token) {
@@ -3466,18 +3502,45 @@ export async function renderPdf(html: string, settings: MagazineSettings): Promi
   const pdf = new Uint8Array(await res.arrayBuffer());
   // "Join us on Telegram", linked, at the bottom of every page.
   const d = DEFAULT_MAGAZINE_SETTINGS;
+  const ads = normalizeAds(settings.ads);
   try {
-    const { addJoinLink } = await import("@/lib/ca-pdf-link");
-    return await addJoinLink(pdf, {
-      text: settings.join_text ?? d.join_text,
-      url: (settings.join_url ?? d.join_url).trim(),
-      color: settings.accent,
+    const { finishPdf } = await import("@/lib/ca-pdf-link");
+    return await finishPdf(pdf, {
+      join: {
+        text: settings.join_text ?? d.join_text,
+        url: (settings.join_url ?? d.join_url).trim(),
+        color: settings.accent,
+      },
+      loadAd: async (id) => {
+        const ad = ads.find((a) => a.id === id);
+        if (!ad) return null;
+        const { data, error } = await supabaseAdmin.storage
+          .from(BUCKET)
+          .download(adImage(ad, lang).path);
+        if (error || !data) return null;
+        return { bytes: new Uint8Array(await data.arrayBuffer()), fit: ad.fit, link: ad.link };
+      },
     });
   } catch (e) {
     // The issue still goes out, without the link.
     console.error("join link:", e instanceof Error ? e.message : e);
-    return pdf;
+    return { pdf, pages: 0 };
   }
+}
+
+// An issue's PDF in one language. A monthly issue for print gets ruled notes
+// pages before its back cover so the back cover lands on the outside: the
+// first PDF tells how many pages there are, and when notes pages are needed
+// the issue is made again with them (so the page numbers count them).
+async function issuePdf(kind: "daily" | "monthly", period: string, lang: Lang) {
+  const first = await issueHtml(kind, period, lang);
+  const made = await renderPdf(first.html, first.settings, lang);
+  const binding = first.settings.print_binding ?? "booklet";
+  const need = kind === "monthly" && made.pages ? fillerPages(made.pages, binding) : 0;
+  if (!need) return { ...first, pdf: made.pdf };
+  const again = await issueHtml(kind, period, lang, { fillers: need });
+  const padded = await renderPdf(again.html, again.settings, lang);
+  return { ...again, pdf: padded.pdf };
 }
 
 function fileName(kind: "daily" | "monthly", period: string, lang: Lang) {
@@ -3511,6 +3574,55 @@ async function getIssue(kind: "daily" | "monthly", period: string) {
   return (data as unknown as CaIssue | null) ?? null;
 }
 
+// ---------- Covers and ads ----------
+
+// A monthly issue's cover, ads and back cover, kept with the issue.
+export async function getIssueDesign(period: string): Promise<IssueDesign> {
+  const { data } = await from("ca_issues")
+    .select("design")
+    .eq("kind", "monthly")
+    .eq("period", period)
+    .maybeSingle();
+  return normalizeIssueDesign((data as { design?: unknown } | null)?.design);
+}
+
+export async function saveIssueDesign(period: string, design: unknown): Promise<IssueDesign> {
+  const clean = normalizeIssueDesign(design);
+  await upsertIssue("monthly", period, { design: clean });
+  return clean;
+}
+
+// Cover photos and ads live next to the PDFs, public like them, so the PDF
+// renderer can load them.
+export async function uploadMagazineFile(
+  folder: "covers" | "ads",
+  bytes: Uint8Array,
+  contentType: string,
+) {
+  const ext = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+  const path = `${folder}/${crypto.randomUUID()}.${ext}`;
+  const { error } = await supabaseAdmin.storage.from(BUCKET).upload(path, bytes, { contentType });
+  fail(error);
+  return { path, url: supabaseAdmin.storage.from(BUCKET).getPublicUrl(path).data.publicUrl };
+}
+
+export async function saveAds(list: unknown) {
+  const ads = normalizeAds(list).filter(
+    (a) => a.path.startsWith("ads/") && (!a.path_hi || a.path_hi.startsWith("ads/")),
+  );
+  const settings = await getMagazineSettings();
+  const ids = new Set(ads.map((a) => a.id));
+  return saveMagazineSettings({
+    ads,
+    // A removed ad is no longer the daily back cover.
+    daily_back_cover: ids.has(settings.daily_back_cover) ? settings.daily_back_cover : "",
+  });
+}
+
+export async function saveCoverPresets(list: unknown) {
+  return saveMagazineSettings({ cover_presets: normalizePresets(list) });
+}
+
 // Builds the PDF and stores it. With schedule, the issue is approved and will
 // be posted at `when` (daily default: next day at the set time, India time).
 export async function buildIssue(
@@ -3537,9 +3649,8 @@ export async function buildIssue(
   for (const lang of ["en", "hi"] as const) {
     made.push(
       await (async () => {
-        const { html, settings, count } = await issueHtml(kind, period, lang);
+        const { pdf, settings, count } = await issuePdf(kind, period, lang);
         if (count === 0) throw new Error("There are no items to put in this issue.");
-        const pdf = await renderPdf(html, settings);
         const path = fileName(kind, period, lang);
         const { error } = await supabaseAdmin.storage
           .from(BUCKET)

@@ -2,6 +2,7 @@
 // check facts against their sources, merge duplicate stories, apply
 // corrections and schedule posts. No database or network access here.
 
+import type { Binding, CoverPreset, DailyLayout, MagazineAd } from "@/lib/ca-covers";
 import { unverifiedNumbers, type Visual } from "@/lib/ca-visuals";
 import { DEFAULT_MIN_RAJASTHAN } from "@/lib/ca-report";
 import { hindiGuide, type GlossaryEntry } from "../../supabase/functions/_shared/ca-hindi.ts";
@@ -1002,6 +1003,17 @@ export type MagazineSettings = {
   post_corrections: boolean;
   // House style: the editor's writing rules, added to SAATHI's instructions.
   style_rules: string[];
+  // The daily issue's cover layout.
+  daily_cover: DailyLayout;
+  // An ad from the library printed as the daily issue's last page ("": none).
+  daily_back_cover: string;
+  // How the printed monthly issue is bound: ruled notes pages are added so
+  // its back cover lands on the outside.
+  print_binding: Binding;
+  // Full-page A4 ads, for back covers and pages between monthly sections.
+  ads: MagazineAd[];
+  // Customised monthly covers saved by name.
+  cover_presets: CoverPreset[];
 };
 
 // Official and reference sites the "Fact Bite" search may use. Subdomains
@@ -1057,6 +1069,11 @@ export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   min_rajasthan: DEFAULT_MIN_RAJASTHAN,
   post_corrections: true,
   style_rules: [],
+  daily_cover: "classic",
+  daily_back_cover: "",
+  print_binding: "booklet",
+  ads: [],
+  cover_presets: [],
 };
 
 // The note posted on the channel, under a day's PDF, when a correction to one

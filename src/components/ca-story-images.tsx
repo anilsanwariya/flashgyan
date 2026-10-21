@@ -14,41 +14,7 @@ import { Input } from "@/components/ui/input";
 import { errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { BiLine, type Lang } from "@/components/ca-story-review";
-
-// Large photos are made smaller before upload: sharp in print, light to send.
-const MAX_SIDE = 2000;
-const KEEP_PNG_BYTES = 1_500_000;
-
-async function prepare(file: File): Promise<{ type: string; bytes: Blob; w: number; h: number }> {
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
-  const w = Math.max(1, Math.round(bitmap.width * scale));
-  const h = Math.max(1, Math.round(bitmap.height * scale));
-  // Small PNGs (maps, diagrams) stay as they are: sharp lines and text.
-  if (file.type === "image/png" && scale === 1 && file.size <= KEEP_PNG_BYTES) {
-    bitmap.close();
-    return { type: "image/png", bytes: file, w, h };
-  }
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, w, h);
-  ctx.drawImage(bitmap, 0, 0, w, h);
-  bitmap.close();
-  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", 0.88));
-  if (!blob) throw new Error("Couldn't read this image");
-  return { type: "image/jpeg", bytes: blob, w, h };
-}
-
-async function toBase64(blob: Blob): Promise<string> {
-  const buf = new Uint8Array(await blob.arrayBuffer());
-  let binary = "";
-  for (let i = 0; i < buf.length; i += 0x8000)
-    binary += String.fromCharCode(...buf.subarray(i, i + 0x8000));
-  return btoa(binary);
-}
+import { prepareImage, toBase64 } from "@/lib/ca-image-file";
 
 const LAYOUTS: { value: ImageLayout; label: string }[] = [
   { value: "row", label: "In the rows" },
@@ -127,7 +93,7 @@ export function StoryImages({
     const added: CaImage[] = [];
     try {
       for (const file of list) {
-        const img = await prepare(file);
+        const img = await prepareImage(file);
         const { url, path } = await uploadFn({
           data: {
             item_id: itemId,

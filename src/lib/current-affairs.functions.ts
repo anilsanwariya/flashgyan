@@ -1,4 +1,12 @@
 // Admin server functions for the current affairs magazine.
+import {
+  DAILY_LAYOUTS,
+  MAX_ADS,
+  MAX_PRESETS,
+  normalizeIssueDesign,
+  type DailyLayout,
+  type IssueDesign,
+} from "@/lib/ca-covers";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
@@ -220,6 +228,9 @@ export const saveMagazineSettings = createServerFn({ method: "POST" })
         weekly_report: z.boolean(),
         min_rajasthan: z.number().int().min(0).max(20),
         post_corrections: z.boolean(),
+        daily_cover: z.enum(DAILY_LAYOUTS.map((l) => l.id) as [DailyLayout, ...DailyLayout[]]),
+        daily_back_cover: z.string().max(60),
+        print_binding: z.enum(["booklet", "even", "digital"]),
       })
       .parse(d),
   )
@@ -1077,6 +1088,96 @@ export const previewCaIssue = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     const { html, count } = await (await server()).issueHtml(data.kind, data.period, data.lang);
     return { html, count };
+  });
+
+// ---------- Covers and ads ----------
+
+const imageUpload = z.object({
+  contentType: z.enum(["image/png", "image/jpeg"]),
+  base64: z.string().min(1).max(12_000_000),
+});
+const toBytes = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+
+// A monthly issue's cover photo (framed or background).
+export const uploadCaCoverPhoto = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => imageUpload.parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).uploadMagazineFile("covers", toBytes(data.base64), data.contentType);
+  });
+
+// An ad image (JPG or PNG: the PDF step puts it on its own page).
+export const uploadCaAdImage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => imageUpload.parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).uploadMagazineFile("ads", toBytes(data.base64), data.contentType);
+  });
+
+export const saveCaAds = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ ads: z.array(z.unknown()).max(MAX_ADS) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).saveAds(data.ads);
+  });
+
+export const saveCaCoverPresets = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ presets: z.array(z.unknown()).max(MAX_PRESETS) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).saveCoverPresets(data.presets);
+  });
+
+export const getCaIssueDesign = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ period: dateSchema }).parse(d))
+  .handler(async ({ data, context }): Promise<IssueDesign> => {
+    await assertAdmin(context.userId);
+    return (await server()).getIssueDesign(data.period);
+  });
+
+export const saveCaIssueDesign = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ period: dateSchema, design: z.record(z.string(), z.unknown()) }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<IssueDesign> => {
+    await assertAdmin(context.userId);
+    return (await server()).saveIssueDesign(data.period, data.design);
+  });
+
+// Just the cover, for the designer's live preview: the monthly design being
+// edited (not saved yet), or the daily layout from the settings.
+export const previewCaCover = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        kind: kindSchema,
+        period: dateSchema,
+        lang: z.enum(["en", "hi"]).default("en"),
+        design: z.record(z.string(), z.unknown()).nullish(),
+        daily_cover: z.string().max(20).nullish(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<{ html: string }> => {
+    await assertAdmin(context.userId);
+    const s = await server();
+    const { html } = await s.issueHtml(data.kind, data.period, data.lang, {
+      coverOnly: true,
+      design: data.design ? normalizeIssueDesign(data.design) : undefined,
+      dailyCover: (DAILY_LAYOUTS.find((l) => l.id === data.daily_cover)?.id ?? undefined) as
+        | DailyLayout
+        | undefined,
+    });
+    return { html };
   });
 
 export const buildCaIssue = createServerFn({ method: "POST" })

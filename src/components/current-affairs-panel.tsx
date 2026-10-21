@@ -73,6 +73,9 @@ import { dayChecklist, type CheckAction } from "@/lib/ca-checklist";
 import { styleStatus } from "@/lib/ca-style";
 import { langStatus } from "@/lib/ca-bilingual";
 import { FeatureBox } from "@/components/ca-feature-box";
+import { DailyCoverSettings, MonthlyCoverDesigner } from "@/components/ca-cover-designer";
+import { AdLibrary } from "@/components/ca-ads-panel";
+import type { Binding, DailyLayout } from "@/lib/ca-covers";
 import { Badge, BulkBar, errorText, useChosen } from "@/components/ca-ui";
 import { FileDropZone, FileQueueList, useFileQueue } from "@/components/saathi-file-queue";
 import { SAATHI_ACCEPT } from "@/lib/saathi-parse";
@@ -1144,6 +1147,8 @@ function MonthlyPanel() {
         onChanged={refresh}
       />
 
+      <MonthlyCoverDesigner month={month} />
+
       {items > 0 && <FeatureBox month={month} />}
 
       {data && (
@@ -1337,6 +1342,7 @@ function AiServicesBox() {
 const SETTINGS_PARTS = [
   ["set-channel", "Channel"],
   ["set-look", "Look"],
+  ["set-covers", "Covers & ads"],
   ["set-ai", "AI services"],
   ["set-saathi", "SAATHI & PDF"],
   ["set-factbite", "Fact Bite"],
@@ -1373,7 +1379,13 @@ function SettingsPanel() {
   useEffect(() => {
     if (q.data && !form) {
       // House style rules are edited (and saved) on their own, below.
-      const { style_rules: _rules, glossary: _glossary, ...rest } = q.data;
+      const {
+        style_rules: _rules,
+        glossary: _glossary,
+        ads: _ads,
+        cover_presets: _presets,
+        ...rest
+      } = q.data;
       const loaded = {
         ...rest,
         trusted_domains: q.data.trusted_domains.join("\n"),
@@ -1421,6 +1433,9 @@ function SettingsPanel() {
           join_text: text("join_text"),
           join_url: text("join_url"),
           accent: text("accent"),
+          daily_cover: (text("daily_cover") || "classic") as DailyLayout,
+          daily_back_cover: text("daily_back_cover"),
+          print_binding: (text("print_binding") || "booklet") as Binding,
           test_chat_id: text("test_chat_id"),
           add_to_knowledge_base: Boolean(form!.add_to_knowledge_base),
           add_to_flashcards: Boolean(form!.add_to_flashcards),
@@ -1671,6 +1686,26 @@ function SettingsPanel() {
           })}
         </div>
       </section>
+
+      <section
+        id="set-covers"
+        className="scroll-mt-20 space-y-3 rounded-2xl border border-border bg-card p-4"
+      >
+        <h3 className="font-semibold">Covers and printing</h3>
+        <p className="text-sm text-muted-foreground">
+          The daily issue's cover layout and back cover. Each monthly issue's cover is designed on
+          the Monthly page.
+        </p>
+        <DailyCoverSettings
+          layout={text("daily_cover") || "classic"}
+          backCover={text("daily_back_cover")}
+          binding={text("print_binding") || "booklet"}
+          ads={s.ads ?? []}
+          period={istDate()}
+          onChange={(k, v) => set(k, v)}
+        />
+      </section>
+      <AdLibrary />
 
       <div id="set-ai" className="scroll-mt-20">
         <AiServicesBox />
