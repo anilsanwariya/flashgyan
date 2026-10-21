@@ -1253,6 +1253,16 @@ export function SourceReader({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSpan?.[0], activeSpan?.[1], size, view, focus, comfort, ranges, wide]);
 
+  useNumberUnderline(textRef.current, comfort.numbers && !!part, [
+    part,
+    ranges,
+    view,
+    focus,
+    found,
+    suggestSpans,
+    size,
+  ]);
+
   const handleDrag = useRef<{ which: "start" | "end"; dy: number; span: Span } | null>(null);
   function onHandleDown(which: "start" | "end", e: React.PointerEvent) {
     e.stopPropagation();
@@ -1327,16 +1337,17 @@ export function SourceReader({
     setPreview(null);
   }
 
-  // A finger painting must not scroll the page.
+  // A finger painting (or moving a handle) must not scroll the page. Caught
+  // on the document: the word under the finger is redrawn as the highlight
+  // grows, and touches keep going to the node that was there.
   useEffect(() => {
-    const el = textRef.current;
-    if (!el) return;
+    if (!open) return;
     const stop = (e: TouchEvent) => {
-      if (gesture.current?.paint) e.preventDefault();
+      if (gesture.current?.paint || handleDrag.current) e.preventDefault();
     };
-    el.addEventListener("touchmove", stop, { passive: false });
-    return () => el.removeEventListener("touchmove", stop);
-  });
+    document.addEventListener("touchmove", stop, { passive: false, capture: true });
+    return () => document.removeEventListener("touchmove", stop, { capture: true });
+  }, [open]);
 
   // Read mode: words selected the usual way can be highlighted with the pen.
   useEffect(() => {
@@ -1794,6 +1805,7 @@ export function SourceReader({
 
   const page = (
     <>
+      <style>{NUMBER_CSS}</style>
       {/* Top bar: hides while scrolling down. */}
       <header
         className={`overflow-hidden border-b border-border bg-background transition-all duration-200 ${headerHidden ? "max-h-0 border-b-0 opacity-0" : "max-h-72"}`}
@@ -2164,30 +2176,36 @@ export function SourceReader({
                         return (
                           <span
                             key={which}
-                            role="slider"
-                            aria-label={
-                              which === "start" ? "Start of highlight" : "End of highlight"
-                            }
-                            aria-valuenow={which === "start" ? activeSpan?.[0] : activeSpan?.[1]}
                             data-handle={which}
-                            onPointerDown={(e) => onHandleDown(which, e)}
-                            onPointerMove={onHandleMove}
-                            onPointerUp={onHandleUp}
-                            onPointerCancel={() => {
-                              handleDrag.current = null;
-                              setEdit(null);
-                            }}
-                            className="absolute z-10 flex w-6 -translate-x-1/2 touch-none select-none flex-col items-center"
+                            className="pointer-events-none absolute z-10 flex w-7 -translate-x-1/2 select-none flex-col items-center"
                             style={{
                               left: h.x,
-                              top: which === "start" ? h.y - 14 : h.y,
-                              height: h.h + 14,
+                              top: which === "start" ? h.y - 16 : h.y,
+                              height: h.h + 16,
                               flexDirection: which === "start" ? "column" : "column-reverse",
                             }}
                           >
+                            {/* Only the knob, above the first line or below the last,
+                                takes a finger: the words under the bar stay tappable. */}
                             <span
-                              className={`h-3.5 w-3.5 shrink-0 rounded-full border-2 border-background shadow ${pen}`}
-                            />
+                              role="slider"
+                              aria-label={
+                                which === "start" ? "Start of highlight" : "End of highlight"
+                              }
+                              aria-valuenow={which === "start" ? activeSpan?.[0] : activeSpan?.[1]}
+                              onPointerDown={(e) => onHandleDown(which, e)}
+                              onPointerMove={onHandleMove}
+                              onPointerUp={onHandleUp}
+                              onPointerCancel={() => {
+                                handleDrag.current = null;
+                                setEdit(null);
+                              }}
+                              className="pointer-events-auto grid h-4 w-7 shrink-0 cursor-grab touch-none place-items-center"
+                            >
+                              <span
+                                className={`h-3.5 w-3.5 rounded-full border-2 border-background shadow ${pen}`}
+                              />
+                            </span>
                             <span className="w-0.5 flex-1 bg-foreground/60" />
                           </span>
                         );
@@ -2215,15 +2233,7 @@ export function SourceReader({
                           <BlockView
                             key={b.at}
                             block={b}
-                            {...rangesFor(
-                              b,
-                              ranges,
-                              taken,
-                              found,
-                              flash,
-                              suggestSpans,
-                              comfort.numbers,
-                            )}
+                            {...rangesFor(b, ranges, taken, found, flash, suggestSpans)}
                             dim={comfort.focus && focusAt !== null && b.at !== focusAt}
                           />
                         ),
@@ -2246,7 +2256,6 @@ export function SourceReader({
                         found={found}
                         flash={flash}
                         suggest={suggestSpans}
-                        numbers={comfort.numbers}
                       />
                     </div>
                   )}
@@ -2905,6 +2914,8 @@ function ComparePane({
     return out;
   }, [marks, text, source.id, preview, tool]);
 
+  useNumberUnderline(textRef.current, numbers, [ranges, focus, text]);
+
   // A click marks the sentence (or changes the highlight there); a drag
   // paints words; a right-click on a highlight opens its actions.
   const drag = useRef<{
@@ -3060,11 +3071,7 @@ function ComparePane({
         >
           {blocks.map((b) =>
             b.clutter || !inFocus(b.at) ? null : (
-              <BlockView
-                key={b.at}
-                block={b}
-                {...rangesFor(b, ranges, NONE, NONE, null, NONE, numbers)}
-              />
+              <BlockView key={b.at} block={b} {...rangesFor(b, ranges, NONE, NONE, null, NONE)} />
             ),
           )}
         </div>
@@ -3724,7 +3731,6 @@ function rangesFor(
   found: Found[],
   flash: number | null,
   suggest: Span[] = [],
-  numbers = false,
 ) {
   const span: Span = [b.at, b.end];
   const mine = ranges.filter((r) => overlaps(r.span, span));
@@ -3738,7 +3744,6 @@ function rangesFor(
     found: finds,
     flash: lit,
     suggest: sugg,
-    numbers,
     marksKey: [
       ...mine.map(
         (r) => `${r.pen}${r.preview ? "~" : ""}${r.note ? "n" : ""}${r.joined ? "j" : ""}${r.span}`,
@@ -3746,7 +3751,6 @@ function rangesFor(
       ...faint,
       ...finds.map((f) => `${f.current ? "!" : "?"}${f.span}`),
       ...sugg.map((x) => `s${x}`),
-      numbers ? "#" : "",
       lit ?? "",
     ].join("|"),
   };
@@ -3760,7 +3764,6 @@ const BlockView = memo(
     found,
     flash,
     suggest,
-    numbers,
     dim,
   }: {
     block: Block;
@@ -3769,7 +3772,6 @@ const BlockView = memo(
     found: Found[];
     flash: number | null;
     suggest: Span[];
-    numbers: boolean;
     // Reading focus: paragraphs other than the one being read are dimmed.
     dim?: boolean;
     marksKey: string;
@@ -3787,7 +3789,6 @@ const BlockView = memo(
             found={found}
             flash={flash}
             suggest={suggest}
-            numbers={numbers}
           />
         ),
       );
@@ -3875,21 +3876,41 @@ const BlockView = memo(
 const NUMBER_RE =
   /(?:₹|Rs\.?|रु\.?)\s?\d[\d,.]*(?:\s?(?:crore|lakh|million|billion|करोड़|लाख))?|\d[\d,.]*\s?(?:%|per cent|percent|प्रतिशत|crore|lakh|million|billion|करोड़|लाख|km|किमी|MW|GW|hectares?|हेक्टेयर)?|[०-९][०-९,.]*/giu;
 
-// Plain text cut into pieces, numbers marked; every piece keeps its raw offset.
-function numberPieces(text: string, at: number, numbers: boolean) {
-  if (!numbers) return [{ text, at, num: false }];
-  const out: { text: string; at: number; num: boolean }[] = [];
-  let last = 0;
-  for (const m of text.matchAll(NUMBER_RE)) {
-    const t = m[0].trimEnd();
-    if (!/\d|[०-९]/.test(t)) continue;
-    if (m.index! > last) out.push({ text: text.slice(last, m.index), at: at + last, num: false });
-    out.push({ text: t, at: at + m.index!, num: true });
-    last = m.index! + t.length;
-  }
-  if (last < text.length) out.push({ text: text.slice(last), at: at + last, num: false });
-  return out;
+// Numbers underlined without touching the article's markup (a finger on a
+// word must stay on the same node while a highlight is painted): the CSS
+// Custom Highlight API marks their text ranges. Browsers without it show no
+// underline.
+function useNumberUnderline(root: HTMLElement | null, on: boolean, deps: unknown[]) {
+  useLayoutEffect(() => {
+    if (typeof Highlight === "undefined" || typeof CSS === "undefined" || !CSS.highlights) return;
+    const reg = CSS.highlights;
+    const name = "reader-num";
+    if (!on || !root) {
+      reg.delete(name);
+      return;
+    }
+    const ranges: globalThis.Range[] = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const t = n.textContent ?? "";
+      for (const m of t.matchAll(NUMBER_RE)) {
+        const w = m[0].trimEnd();
+        if (!/\d|[०-९]/.test(w)) continue;
+        const r = document.createRange();
+        r.setStart(n, m.index!);
+        r.setEnd(n, m.index! + w.length);
+        ranges.push(r);
+      }
+    }
+    reg.set(name, new Highlight(...ranges));
+    return () => {
+      reg.delete(name);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [root, on, ...deps]);
 }
+const NUMBER_CSS =
+  "::highlight(reader-num){text-decoration:underline dotted 2px;text-decoration-color:rgb(124 58 237 / .5);text-underline-offset:5px}";
 
 // One run of text cut where highlights start and end. Every piece carries
 // its raw offset, so a touch can be turned back into a position.
@@ -3900,7 +3921,6 @@ function Pieces({
   found = [],
   flash = null,
   suggest = [],
-  numbers = false,
 }: {
   run: Run;
   ranges: Range[];
@@ -3909,7 +3929,6 @@ function Pieces({
   flash?: number | null;
   // SAATHI's suggested facts, dotted until tapped.
   suggest?: Span[];
-  numbers?: boolean;
 }) {
   const span: Span = [run.at, run.at + run.text.length];
   const inside = ranges.filter((r) => overlaps(r.span, span));
@@ -3943,20 +3962,15 @@ function Pieces({
           : "";
         const findAttr = hit?.current && hit.span[0] === a ? { "data-find-current": "" } : {};
         if (!mark) {
-          const base = `${cls} ${findCls} ${dim ? "text-muted-foreground/60 underline decoration-dotted" : ""} ${sug ? "rounded-sm outline-dotted outline-2 outline-offset-1 outline-primary/70" : ""}`;
-          const bits = numberPieces(text, a, numbers && !hit && !sug);
           return (
-            <span key={k} {...(sug ? { "data-suggest": "" } : {})}>
-              {bits.map((x, j) => (
-                <span
-                  key={j}
-                  data-raw={x.at}
-                  {...(j === 0 ? findAttr : {})}
-                  className={`${base} ${x.num ? "underline decoration-primary/40 decoration-dotted decoration-2 underline-offset-[5px]" : ""}`}
-                >
-                  {x.text}
-                </span>
-              ))}
+            <span
+              key={k}
+              data-raw={a}
+              {...findAttr}
+              {...(sug ? { "data-suggest": "" } : {})}
+              className={`${cls} ${findCls} ${dim ? "text-muted-foreground/60 underline decoration-dotted" : ""} ${sug ? "rounded-sm outline-dotted outline-2 outline-offset-1 outline-primary/70" : ""}`}
+            >
+              {text}
             </span>
           );
         }
