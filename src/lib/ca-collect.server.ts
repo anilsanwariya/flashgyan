@@ -102,25 +102,34 @@ export async function startRun(issueDate: string, by: string, siteIds?: string[]
     ? all.filter((s) => siteIds.includes(s.id)).map((s) => s.id)
     : all.filter((s) => s.enabled).map((s) => s.id);
   if (siteIds && !sites.length) throw new Error("Pick at least one website.");
-  const { data, error } = await from("ca_runs")
-    .upsert(
-      {
-        issue_date: issueDate,
-        status: "running",
-        started_by: by,
-        discovered: [],
-        sites,
-        locked_until: null,
-        notified: false,
-        error: null,
-        started_at: now(),
-        finished_at: null,
-        updated_at: now(),
-      } as never,
-      { onConflict: "issue_date" },
-    )
-    .select("*")
-    .single();
+  const row = {
+    issue_date: issueDate,
+    status: "running",
+    started_by: by,
+    discovered: [],
+    sites,
+    locked_until: null,
+    notified: false,
+    error: null,
+    started_at: now(),
+    finished_at: null,
+    updated_at: now(),
+  };
+  const upsert = (r: Record<string, unknown>) =>
+    from("ca_runs")
+      .upsert(r as never, { onConflict: "issue_date" })
+      .select("*")
+      .single();
+  let { data, error } = await upsert(row);
+  // A database without the runs' websites column (its migration not run
+  // yet): the run reads every website switched on in Settings.
+  if (error && /'sites' column/.test(error.message)) {
+    console.error(
+      "ca_runs.sites is missing: run migration 20261021090000_ca_run_sites.sql. Collecting from every website switched on.",
+    );
+    const { sites: _sites, ...rest } = row;
+    ({ data, error } = await upsert(rest));
+  }
   fail(error);
   return data as unknown as CaRun;
 }
