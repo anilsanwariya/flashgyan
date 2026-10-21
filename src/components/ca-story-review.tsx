@@ -420,7 +420,7 @@ function StoryCard({
               ) : (
                 !dropped && (
                   <Badge title={`No ${STATIC_CONNECT.en} yet`}>
-                    <Library className="h-3 w-3 opacity-50" /> none
+                    <Library className="h-3 w-3 opacity-50" /> 0
                   </Badge>
                 )
               ))}
