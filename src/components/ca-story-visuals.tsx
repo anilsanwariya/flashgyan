@@ -201,13 +201,6 @@ export function StoryVisuals({
           <Plus className="mr-1 h-3.5 w-3.5" /> Add a second visual
         </Button>
       )}
-      {content.oneliner && (content.oneliner.en || content.oneliner.hi) && (
-        <p className="text-xs">
-          <span className="font-semibold text-muted-foreground">Revision line: </span>
-          <span lang="hi">{content.oneliner.hi}</span>
-          <span className="text-muted-foreground"> · {content.oneliner.en}</span>
-        </p>
-      )}
       {picking && (
         <VisualPicker
           item={item}

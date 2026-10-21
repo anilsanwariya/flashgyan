@@ -15,6 +15,9 @@ import {
   Check,
   CheckCircle2,
   ChevronLeft,
+  Circle,
+  PanelRightClose,
+  PanelRightOpen,
   ChevronRight,
   Eye,
   FileText,
@@ -129,7 +132,14 @@ export function StoryEditor({
   const [tab, setTab] = useState<TabId>("preview");
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState(false);
+  // Saving shows in the footer: how many saves are on their way, and when
+  // the last one landed.
+  const [saving, setSaving] = useState(0);
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [showLive, setShowLive] = useLivePreview();
   const main = useRef<HTMLDivElement>(null);
+  const nav = useRef<HTMLElement>(null);
+  const shell = useRef<HTMLDivElement>(null);
   const at = items.findIndex((i) => i.id === id);
   const item = items[at];
   const prev = items[at - 1];
@@ -139,6 +149,19 @@ export function StoryEditor({
   useEffect(() => {
     main.current?.scrollTo({ top: 0 });
   }, [id, tab]);
+  useEffect(() => {
+    setSavedAt(null);
+  }, [id]);
+  // The chosen tab stays in sight in the phone's strip of tabs.
+  useEffect(() => {
+    const el = nav.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    const strip = nav.current;
+    if (!el || !strip || strip.scrollWidth <= strip.clientWidth) return;
+    strip.scrollTo({
+      left: el.offsetLeft - (strip.clientWidth - el.offsetWidth) / 2,
+      behavior: "smooth",
+    });
+  }, [tab]);
 
   if (!item) return null;
   const c = item.content;
@@ -148,10 +171,21 @@ export function StoryEditor({
   const siblings = items.filter((i) => i.category === item.category);
   const si = siblings.findIndex((i) => i.id === item.id);
 
+  // Runs one save, counted for the footer's "Saving…" and "Saved".
+  async function tracked<T>(fn: () => Promise<T>): Promise<T> {
+    setSaving((n) => n + 1);
+    try {
+      const r = await fn();
+      setSavedAt(new Date());
+      return r;
+    } finally {
+      setSaving((n) => n - 1);
+    }
+  }
   async function act(fn: () => Promise<unknown>, ok?: string) {
     setBusy(true);
     try {
-      await fn();
+      await tracked(fn);
       if (ok) toast.success(ok);
       onChanged();
     } catch (e) {
@@ -163,8 +197,19 @@ export function StoryEditor({
   // Saves one changed part of the story.
   const save = async (patch: Partial<CaContent>) => {
     if (!item.content) return;
-    await updateFn({ data: { id: item.id, content: { ...item.content, ...patch } } });
+    await tracked(() =>
+      updateFn({ data: { id: item.id, content: { ...item.content!, ...patch } } }),
+    );
     onChanged();
+  };
+  // Leaving the story with a line still open asks first.
+  const leave = (go: () => void) => {
+    const open = shell.current?.querySelector('[data-unsaved="true"]');
+    if (open && !confirm("A line you changed isn't saved yet. Leave without saving it?")) {
+      open.scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    }
+    go();
   };
   const swap = (other?: CaItem) =>
     other &&
@@ -221,8 +266,9 @@ export function StoryEditor({
   const ctx: Ctx | null = c ? { item, c, lang, busy, save, act, onChanged, goTo: setTab } : null;
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
+    <Dialog open onOpenChange={(o) => !o && leave(onClose)}>
       <DialogContent
+        ref={shell}
         aria-describedby={undefined}
         className="left-0 top-0 flex h-[100dvh] max-h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-0 p-0 sm:rounded-none"
       >
@@ -382,7 +428,9 @@ export function StoryEditor({
               {"☆".repeat(3 - item.importance)}
             </button>
             {dropped && <Badge tone="bad">Dropped</Badge>}
-            {item.rajasthan && <Badge tone="warn">Rajasthan</Badge>}
+            {item.rajasthan && item.category !== "rajasthan" && (
+              <Badge tone="warn">Rajasthan</Badge>
+            )}
             {item.unit && <Badge>{unitLabel(item.unit)}</Badge>}
             {item.related_item_id && <Badge tone="primary">Follow-up</Badge>}
             {unverified > 0 && (
@@ -397,8 +445,9 @@ export function StoryEditor({
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
           {/* The parts: a strip on phones, a column on laptops. */}
           <nav
+            ref={nav}
             aria-label="Parts of the story"
-            className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-muted/30 p-1.5 lg:w-52 lg:flex-col lg:overflow-y-auto lg:border-b-0 lg:border-r lg:p-2"
+            className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-muted/30 p-1.5 [mask-image:linear-gradient(to_right,transparent,black_1rem,black_calc(100%-1rem),transparent)] lg:w-52 lg:flex-col lg:overflow-y-auto lg:border-b-0 lg:border-r lg:p-2 lg:[mask-image:none]"
           >
             {tabs.map((t) => {
               const Icon = t.icon;
@@ -463,15 +512,20 @@ export function StoryEditor({
                     <StoryVisuals item={item} content={c!} busy={busy} onSave={save} />
                   </Section>
                 ) : tab === "static" ? (
-                  <StaticConnect
-                    item={item}
-                    content={c!}
-                    lang={lang}
-                    editing
-                    busy={busy}
-                    save={save}
-                    act={act}
-                  />
+                  <Section
+                    title={STATIC_CONNECT.en}
+                    hint="Textbook background on the concepts behind the news, from your books or SAATHI's own knowledge."
+                  >
+                    <StaticConnect
+                      item={item}
+                      content={c!}
+                      lang={lang}
+                      editing
+                      busy={busy}
+                      save={save}
+                      act={act}
+                    />
+                  </Section>
                 ) : tab === "factbite" ? (
                   <FactBiteTab key={item.id} {...ctx} />
                 ) : tab === "questions" ? (
@@ -495,6 +549,9 @@ export function StoryEditor({
               </div>
             </main>
           )}
+          {ctx && tab !== "preview" && tab !== "article" && (
+            <LivePreview {...ctx} open={showLive} onOpenChange={setShowLive} />
+          )}
         </div>
 
         <footer className="flex items-center gap-2 border-t border-border bg-background p-2 sm:px-4">
@@ -502,14 +559,30 @@ export function StoryEditor({
             size="sm"
             variant="ghost"
             disabled={!prev}
-            onClick={() => prev && onNavigate(prev.id)}
+            onClick={() => prev && leave(() => onNavigate(prev.id))}
           >
             <ChevronLeft className="mr-0.5 h-4 w-4" /> Previous
           </Button>
-          <Button size="sm" variant="outline" className="mx-auto" onClick={onClose}>
-            <Check className="mr-1 h-4 w-4" /> Done
-          </Button>
-          <Button size="sm" disabled={!next} onClick={() => next && onNavigate(next.id)}>
+          <div className="mx-auto flex items-center gap-2">
+            <span
+              role="status"
+              className="hidden min-w-[6.5rem] text-right text-xs text-muted-foreground sm:inline"
+            >
+              {saving > 0
+                ? "Saving…"
+                : savedAt
+                  ? `Saved · ${savedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+                  : "Changes save as you go"}
+            </span>
+            <Button size="sm" variant="outline" onClick={() => leave(onClose)}>
+              <Check className="mr-1 h-4 w-4" /> Done
+            </Button>
+          </div>
+          <Button
+            size="sm"
+            disabled={!next}
+            onClick={() => next && leave(() => onNavigate(next.id))}
+          >
             Next story <ChevronRight className="ml-0.5 h-4 w-4" />
           </Button>
         </footer>
@@ -539,7 +612,7 @@ function Section({
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-start gap-2">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 basis-64">
           <h2 className="text-lg font-semibold">{title}</h2>
           {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
         </div>
@@ -681,87 +754,104 @@ function PointsTab({ item, c, lang, busy, save, act, onChanged, goTo }: Ctx) {
     };
   }, []);
   const unverified = item.facts.filter((f) => !f.verified).length;
+  // Facts the story keeps without a point of their own (older stories).
+  const extraFacts = item.facts.slice(c.points.length);
+  const markChecked = (text: string) =>
+    act(() => checkFn({ data: { id: item.id, text, checked: true } }), "Marked checked");
 
   return (
-    <>
-      <Section
-        title="Key points"
-        hint="One point for each fact. Points shown in a visual are faded: they print only if the visual goes."
-        action={
-          <Button size="sm" variant="outline" onClick={() => goTo("article")}>
-            <Plus className="mr-1 h-3.5 w-3.5" /> Add from the article
-          </Button>
-        }
-      >
-        <ul className="space-y-2">
-          {c.points.map((p, i) => {
-            const factText = item.facts[i]?.text ?? "";
-            if (hidden.has(factText)) return null;
-            return (
-              <li key={`${i}-${factText}`} className="flex gap-2">
-                <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-                <div className="min-w-0 flex-1">
-                  <BiLine
-                    value={p}
-                    lang={lang}
-                    editing
-                    faded={inVisual.has(i)}
-                    onSave={(v) => save({ points: c.points.map((x, j) => (j === i ? v : x)) })}
-                    onDelete={item.facts[i] ? () => deletePoint(item.facts[i].text) : undefined}
-                  />
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      </Section>
-      <Section
-        title="Facts and source quotes"
-        hint={
-          unverified
-            ? `${unverified} to check: the quote wasn't found word for word in the source, or you marked it with the pink pen.`
-            : "Every fact's quote was found in its source."
-        }
-      >
-        <ul className="space-y-1.5 text-xs">
-          {item.facts.map((f, i) => (
+    <Section
+      title="Key points"
+      hint={
+        unverified
+          ? `One point for each fact, with the source's words under it. ${unverified} to check: the quote wasn't found word for word in the source, or you marked it with the pink pen.`
+          : "One point for each fact, with the source's words under it. Points shown in a visual are faded: they print only if the visual goes."
+      }
+      action={
+        <Button size="sm" variant="outline" onClick={() => goTo("article")}>
+          <Plus className="mr-1 h-3.5 w-3.5" /> Add from the article
+        </Button>
+      }
+    >
+      <ul className="space-y-2">
+        {c.points.map((p, i) => {
+          const f = item.facts[i];
+          if (f && hidden.has(f.text)) return null;
+          return (
             <li
-              key={i}
-              className={`rounded-lg border p-2 ${f.verified ? "border-border" : "border-amber-500/50 bg-amber-500/5"}`}
+              key={`${i}-${f?.text ?? ""}`}
+              className={`rounded-xl border p-2 ${f && !f.verified ? "border-amber-500/50 bg-amber-500/5" : "border-border"}`}
             >
-              <div className="flex items-start gap-1.5">
-                {f.verified ? (
-                  <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                ) : (
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
-                )}
-                <span className="min-w-0 flex-1">
-                  {f.text}
-                  {f.corrected && <Badge tone="primary">corrected</Badge>}
-                </span>
-                {!f.verified && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 px-2 text-xs"
-                    disabled={busy}
-                    onClick={() =>
-                      act(
-                        () => checkFn({ data: { id: item.id, text: f.text, checked: true } }),
-                        "Marked checked",
-                      )
-                    }
-                  >
-                    <Check className="mr-1 h-3.5 w-3.5" /> Mark checked
-                  </Button>
-                )}
-              </div>
-              <div className="mt-1 pl-5 italic text-muted-foreground">“{f.quote}”</div>
+              <BiLine
+                value={p}
+                lang={lang}
+                editing
+                faded={inVisual.has(i)}
+                onSave={(v) => save({ points: c.points.map((x, j) => (j === i ? v : x)) })}
+                onDelete={f ? () => deletePoint(f.text) : undefined}
+              />
+              {f && <FactQuote fact={f} busy={busy} onCheck={() => markChecked(f.text)} />}
             </li>
-          ))}
-        </ul>
-      </Section>
-    </>
+          );
+        })}
+      </ul>
+      {extraFacts.length > 0 && (
+        <Part title="Facts without a point">
+          <ul className="space-y-2">
+            {extraFacts.map((f, i) => (
+              <li
+                key={i}
+                className={`rounded-xl border p-2 text-sm ${f.verified ? "border-border" : "border-amber-500/50 bg-amber-500/5"}`}
+              >
+                {f.text}
+                <FactQuote fact={f} busy={busy} onCheck={() => markChecked(f.text)} />
+              </li>
+            ))}
+          </ul>
+        </Part>
+      )}
+    </Section>
+  );
+}
+
+// A fact's quote from the source, and whether it was found there.
+function FactQuote({
+  fact,
+  busy,
+  onCheck,
+}: {
+  fact: CaItem["facts"][number];
+  busy: boolean;
+  onCheck: () => void;
+}) {
+  return (
+    <div className="mt-1 flex items-start gap-1.5 border-t border-border/60 pt-1.5 text-xs">
+      {fact.verified ? (
+        <CheckCircle2
+          className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600"
+          aria-label="Found in the source"
+        />
+      ) : (
+        <AlertTriangle
+          className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600"
+          aria-label="needs checking"
+        />
+      )}
+      <span className="min-w-0 flex-1 italic text-muted-foreground">
+        “{fact.quote}”{fact.corrected && <Badge tone="primary">corrected</Badge>}
+      </span>
+      {!fact.verified && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 shrink-0 px-2 text-xs"
+          disabled={busy}
+          onClick={onCheck}
+        >
+          <Check className="mr-1 h-3.5 w-3.5" /> Mark checked
+        </Button>
+      )}
+    </div>
   );
 }
 
@@ -1081,23 +1171,28 @@ function QuestionsTab({ c, lang, busy, save, act }: Ctx) {
                             },
                           })
                         }
+                        extra={
+                          right ? (
+                            <span
+                              className="flex h-8 w-8 items-center justify-center"
+                              title="The correct answer"
+                            >
+                              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                            </span>
+                          ) : (
+                            <IconButton
+                              label="Mark correct"
+                              disabled={busy}
+                              onClick={() =>
+                                act(() => save({ mcq: { ...c.mcq!, answer: i } }), "Answer changed")
+                              }
+                            >
+                              <Circle className="h-4 w-4" />
+                            </IconButton>
+                          )
+                        }
                       />
                     </div>
-                    {right ? (
-                      <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-emerald-600" />
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 shrink-0 px-2 text-xs"
-                        disabled={busy}
-                        onClick={() =>
-                          act(() => save({ mcq: { ...c.mcq!, answer: i } }), "Answer changed")
-                        }
-                      >
-                        Mark correct
-                      </Button>
-                    )}
                   </li>
                 );
               })}
@@ -1166,10 +1261,31 @@ function ArticleTab({ item, onChanged, goTo }: Ctx) {
 
 // ---------- Preview ----------
 
-function PreviewTab({ item, c, lang }: Ctx) {
+// The story as one issue prints it.
+function usePreviewHtml({ item, c }: Pick<Ctx, "item" | "c">) {
   const settingsFn = useServerFn(getMagazineSettings);
   const settings = useQuery({ queryKey: ["caSettings"], queryFn: () => settingsFn() });
   const s = settings.data ?? DEFAULT_MAGAZINE_SETTINGS;
+  return (l: "hi" | "en") =>
+    storyPreviewHtml(
+      {
+        id: item.id,
+        issue_date: item.issue_date,
+        category: item.category,
+        importance: item.importance,
+        rajasthan: item.rajasthan,
+        content: c,
+        facts: item.facts,
+        context_sources: item.context_sources,
+        source_names: [],
+      },
+      l,
+      s,
+    );
+}
+
+function PreviewTab({ item, c, lang }: Ctx) {
+  const html = usePreviewHtml({ item, c });
   const langs: ("hi" | "en")[] = lang === "both" ? ["hi", "en"] : [lang];
   return (
     <Section title="Preview" hint="This story as the issue prints it.">
@@ -1177,21 +1293,7 @@ function PreviewTab({ item, c, lang }: Ctx) {
         {langs.map((l) => (
           <PreviewFrame
             key={l}
-            html={storyPreviewHtml(
-              {
-                id: item.id,
-                issue_date: item.issue_date,
-                category: item.category,
-                importance: item.importance,
-                rajasthan: item.rajasthan,
-                content: c,
-                facts: item.facts,
-                context_sources: item.context_sources,
-                source_names: [],
-              },
-              l,
-              s,
-            )}
+            html={html(l)}
             label={l === "hi" ? "Hindi issue" : "English issue"}
           />
         ))}
@@ -1200,7 +1302,89 @@ function PreviewTab({ item, c, lang }: Ctx) {
   );
 }
 
-function PreviewFrame({ html, label }: { html: string; label: string }) {
+// Wide screens keep the printed story beside the part being edited, so each
+// change shows as it will print. It can be folded away; the choice is kept.
+const LIVE_KEY = "ca-editor-live-preview";
+function useLivePreview(): [boolean, (v: boolean) => void] {
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem(LIVE_KEY) !== "off";
+    } catch {
+      return true;
+    }
+  });
+  const set = (v: boolean) => {
+    setOpen(v);
+    try {
+      localStorage.setItem(LIVE_KEY, v ? "on" : "off");
+    } catch {
+      // the choice lasts for this visit only
+    }
+  };
+  return [open, set];
+}
+
+function LivePreview({
+  item,
+  c,
+  lang,
+  open,
+  onOpenChange,
+}: Ctx & { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const html = usePreviewHtml({ item, c });
+  const [pick, setPick] = useState<"hi" | "en">(lang === "en" ? "en" : "hi");
+  useEffect(() => {
+    if (lang !== "both") setPick(lang);
+  }, [lang]);
+  if (!open)
+    return (
+      <aside className="hidden border-l border-border bg-muted/20 p-1.5 xl:block">
+        <IconButton label="Show the live preview" onClick={() => onOpenChange(true)}>
+          <PanelRightOpen className="h-4 w-4" />
+        </IconButton>
+      </aside>
+    );
+  return (
+    <aside
+      aria-label="Live preview"
+      className="hidden w-[26rem] shrink-0 flex-col border-l border-border bg-muted/20 xl:flex"
+    >
+      <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+        <span className="flex-1 text-xs font-medium text-muted-foreground">As it prints</span>
+        <div className="flex rounded-lg border border-border p-0.5 text-xs" role="group">
+          {(
+            [
+              ["hi", "हिंदी"],
+              ["en", "English"],
+            ] as const
+          ).map(([k, label]) => (
+            <button
+              key={k}
+              type="button"
+              aria-pressed={pick === k}
+              onClick={() => setPick(k)}
+              className={`rounded-md px-2 py-0.5 ${pick === k ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <IconButton label="Hide the live preview" onClick={() => onOpenChange(false)}>
+          <PanelRightClose className="h-4 w-4" />
+        </IconButton>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        <PreviewFrame
+          html={html(pick)}
+          label={pick === "hi" ? "Hindi issue" : "English issue"}
+          quiet
+        />
+      </div>
+    </aside>
+  );
+}
+
+function PreviewFrame({ html, label, quiet }: { html: string; label: string; quiet?: boolean }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(400);
   const fit = () => {
@@ -1210,10 +1394,10 @@ function PreviewFrame({ html, label }: { html: string; label: string }) {
   const srcDoc = useMemo(() => html, [html]);
   return (
     <div className="space-y-1">
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      {!quiet && <p className="text-xs font-medium text-muted-foreground">{label}</p>}
       <iframe
         ref={frame}
-        title={`Preview: ${label}`}
+        title={quiet ? `Live preview: ${label}` : `Preview: ${label}`}
         srcDoc={srcDoc}
         onLoad={() => {
           fit();
