@@ -17,7 +17,16 @@
 // a laptop another of the day's sources (the same news in another paper) can
 // be read and highlighted beside it. Highlights are kept as a draft on the
 // device until the story is rewritten or a new story is made from them.
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -38,7 +47,11 @@ import {
   Pencil,
   Redo2,
   Search,
+  Link2,
+  Scissors,
+  Sparkles,
   StickyNote,
+  Type,
   Undo2,
   X,
 } from "lucide-react";
@@ -49,6 +62,8 @@ import {
   createCaFromHighlights,
   deleteCaItems,
   getCaCompareSources,
+  previewCaPoints,
+  suggestCaMarks,
   getCaReader,
   getCaReaderText,
   getCaSourceReader,
@@ -57,10 +72,21 @@ import {
   type CaItem,
   type ReaderSource,
 } from "@/lib/current-affairs.functions";
-import { cleanQuote, findAll, findQuote, sentenceSpans, type Span } from "@/lib/ca-highlight";
+import {
+  QUOTE_JOIN,
+  clauseAt,
+  cleanQuote,
+  findAll,
+  findQuote,
+  findQuoteParts,
+  quoteParts,
+  sentenceSpans,
+  wordsIn,
+  type Span,
+} from "@/lib/ca-highlight";
 import { type MissingCheck, type MissingFact } from "@/lib/ca-missing";
 import { ADD_POINTS_MAX } from "@/lib/ca-points";
-import { normalizeForMatch } from "@/lib/current-affairs";
+import { normalizeForMatch, type Bi } from "@/lib/current-affairs";
 import {
   isPaged,
   parseBlocks,
@@ -85,7 +111,32 @@ type Tool = Pen | "eraser";
 type Mark = { source_id: string; quote: string; pen: Pen; note?: string };
 // What part of each source is loaded (offsets are in the whole source).
 type Loaded = { text: string; start: number; total: number };
-type Range = { span: Span; pen: Pen; preview?: boolean; note?: string };
+// idx: the highlight's index in marks; joined: one part of a highlight
+// joined from several places.
+type Range = {
+  span: Span;
+  pen: Pen;
+  preview?: boolean;
+  note?: string;
+  idx?: number;
+  joined?: boolean;
+};
+// What a tap marks: the sentence (a double tap: its clause), the clause, or
+// the words between two taps.
+type TapMode = "sentence" | "clause" | "words";
+const TAP_MODES: { mode: TapMode; label: string; hint: string }[] = [
+  {
+    mode: "sentence",
+    label: "Sentence",
+    hint: "A tap marks the sentence; a double tap only its clause",
+  },
+  {
+    mode: "clause",
+    label: "Clause",
+    hint: "A tap marks the clause (between commas, “and”, “और”…)",
+  },
+  { mode: "words", label: "Words", hint: "Tap the first word, then the last word" },
+];
 // A find-bar match; "current" is the one jumped to.
 type Found = { span: Span; current: boolean };
 
@@ -123,6 +174,51 @@ const overlaps = (a: Span, b: Span) => a[0] < b[1] && a[1] > b[0];
 const HOLD_MS = 300;
 const MOVE_PX = 8;
 const SIZE_KEY = "ca-reader-size";
+const TAP_KEY = "ca-reader-tap";
+const COMFORT_KEY = "ca-reader-comfort";
+const DOUBLE_TAP_MS = 350;
+
+// Reading comfort, kept on this device: line spacing, a Hindi font, numbers
+// underlined, and dimming all but the paragraph being read.
+type Comfort = {
+  spacing: "normal" | "relaxed" | "loose";
+  font: "default" | "noto-sans" | "noto-serif" | "mukta";
+  numbers: boolean;
+  focus: boolean;
+};
+const COMFORT_DEFAULT: Comfort = {
+  spacing: "normal",
+  font: "default",
+  numbers: true,
+  focus: false,
+};
+const SPACING = { normal: 1.75, relaxed: 2, loose: 2.3 };
+const FONTS: Record<Comfort["font"], { label: string; family?: string; css?: string }> = {
+  default: { label: "Default" },
+  "noto-sans": {
+    label: "Noto Sans",
+    family: '"Noto Sans Devanagari", "Noto Sans", sans-serif',
+    css: "Noto+Sans+Devanagari:wght@400;600",
+  },
+  "noto-serif": {
+    label: "Noto Serif",
+    family: '"Noto Serif Devanagari", "Noto Serif", serif',
+    css: "Noto+Serif+Devanagari:wght@400;600",
+  },
+  mukta: { label: "Mukta", family: '"Mukta", sans-serif', css: "Mukta:wght@400;600" },
+};
+// Loads a Hindi font from Google Fonts once, when it is picked.
+function useFont(font: Comfort["font"]) {
+  useEffect(() => {
+    const css = FONTS[font].css;
+    if (!css || document.querySelector(`link[data-reader-font="${font}"]`)) return;
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = `https://fonts.googleapis.com/css2?family=${css}&display=swap`;
+    link.dataset.readerFont = font;
+    document.head.appendChild(link);
+  }, [font]);
+}
 const VIEW_KEY = "ca-reader-view";
 const draftKey = (id: string, mode: Mode) => `ca-reader-draft:${id}:${mode}`;
 const posKey = (sourceId: string) => `ca-reader-pos:${sourceId}`;
@@ -200,19 +296,24 @@ function offsetAt(x: number, y: number, root?: HTMLElement | null): number | nul
 
 // The highlight (its index in marks) at an offset of the text, or -1.
 function markIndexIn(marks: Mark[], sourceId: string, text: string, offset: number): number {
-  return marks.findIndex((m) => {
-    if (m.source_id !== sourceId) return false;
-    const s = findQuote(text, m.quote);
-    return !!s && s[0] <= offset && offset < s[1];
-  });
+  // The latest highlight wins where two overlap, as they are drawn.
+  for (let i = marks.length - 1; i >= 0; i--) {
+    const m = marks[i];
+    if (m.source_id !== sourceId) continue;
+    if (findQuoteParts(text, m.quote).some((s) => s[0] <= offset && offset < s[1])) return i;
+  }
+  return -1;
 }
+
+// The words a highlight quotes for [a, b) of the text.
+const quoteOf = (text: string, span: Span) => cleanQuote(plainText(text, span[0], span[1]));
 
 const markable = (text: string, span: Span, pen: Pen) =>
   cleanQuote(plainText(text, span[0], span[1])).length >= (pen === "keyword" ? 2 : 8);
 
 // The marks with [a, b) of the text highlighted; marks inside it are replaced.
 function withMark(marks: Mark[], sourceId: string, text: string, span: Span, pen: Pen): Mark[] {
-  const quote = cleanQuote(plainText(text, span[0], span[1]));
+  const quote = quoteOf(text, span);
   return [
     ...marks.filter((m) => {
       if (m.source_id !== sourceId) return true;
@@ -226,13 +327,33 @@ function withMark(marks: Mark[], sourceId: string, text: string, span: Span, pen
 function withoutSpan(marks: Mark[], sourceId: string, text: string, span: Span): Mark[] {
   return marks.filter((m) => {
     if (m.source_id !== sourceId) return true;
-    const s = findQuote(text, m.quote);
-    return !(s && overlaps(s, span));
+    return !findQuoteParts(text, m.quote).some((s) => overlaps(s, span));
   });
 }
 
+// One highlight given new ends (its pen and note kept); highlights inside the
+// new stretch are replaced by it.
+function withSpanOf(marks: Mark[], i: number, text: string, span: Span): Mark[] {
+  const m = marks[i];
+  const quote = quoteOf(text, span);
+  return marks.flatMap((x, j) => {
+    if (j === i) return [{ ...x, quote }];
+    if (x.source_id !== m.source_id) return [x];
+    const s = findQuote(text, x.quote);
+    return s && s[0] >= span[0] && s[1] <= span[1] && !x.quote.includes(QUOTE_JOIN) ? [] : [x];
+  });
+}
+
+// The stretch a tap marks: the sentence, or the clause.
+function unitAt(text: string, sentences: Span[], offset: number, clause: boolean): Span | null {
+  const s = clause
+    ? clauseAt(text, sentences, offset)
+    : (sentences.find(([a, b]) => a <= offset && offset < b) ?? null);
+  return s && snapToWords(text, s[0], s[1]);
+}
+
 // A tap: on a highlight it removes it (or recolours it with another pen);
-// elsewhere it highlights the sentence. Null when nothing changes.
+// elsewhere it highlights the sentence (or clause). Null when nothing changes.
 function tapped(
   marks: Mark[],
   sourceId: string,
@@ -240,6 +361,7 @@ function tapped(
   sentences: Span[],
   offset: number,
   tool: Tool,
+  clause = false,
 ): Mark[] | "short" | null {
   const hit = markIndexIn(marks, sourceId, text, offset);
   if (hit >= 0) {
@@ -248,7 +370,7 @@ function tapped(
     return marks.map((m, i) => (i === hit ? { ...m, pen } : m));
   }
   if (tool === "eraser") return null;
-  const s = sentences.find(([a, b]) => a <= offset && offset < b);
+  const s = unitAt(text, sentences, offset, clause);
   if (!s) return null;
   return markable(text, s, tool) ? withMark(marks, sourceId, text, s, tool) : "short";
 }
@@ -297,6 +419,8 @@ export function SourceReader({
   const deleteFn = useServerFn(deleteCaItems);
   const compareFn = useServerFn(getCaCompareSources);
   const addPointsFn = useServerFn(addCaPoints);
+  const previewFn = useServerFn(previewCaPoints);
+  const suggestFn = useServerFn(suggestCaMarks);
   const q = useQuery({
     queryKey: ["caReader", key, item ? null : origin?.at],
     queryFn: () =>
@@ -347,6 +471,25 @@ export function SourceReader({
   const [missing, setMissing] = useState<MissingCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [preview, setPreview] = useState<Span | null>(null);
+  // What a tap marks (kept on this device), and in Words mode the first word
+  // tapped.
+  const [tapMode, setTapMode] = useState<TapMode>(() => read<TapMode>(TAP_KEY, "sentence"));
+  const [anchor, setAnchor] = useState<number | null>(null);
+  const lastTap = useRef<{ t: number; offset: number; before: Mark[] } | null>(null);
+  // The highlight just made or picked: its ends can be dragged, or moved a
+  // word at a time with Shift + arrows. While a handle is dragged, its new
+  // stretch.
+  const [active, setActive] = useState<{ source_id: string; quote: string } | null>(null);
+  const [edit, setEdit] = useState<{ idx: number; span: Span } | null>(null);
+  // "Suggest facts": SAATHI's picks, shown dotted until tapped.
+  const [suggested, setSuggested] = useState<{ source_id: string; quote: string }[]>([]);
+  const [suggesting, setSuggesting] = useState(false);
+  const [comfort, setComfort] = useState<Comfort>(() => ({
+    ...COMFORT_DEFAULT,
+    ...read<Partial<Comfort>>(COMFORT_KEY, {}),
+  }));
+  const [comfortOpen, setComfortOpen] = useState(false);
+  const [focusAt, setFocusAt] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
   const pendingJump = useRef<number | null>(null);
@@ -425,10 +568,19 @@ export function SourceReader({
   }, [open, mode, marks, note, own, ownKey, key]);
 
   useEffect(() => write(SIZE_KEY, size), [size]);
+  useEffect(() => write(TAP_KEY, tapMode), [tapMode]);
+  useFont(comfort.font);
+  useEffect(() => write(COMFORT_KEY, comfort), [comfort]);
+  useEffect(() => {
+    setAnchor(null);
+    setPreview(null);
+  }, [tapMode]);
   // A different tab is a different source: its own articles.
   useEffect(() => {
     setFocus(null);
     setMissing(null);
+    setActive(null);
+    setAnchor(null);
   }, [tab]);
   useEffect(() => write(VIEW_KEY, view), [view]);
 
@@ -466,14 +618,32 @@ export function SourceReader({
   const ranges = useMemo<Range[]>(() => {
     if (!part || !source) return [];
     const out: Range[] = [];
-    for (const m of marks) {
-      if (m.source_id !== source.id) continue;
-      const span = findQuote(part.text, m.quote);
-      if (span) out.push({ span, pen: m.pen, note: m.note });
-    }
+    marks.forEach((m, idx) => {
+      if (m.source_id !== source.id) return;
+      // A handle being dragged: the highlight's new stretch.
+      if (edit?.idx === idx) {
+        out.push({ span: edit.span, pen: m.pen, note: m.note, idx });
+        return;
+      }
+      const parts = findQuoteParts(part.text, m.quote);
+      for (const span of parts)
+        out.push({ span, pen: m.pen, note: m.note, idx, joined: parts.length > 1 });
+    });
     if (preview && tool !== "eraser") out.push({ span: preview, pen: tool, preview: true });
     return out;
-  }, [marks, part, source, preview, tool]);
+  }, [marks, part, source, preview, tool, edit]);
+  // SAATHI's suggestions in this source, not yet marked.
+  const suggestSpans = useMemo<Span[]>(() => {
+    if (!part || !source) return [];
+    return suggested
+      .filter((x) => x.source_id === source.id)
+      .map((x) => findQuote(part.text, x.quote))
+      .filter((x): x is Span => !!x)
+      .filter((x) => !ranges.some((r) => !r.preview && overlaps(r.span, x)));
+  }, [suggested, part, source, ranges]);
+  const activeIdx = active
+    ? marks.findIndex((m) => m.source_id === active.source_id && m.quote === active.quote)
+    : -1;
   // In "new story" mode the story's own facts show faintly.
   const taken = useMemo<Span[]>(() => {
     if (mode !== "new" || !part || !source) return [];
@@ -649,7 +819,21 @@ export function SourceReader({
       else undo();
       return;
     }
-    if (typing || mod || e.altKey || sheet !== null) return;
+    if (typing || mod || sheet !== null) return;
+    // Shift + arrows move the active highlight's end a word (with Alt, its
+    // start); Enter marks the words selected in Read mode.
+    if (e.shiftKey && (e.key === "ArrowRight" || e.key === "ArrowLeft") && activeSpan) {
+      e.preventDefault();
+      if (e.altKey) nudge("start", e.key === "ArrowLeft" ? 1 : -1);
+      else nudge("end", e.key === "ArrowRight" ? 1 : -1);
+      return;
+    }
+    if (e.key === "Enter" && selection && !painting) {
+      e.preventDefault();
+      markSelection();
+      return;
+    }
+    if (e.altKey) return;
     const pen = PENS[Number(e.key) - 1];
     if (pen) {
       setTool(pen.pen);
@@ -694,7 +878,12 @@ export function SourceReader({
   // Escape closes the innermost thing first: the sheet, the shortcuts, find,
   // the list of sources.
   function onEscape(e: KeyboardEvent) {
-    if (sheet !== null) setSheet(null);
+    if (anchor !== null) {
+      setAnchor(null);
+      setPreview(null);
+      toast.dismiss("reader-words");
+    } else if (comfortOpen) setComfortOpen(false);
+    else if (sheet !== null) setSheet(null);
     else if (helpOpen) setHelpOpen(false);
     else if (findOpen) {
       setFindOpen(false);
@@ -717,6 +906,111 @@ export function SourceReader({
       return;
     }
     commit((cur) => withMark(cur, id, text, span, pen));
+    setActive({ source_id: id, quote: quoteOf(text, span) });
+    dropSuggestion(span);
+  }
+
+  // A highlight's new ends (from a handle, Shift + arrows, or Trim).
+  function reshape(i: number, span: Span) {
+    if (!part || !source || !marks[i]) return;
+    const text = part.text;
+    if (!markable(text, span, marks[i].pen)) {
+      toast("Mark a little more text");
+      return;
+    }
+    commit((cur) => withSpanOf(cur, i, text, span));
+    setActive({ source_id: marks[i].source_id, quote: quoteOf(text, span) });
+  }
+
+  // One highlight made into two at a word (Split).
+  function split(i: number, at: number) {
+    if (!part || !marks[i]) return;
+    const text = part.text;
+    const span = findQuote(text, marks[i].quote);
+    if (!span) return;
+    // The first part ends before the word the second starts with.
+    const a = snapToWords(text, span[0], Math.max(span[0], at - 1));
+    const b = snapToWords(text, at, span[1]);
+    const m = marks[i];
+    if (!markable(text, a, m.pen) || !markable(text, b, m.pen)) {
+      toast("Each part needs a little more text");
+      return;
+    }
+    commit((cur) => [
+      ...cur.slice(0, i),
+      { ...m, quote: quoteOf(text, a) },
+      { source_id: m.source_id, quote: quoteOf(text, b), pen: m.pen },
+      ...cur.slice(i + 1),
+    ]);
+    setActive(null);
+    toast.success("Split into two highlights");
+  }
+
+  // Highlights from one source joined into one fact, in reading order.
+  function join(ids: number[]) {
+    const picked = ids.map((i) => marks[i]).filter(Boolean);
+    if (picked.length < 2 || new Set(picked.map((m) => m.source_id)).size > 1) {
+      toast.error("Pick two or more highlights from the same source");
+      return;
+    }
+    const text = loaded[picked[0].source_id]?.text ?? "";
+    const parts = picked
+      .flatMap((m) => quoteParts(m.quote))
+      .map((q) => ({ q, at: findQuote(text, q)?.[0] ?? Number.MAX_SAFE_INTEGER }))
+      .sort((x, y) => x.at - y.at)
+      .map((x) => x.q);
+    const pen: Pen = picked.some((m) => m.pen === "point")
+      ? "point"
+      : picked.some((m) => m.pen === "check")
+        ? "check"
+        : picked[0].pen;
+    const note = picked
+      .map((m) => m.note)
+      .filter(Boolean)
+      .join("; ")
+      .slice(0, 200);
+    const joined: Mark = {
+      source_id: picked[0].source_id,
+      quote: parts.join(QUOTE_JOIN),
+      pen,
+      ...(note ? { note } : {}),
+    };
+    const first = Math.min(...ids);
+    commit((cur) => {
+      const rest = cur.filter((_, j) => !ids.includes(j));
+      const at = cur.slice(0, first).filter((_, j) => !ids.includes(j)).length;
+      return [...rest.slice(0, at), joined, ...rest.slice(at)];
+    });
+    toast.success(`Joined ${picked.length} highlights into one fact`);
+  }
+
+  // A joined highlight back into its parts.
+  function unjoin(i: number) {
+    const m = marks[i];
+    if (!m) return;
+    commit((cur) => [
+      ...cur.slice(0, i),
+      ...quoteParts(m.quote).map((quote, k) => ({
+        source_id: m.source_id,
+        quote,
+        pen: m.pen,
+        ...(k === 0 && m.note ? { note: m.note } : {}),
+      })),
+      ...cur.slice(i + 1),
+    ]);
+  }
+
+  function dropSuggestion(span: Span) {
+    if (!part || !source) return;
+    const id = source.id;
+    const text = part.text;
+    setSuggested((cur) =>
+      cur.filter((x) => {
+        if (x.source_id !== id) return true;
+        const s2 = findQuote(text, x.quote);
+        return !(s2 && overlaps(s2, span));
+      }),
+    );
   }
 
   function erase(span: Span) {
@@ -730,9 +1024,64 @@ export function SourceReader({
     if (!part || !source) return;
     const id = source.id;
     const text = part.text;
-    const next = tapped(marks, id, text, sentences, offset, tool);
+    const now = Date.now();
+    const prev = lastTap.current;
+    lastTap.current = null;
+    // A suggestion from SAATHI: one tap keeps it with the pen in hand.
+    const sug = suggestSpans.find(([a, b]) => a <= offset && offset < b);
+    if (sug && tool !== "eraser" && markIndexAt(offset) < 0) {
+      addMark(sug, tool);
+      return;
+    }
+    // Words: the first tap picks the first word, the second the last.
+    if (tapMode === "words" && tool !== "eraser") {
+      if (anchor === null) {
+        if (markIndexAt(offset) >= 0) {
+          const next = tapped(marks, id, text, sentences, offset, tool);
+          if (next && next !== "short") commit(next);
+          return;
+        }
+        setAnchor(offset);
+        setPreview(snapToWords(text, offset, offset + 1));
+        toast("Now tap the last word", { id: "reader-words", duration: 2500 });
+        return;
+      }
+      const span = snapToWords(text, Math.min(anchor, offset), Math.max(anchor, offset) + 1);
+      setAnchor(null);
+      setPreview(null);
+      toast.dismiss("reader-words");
+      addMark(span, tool);
+      return;
+    }
+    // Sentence mode: a second tap at once on the same place marks only the
+    // clause, in place of the sentence the first tap marked.
+    if (
+      tapMode === "sentence" &&
+      tool !== "eraser" &&
+      prev &&
+      now - prev.t < DOUBLE_TAP_MS &&
+      Math.abs(prev.offset - offset) < 40
+    ) {
+      const cl = unitAt(text, sentences, offset, true);
+      if (cl && markable(text, cl, tool)) {
+        setMarks(withMark(prev.before, id, text, cl, tool));
+        setActive({ source_id: id, quote: quoteOf(text, cl) });
+        return;
+      }
+    }
+    const next = tapped(marks, id, text, sentences, offset, tool, tapMode === "clause");
     if (next === "short") toast("Mark a little more text");
-    else if (next) commit(next);
+    else if (next) {
+      commit(next);
+      lastTap.current = { t: now, offset, before: marks };
+      // The highlight just made is the one to adjust.
+      const made = next.length > marks.length ? next[next.length - 1] : null;
+      setActive(made ? { source_id: made.source_id, quote: made.quote } : null);
+      if (made) {
+        const sp = findQuote(text, made.quote);
+        if (sp) dropSuggestion(sp);
+      }
+    }
   }
 
   // ---------- Pointer: tap, press-and-hold to paint, drag to paint with a mouse ----------
@@ -841,6 +1190,8 @@ export function SourceReader({
     }
     window.getSelection()?.removeAllRanges();
     setSheet(i);
+    // Its ends can be dragged once the actions close.
+    if (marks[i]) setActive({ source_id: marks[i].source_id, quote: marks[i].quote });
   }
 
   // Read mode: a tap on a highlight opens its actions. With a mouse in
@@ -861,6 +1212,124 @@ export function SourceReader({
     if (hit >= 0) openSheet(hit);
   }
 
+  // ---------- Handles on the active highlight: drag an end, a word at a time ----------
+  const activeMark = activeIdx >= 0 ? marks[activeIdx] : undefined;
+  const activeSpan: Span | null =
+    activeMark && part && source && activeMark.source_id === source.id
+      ? activeMark.quote.includes(QUOTE_JOIN)
+        ? null
+        : edit?.idx === activeIdx
+          ? edit.span
+          : findQuote(part.text, activeMark.quote)
+      : null;
+  const [handles, setHandles] = useState<{
+    start: { x: number; y: number; h: number };
+    end: { x: number; y: number; h: number };
+  } | null>(null);
+  useLayoutEffect(() => {
+    const root = textRef.current;
+    if (!root || !activeSpan) {
+      setHandles(null);
+      return;
+    }
+    const a = root.querySelector<HTMLElement>(`[data-mark-start="${activeSpan[0]}"]`);
+    const b = root.querySelector<HTMLElement>(`[data-mark-end="${activeSpan[1]}"]`);
+    if (!a || !b) {
+      setHandles(null);
+      return;
+    }
+    const box = root.getBoundingClientRect();
+    const first = a.getClientRects()[0];
+    const lasts = b.getClientRects();
+    const last = lasts[lasts.length - 1];
+    if (!first || !last) {
+      setHandles(null);
+      return;
+    }
+    setHandles({
+      start: { x: first.left - box.left, y: first.top - box.top, h: first.height },
+      end: { x: last.right - box.left, y: last.top - box.top, h: last.height },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSpan?.[0], activeSpan?.[1], size, view, focus, comfort, ranges, wide]);
+
+  useNumberUnderline(textRef.current, comfort.numbers && !!part, [
+    part,
+    ranges,
+    view,
+    focus,
+    found,
+    suggestSpans,
+    size,
+  ]);
+
+  const handleDrag = useRef<{ which: "start" | "end"; dy: number; span: Span } | null>(null);
+  function onHandleDown(which: "start" | "end", e: React.PointerEvent) {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!activeSpan || !handles) return;
+    const h = handles[which];
+    const box = textRef.current!.getBoundingClientRect();
+    // Where the finger is against the line it moves: the knob sits above
+    // the first line or below the last one.
+    const lineY = box.top + h.y + h.h / 2;
+    handleDrag.current = { which, dy: lineY - e.clientY, span: activeSpan };
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+  }
+  function onHandleMove(e: React.PointerEvent) {
+    e.stopPropagation();
+    const d = handleDrag.current;
+    if (!d || !part) return;
+    const at = offsetAt(e.clientX, e.clientY + d.dy, textRef.current);
+    if (at === null) return;
+    const [a, b] = d.span;
+    const next =
+      d.which === "start"
+        ? snapToWords(part.text, Math.min(at, b - 1), b)
+        : snapToWords(part.text, a, Math.max(at + 1, a + 1));
+    if (next[1] > next[0]) setEdit({ idx: activeIdx, span: next });
+    // Scroll along near the top or bottom edge.
+    const box = scrollRef.current?.getBoundingClientRect();
+    if (box && scrollRef.current) {
+      if (e.clientY > box.bottom - 40) scrollRef.current.scrollTop += 12;
+      else if (e.clientY < box.top + 40) scrollRef.current.scrollTop -= 12;
+    }
+  }
+  function onHandleUp(e: React.PointerEvent) {
+    e.stopPropagation();
+    const d = handleDrag.current;
+    handleDrag.current = null;
+    const span = edit?.idx === activeIdx ? edit.span : null;
+    setEdit(null);
+    if (!d || !span || (span[0] === d.span[0] && span[1] === d.span[1])) return;
+    reshape(activeIdx, span);
+  }
+
+  // Shift + arrows: the active highlight's end (with Alt, its start) a word
+  // further or back.
+  function nudge(which: "start" | "end", dir: 1 | -1) {
+    if (!part || !activeSpan) return;
+    const text = part.text;
+    const words = wordsIn(text, [
+      Math.max(0, activeSpan[0] - 400),
+      Math.min(text.length, activeSpan[1] + 400),
+    ]);
+    const [a, b] = activeSpan;
+    let next: Span = [a, b];
+    if (which === "end") {
+      const after = words.find((w) => w[1] > b);
+      const inside = words.filter((w) => w[0] >= a && w[1] <= b);
+      if (dir > 0 && after) next = [a, after[1]];
+      else if (dir < 0 && inside.length > 1) next = [a, inside[inside.length - 2][1]];
+    } else {
+      const before = [...words].reverse().find((w) => w[0] < a);
+      const inside = words.filter((w) => w[0] >= a && w[1] <= b);
+      if (dir > 0 && before) next = [before[0], b];
+      else if (dir < 0 && inside.length > 1) next = [inside[1][0], b];
+    }
+    if (next[0] !== a || next[1] !== b) reshape(activeIdx, next);
+  }
+
   function onPointerCancel() {
     if (gesture.current) clearTimeout(gesture.current.timer);
     gesture.current = null;
@@ -868,16 +1337,17 @@ export function SourceReader({
     setPreview(null);
   }
 
-  // A finger painting must not scroll the page.
+  // A finger painting (or moving a handle) must not scroll the page. Caught
+  // on the document: the word under the finger is redrawn as the highlight
+  // grows, and touches keep going to the node that was there.
   useEffect(() => {
-    const el = textRef.current;
-    if (!el) return;
+    if (!open) return;
     const stop = (e: TouchEvent) => {
-      if (gesture.current?.paint) e.preventDefault();
+      if (gesture.current?.paint || handleDrag.current) e.preventDefault();
     };
-    el.addEventListener("touchmove", stop, { passive: false });
-    return () => el.removeEventListener("touchmove", stop);
-  });
+    document.addEventListener("touchmove", stop, { passive: false, capture: true });
+    return () => document.removeEventListener("touchmove", stop, { capture: true });
+  }, [open]);
 
   // Read mode: words selected the usual way can be highlighted with the pen.
   useEffect(() => {
@@ -992,6 +1462,18 @@ export function SourceReader({
     if (top > lastTop.current + 8 && top > 60 && !findOpen) setHeaderHidden(true);
     else if (top < lastTop.current - 8 || top < 20) setHeaderHidden(false);
     lastTop.current = top;
+    // Reading focus: the paragraph across the middle of the screen.
+    if (comfort.focus) {
+      const box = el.getBoundingClientRect();
+      const mid = box.top + box.height / 2;
+      const at = [...(textRef.current?.querySelectorAll<HTMLElement>("[data-at]") ?? [])].find(
+        (x) => {
+          const r = x.getBoundingClientRect();
+          return r.top <= mid && r.bottom >= mid;
+        },
+      );
+      if (at) setFocusAt(Number(at.dataset.at));
+    }
     clearTimeout(posTimer.current);
     posTimer.current = setTimeout(() => {
       if (!source || !part) return;
@@ -1120,6 +1602,72 @@ export function SourceReader({
     (m) => isPoint(m.pen) && !factKeys.has(normalizeForMatch(cleanQuote(m.quote))),
   );
 
+  // "Only add new key points": SAATHI's points are shown first, to change
+  // or add as they are.
+  const [pointsPreview, setPointsPreview] = useState<{ quote: string; point: Bi }[] | null>(null);
+  const newHighlights = () =>
+    newPoints.map((m) => ({
+      source_id: m.source_id,
+      quote: m.quote,
+      point: true,
+      check: m.pen === "check",
+      ...(m.note ? { note: m.note } : {}),
+    }));
+  async function previewPointsOnly() {
+    if (!item) return;
+    setBusy(true);
+    try {
+      const r = await previewFn({ data: { id: item.id, highlights: newHighlights() } });
+      setPointsPreview(r.facts.map((f, i) => ({ quote: f.quote, point: r.points[i] })));
+      setTrayOpen(true);
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't write the points"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function suggestFacts() {
+    if (!source) return;
+    setSuggesting(true);
+    try {
+      const r = await suggestFn({
+        data: {
+          id: item?.id ?? null,
+          source_id: source.id,
+          marked: marks
+            .filter((m) => m.source_id === source.id)
+            .flatMap((m) => quoteParts(m.quote))
+            .slice(0, 60),
+          ...(art && part ? { article: [part.start + art.at, part.start + art.end] } : {}),
+        },
+      });
+      setSuggested(r.map((x) => ({ source_id: source.id, quote: x.quote })));
+      toast.success(
+        r.length
+          ? `${r.length} fact${r.length === 1 ? "" : "s"} suggested: tap one to keep it`
+          : "No more exam facts found in this article",
+      );
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't suggest facts"));
+    } finally {
+      setSuggesting(false);
+    }
+  }
+  function acceptAllSuggested() {
+    if (!part || !source) return;
+    const id = source.id;
+    const text = part.text;
+    const pen: Pen = tool === "eraser" ? "point" : tool;
+    commit((cur) =>
+      suggestSpans.reduce(
+        (acc, span) => (markable(text, span, pen) ? withMark(acc, id, text, span, pen) : acc),
+        cur,
+      ),
+    );
+    setSuggested((cur) => cur.filter((x) => x.source_id !== id));
+  }
+
   async function addPointsOnly() {
     if (!item) return;
     const id = item.id;
@@ -1129,16 +1677,12 @@ export function SourceReader({
       const saved = await addPointsFn({
         data: {
           id,
-          highlights: newPoints.map((m) => ({
-            source_id: m.source_id,
-            quote: m.quote,
-            point: true,
-            check: m.pen === "check",
-            ...(m.note ? { note: m.note } : {}),
-          })),
+          highlights: newHighlights(),
           keywords: keywordMarks.map((m) => m.quote),
+          ...(pointsPreview ? { points: pointsPreview.map((x) => x.point) } : {}),
         },
       });
+      setPointsPreview(null);
       const added = saved.facts.length - before;
       write(draftKey(key, mode), null);
       toast.success(`Added ${added} key point${added === 1 ? "" : "s"}`, {
@@ -1179,6 +1723,16 @@ export function SourceReader({
     }
   }
 
+  // The words of the highlight whose actions are open, for Trim and Split
+  // (a highlight in the source being read, not a joined one).
+  const sheetWords = useMemo(() => {
+    const m = sheet !== null ? marks[sheet] : undefined;
+    if (!m || !part || !source || m.source_id !== source.id || m.quote.includes(QUOTE_JOIN))
+      return null;
+    const span = findQuote(part.text, m.quote);
+    return span ? wordsIn(part.text, span) : null;
+  }, [sheet, marks, part, source]);
+
   const tray = (
     <Tray
       marks={marks}
@@ -1189,7 +1743,30 @@ export function SourceReader({
       keywords={keywordMarks.length}
       canAddKeywords={mode === "rewrite" && !!item?.content}
       newPoints={newPoints.length}
-      onAddPoints={mode === "rewrite" && item?.content ? () => void addPointsOnly() : undefined}
+      onAddPoints={mode === "rewrite" && item?.content ? () => void previewPointsOnly() : undefined}
+      pointsPreview={pointsPreview}
+      onPreviewChange={setPointsPreview}
+      onConfirmPoints={() => void addPointsOnly()}
+      onMove={(i, d) =>
+        commit((cur) => {
+          const j = i + d;
+          if (j < 0 || j >= cur.length) return cur;
+          const next = [...cur];
+          [next[i], next[j]] = [next[j], next[i]];
+          return next;
+        })
+      }
+      onJoin={join}
+      canJoin={(ids) =>
+        ids.length > 1 &&
+        new Set(ids.map((i) => marks[i]?.source_id)).size === 1 &&
+        ids.every((i) => marks[i] && marks[i].pen !== "keyword")
+      }
+      suggestCount={suggestSpans.length}
+      suggesting={suggesting}
+      onSuggest={source ? () => void suggestFacts() : undefined}
+      onAcceptSuggested={acceptAllSuggested}
+      onClearSuggested={() => setSuggested([])}
       story={wide && mode === "rewrite" ? item : null}
       onNote={setNote}
       onCycle={(i) =>
@@ -1228,6 +1805,7 @@ export function SourceReader({
 
   const page = (
     <>
+      <style>{NUMBER_CSS}</style>
       {/* Top bar: hides while scrolling down. */}
       <header
         className={`overflow-hidden border-b border-border bg-background transition-all duration-200 ${headerHidden ? "max-h-0 border-b-0 opacity-0" : "max-h-72"}`}
@@ -1312,7 +1890,18 @@ export function SourceReader({
           >
             <Plus className="h-4 w-4" />
           </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 w-8 p-0"
+            aria-label="Reading settings"
+            aria-expanded={comfortOpen}
+            onClick={() => setComfortOpen((v) => !v)}
+          >
+            <Type className="h-4 w-4" />
+          </Button>
         </div>
+        {comfortOpen && <ComfortPanel value={comfort} onChange={setComfort} />}
         <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2">
           {item ? (
             (
@@ -1570,9 +2159,59 @@ export function SourceReader({
                   onPointerCancel={onPointerCancel}
                   onContextMenu={onTextMenu}
                   onClick={onTextClick}
-                  style={{ fontSize: size }}
-                  className={`leading-[1.75] ${painting ? "cursor-text select-none [-webkit-touch-callout:none]" : ""}`}
+                  style={{
+                    fontSize: size,
+                    lineHeight: SPACING[comfort.spacing],
+                    ...(FONTS[comfort.font].family
+                      ? { fontFamily: FONTS[comfort.font].family }
+                      : {}),
+                  }}
+                  className={`relative ${painting ? "cursor-text select-none [-webkit-touch-callout:none]" : ""}`}
                 >
+                  {handles && (
+                    <>
+                      {(["start", "end"] as const).map((which) => {
+                        const h = handles[which];
+                        const pen = activeMark ? PEN[activeMark.pen].dot : "bg-primary";
+                        return (
+                          <span
+                            key={which}
+                            data-handle={which}
+                            className="pointer-events-none absolute z-10 flex w-7 -translate-x-1/2 select-none flex-col items-center"
+                            style={{
+                              left: h.x,
+                              top: which === "start" ? h.y - 16 : h.y,
+                              height: h.h + 16,
+                              flexDirection: which === "start" ? "column" : "column-reverse",
+                            }}
+                          >
+                            {/* Only the knob, above the first line or below the last,
+                                takes a finger: the words under the bar stay tappable. */}
+                            <span
+                              role="slider"
+                              aria-label={
+                                which === "start" ? "Start of highlight" : "End of highlight"
+                              }
+                              aria-valuenow={which === "start" ? activeSpan?.[0] : activeSpan?.[1]}
+                              onPointerDown={(e) => onHandleDown(which, e)}
+                              onPointerMove={onHandleMove}
+                              onPointerUp={onHandleUp}
+                              onPointerCancel={() => {
+                                handleDrag.current = null;
+                                setEdit(null);
+                              }}
+                              className="pointer-events-auto grid h-4 w-7 shrink-0 cursor-grab touch-none place-items-center"
+                            >
+                              <span
+                                className={`h-3.5 w-3.5 rounded-full border-2 border-background shadow ${pen}`}
+                              />
+                            </span>
+                            <span className="w-0.5 flex-1 bg-foreground/60" />
+                          </span>
+                        );
+                      })}
+                    </>
+                  )}
                   {view === "clean" ? (
                     <>
                       {art && (
@@ -1594,7 +2233,8 @@ export function SourceReader({
                           <BlockView
                             key={b.at}
                             block={b}
-                            {...rangesFor(b, ranges, taken, found, flash)}
+                            {...rangesFor(b, ranges, taken, found, flash, suggestSpans)}
+                            dim={comfort.focus && focusAt !== null && b.at !== focusAt}
                           />
                         ),
                       )}
@@ -1615,6 +2255,7 @@ export function SourceReader({
                         taken={taken}
                         found={found}
                         flash={flash}
+                        suggest={suggestSpans}
                       />
                     </div>
                   )}
@@ -1644,6 +2285,8 @@ export function SourceReader({
               tool={tool}
               painting={painting}
               size={size}
+              numbers={comfort.numbers}
+              clause={tapMode === "clause"}
               commit={commit}
               onSheet={openSheet}
               onClose={() => setCompare(null)}
@@ -1720,6 +2363,33 @@ export function SourceReader({
           </div>
           {trayOpen && !wide && <div className="max-h-[55dvh] overflow-y-auto">{tray}</div>}
         </div>
+        {painting && tool !== "eraser" && (
+          <div
+            className="flex items-center gap-1.5 px-3 pt-1.5 text-xs"
+            role="radiogroup"
+            aria-label="A tap marks"
+          >
+            <span className="text-muted-foreground">A tap marks</span>
+            {TAP_MODES.map((t) => (
+              <button
+                key={t.mode}
+                type="button"
+                role="radio"
+                aria-checked={tapMode === t.mode}
+                title={t.hint}
+                onClick={() => setTapMode(t.mode)}
+                className={`rounded-full border px-2.5 py-0.5 ${tapMode === t.mode ? "border-primary/50 bg-primary/10 font-medium text-primary" : "border-border text-muted-foreground"}`}
+              >
+                {t.label}
+              </button>
+            ))}
+            {anchor !== null && (
+              <span className="ml-auto text-primary" aria-live="polite">
+                Now tap the last word
+              </span>
+            )}
+          </div>
+        )}
         <Toolbar
           painting={painting}
           keepMode={!!selection}
@@ -1736,7 +2406,22 @@ export function SourceReader({
       {helpOpen && <ShortcutsHelp onClose={() => setHelpOpen(false)} />}
       {sheet !== null && marks[sheet] && (
         <MarkSheet
+          key={sheet}
           mark={marks[sheet]}
+          words={sheetWords}
+          text={part?.text ?? ""}
+          onTrim={(span) => {
+            reshape(sheet, span);
+            setSheet(null);
+          }}
+          onSplit={(at) => {
+            split(sheet, at);
+            setSheet(null);
+          }}
+          onUnjoin={() => {
+            unjoin(sheet);
+            setSheet(null);
+          }}
           onClose={() => setSheet(null)}
           onPen={(pen) => {
             const i = sheet;
@@ -1810,6 +2495,75 @@ function useWide() {
     return () => mq.removeEventListener("change", on);
   }, []);
   return wide;
+}
+
+// Reading settings: line spacing, a Hindi font, numbers underlined, and
+// dimming all but the paragraph being read.
+function ComfortPanel({ value, onChange }: { value: Comfort; onChange: (c: Comfort) => void }) {
+  const row = "flex flex-wrap items-center gap-1.5";
+  const chip = (on: boolean) =>
+    `rounded-full border px-2.5 py-0.5 text-xs ${on ? "border-primary/50 bg-primary/10 font-medium text-primary" : "border-border text-muted-foreground"}`;
+  return (
+    <div
+      role="group"
+      aria-label="Reading settings"
+      className="space-y-2 border-t border-border px-3 py-2 text-xs"
+    >
+      <div className={row}>
+        <span className="w-24 text-muted-foreground">Line spacing</span>
+        {(
+          [
+            ["normal", "Normal"],
+            ["relaxed", "Relaxed"],
+            ["loose", "Loose"],
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            aria-pressed={value.spacing === k}
+            onClick={() => onChange({ ...value, spacing: k })}
+            className={chip(value.spacing === k)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className={row}>
+        <span className="w-24 text-muted-foreground">Hindi font</span>
+        {(Object.keys(FONTS) as Comfort["font"][]).map((k) => (
+          <button
+            key={k}
+            type="button"
+            aria-pressed={value.font === k}
+            onClick={() => onChange({ ...value, font: k })}
+            className={chip(value.font === k)}
+            style={FONTS[k].family ? { fontFamily: FONTS[k].family } : undefined}
+          >
+            {FONTS[k].label} · हिंदी
+          </button>
+        ))}
+      </div>
+      <div className={row}>
+        <button
+          type="button"
+          aria-pressed={value.numbers}
+          onClick={() => onChange({ ...value, numbers: !value.numbers })}
+          className={chip(value.numbers)}
+        >
+          Underline numbers and dates
+        </button>
+        <button
+          type="button"
+          aria-pressed={value.focus}
+          onClick={() => onChange({ ...value, focus: !value.focus })}
+          className={chip(value.focus)}
+        >
+          Focus on the paragraph I'm reading
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // The bottom toolbar: Read / Highlight, the pens, the eraser, undo and redo.
@@ -1941,6 +2695,9 @@ const SHORTCUTS: [string, string][] = [
   ["J / K", "Next / previous highlight"],
   ["N / P", "Next / previous article"],
   ["C", "Read another source beside this one"],
+  ["Shift+→ / Shift+←", "The highlight just made: a word longer / shorter at its end"],
+  ["Alt+Shift+← / →", "The same at its start"],
+  ["Enter", "Read mode: mark the selected words with the pen"],
   ["Esc", "Close find, a highlight's actions, or this list"],
   ["?", "Show or hide this list"],
 ];
@@ -2082,10 +2839,15 @@ function ComparePane({
   tool,
   painting,
   size,
+  numbers,
+  clause,
   commit,
   onSheet,
   onClose,
 }: {
+  numbers: boolean;
+  // A click marks the clause rather than the sentence.
+  clause: boolean;
   source: ReaderSource;
   // Where it opened, in the whole source.
   at: number;
@@ -2152,6 +2914,8 @@ function ComparePane({
     return out;
   }, [marks, text, source.id, preview, tool]);
 
+  useNumberUnderline(textRef.current, numbers, [ranges, focus, text]);
+
   // A click marks the sentence (or changes the highlight there); a drag
   // paints words; a right-click on a highlight opens its actions.
   const drag = useRef<{
@@ -2198,7 +2962,7 @@ function ComparePane({
       } else toast("Mark a little more text");
       return;
     }
-    const next = tapped(marks, source.id, text, sentences, g.at, tool);
+    const next = tapped(marks, source.id, text, sentences, g.at, tool, clause);
     if (next === "short") toast("Mark a little more text");
     else if (next) commit(next);
   }
@@ -2307,7 +3071,7 @@ function ComparePane({
         >
           {blocks.map((b) =>
             b.clutter || !inFocus(b.at) ? null : (
-              <BlockView key={b.at} block={b} {...rangesFor(b, ranges, NONE, NONE, null)} />
+              <BlockView key={b.at} block={b} {...rangesFor(b, ranges, NONE, NONE, null, NONE)} />
             ),
           )}
         </div>
@@ -2417,18 +3181,39 @@ const QUICK_NOTES = [
 // A highlight's actions: its pen, a margin note for SAATHI, removing it.
 function MarkSheet({
   mark,
+  words,
+  text: source,
+  onTrim,
+  onSplit,
+  onUnjoin,
   onClose,
   onPen,
   onNote,
   onRemove,
 }: {
   mark: Mark;
+  // The highlight's words in the source, for Trim and Split (null when not
+  // possible here).
+  words: Span[] | null;
+  text: string;
+  onTrim: (span: Span) => void;
+  onSplit: (at: number) => void;
+  onUnjoin: () => void;
   onClose: () => void;
   onPen: (pen: Pen) => void;
   onNote: (note: string) => void;
   onRemove: () => void;
 }) {
   const [text, setText] = useState(mark.note ?? "");
+  const [shape, setShape] = useState<"trim" | "split" | null>(null);
+  const [range, setRange] = useState<[number, number]>([0, (words?.length ?? 1) - 1]);
+  const [cut, setCut] = useState<number | null>(null);
+  const joined = mark.quote.includes(QUOTE_JOIN);
+  const word = (i: number) => (words ? source.slice(words[i][0], words[i][1]) : "");
+  // The word tapped becomes the nearer end of the kept words (outside them,
+  // the end moves out to it; inside, in to it).
+  const pickTrim = (i: number) =>
+    setRange(([a, b]) => (i < a ? [i, b] : i > b ? [a, i] : i - a <= b - i ? [i, b] : [a, i]));
   // Lifting the finger after a long press clicks where it was; that click
   // must not land on the backdrop and close the sheet at once.
   const openedAt = useRef(Date.now());
@@ -2464,6 +3249,77 @@ function MarkSheet({
             </button>
           ))}
         </div>
+        {joined ? (
+          <Button variant="outline" className="mb-3 w-full" onClick={onUnjoin}>
+            <Link2 className="mr-1 h-4 w-4" /> Separate the joined parts
+          </Button>
+        ) : (
+          words &&
+          words.length > 1 && (
+            <div className="mb-3 space-y-2">
+              <div className="flex gap-1.5" role="group" aria-label="Change the words">
+                <Button
+                  size="sm"
+                  variant={shape === "trim" ? "secondary" : "outline"}
+                  onClick={() => setShape(shape === "trim" ? null : "trim")}
+                >
+                  <Scissors className="mr-1 h-3.5 w-3.5" /> Trim
+                </Button>
+                <Button
+                  size="sm"
+                  variant={shape === "split" ? "secondary" : "outline"}
+                  onClick={() => setShape(shape === "split" ? null : "split")}
+                >
+                  Split in two
+                </Button>
+              </div>
+              {shape && (
+                <>
+                  <p className="text-[11px] text-muted-foreground">
+                    {shape === "trim"
+                      ? "Tap a word to move the nearer end to it; grey words are left out."
+                      : "Tap the word the second highlight starts with."}
+                  </p>
+                  <div className="flex flex-wrap gap-1" data-testid="mark-words">
+                    {words.map((_, i) => {
+                      const kept = shape === "trim" ? i >= range[0] && i <= range[1] : true;
+                      const second = shape === "split" && cut !== null && i >= cut;
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() =>
+                            shape === "trim" ? pickTrim(i) : setCut(i === 0 ? null : i)
+                          }
+                          className={`rounded-md border px-1.5 py-0.5 text-sm ${kept ? "border-border bg-background" : "border-dashed border-border bg-muted/40 text-muted-foreground line-through"} ${second ? "border-primary bg-primary/10" : ""}`}
+                        >
+                          {word(i)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {shape === "trim" ? (
+                    <Button
+                      className="w-full"
+                      disabled={range[0] === 0 && range[1] === words.length - 1}
+                      onClick={() => onTrim([words[range[0]][0], words[range[1]][1]])}
+                    >
+                      Keep {range[1] - range[0] + 1} of {words.length} words
+                    </Button>
+                  ) : (
+                    <Button
+                      className="w-full"
+                      disabled={cut === null}
+                      onClick={() => cut !== null && onSplit(words[cut][0])}
+                    >
+                      {cut === null ? "Pick where to split" : `Split before “${word(cut)}”`}
+                    </Button>
+                  )}
+                </>
+              )}
+            </div>
+          )
+        )}
         {mark.pen !== "keyword" && (
           <>
             <label htmlFor="mark-note" className="text-xs font-semibold text-muted-foreground">
@@ -2532,7 +3388,32 @@ function Tray({
   checking,
   onCheckMissing,
   onAddMissing,
+  pointsPreview,
+  onPreviewChange,
+  onConfirmPoints,
+  onMove,
+  onJoin,
+  canJoin,
+  suggestCount,
+  suggesting,
+  onSuggest,
+  onAcceptSuggested,
+  onClearSuggested,
 }: {
+  // The new key points SAATHI wrote, shown before they are added.
+  pointsPreview: { quote: string; point: Bi }[] | null;
+  onPreviewChange: (p: { quote: string; point: Bi }[] | null) => void;
+  onConfirmPoints: () => void;
+  // Points are written in the list's order.
+  onMove: (i: number, d: 1 | -1) => void;
+  onJoin: (ids: number[]) => void;
+  canJoin: (ids: number[]) => boolean;
+  // "Suggest facts": SAATHI's picks in the article, dotted until tapped.
+  suggestCount: number;
+  suggesting: boolean;
+  onSuggest?: () => void;
+  onAcceptSuggested: () => void;
+  onClearSuggested: () => void;
   marks: Mark[];
   mode: Mode;
   note: string;
@@ -2561,6 +3442,71 @@ function Tray({
   onCheckMissing: () => void;
   onAddMissing: (f: MissingFact) => void;
 }) {
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const pickedIds = [...picked].filter((i) => i < marks.length);
+  useEffect(() => setPicked(new Set()), [marks.length]);
+  if (pointsPreview)
+    return (
+      <div className="space-y-3 p-3" data-testid="points-preview">
+        <div>
+          <div className="text-sm font-semibold">New key points</div>
+          <p className="text-xs text-muted-foreground">
+            What SAATHI wrote from your highlights. Change any line, then add them.
+          </p>
+        </div>
+        {pointsPreview.map((x, i) => (
+          <div key={i} className="space-y-1.5 rounded-lg border border-border bg-background p-2">
+            <p className="line-clamp-2 text-[11px] italic text-muted-foreground">“{x.quote}”</p>
+            <Textarea
+              lang="hi"
+              aria-label={`Point ${i + 1} in Hindi`}
+              rows={2}
+              value={x.point.hi}
+              onChange={(e) =>
+                onPreviewChange(
+                  pointsPreview.map((y, j) =>
+                    j === i ? { ...y, point: { ...y.point, hi: e.target.value } } : y,
+                  ),
+                )
+              }
+              className="min-h-0 text-sm"
+            />
+            <Textarea
+              aria-label={`Point ${i + 1} in English`}
+              rows={2}
+              value={x.point.en}
+              onChange={(e) =>
+                onPreviewChange(
+                  pointsPreview.map((y, j) =>
+                    j === i ? { ...y, point: { ...y.point, en: e.target.value } } : y,
+                  ),
+                )
+              }
+              className="min-h-0 text-sm"
+            />
+          </div>
+        ))}
+        <div className="flex gap-2">
+          <Button
+            variant="ghost"
+            className="flex-1"
+            disabled={busy}
+            onClick={() => onPreviewChange(null)}
+          >
+            Cancel
+          </Button>
+          <Button
+            className="flex-1"
+            disabled={busy || pointsPreview.some((x) => !x.point.en.trim() || !x.point.hi.trim())}
+            onClick={onConfirmPoints}
+          >
+            {busy
+              ? "Adding…"
+              : `Add ${pointsPreview.length} point${pointsPreview.length === 1 ? "" : "s"}`}
+          </Button>
+        </div>
+      </div>
+    );
   return (
     <div className="space-y-3 p-3">
       {jump && (
@@ -2577,9 +3523,87 @@ function Tray({
           onAdd={onAddMissing}
         />
       )}
+      {onSuggest && (
+        <div
+          className="rounded-lg border border-border bg-background p-2"
+          data-testid="suggest-box"
+        >
+          <div className="flex items-center gap-2">
+            <span className="flex-1 text-sm font-semibold">Suggest facts</span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              disabled={suggesting}
+              onClick={onSuggest}
+            >
+              <Sparkles className="mr-1 h-3.5 w-3.5" />
+              {suggesting ? "Looking…" : suggestCount ? "Again" : "Suggest"}
+            </Button>
+          </div>
+          {suggestCount > 0 ? (
+            <div className="mt-1.5 flex items-center gap-2 text-xs">
+              <span className="flex-1 text-muted-foreground">
+                {suggestCount} dotted in the article: tap one to keep it
+              </span>
+              <button
+                type="button"
+                className="font-medium text-primary"
+                onClick={onAcceptSuggested}
+              >
+                Keep all
+              </button>
+              <button type="button" className="text-muted-foreground" onClick={onClearSuggested}>
+                Clear
+              </button>
+            </div>
+          ) : (
+            <p className="mt-1 text-xs text-muted-foreground">
+              SAATHI dots the exam facts in this article (numbers, dates, names, firsts). One AI
+              request.
+            </p>
+          )}
+        </div>
+      )}
+      {marks.length > 1 && (
+        <p className="text-[11px] text-muted-foreground">
+          Key points are written in this order. Tick two or more to join them into one fact.
+        </p>
+      )}
+      {pickedIds.length > 1 && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="w-full"
+          disabled={!canJoin(pickedIds)}
+          title={canJoin(pickedIds) ? undefined : "Pick highlights from the same source"}
+          onClick={() => {
+            onJoin(pickedIds);
+            setPicked(new Set());
+          }}
+        >
+          <Link2 className="mr-1 h-4 w-4" /> Join {pickedIds.length} into one fact
+        </Button>
+      )}
       <ul className="space-y-1.5" data-testid="highlight-list">
         {marks.map((m, i) => (
           <li key={`${m.source_id}-${m.quote}-${i}`} className="flex items-start gap-2 text-xs">
+            {marks.length > 1 && (
+              <input
+                type="checkbox"
+                aria-label={`Pick highlight ${i + 1} to join`}
+                checked={picked.has(i)}
+                onChange={(e) =>
+                  setPicked((cur) => {
+                    const next = new Set(cur);
+                    if (e.target.checked) next.add(i);
+                    else next.delete(i);
+                    return next;
+                  })
+                }
+                className="mt-1 h-3.5 w-3.5 shrink-0 accent-primary"
+              />
+            )}
             <button
               type="button"
               onClick={() => onCycle(i)}
@@ -2591,6 +3615,7 @@ function Tray({
             </button>
             <div className="min-w-0 flex-1">
               <button type="button" onClick={() => onShow(m)} className="line-clamp-2 text-left">
+                {m.quote.includes(QUOTE_JOIN) && <Link2 className="mr-1 inline h-3 w-3" />}
                 {m.quote}
               </button>
               {sourceName(m.source_id) && (
@@ -2604,6 +3629,28 @@ function Tray({
                 </div>
               )}
             </div>
+            {marks.length > 1 && (
+              <span className="flex shrink-0 flex-col">
+                <button
+                  type="button"
+                  aria-label={`Move highlight ${i + 1} up`}
+                  disabled={i === 0}
+                  onClick={() => onMove(i, -1)}
+                  className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+                >
+                  <ArrowUp className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Move highlight ${i + 1} down`}
+                  disabled={i === marks.length - 1}
+                  onClick={() => onMove(i, 1)}
+                  className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+                >
+                  <ArrowDown className="h-3.5 w-3.5" />
+                </button>
+              </span>
+            )}
             <button
               type="button"
               aria-label="Edit highlight"
@@ -2646,8 +3693,14 @@ function Tray({
       {newPoints > 0 && onAddPoints && (
         <Button variant="outline" className="w-full" disabled={busy} onClick={onAddPoints}>
           <Plus className="mr-1 h-4 w-4" />
-          Only add {Math.min(newPoints, ADD_POINTS_MAX)} new key point
-          {Math.min(newPoints, ADD_POINTS_MAX) === 1 ? "" : "s"} · keeps the rest
+          {busy ? (
+            "Writing…"
+          ) : (
+            <>
+              Only add {Math.min(newPoints, ADD_POINTS_MAX)} new key point
+              {Math.min(newPoints, ADD_POINTS_MAX) === 1 ? "" : "s"} · see them first
+            </>
+          )}
         </Button>
       )}
       {keywords > 0 && canAddKeywords && (
@@ -2671,21 +3724,33 @@ function Tray({
 
 // The marks that fall in a block, with a key so unchanged blocks skip
 // re-rendering while a highlight is painted elsewhere.
-function rangesFor(b: Block, ranges: Range[], taken: Span[], found: Found[], flash: number | null) {
+function rangesFor(
+  b: Block,
+  ranges: Range[],
+  taken: Span[],
+  found: Found[],
+  flash: number | null,
+  suggest: Span[] = [],
+) {
   const span: Span = [b.at, b.end];
   const mine = ranges.filter((r) => overlaps(r.span, span));
   const faint = taken.filter((t) => overlaps(t, span));
   const finds = found.filter((f) => overlaps(f.span, span));
+  const sugg = suggest.filter((t) => overlaps(t, span));
   const lit = flash !== null && mine.some((r) => r.span[0] === flash) ? flash : null;
   return {
     ranges: mine,
     taken: faint,
     found: finds,
     flash: lit,
+    suggest: sugg,
     marksKey: [
-      ...mine.map((r) => `${r.pen}${r.preview ? "~" : ""}${r.note ? "n" : ""}${r.span}`),
+      ...mine.map(
+        (r) => `${r.pen}${r.preview ? "~" : ""}${r.note ? "n" : ""}${r.joined ? "j" : ""}${r.span}`,
+      ),
       ...faint,
       ...finds.map((f) => `${f.current ? "!" : "?"}${f.span}`),
+      ...sugg.map((x) => `s${x}`),
       lit ?? "",
     ].join("|"),
   };
@@ -2698,12 +3763,17 @@ const BlockView = memo(
     taken,
     found,
     flash,
+    suggest,
+    dim,
   }: {
     block: Block;
     ranges: Range[];
     taken: Span[];
     found: Found[];
     flash: number | null;
+    suggest: Span[];
+    // Reading focus: paragraphs other than the one being read are dimmed.
+    dim?: boolean;
     marksKey: string;
   }) {
     const runs = (rs: Run[]) =>
@@ -2711,83 +3781,136 @@ const BlockView = memo(
         r.at < 0 ? (
           <span key={i}> </span>
         ) : (
-          <Pieces key={i} run={r} ranges={ranges} taken={taken} found={found} flash={flash} />
+          <Pieces
+            key={i}
+            run={r}
+            ranges={ranges}
+            taken={taken}
+            found={found}
+            flash={flash}
+            suggest={suggest}
+          />
         ),
       );
-    switch (b.kind) {
-      case "heading":
-        return (
-          <div
-            data-at={b.at}
-            role="heading"
-            aria-level={b.level + 1}
-            className={
-              b.level === 1
-                ? "mb-2 mt-4 text-[1.3em] font-bold leading-snug"
-                : b.level === 2
-                  ? "mb-1.5 mt-4 text-[1.15em] font-semibold leading-snug"
-                  : "mb-1 mt-3 font-semibold"
-            }
-          >
-            {runs(b.runs)}
-          </div>
-        );
-      case "para":
-        return (
-          <p data-at={b.at} className="my-3">
-            {runs(b.runs)}
-          </p>
-        );
-      case "item":
-        return (
-          <div data-at={b.at} className="my-1.5 flex gap-2">
-            <span className="shrink-0 text-muted-foreground">{b.marker}</span>
-            <div className="min-w-0">{runs(b.runs)}</div>
-          </div>
-        );
-      case "quote":
-        return (
-          <blockquote
-            data-at={b.at}
-            className="my-3 border-l-4 border-border pl-3 italic text-muted-foreground"
-          >
-            {runs(b.runs)}
-          </blockquote>
-        );
-      case "table":
-        return (
-          <div data-at={b.at} className="my-3 overflow-x-auto">
-            <table className="w-full border-collapse text-[0.9em]">
-              <tbody>
-                {b.rows.map((row, i) => (
-                  <tr key={i} className={i === 0 ? "bg-muted/60 font-semibold" : ""}>
-                    {row.map((cell, j) => (
-                      <td key={j} className="border border-border px-2 py-1 align-top">
-                        {runs(cell)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        );
-      case "page":
-        return (
-          <div
-            data-at={b.at}
-            className="my-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-          >
-            <span className="h-px flex-1 bg-border" /> Page {b.n}{" "}
-            <span className="h-px flex-1 bg-border" />
-          </div>
-        );
-      default:
-        return <hr data-at={b.at} className="my-4 border-border" />;
+    const body = render();
+    return dim ? <div className="opacity-35 transition-opacity">{body}</div> : body;
+    function render() {
+      switch (b.kind) {
+        case "heading":
+          return (
+            <div
+              data-at={b.at}
+              role="heading"
+              aria-level={b.level + 1}
+              className={
+                b.level === 1
+                  ? "mb-2 mt-4 text-[1.3em] font-bold leading-snug"
+                  : b.level === 2
+                    ? "mb-1.5 mt-4 text-[1.15em] font-semibold leading-snug"
+                    : "mb-1 mt-3 font-semibold"
+              }
+            >
+              {runs(b.runs)}
+            </div>
+          );
+        case "para":
+          return (
+            <p data-at={b.at} className="my-3">
+              {runs(b.runs)}
+            </p>
+          );
+        case "item":
+          return (
+            <div data-at={b.at} className="my-1.5 flex gap-2">
+              <span className="shrink-0 text-muted-foreground">{b.marker}</span>
+              <div className="min-w-0">{runs(b.runs)}</div>
+            </div>
+          );
+        case "quote":
+          return (
+            <blockquote
+              data-at={b.at}
+              className="my-3 border-l-4 border-border pl-3 italic text-muted-foreground"
+            >
+              {runs(b.runs)}
+            </blockquote>
+          );
+        case "table":
+          return (
+            <div data-at={b.at} className="my-3 overflow-x-auto">
+              <table className="w-full border-collapse text-[0.9em]">
+                <tbody>
+                  {b.rows.map((row, i) => (
+                    <tr key={i} className={i === 0 ? "bg-muted/60 font-semibold" : ""}>
+                      {row.map((cell, j) => (
+                        <td key={j} className="border border-border px-2 py-1 align-top">
+                          {runs(cell)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        case "page":
+          return (
+            <div
+              data-at={b.at}
+              className="my-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+            >
+              <span className="h-px flex-1 bg-border" /> Page {b.n}{" "}
+              <span className="h-px flex-1 bg-border" />
+            </div>
+          );
+        default:
+          return <hr data-at={b.at} className="my-4 border-border" />;
+      }
     }
   },
-  (a, b) => a.block === b.block && a.marksKey === b.marksKey,
+  (a, b) => a.block === b.block && a.marksKey === b.marksKey && a.dim === b.dim,
 );
+
+// Numbers, amounts, percentages and dates, faintly underlined so the exam
+// details stand out.
+const NUMBER_RE =
+  /(?:₹|Rs\.?|रु\.?)\s?\d[\d,.]*(?:\s?(?:crore|lakh|million|billion|करोड़|लाख))?|\d[\d,.]*\s?(?:%|per cent|percent|प्रतिशत|crore|lakh|million|billion|करोड़|लाख|km|किमी|MW|GW|hectares?|हेक्टेयर)?|[०-९][०-९,.]*/giu;
+
+// Numbers underlined without touching the article's markup (a finger on a
+// word must stay on the same node while a highlight is painted): the CSS
+// Custom Highlight API marks their text ranges. Browsers without it show no
+// underline.
+function useNumberUnderline(root: HTMLElement | null, on: boolean, deps: unknown[]) {
+  useLayoutEffect(() => {
+    if (typeof Highlight === "undefined" || typeof CSS === "undefined" || !CSS.highlights) return;
+    const reg = CSS.highlights;
+    const name = "reader-num";
+    if (!on || !root) {
+      reg.delete(name);
+      return;
+    }
+    const ranges: globalThis.Range[] = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const t = n.textContent ?? "";
+      for (const m of t.matchAll(NUMBER_RE)) {
+        const w = m[0].trimEnd();
+        if (!/\d|[०-९]/.test(w)) continue;
+        const r = document.createRange();
+        r.setStart(n, m.index!);
+        r.setEnd(n, m.index! + w.length);
+        ranges.push(r);
+      }
+    }
+    reg.set(name, new Highlight(...ranges));
+    return () => {
+      reg.delete(name);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [root, on, ...deps]);
+}
+const NUMBER_CSS =
+  "::highlight(reader-num){text-decoration:underline dotted 2px;text-decoration-color:rgb(124 58 237 / .5);text-underline-offset:5px}";
 
 // One run of text cut where highlights start and end. Every piece carries
 // its raw offset, so a touch can be turned back into a position.
@@ -2797,22 +3920,26 @@ function Pieces({
   taken,
   found = [],
   flash = null,
+  suggest = [],
 }: {
   run: Run;
   ranges: Range[];
   taken: Span[];
   found?: Found[];
   flash?: number | null;
+  // SAATHI's suggested facts, dotted until tapped.
+  suggest?: Span[];
 }) {
   const span: Span = [run.at, run.at + run.text.length];
   const inside = ranges.filter((r) => overlaps(r.span, span));
   const faint = taken.filter((t) => overlaps(t, span));
   const finds = found.filter((f) => overlaps(f.span, span));
+  const sugg = suggest.filter((t) => overlaps(t, span));
   const cuts = [
     ...new Set([
       span[0],
       span[1],
-      ...[...inside.map((r) => r.span), ...faint, ...finds.map((f) => f.span)]
+      ...[...inside.map((r) => r.span), ...faint, ...finds.map((f) => f.span), ...sugg]
         .flat()
         .filter((x) => x > span[0] && x < span[1]),
     ]),
@@ -2827,6 +3954,7 @@ function Pieces({
         const mark = [...inside].reverse().find((r) => r.span[0] <= a && r.span[1] >= b);
         const dim = !mark && faint.some((t) => t[0] <= a && t[1] >= b);
         const hit = finds.find((f) => f.span[0] <= a && f.span[1] >= b);
+        const sug = !mark && sugg.some((t) => t[0] <= a && t[1] >= b);
         const findCls = hit
           ? hit.current
             ? "rounded-sm bg-orange-300/80 outline outline-2 outline-orange-500 dark:bg-orange-500/50"
@@ -2839,7 +3967,8 @@ function Pieces({
               key={k}
               data-raw={a}
               {...findAttr}
-              className={`${cls} ${findCls} ${dim ? "text-muted-foreground/60 underline decoration-dotted" : ""}`}
+              {...(sug ? { "data-suggest": "" } : {})}
+              className={`${cls} ${findCls} ${dim ? "text-muted-foreground/60 underline decoration-dotted" : ""} ${sug ? "rounded-sm outline-dotted outline-2 outline-offset-1 outline-primary/70" : ""}`}
             >
               {text}
             </span>
@@ -2853,11 +3982,20 @@ function Pieces({
               data-raw={a}
               data-pen={mark.pen}
               {...(first && !mark.preview ? { "data-mark-start": a } : {})}
+              {...(last && !mark.preview ? { "data-mark-end": b } : {})}
               {...findAttr}
-              className={`text-inherit [box-decoration-break:clone] ${first ? "rounded-l-sm pl-0.5" : ""} ${last ? "rounded-r-sm pr-0.5" : ""} ${PEN[mark.pen].mark} ${mark.preview ? "outline-dashed outline-1 outline-foreground/40" : ""} ${flash === mark.span[0] ? "ring-2 ring-primary" : ""} ${findCls} ${cls}`}
+              className={`text-inherit [box-decoration-break:clone] ${first ? "rounded-l-sm pl-0.5" : ""} ${last ? "rounded-r-sm pr-0.5" : ""} ${PEN[mark.pen].mark} ${mark.preview ? "outline-dashed outline-1 outline-foreground/40" : ""} ${mark.joined ? "underline decoration-foreground/40 decoration-wavy underline-offset-4" : ""} ${flash === mark.span[0] ? "ring-2 ring-primary" : ""} ${findCls} ${cls}`}
             >
               {text}
             </mark>
+            {last && mark.joined && (
+              <sup
+                className="ml-0.5 select-none text-[0.7em] text-muted-foreground"
+                title="Part of one fact joined from several places"
+              >
+                ⛓
+              </sup>
+            )}
             {last && mark.note && (
               <sup
                 className="ml-0.5 select-none text-[0.7em] text-primary"

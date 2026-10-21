@@ -3,11 +3,14 @@
 // how the text splits into sentences, and which part of a long source to show.
 // Pure helpers, shared by the server and the browser.
 import {
+  QUOTE_JOIN,
   normalizeForMatch,
   quoteInSource,
   type CaChange,
   type CaFact,
 } from "@/lib/current-affairs";
+
+export { QUOTE_JOIN };
 
 export type Span = [start: number, end: number];
 
@@ -83,8 +86,21 @@ export function findAll(text: string, query: string, max = 500): Span[] {
   return out;
 }
 
-// Where the quote is in the text, or null.
+// The parts of a joined quote ("first part … second part"); one part for an
+// ordinary quote.
+export const quoteParts = (quote: string) =>
+  quote.includes(QUOTE_JOIN) ? quote.split(QUOTE_JOIN).filter((p) => p.trim()) : [quote];
+
+// Where each part of a quote is in the text (empty when any part is missing).
+export function findQuoteParts(text: string, quote: string): Span[] {
+  const spans = quoteParts(quote).map((p) => findQuote(text, p));
+  return spans.every(Boolean) ? (spans as Span[]) : [];
+}
+
+// Where the quote is in the text, or null. A joined quote: where its first
+// part is.
 export function findQuote(text: string, quote: string): Span | null {
+  if (quote.includes(QUOTE_JOIN)) return findQuoteParts(text, quote)[0] ?? null;
   const q = normalized(quote).norm;
   if (q.length < 4) return null;
   const { norm, at } = normalizedCached(text);
@@ -126,6 +142,65 @@ export function sentenceSpans(text: string): Span[] {
     }
   }
   push(text.length);
+  return out;
+}
+
+// A sentence's clauses: split at commas, semicolons, colons, dashes and
+// brackets, and before joining words ("and", "but", "while", "which",
+// "और", "तथा", "जबकि", "लेकिन", "एवं"). A clause shorter than a few words
+// joins the next one, so a tap never marks a lone word.
+const CLAUSE_BREAK =
+  /[,;:–—()]|\s(?=(?:and|but|while|whereas|which|who|after|before|as|और|तथा|जबकि|लेकिन|किंतु|परंतु|एवं|जिसमें|जिससे)\s)/giu;
+const CLAUSE_WORD = /^(?:and|but|while|whereas|और|तथा|जबकि|लेकिन|किंतु|परंतु|एवं)\s+/iu;
+export function clauseSpans(text: string, sentence: Span): Span[] {
+  const [a, b] = sentence;
+  const piece = text.slice(a, b);
+  const cuts = [0];
+  for (const m of piece.matchAll(CLAUSE_BREAK)) cuts.push(m.index! + m[0].length);
+  cuts.push(piece.length);
+  const raw: Span[] = [];
+  for (let i = 0; i < cuts.length - 1; i++) {
+    let s = cuts[i];
+    let e = cuts[i + 1];
+    while (s < e && /[\s,;:–—()]/.test(piece[s])) s++;
+    // The joining word itself is left out of the clause.
+    const join = CLAUSE_WORD.exec(piece.slice(s, e));
+    if (join) s += join[0].length;
+    while (e > s && /[\s,;:–—().!?।॥]/.test(piece[e - 1])) e--;
+    if (e > s) raw.push([a + s, a + e]);
+  }
+  // Too short to be a fact on its own: joined with the next clause.
+  const out: Span[] = [];
+  for (const sp of raw) {
+    const prev = out[out.length - 1];
+    const words = (x: Span) => text.slice(x[0], x[1]).trim().split(/\s+/).length;
+    if (prev && words(prev) < 3) out[out.length - 1] = [prev[0], sp[1]];
+    else out.push(sp);
+  }
+  const last = out[out.length - 1];
+  if (out.length > 1 && last && text.slice(last[0], last[1]).trim().split(/\s+/).length < 3)
+    out.splice(-2, 2, [out[out.length - 2][0], last[1]]);
+  return out.length ? out : [sentence];
+}
+
+// The clause of a sentence at an offset.
+export function clauseAt(text: string, sentences: Span[], offset: number): Span | null {
+  const s = sentences.find(([x, y]) => x <= offset && offset < y);
+  if (!s) return null;
+  const cl = clauseSpans(text, s);
+  return cl.find(([x, y]) => x <= offset && offset < y) ?? cl.find(([x]) => x > offset) ?? s;
+}
+
+// The words of [a, b) with their offsets, for trimming a highlight.
+export function wordsIn(text: string, span: Span): Span[] {
+  const out: Span[] = [];
+  const re = /[\p{L}\p{M}\p{N}₹$%][\p{L}\p{M}\p{N}₹$%.,'’/-]*/gu;
+  const piece = text.slice(span[0], span[1]);
+  for (const m of piece.matchAll(re)) {
+    let w = m[0];
+    while (w.length > 1 && /[.,'’/-]$/.test(w)) w = w.slice(0, -1);
+    out.push([span[0] + m.index!, span[0] + m.index! + w.length]);
+  }
   return out;
 }
 

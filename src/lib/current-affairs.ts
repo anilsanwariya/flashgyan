@@ -342,9 +342,14 @@ const stripMarkdownTargets = (s: string) =>
     .replace(/\]\([^)\n]*\)/g, "] ")
     .replace(/<\/?[a-zA-Z][^<>\n]*>/g, " ");
 
+// Words joined from two places in a source ("first part … second part")
+// count as found when every part is.
+export const QUOTE_JOIN = " … ";
 export function quoteInSource(quote: string, source: string): boolean {
-  const q = normalizeForMatch(quote);
-  return q.length >= 8 && normalizeForMatch(stripMarkdownTargets(source)).includes(q);
+  const parts = quote.includes(QUOTE_JOIN) ? quote.split(QUOTE_JOIN) : [quote];
+  const text = normalizeForMatch(stripMarkdownTargets(source));
+  const qs = parts.map((p) => normalizeForMatch(p)).filter(Boolean);
+  return qs.join(" ").length >= 8 && qs.every((q) => q.length >= 4 && text.includes(q));
 }
 
 // ---------- 1) Extracting items from a source ----------

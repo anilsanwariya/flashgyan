@@ -755,17 +755,62 @@ export const createCaFromHighlights = createServerFn({ method: "POST" })
     );
   });
 
-// New key points from the reader, added without rewriting the story.
+// New key points from the reader, added without rewriting the story; the
+// points shown in the preview (as the editor left them) when given.
 export const addCaPoints = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
     z
-      .object({ id: z.string().uuid(), highlights: highlightsSchema, keywords: penKeywords })
+      .object({
+        id: z.string().uuid(),
+        highlights: highlightsSchema,
+        keywords: penKeywords,
+        points: z.array(bi).max(20).optional(),
+      })
       .parse(d),
   )
   .handler(async ({ data, context }): Promise<CaItem> => {
     await assertAdmin(context.userId);
-    return (await server()).addPointsFromHighlights(data.id, data.highlights, data.keywords);
+    return (await server()).addPointsFromHighlights(
+      data.id,
+      data.highlights,
+      data.keywords,
+      data.points,
+    );
+  });
+
+// The points new highlights would add, to see before adding (nothing saved).
+export const previewCaPoints = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), highlights: highlightsSchema }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).previewPoints(data.id, data.highlights);
+  });
+
+// "Suggest facts": exam facts in the article being read, as its own words.
+export const suggestCaMarks = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid().nullish(),
+        source_id: z.string().uuid(),
+        marked: z.array(z.string().trim().min(2).max(2000)).max(60),
+        article: z.tuple([z.number().int().min(0), z.number().int().min(0)]).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).suggestMarks(
+      data.id ?? null,
+      data.source_id,
+      data.marked,
+      data.article,
+    );
   });
 
 // Green-pen keywords added to Static Context without rewriting the story.
