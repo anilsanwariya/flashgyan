@@ -10,7 +10,10 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Eye,
+  FolderOpen,
   FileText,
   Layers,
   RefreshCw,
@@ -196,6 +199,24 @@ function IssueBar({
         {issue?.posted_at && (
           <span className="text-xs text-muted-foreground">on {timeIst(issue.posted_at)} IST</span>
         )}
+        {/* Set-up still missing: a quiet note that leads to the settings. */}
+        {settingsQ.data && !settingsQ.data.pdf_ready && (
+          <a
+            href="/admin?section=ca.settings"
+            title="Add CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN to the project's secrets. You can still preview."
+            className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 hover:underline dark:bg-amber-500/15 dark:text-amber-300"
+          >
+            PDF not set up
+          </a>
+        )}
+        {settingsQ.data && !settingsQ.data.channel && (
+          <a
+            href="/admin?section=ca.settings"
+            className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 hover:underline dark:bg-amber-500/15 dark:text-amber-300"
+          >
+            No channel set
+          </a>
+        )}
         {issue?.pdf_url && (
           <span className="ml-auto flex flex-wrap gap-3">
             {/* The English issue, and the Hindi issue (none on older bilingual issues). */}
@@ -221,17 +242,6 @@ function IssueBar({
         )}
       </div>
       {issue?.error && <p className="text-sm text-destructive">{issue.error}</p>}
-      {settingsQ.data && !settingsQ.data.pdf_ready && (
-        <p className="text-sm text-amber-700 dark:text-amber-400">
-          PDF making is not set up yet: add CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN to the
-          project's secrets (see Magazine settings). You can still preview.
-        </p>
-      )}
-      {settingsQ.data && !settingsQ.data.channel && (
-        <p className="text-sm text-amber-700 dark:text-amber-400">
-          No Telegram channel set yet (Magazine settings).
-        </p>
-      )}
       {blocking && <p className="text-sm text-amber-700 dark:text-amber-400">{blocking}</p>}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -434,6 +444,10 @@ function DailyPanel() {
   const [factsOpen, setFactsOpen] = useState(false);
   const [styleOpen, setStyleOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
+  // Sources & collection: open on its own while the day has no stories or
+  // work is going on, until opened or closed by hand.
+  const [sourcesOpen, setSourcesOpen] = useState<boolean | null>(null);
+  useEffect(() => setSourcesOpen(null), [date]);
   // A link from the Telegram message: the day, and fact-check mode or the
   // house style check.
   useEffect(() => {
@@ -641,10 +655,22 @@ function DailyPanel() {
   });
   const issueDone =
     day?.issue?.status === "posted" || day?.issue?.status === "posting" || !included.length;
+  const showSources =
+    sourcesOpen ?? (items.length === 0 || !!work || unfinished > 0 || pending.length > 0);
+  const sourceCount = day?.sources.length ?? 0;
+  const sourcesLine = [
+    sourceCount ? `${sourceCount} source${sourceCount === 1 ? "" : "s"}` : "No sources yet",
+    work ?? (unfinished ? `${unfinished} not fully read` : null),
+    skippedStats?.worth ? `${skippedStats.worth} skipped worth a story` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   function onCheck(a: CheckAction) {
     if (a.kind === "story") setStoryJump({ id: a.id, n: Date.now() });
-    else if (a.kind === "skipped") setSkippedSignal(Date.now());
-    else if (a.kind === "write") void retryAll();
+    else if (a.kind === "skipped") {
+      setSourcesOpen(true);
+      setSkippedSignal(Date.now());
+    } else if (a.kind === "write") void retryAll();
     else if (a.kind === "facts") setFactsOpen(true);
     else if (a.kind === "style") setStyleOpen(true);
     else if (a.kind === "lang") setLangOpen(true);
@@ -719,98 +745,11 @@ function DailyPanel() {
         onOpenStory={(id) => setStoryJump({ id, n: Date.now() })}
       />
 
-      <CollectionBox date={date} onChanged={refresh} />
-
-      {/* Upload */}
-      <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
-        <h3 className="font-semibold">Add the day's sources</h3>
-        <div className="grid gap-2 sm:grid-cols-[14rem_1fr]">
-          <Select value={section} onValueChange={(v) => setSection(v as UploadSection)}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {UPLOAD_SECTIONS.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Input
-            value={sourceName}
-            onChange={(e) => setSourceName(e.target.value)}
-            placeholder={
-              sectionInfo.source
-                ? `Source name (default: ${sectionInfo.source})`
-                : "Source name, e.g. Rajasthan Patrika, The Hindu"
-            }
-          />
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {sectionInfo.hint}. PDFs are read with LlamaParse and cleaned of headers, footers and page
-          numbers.
-        </p>
-        <FileDropZone onFiles={(files) => queue.add(files)}>
-          <label className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground hover:bg-muted/40">
-            <Upload className="h-5 w-5" />
-            Drop PDFs or Word files here, or click to choose
-            <input
-              type="file"
-              multiple
-              accept={SAATHI_ACCEPT}
-              className="hidden"
-              onChange={(e) => {
-                queue.add(Array.from(e.target.files ?? []));
-                e.target.value = "";
-              }}
-            />
-          </label>
-        </FileDropZone>
-        <FileQueueList queue={queue} />
-        <Textarea
-          rows={4}
-          value={pasted}
-          onChange={(e) => setPasted(e.target.value)}
-          placeholder="…or paste text (e.g. a PIB release or Sujas summary)"
-        />
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={addPasted}
-            disabled={pasted.trim().length < 20}
-          >
-            Add pasted text
-          </Button>
-          {work && (
-            <span className="inline-flex items-center gap-2 text-sm text-primary">
-              <RefreshCw className="h-4 w-4 animate-spin" /> {work}
-              {pending.length > 1 ? ` (${pending.length - 1} more waiting)` : ""}
-            </span>
-          )}
-          {!work && (unwritten > 0 || unfinished > 0) && (
-            <Button size="sm" onClick={retryAll}>
-              <RefreshCw className="mr-1 h-4 w-4" /> Finish reading and writing
-            </Button>
-          )}
-        </div>
-        <SourcesList sources={day?.sources ?? []} onChanged={refresh} />
-      </section>
-
       {day && day.corrections.length > 0 && (
         <div id="ca-corrections" className="scroll-mt-20">
           <CorrectionsBox corrections={day.corrections} onChanged={refresh} />
         </div>
       )}
-
-      <SkippedNews
-        date={date}
-        sourceCount={day?.sources.length ?? 0}
-        onChanged={refresh}
-        openSignal={skippedSignal}
-        onStats={setSkippedStats}
-      />
 
       {/* Items */}
       {dayQ.isLoading ? (
@@ -822,7 +761,8 @@ function DailyPanel() {
         </p>
       ) : items.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-          No news items for this day yet.
+          No news items for this day yet. Add the day’s sources below, or collect them from the
+          websites.
         </div>
       ) : (
         <>
@@ -832,6 +772,124 @@ function DailyPanel() {
               daySettingsQ.data?.min_rajasthan ?? DEFAULT_MIN_RAJASTHAN,
             )}
           />
+          <StoryList
+            items={items}
+            date={date}
+            onChanged={refresh}
+            jump={storyJump}
+            onReviewed={setReviewed}
+          />
+        </>
+      )}
+      {/* Sources and collection: needed while the day is put together, then
+          folded under the stories. Kept mounted so the skipped news still
+          reports to the checklist. */}
+      <section className="rounded-2xl border border-border bg-muted/30">
+        <button
+          type="button"
+          onClick={() => setSourcesOpen(!showSources)}
+          aria-expanded={showSources}
+          className="flex w-full items-center gap-3 px-4 py-3 text-left"
+        >
+          <FolderOpen className="h-5 w-5 shrink-0 text-primary" />
+          <span className="min-w-0 flex-1">
+            <span className="block font-semibold">Sources & collection</span>
+            <span className="block text-xs text-muted-foreground">{sourcesLine}</span>
+          </span>
+          {showSources ? (
+            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          )}
+        </button>
+        <div className={showSources ? "space-y-5 px-2 pb-2 sm:px-3 sm:pb-3" : "hidden"}>
+          <CollectionBox date={date} onChanged={refresh} />
+
+          {/* Upload */}
+          <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+            <h3 className="font-semibold">Add the day's sources</h3>
+            <div className="grid gap-2 sm:grid-cols-[14rem_1fr]">
+              <Select value={section} onValueChange={(v) => setSection(v as UploadSection)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {UPLOAD_SECTIONS.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                value={sourceName}
+                onChange={(e) => setSourceName(e.target.value)}
+                placeholder={
+                  sectionInfo.source
+                    ? `Source name (default: ${sectionInfo.source})`
+                    : "Source name, e.g. Rajasthan Patrika, The Hindu"
+                }
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {sectionInfo.hint}. PDFs are read with LlamaParse and cleaned of headers, footers and
+              page numbers.
+            </p>
+            <FileDropZone onFiles={(files) => queue.add(files)}>
+              <label className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground hover:bg-muted/40">
+                <Upload className="h-5 w-5" />
+                Drop PDFs or Word files here, or click to choose
+                <input
+                  type="file"
+                  multiple
+                  accept={SAATHI_ACCEPT}
+                  className="hidden"
+                  onChange={(e) => {
+                    queue.add(Array.from(e.target.files ?? []));
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+            </FileDropZone>
+            <FileQueueList queue={queue} />
+            <Textarea
+              rows={4}
+              value={pasted}
+              onChange={(e) => setPasted(e.target.value)}
+              placeholder="…or paste text (e.g. a PIB release or Sujas summary)"
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={addPasted}
+                disabled={pasted.trim().length < 20}
+              >
+                Add pasted text
+              </Button>
+              {work && (
+                <span className="inline-flex items-center gap-2 text-sm text-primary">
+                  <RefreshCw className="h-4 w-4 animate-spin" /> {work}
+                  {pending.length > 1 ? ` (${pending.length - 1} more waiting)` : ""}
+                </span>
+              )}
+              {!work && (unwritten > 0 || unfinished > 0) && (
+                <Button size="sm" onClick={retryAll}>
+                  <RefreshCw className="mr-1 h-4 w-4" /> Finish reading and writing
+                </Button>
+              )}
+            </div>
+            <SourcesList sources={day?.sources ?? []} onChanged={refresh} />
+          </section>
+
+          <SkippedNews
+            date={date}
+            sourceCount={day?.sources.length ?? 0}
+            onChanged={refresh}
+            openSignal={skippedSignal}
+            onStats={setSkippedStats}
+          />
+
           {items.length > 1 && (
             <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3">
               <Button size="sm" variant="outline" disabled={!!work} onClick={mergeDuplicates}>
@@ -844,16 +902,8 @@ function DailyPanel() {
               </span>
             </div>
           )}
-          <StoryList
-            items={items}
-            date={date}
-            onChanged={refresh}
-            jump={storyJump}
-            onReviewed={setReviewed}
-            onFactCheck={() => setFactsOpen(true)}
-          />
-        </>
-      )}
+        </div>
+      </section>
     </div>
   );
 }
@@ -1198,6 +1248,16 @@ function AiServicesBox() {
   );
 }
 
+const SETTINGS_PARTS = [
+  ["set-channel", "Channel"],
+  ["set-look", "Look"],
+  ["set-ai", "AI services"],
+  ["set-saathi", "SAATHI & PDF"],
+  ["set-factbite", "Fact Bite"],
+  ["set-collect", "Collection"],
+  ["set-style", "House style"],
+] as const;
+
 function SettingsPanel() {
   const qc = useQueryClient();
   const getFn = useServerFn(getMagazineSettings);
@@ -1219,22 +1279,34 @@ function SettingsPanel() {
   const logoFn = useServerFn(uploadMagazineLogo);
   const q = useQuery({ queryKey: ["caSettings"], queryFn: () => getFn() });
   const [form, setForm] = useState<Record<string, string | boolean> | null>(null);
+  // The form as last loaded or saved, to tell when something changed.
+  const [base, setBase] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (q.data && !form) {
       // House style rules are edited (and saved) on their own, below.
       const { style_rules: _rules, ...rest } = q.data;
-      setForm({
+      const loaded = {
         ...rest,
         trusted_domains: q.data.trusted_domains.join("\n"),
         daily_stories: String(q.data.daily_stories),
         daily_editorials: String(q.data.daily_editorials),
         channel_quiz_count: String(q.data.channel_quiz_count),
         min_rajasthan: String(q.data.min_rajasthan),
-      });
+      };
+      setForm(loaded);
+      setBase(JSON.stringify(loaded));
     }
   }, [q.data, form]);
+  const changed = !!form && JSON.stringify(form) !== base;
+  // Leaving the page with changes not saved asks first.
+  useEffect(() => {
+    if (!changed) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [changed]);
 
   if (q.isLoading || !form) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (q.error)
@@ -1291,6 +1363,7 @@ function SettingsPanel() {
         },
       });
       toast.success("Saved");
+      setBase(JSON.stringify(form));
       qc.invalidateQueries({ queryKey: ["caSettings"] });
     } catch (e) {
       toast.error(errorText(e, "Couldn't save"));
@@ -1324,14 +1397,38 @@ function SettingsPanel() {
   const field = (k: string, label: string, placeholder = "", hint = "") => (
     <div className="space-y-1">
       <Label>{label}</Label>
-      <Input value={text(k)} onChange={(e) => set(k, e.target.value)} placeholder={placeholder} />
+      <Input
+        aria-label={label}
+        value={text(k)}
+        onChange={(e) => set(k, e.target.value)}
+        placeholder={placeholder}
+      />
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
     </div>
   );
 
   return (
     <div className="space-y-5">
-      <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      {/* The page is long: a link to each part. */}
+      <nav aria-label="Parts of the settings" className="flex flex-wrap gap-1.5">
+        {SETTINGS_PARTS.map(([id, label]) => (
+          <a
+            key={id}
+            href={`#${id}`}
+            onClick={(e) => {
+              e.preventDefault();
+              document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+            className="rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            {label}
+          </a>
+        ))}
+      </nav>
+      <section
+        id="set-channel"
+        className="scroll-mt-20 space-y-3 rounded-2xl border border-border bg-card p-4"
+      >
         <h3 className="font-semibold">Telegram channel</h3>
         <p className="text-sm text-muted-foreground">
           Each day's stories become two issues, an English PDF and a Hindi PDF, both posted to this
@@ -1401,7 +1498,10 @@ function SettingsPanel() {
         )}
       </section>
 
-      <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      <section
+        id="set-look"
+        className="scroll-mt-20 space-y-3 rounded-2xl border border-border bg-card p-4"
+      >
         <h3 className="font-semibold">Look of the magazine</h3>
         <div className="grid gap-3 sm:grid-cols-2">
           {field("title_hi", "Title (Hindi)")}
@@ -1438,9 +1538,9 @@ function SettingsPanel() {
           </p>
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
-          {field("box_static", "Static concepts box", "Static Context")}
-          {field("box_dyk", "Related developments box", "Fact Bite")}
-          {field("box_why", "Syllabus link box", "Exam Angle")}
+          {field("box_static", "Static Context box", "Static Context")}
+          {field("box_dyk", "Fact Bite box", "Fact Bite")}
+          {field("box_why", "Exam Angle box", "Exam Angle")}
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           {(["main", "partner"] as const).map((kind) => {
@@ -1476,9 +1576,14 @@ function SettingsPanel() {
         </div>
       </section>
 
-      <AiServicesBox />
+      <div id="set-ai" className="scroll-mt-20">
+        <AiServicesBox />
+      </div>
 
-      <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      <section
+        id="set-saathi"
+        className="scroll-mt-20 space-y-3 rounded-2xl border border-border bg-card p-4"
+      >
         <h3 className="font-semibold">SAATHI and PDF</h3>
         <div className="grid gap-3 sm:grid-cols-2">
           {field(
@@ -1555,8 +1660,11 @@ function SettingsPanel() {
         </div>
       </section>
 
-      <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
-        <h3 className="font-semibold">“Fact Bite”: related recent developments</h3>
+      <section
+        id="set-factbite"
+        className="scroll-mt-20 space-y-3 rounded-2xl border border-border bg-card p-4"
+      >
+        <h3 className="font-semibold">Fact Bite: related recent developments</h3>
         <label className="flex items-start gap-3">
           <Switch
             checked={Boolean(form.do_you_know)}
@@ -1569,8 +1677,8 @@ function SettingsPanel() {
               tested, other amendments, other new Ramsar sites): first from this magazine's own
               stories of the last 12 months, credited to the issue's date, then from the trusted
               websites below (Tavily). Each line is quoted word for word from its story or page; any
-              whose quote isn't found is dropped. The static concept itself goes in the Background
-              box, from your books.
+              whose quote isn't found is dropped. You can add more (up to 5) in each story's Fact
+              Bite tab. The static concept itself goes in the Static Context box, from your books.
             </span>
           </span>
         </label>
@@ -1596,7 +1704,10 @@ function SettingsPanel() {
         </div>
       </section>
 
-      <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      <section
+        id="set-collect"
+        className="scroll-mt-20 space-y-3 rounded-2xl border border-border bg-card p-4"
+      >
         <h3 className="font-semibold">Automatic news collection</h3>
         <label className="flex items-start gap-3">
           <Switch
@@ -1667,11 +1778,27 @@ function SettingsPanel() {
         <WatchSitesSettings />
       </section>
 
-      <Button onClick={save} disabled={saving}>
-        {saving ? "Saving…" : "Save settings"}
-      </Button>
+      {/* Saving stays in reach, and says when something is waiting. */}
+      <div className="sticky bottom-0 z-20 -mx-2 flex flex-wrap items-center gap-2 rounded-t-2xl border border-b-0 border-border bg-background/95 px-4 py-3 shadow-[0_-4px_12px_rgba(0,0,0,0.04)] backdrop-blur">
+        <span
+          role="status"
+          className={`flex-1 text-sm ${changed ? "font-medium text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}
+        >
+          {changed ? "You have changes that aren't saved" : "All settings saved"}
+        </span>
+        {changed && (
+          <Button variant="ghost" disabled={saving} onClick={() => setForm(JSON.parse(base))}>
+            Discard
+          </Button>
+        )}
+        <Button onClick={save} disabled={saving}>
+          {saving ? "Saving…" : "Save settings"}
+        </Button>
+      </div>
 
-      <HouseStyle />
+      <div id="set-style" className="scroll-mt-20">
+        <HouseStyle />
+      </div>
     </div>
   );
 }

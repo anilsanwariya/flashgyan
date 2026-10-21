@@ -73,7 +73,6 @@ export function StoryList({
   onChanged,
   jump = null,
   onReviewed,
-  onFactCheck,
 }: {
   items: CaItem[];
   date: string;
@@ -82,8 +81,6 @@ export function StoryList({
   jump?: { id: string; n: number } | null;
   // The stories opened so far, for the day's checklist.
   onReviewed?: (ids: Set<string>) => void;
-  // Opens fact-check mode.
-  onFactCheck?: () => void;
 }) {
   const groups = useMemo(() => {
     const order = new Map<string, number>(CATEGORIES.map((c, i) => [c.id, i]));
@@ -149,7 +146,6 @@ export function StoryList({
   }, [jump]);
 
   const included = items.filter((i) => i.status === "included").length;
-  const unverified = items.reduce((n, i) => n + i.facts.filter((f) => !f.verified).length, 0);
   const done = ordered.filter((it) => reviewed.has(it.id)).length;
 
   const deleteFn = useServerFn(deleteCaItems);
@@ -180,31 +176,6 @@ export function StoryList({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2 text-xs">
-        <Badge tone="primary">{included} items in the issue</Badge>
-        {items.length - included > 0 && <Badge>{items.length - included} dropped</Badge>}
-        {unverified > 0 && (
-          <Badge
-            tone="warn"
-            title="The AI's quote for these facts wasn't found word-for-word in the source"
-          >
-            {unverified} facts to check
-          </Badge>
-        )}
-        {unverified > 0 && onFactCheck && (
-          <button
-            type="button"
-            onClick={onFactCheck}
-            className="text-xs font-medium text-primary hover:underline"
-          >
-            Check them one by one
-          </button>
-        )}
-        <Badge tone="good">
-          {items.filter((i) => i.context_sources.length > 0).length} with {STATIC_CONNECT.en} from
-          your books
-        </Badge>
-      </div>
       {items.length - included > 0 && (
         <p className="text-xs text-muted-foreground">
           Stories unlikely in the exam, and less important ones beyond your stories-per-day limit
@@ -539,7 +510,7 @@ export function StaticConnect({
   const custom = chosen.filter((k) => !offered.some((o) => keyOf(o) === keyOf(k)));
 
   return (
-    <Part title={STATIC_CONNECT.en} tone="background">
+    <Part tone="background">
       {c.background && (
         <BiLine
           value={c.background}
@@ -726,15 +697,18 @@ export function Part({
   tone = "plain",
   children,
 }: {
-  title: string;
+  // Left out where the page already names the part.
+  title?: string;
   tone?: keyof typeof PART_TONES;
   children: React.ReactNode;
 }) {
   return (
     <section className={PART_TONES[tone]}>
-      <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {title}
-      </h4>
+      {title && (
+        <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </h4>
+      )}
       {children}
     </section>
   );
@@ -751,6 +725,7 @@ export function BiLine({
   faded = false,
   onSave,
   onDelete,
+  extra,
 }: {
   value: Bi;
   lang: Lang;
@@ -761,6 +736,8 @@ export function BiLine({
   faded?: boolean;
   onSave?: (v: Bi) => Promise<void>;
   onDelete?: () => void;
+  // One more small button beside the pencil, in place of the bin.
+  extra?: React.ReactNode;
 }) {
   const [draft, setDraft] = useState<Bi | null>(null);
   const [saving, setSaving] = useState(false);
@@ -769,8 +746,14 @@ export function BiLine({
   }, [editing]);
 
   if (draft) {
+    // Marked while it differs from the saved text, so closing the editor can
+    // warn about it.
+    const dirty = draft.hi !== (value.hi ?? "") || draft.en !== (value.en ?? "");
     return (
-      <div className="space-y-2 rounded-xl border border-primary/40 bg-primary/5 p-2">
+      <div
+        data-unsaved={dirty ? "true" : undefined}
+        className="space-y-2 rounded-xl border border-primary/40 bg-primary/5 p-2"
+      >
         <GrowText
           lang="hi"
           value={draft.hi}
@@ -840,21 +823,27 @@ export function BiLine({
     text
   );
   if (!editing || !onSave) return shown;
+  // The buttons take the same room on every line, so the Hindi and English
+  // columns line up down the page.
   return (
     <div className="flex items-start gap-1">
       <div className="min-w-0 flex-1">{shown}</div>
-      <IconButton label="Edit this line" onClick={() => setDraft({ ...value })}>
-        <Pencil className="h-4 w-4" />
-      </IconButton>
-      {onDelete && (
-        <IconButton
-          label="Delete (both languages)"
-          className="text-destructive hover:text-destructive"
-          onClick={onDelete}
-        >
-          <Trash2 className="h-4 w-4" />
+      <div className="flex w-[4.5rem] shrink-0 justify-end gap-1">
+        <IconButton label="Edit this line" onClick={() => setDraft({ ...value })}>
+          <Pencil className="h-4 w-4" />
         </IconButton>
-      )}
+        {onDelete ? (
+          <IconButton
+            label="Delete (both languages)"
+            className="text-destructive hover:text-destructive"
+            onClick={onDelete}
+          >
+            <Trash2 className="h-4 w-4" />
+          </IconButton>
+        ) : (
+          (extra ?? <span className="w-8" aria-hidden />)
+        )}
+      </div>
     </div>
   );
 }
