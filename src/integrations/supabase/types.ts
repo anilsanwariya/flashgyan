@@ -798,6 +798,7 @@ export type Database = {
           issue_date: string
           locked_until: string | null
           notified: boolean
+          sites: string[] | null
           started_at: string
           started_by: string
           status: string
@@ -811,6 +812,7 @@ export type Database = {
           issue_date: string
           locked_until?: string | null
           notified?: boolean
+          sites?: string[] | null
           started_at?: string
           started_by?: string
           status?: string
@@ -824,6 +826,7 @@ export type Database = {
           issue_date?: string
           locked_until?: string | null
           notified?: boolean
+          sites?: string[] | null
           started_at?: string
           started_by?: string
           status?: string
@@ -1893,6 +1896,7 @@ export type Database = {
           caption: string | null
           caption_hi: string | null
           created_at: string
+          design: Json | null
           error: string | null
           id: string
           item_count: number
@@ -1926,6 +1930,7 @@ export type Database = {
           issue_date: string
           locked_until: string | null
           notified: boolean
+          sites: string[] | null
           started_at: string
           started_by: string
           status: string
