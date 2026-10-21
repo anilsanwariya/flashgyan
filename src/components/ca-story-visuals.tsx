@@ -166,7 +166,12 @@ export function StoryVisuals({
                   disabled={off}
                   onClick={() => setPicking(slot)}
                 >
-                  <RefreshCw className="mr-1 h-3.5 w-3.5" /> {v ? "Rebuild" : "Make visual"}
+                  {v ? (
+                    <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                  ) : (
+                    <Plus className="mr-1 h-3.5 w-3.5" />
+                  )}{" "}
+                  {v ? "Rebuild" : "Make visual"}
                 </Button>
                 {v && (
                   <Button
