@@ -3588,7 +3588,15 @@ export async function getIssueDesign(period: string): Promise<IssueDesign> {
 
 export async function saveIssueDesign(period: string, design: unknown): Promise<IssueDesign> {
   const clean = normalizeIssueDesign(design);
-  await upsertIssue("monthly", period, { design: clean });
+  try {
+    await upsertIssue("monthly", period, { design: clean });
+  } catch (e) {
+    if (e instanceof Error && /'design' column/.test(e.message))
+      throw new Error(
+        "The database is missing the monthly cover column: run migration 20261021120000_ca_issue_design.sql, then save again.",
+      );
+    throw e;
+  }
   return clean;
 }
 
