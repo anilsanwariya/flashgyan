@@ -167,6 +167,16 @@ export const MAX_IMAGES = 8;
 // null when SAATHI wrote it from its own knowledge.
 export type StaticFact = { keyword: Bi; text: Bi; source: string | null };
 
+// A summary's length in words: the default, and what can be chosen.
+export const DEFAULT_SUMMARY_WORDS = 70;
+export const MIN_SUMMARY_WORDS = 25;
+export const MAX_SUMMARY_WORDS = 150;
+export const clampSummaryWords = (n: unknown) =>
+  Math.min(
+    MAX_SUMMARY_WORDS,
+    Math.max(MIN_SUMMARY_WORDS, Math.round(Number(n) || DEFAULT_SUMMARY_WORDS)),
+  );
+
 export const STATIC_CONNECT = { en: "Static Context", hi: "Static Context" };
 export const MAX_KEYWORDS = 8;
 export const MAX_STATICS = 6;
@@ -178,6 +188,21 @@ export function staticSources(statics: StaticFact[] | undefined): { title: strin
       (statics ?? []).flatMap((s) => (s.source ? s.source.split(" | ") : [])).filter(Boolean),
     ),
   ].map((title) => ({ title }));
+}
+
+// The printed sources line names who published each book ("NCERT, NIOS"),
+// each once; a book with no publisher set keeps its title.
+export function sourcePublishers(sources: { title: string }[]): string[] {
+  return [
+    ...new Set(
+      sources
+        .map((s) => {
+          const at = s.title.indexOf(" · ");
+          return (at > 0 ? s.title.slice(0, at) : s.title).trim();
+        })
+        .filter(Boolean),
+    ),
+  ];
 }
 
 const sameKeyword = (a: Bi, b: Bi) =>
@@ -450,6 +475,12 @@ export function styleBlock(rules: string[] | undefined): string {
     : "";
 }
 
+// What a summary must do, shared by the writing and the "Write another"
+// prompts: the whole news in context, not one line lifted from it.
+export function summaryRule(words: number): string {
+  return `THE SUMMARY gives the complete context of the news in about ${words} words (3-4 connected sentences, never more than ${words + 15} words): what happened, who did it and where, the background as far as the facts and Context say (why it happened or what led to it), and what it means or what comes next. It reads as a short explanation a student can understand on its own, never one line copied from the news. Exact figures stay in the points; name one in the summary only where the story needs it.`;
+}
+
 export function enrichMessages(opts: {
   headline: string;
   category: Category;
@@ -472,7 +503,10 @@ export function enrichMessages(opts: {
   note?: string | null;
   // The editor's house style rules (Magazine settings).
   style?: string[];
+  // About how many words the summary has (Magazine settings).
+  summaryWords?: number;
 }): ChatMessage[] {
+  const words = clampSummaryWords(opts.summaryWords);
   const facts = opts.facts
     .map((f, i) => `${i + 1}. ${f.text}${f.note ? ` [Editor's note: ${f.note}]` : ""}`)
     .join("\n");
@@ -493,11 +527,11 @@ export function enrichMessages(opts: {
       role: "system",
       content: `You write a bilingual (Hindi and English) current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). Write one news item from the numbered facts.
 RULES: Use only the facts given (numbered facts and any Context). Never add a number, name, date or claim that is not in them. Follow the editor's instruction when one is given, and an [Editor's note] on a fact (for example: put it in the headline, build the MCQ or the Mains question on it, keep it word for word), within these rules. Hindi must be natural standard Hindi as used in Rajasthan competitive exams (मानक हिंदी), with the same numbers and official names (give the English name in brackets the first time if it helps).
-BE BRIEF: students revise from this, so less theory, more memorable facts. Say each fact once: the summary gives only the gist (what happened, who, where), the points carry the details, and nothing is repeated between summary, points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}${styleBlock(opts.style)}
+BE BRIEF: students revise from this, so less theory, more memorable facts. ${summaryRule(words)} Nothing is repeated between the points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}${styleBlock(opts.style)}
 STATIC CONNECT links the news to the static syllabus. "keywords" lists up to ${MAX_KEYWORDS} static concepts the news links to that RPSC could ask about (constitutional articles, acts, institutions, technologies, schemes, places, conventions, terms), most important first (the "Static concept" in the message, when given), whether or not the passages explain them; each is a short name of at most 5 words. "statics" explains the first 1 or 2 keywords the way a textbook does: what it is, what it says, how it works, in 1-2 sentences of at most 40 words each, without retelling the news. Base each on the knowledge-base passages [K…] that explain it, even if they never mention the news, and list them in "from"; when no passage explains it, write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. Use [] for both when the news has no static concept worth explaining.
 Reply with JSON only:
 {"headline": {"en": "...", "hi": "..."},
- "summary": {"en": ${editorial ? '"3-4 short sentences: the issue, the main argument and the suggested way forward"' : opts.visual ? '"one sentence, at most 25 words"' : '"1-2 sentences, at most 40 words"'}, "hi": "..."},
+ "summary": {"en": ${editorial ? `"3-4 connected sentences, about ${words} words: the issue, the main argument and the suggested way forward"` : `"3-4 connected sentences, about ${words} words (never more than ${words + 15}): the complete context of the news"`}, "hi": "..."},
  "points": [{"en": "...", "hi": "..."}] (exactly one per numbered fact, same order),
  "why": {"en": "a label, not a sentence: 'GS Paper <number> · <subject> · <topic in at most 6 words>' from the RAS syllabus topic given (e.g. 'GS Paper II · Earth Science · Climate of Rajasthan')", "hi": "the same label in Hindi (e.g. 'सामान्य अध्ययन प्रश्नपत्र II · भू-विज्ञान · राजस्थान की जलवायु')"},
  "keywords": [{"en": "...", "hi": "..."}],
@@ -936,6 +970,8 @@ export type MagazineSettings = {
   daily_stories: number;
   // Editorials a day picked from the websites marked "Editorials".
   daily_editorials: number;
+  // About how many words SAATHI writes for each story's summary.
+  summary_words: number;
   // After each daily PDF, post its MCQs to the channel as quiz polls.
   channel_quiz: boolean;
   channel_quiz_count: number;
@@ -997,6 +1033,7 @@ export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   visuals: true,
   daily_stories: DEFAULT_DAILY_STORIES,
   daily_editorials: 2,
+  summary_words: DEFAULT_SUMMARY_WORDS,
   channel_quiz: true,
   channel_quiz_count: 5,
   add_to_flashcards: true,

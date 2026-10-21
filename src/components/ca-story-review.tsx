@@ -7,6 +7,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
   BarChart3,
   Plus,
   Check,
@@ -469,6 +471,11 @@ function StoryCard({
 // ====================== Pieces ======================
 
 const keyOf = (k: Bi) => normalizeForMatch(k.en || k.hi);
+const swapAt = <T,>(list: T[], a: number, b: number): T[] => {
+  const next = [...list];
+  [next[a], next[b]] = [next[b], next[a]];
+  return next;
+};
 const keywordLabel = (k: Bi, lang: Lang) =>
   lang === "en"
     ? k.en || k.hi
@@ -564,15 +571,37 @@ export function StaticConnect({
                     : "💡 SAATHI's own knowledge"}
                 </div>
               </div>
-              <IconButton
-                label="Remove this fact"
-                disabled={busy}
-                onClick={() =>
-                  act(() => setStatics(statics.filter((_, j) => j !== i)), "Fact removed")
-                }
-              >
-                <X className="h-4 w-4" />
-              </IconButton>
+              {/* Printed in this order. */}
+              <div className="flex shrink-0 flex-col">
+                {editing && statics.length > 1 && (
+                  <>
+                    <IconButton
+                      label="Move up"
+                      disabled={busy || i === 0}
+                      onClick={() => act(() => setStatics(swapAt(statics, i, i - 1)), "Moved")}
+                    >
+                      <ArrowUp className="h-4 w-4" />
+                    </IconButton>
+                    <IconButton
+                      label="Move down"
+                      disabled={busy || i === statics.length - 1}
+                      onClick={() => act(() => setStatics(swapAt(statics, i, i + 1)), "Moved")}
+                    >
+                      <ArrowDown className="h-4 w-4" />
+                    </IconButton>
+                  </>
+                )}
+                <IconButton
+                  label="Remove this fact"
+                  className="text-destructive hover:text-destructive"
+                  disabled={busy}
+                  onClick={() =>
+                    act(() => setStatics(statics.filter((_, j) => j !== i)), "Fact removed")
+                  }
+                >
+                  <X className="h-4 w-4" />
+                </IconButton>
+              </div>
             </li>
           ))}
         </ul>

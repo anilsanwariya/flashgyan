@@ -213,6 +213,7 @@ export const saveMagazineSettings = createServerFn({ method: "POST" })
         visuals: z.boolean(),
         daily_stories: z.number().int().min(3).max(40),
         daily_editorials: z.number().int().min(0).max(6),
+        summary_words: z.number().int().min(25).max(150),
         channel_quiz: z.boolean(),
         channel_quiz_count: z.number().int().min(1).max(10),
         add_to_flashcards: z.boolean(),
@@ -514,6 +515,24 @@ export const suggestCaFactBites = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return (await server()).suggestFactBites(data.id, data.search);
+  });
+
+// Three other summaries for a story, of the length the editor picks.
+export const suggestCaSummaries = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        words: z.number().int().min(25).max(150),
+        note: z.string().trim().max(500).optional(),
+        avoid: z.array(bi).max(12).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).suggestSummaries(data.id, data);
   });
 
 // ---------- Material the editor adds to a story ----------

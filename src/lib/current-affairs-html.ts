@@ -12,6 +12,7 @@ import {
   type CaFact,
   type CaImage,
   type MagazineSettings,
+  sourcePublishers,
 } from "@/lib/current-affairs";
 import { VISUAL_CSS, pointsToShow, visualHtml, type Visual } from "@/lib/ca-visuals";
 import type { CaFeature } from "@/lib/ca-feature";
@@ -334,7 +335,7 @@ function itemHtml(
     pick(c.background, lang) || statics
       ? `<div class="box context"><div class="box-title">${boxes.static}</div>${block(c.background, lang)}${statics}${
           item.context_sources.length
-            ? `<div class="src">${t.source}: ${esc(item.context_sources.map((s) => s.title).join(", "))}</div>`
+            ? `<div class="src">${t.source}: ${esc(sourcePublishers(item.context_sources).join(", "))}</div>`
             : ""
         }</div>`
       : "";

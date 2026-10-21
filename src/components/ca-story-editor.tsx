@@ -43,18 +43,22 @@ import {
   redoCaVisual,
   setCaFactChecked,
   suggestCaFactBites,
+  suggestCaSummaries,
   updateCaItem,
   type CaItem,
 } from "@/lib/current-affairs.functions";
 import {
   CATEGORIES,
   DEFAULT_MAGAZINE_SETTINGS,
+  DEFAULT_SUMMARY_WORDS,
+  clampSummaryWords,
   STATIC_CONNECT,
   categoryLabel,
   type CaContent,
   type DykFact,
 } from "@/lib/current-affairs";
 import { storyPreviewHtml } from "@/lib/current-affairs-html";
+import { SUMMARY_LENGTHS, SUMMARY_OPTIONS, wordCount } from "@/lib/ca-summary";
 import { unitLabel } from "../../supabase/functions/_shared/ras-syllabus.ts";
 import { SourceReader } from "@/components/ca-source-reader";
 import { StoryHistory } from "@/components/ca-story-history";
@@ -687,7 +691,8 @@ function NotWritten({
 
 // ---------- Summary ----------
 
-function SummaryTab({ c, lang, save }: Ctx) {
+function SummaryTab({ item, c, lang, busy, save, act }: Ctx) {
+  const [another, setAnother] = useState(false);
   return (
     <Section
       title="Summary"
@@ -704,6 +709,34 @@ function SummaryTab({ c, lang, save }: Ctx) {
       </Part>
       <Part title="Summary · सारांश">
         <BiLine value={c.summary} lang={lang} editing onSave={(v) => save({ summary: v })} />
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>{wordCount(c.summary.en || c.summary.hi)} words</span>
+          {!another && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              onClick={() => setAnother(true)}
+            >
+              <Sparkles className="mr-1 h-3.5 w-3.5" /> Write another
+            </Button>
+          )}
+        </div>
+        {another && (
+          <SummaryOptions
+            key={item.id}
+            item={item}
+            lang={lang}
+            busy={busy}
+            onPick={(v) =>
+              act(async () => {
+                await save({ summary: v });
+                setAnother(false);
+              }, "Summary changed")
+            }
+            onClose={() => setAnother(false)}
+          />
+        )}
       </Part>
       <Part title="Exam Angle" tone="why">
         <BiLine value={c.why} lang={lang} editing onSave={(v) => save({ why: v })} />
@@ -714,6 +747,133 @@ function SummaryTab({ c, lang, save }: Ctx) {
         </Part>
       )}
     </Section>
+  );
+}
+
+// "Write another": three summaries of the chosen length; "Try again" asks
+// for three more, different from those already shown.
+function SummaryOptions({
+  item,
+  lang,
+  busy,
+  onPick,
+  onClose,
+}: {
+  item: CaItem;
+  lang: Lang;
+  busy: boolean;
+  onPick: (v: { en: string; hi: string }) => void;
+  onClose: () => void;
+}) {
+  const suggestFn = useServerFn(suggestCaSummaries);
+  const settingsFn = useServerFn(getMagazineSettings);
+  const settings = useQuery({ queryKey: ["caSettings"], queryFn: () => settingsFn() });
+  const preset = settings.data?.summary_words ?? DEFAULT_SUMMARY_WORDS;
+  const [words, setWords] = useState<number | null>(null);
+  const [custom, setCustom] = useState("");
+  const [note, setNote] = useState("");
+  const [writing, setWriting] = useState(false);
+  const [options, setOptions] = useState<{ en: string; hi: string }[]>([]);
+  // Everything offered so far, so "Try again" brings new ones.
+  const [offered, setOffered] = useState<{ en: string; hi: string }[]>([]);
+  const length = clampSummaryWords(custom.trim() ? custom : (words ?? preset));
+  const write = async (again: boolean) => {
+    setWriting(true);
+    try {
+      const r = await suggestFn({
+        data: {
+          id: item.id,
+          words: length,
+          ...(note.trim() ? { note: note.trim() } : {}),
+          ...(again && offered.length ? { avoid: offered.slice(-9) } : {}),
+        },
+      });
+      setOptions(r.summaries);
+      setOffered((cur) => [...cur, ...r.summaries]);
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't write summaries"));
+    } finally {
+      setWriting(false);
+    }
+  };
+  const lengths = [...new Set([...SUMMARY_LENGTHS, preset])].sort((a, b) => a - b);
+  return (
+    <div
+      className="mt-2 space-y-3 rounded-xl border border-primary/30 bg-primary/5 p-3"
+      role="group"
+      aria-label="Write another summary"
+    >
+      <div className="space-y-1.5">
+        <p className="text-xs font-medium">Length</p>
+        <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Length">
+          {lengths.map((n) => {
+            const on = !custom.trim() && (words ?? preset) === n;
+            return (
+              <button
+                key={n}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                onClick={() => {
+                  setWords(n);
+                  setCustom("");
+                }}
+                className={`rounded-full border px-3 py-1 text-xs ${on ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background"}`}
+              >
+                {n} words{n === preset ? " · default" : ""}
+              </button>
+            );
+          })}
+          <Input
+            aria-label="Other length in words"
+            inputMode="numeric"
+            placeholder="Other"
+            value={custom}
+            onChange={(e) => setCustom(e.target.value.replace(/\D/g, "").slice(0, 3))}
+            className="h-7 w-20 text-xs"
+          />
+        </div>
+      </div>
+      <Input
+        aria-label="Note for SAATHI"
+        placeholder="Optional note, e.g. start with the Rajasthan angle"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+      />
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button size="sm" variant="ghost" onClick={onClose}>
+          Keep current
+        </Button>
+        <Button size="sm" disabled={writing} onClick={() => void write(options.length > 0)}>
+          <Sparkles className="mr-1 h-3.5 w-3.5" />
+          {writing ? "Writing…" : options.length ? "Try again" : `Write ${SUMMARY_OPTIONS} options`}
+        </Button>
+      </div>
+      {options.length > 0 && (
+        <ol className="space-y-2" aria-label="Summary options">
+          {options.map((o, i) => (
+            <li
+              key={`${i}-${o.en}`}
+              className="space-y-2 rounded-lg border border-border bg-background p-2.5"
+            >
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="font-semibold text-primary">Option {i + 1}</span>
+                <span>{wordCount(o.en)} words</span>
+                <Button
+                  size="sm"
+                  className="ml-auto h-7 px-2 text-xs"
+                  disabled={busy}
+                  onClick={() => onPick(o)}
+                >
+                  <Check className="mr-1 h-3.5 w-3.5" /> Use this
+                </Button>
+              </div>
+              <BiLine value={o} lang={lang} />
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   );
 }
 

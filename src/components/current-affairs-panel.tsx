@@ -55,6 +55,10 @@ import {
   formatDate,
   istDate,
   type UploadSection,
+  DEFAULT_SUMMARY_WORDS,
+  MAX_SUMMARY_WORDS,
+  MIN_SUMMARY_WORDS,
+  clampSummaryWords,
 } from "@/lib/current-affairs";
 import { CollectionBox, WatchSitesSettings } from "@/components/ca-collect-panel";
 import { StoryList } from "@/components/ca-story-review";
@@ -1371,6 +1375,7 @@ function SettingsPanel() {
         trusted_domains: q.data.trusted_domains.join("\n"),
         daily_stories: String(q.data.daily_stories),
         daily_editorials: String(q.data.daily_editorials),
+        summary_words: String(q.data.summary_words),
         channel_quiz_count: String(q.data.channel_quiz_count),
         min_rajasthan: String(q.data.min_rajasthan),
       };
@@ -1435,6 +1440,7 @@ function SettingsPanel() {
           notify_when_ready: Boolean(form!.notify_when_ready),
           visuals: Boolean(form!.visuals),
           daily_stories: Number(text("daily_stories")) || 15,
+          summary_words: clampSummaryWords(text("summary_words")),
           daily_editorials: Math.min(
             6,
             Math.max(0, Math.round(Number(text("daily_editorials") || "2") || 0)),
@@ -1683,6 +1689,12 @@ function SettingsPanel() {
             "Minimum Rajasthan stories",
             "5",
             "RPSC asks a lot about Rajasthan. A day with fewer is flagged on its page and in the “draft ready” message. 0 turns the warning off.",
+          )}
+          {field(
+            "summary_words",
+            "Summary length (words)",
+            String(DEFAULT_SUMMARY_WORDS),
+            `About this many words for each story's summary (${MIN_SUMMARY_WORDS} to ${MAX_SUMMARY_WORDS}): the whole news in context. Used for new stories and rewrites; “Write another” in a story can pick a different length.`,
           )}
         </div>
         <label className="flex items-start gap-3">
