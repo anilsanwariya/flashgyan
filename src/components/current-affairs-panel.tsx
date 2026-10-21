@@ -73,10 +73,24 @@ import { dayChecklist, type CheckAction } from "@/lib/ca-checklist";
 import { styleStatus } from "@/lib/ca-style";
 import { langStatus } from "@/lib/ca-bilingual";
 import { FeatureBox } from "@/components/ca-feature-box";
-import { DailyCoverSettings, MonthlyCoverDesigner } from "@/components/ca-cover-designer";
+import {
+  DailyCoverSettings,
+  DesignSaveBar,
+  MonthlyAdsEditor,
+  MonthlyCoverEditor,
+  useIssueDesign,
+} from "@/components/ca-cover-designer";
 import { AdLibrary } from "@/components/ca-ads-panel";
 import type { Binding, DailyLayout } from "@/lib/ca-covers";
-import { Badge, BulkBar, errorText, useChosen } from "@/components/ca-ui";
+import {
+  Badge,
+  BulkBar,
+  PageTabs,
+  SavesInstantly,
+  errorText,
+  useChosen,
+  useUrlTab,
+} from "@/components/ca-ui";
 import { FileDropZone, FileQueueList, useFileQueue } from "@/components/saathi-file-queue";
 import { SAATHI_ACCEPT } from "@/lib/saathi-parse";
 import { Button } from "@/components/ui/button";
@@ -135,6 +149,7 @@ function IssueBar({
   issue,
   blocking,
   warnings = [],
+  unsaved = null,
   onChanged,
 }: {
   kind: "daily" | "monthly";
@@ -144,6 +159,8 @@ function IssueBar({
   blocking: string | null;
   // What the day's checklist still has open: approving asks first.
   warnings?: string[];
+  // Edits the PDFs won't include yet (the monthly cover): asks first.
+  unsaved?: string | null;
   onChanged: () => void;
 }) {
   const previewFn = useServerFn(previewCaIssue);
@@ -163,6 +180,8 @@ function IssueBar({
     kind === "daily"
       ? `Posts ${timeIst(dailyPostTime(period, postTime).toISOString())} (IST)`
       : "Posts as soon as you approve, or at the time you pick";
+
+  const unsavedOk = () => !unsaved || confirm(`${unsaved}\n\nMake the PDFs without them?`);
 
   async function run(label: string, fn: () => Promise<unknown>, done: string) {
     setBusy(label);
@@ -275,6 +294,7 @@ function IssueBar({
             size="sm"
             disabled={!!busy || !!blocking}
             onClick={() =>
+              unsavedOk() &&
               run(
                 "pdf",
                 () => buildFn({ data: { kind, period, schedule: false } }),
@@ -316,6 +336,7 @@ function IssueBar({
               size="sm"
               disabled={!!busy || !!blocking}
               onClick={() =>
+                unsavedOk() &&
                 (!warnings.length ||
                   confirm(
                     `Still to do:\n${warnings.map((w) => `• ${w}`).join("\n")}\n\nApprove and schedule anyway?`,
@@ -1092,24 +1113,39 @@ function CorrectionsBox({
 
 // ====================== Monthly ======================
 
+const MONTHLY_TABS = [
+  { id: "issue", label: "Issue" },
+  { id: "cover", label: "Cover" },
+  { id: "ads", label: "Ads & printing" },
+] as const;
+type MonthlyTab = (typeof MONTHLY_TABS)[number]["id"];
+const MONTHLY_TAB_IDS = MONTHLY_TABS.map((t) => t.id);
+
 function MonthlyPanel() {
   const qc = useQueryClient();
   const [month, setMonth] = useState(() => `${istDate().slice(0, 7)}-01`);
+  const [tab, setTab] = useUrlTab<MonthlyTab>(MONTHLY_TAB_IDS, "issue");
   const monthFn = useServerFn(getCaMonth);
   const q = useQuery({ queryKey: ["caMonth", month], queryFn: () => monthFn({ data: { month } }) });
+  const design = useIssueDesign(month);
   const refresh = () => qc.invalidateQueries({ queryKey: ["caMonth"] });
   const data = q.data;
   const pending = (data?.corrections ?? []).filter((c) => c.status === "pending");
   const applied = (data?.corrections ?? []).filter((c) => c.status === "approved");
   const items = (data?.days ?? []).reduce((n, d) => n + d.items, 0);
   const shiftMonth = (n: number) => {
+    if (
+      design.changed &&
+      !confirm("The cover or ads have changes that aren't saved. Leave them and change month?")
+    )
+      return;
     const d = new Date(`${month}T00:00:00Z`);
     d.setUTCMonth(d.getUTCMonth() + n);
     setMonth(d.toISOString().slice(0, 10));
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <Button
           variant="outline"
@@ -1125,55 +1161,82 @@ function MonthlyPanel() {
         <Button variant="outline" size="icon" onClick={() => shiftMonth(1)} aria-label="Next month">
           <ChevronRight className="h-4 w-4" />
         </Button>
-      </div>
-
-      <div className="rounded-2xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
-        The monthly magazine collects every included item of the month, grouped by section, using
-        the corrected version of any item that changed later in the month, with an “Updates &amp;
-        corrections” page and all practice MCQs.
-      </div>
-
-      <IssueBar
-        kind="monthly"
-        period={month}
-        issue={data?.issue ?? null}
-        blocking={
-          items === 0
-            ? "No items this month yet."
-            : pending.length
-              ? `${pending.length} possible correction(s) waiting for your decision (on the Daily page).`
-              : null
-        }
-        onChanged={refresh}
-      />
-
-      <MonthlyCoverDesigner month={month} />
-
-      {items > 0 && <FeatureBox month={month} />}
-
-      {data && (
-        <section className="space-y-2 rounded-2xl border border-border bg-card p-4">
-          <div className="flex flex-wrap gap-2 text-xs">
-            <Badge tone="primary">{items} items</Badge>
-            <Badge>{data.days.length} days</Badge>
-            <Badge tone="good">{applied.length} corrections applied</Badge>
+        {data && (
+          <div className="flex flex-wrap gap-1.5 text-xs">
+            <Badge tone="primary">{items} stories</Badge>
+            <Badge>
+              {data.days.length} {data.days.length === 1 ? "day" : "days"}
+            </Badge>
             {pending.length > 0 && <Badge tone="warn">{pending.length} corrections pending</Badge>}
           </div>
-          <MonthCalendar month={month} days={data.days} />
-          {applied.length > 0 && (
-            <div className="pt-2">
-              <div className="text-sm font-medium">Corrections in this month's magazine</div>
-              <ul className="mt-1 list-disc pl-5 text-sm">
-                {applied.map((c) => (
-                  <li key={c.id}>
-                    {formatDate(c.item_date, "en")}: {c.summary_en}
-                  </li>
-                ))}
-              </ul>
-            </div>
+        )}
+      </div>
+
+      <PageTabs
+        label="Monthly issue"
+        tabs={MONTHLY_TABS.map((t) => ({ ...t, dot: t.id !== "issue" && design.changed }))}
+        value={tab}
+        onChange={setTab}
+      />
+
+      {tab === "issue" && (
+        <div className="space-y-4" role="tabpanel" aria-label="Issue">
+          <p className="text-sm text-muted-foreground">
+            Every included story of the month by section, with later corrections applied, an
+            “Updates &amp; corrections” page and all practice MCQs.
+          </p>
+          <IssueBar
+            kind="monthly"
+            period={month}
+            issue={data?.issue ?? null}
+            blocking={
+              items === 0
+                ? "No items this month yet."
+                : pending.length
+                  ? `${pending.length} possible correction(s) waiting for your decision (on the Daily page).`
+                  : null
+            }
+            unsaved={
+              design.changed
+                ? "The cover or ads have changes that aren't saved: the PDFs use the saved ones."
+                : null
+            }
+            onChanged={refresh}
+          />
+
+          {items > 0 && <FeatureBox month={month} />}
+
+          {data && (
+            <section className="space-y-2 rounded-2xl border border-border bg-card p-4">
+              <h3 className="font-semibold">The month's days</h3>
+              <MonthCalendar month={month} days={data.days} />
+              {applied.length > 0 && (
+                <div className="pt-2">
+                  <div className="text-sm font-medium">Corrections in this month's magazine</div>
+                  <ul className="mt-1 list-disc pl-5 text-sm">
+                    {applied.map((c) => (
+                      <li key={c.id}>
+                        {formatDate(c.item_date, "en")}: {c.summary_en}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </section>
           )}
-        </section>
+        </div>
       )}
+      {tab === "cover" && (
+        <div role="tabpanel" aria-label="Cover">
+          <MonthlyCoverEditor state={design} />
+        </div>
+      )}
+      {tab === "ads" && (
+        <div role="tabpanel" aria-label="Ads & printing">
+          <MonthlyAdsEditor state={design} sections={data?.sections ?? {}} />
+        </div>
+      )}
+      <DesignSaveBar state={design} />
     </div>
   );
 }
@@ -1339,17 +1402,54 @@ function AiServicesBox() {
   );
 }
 
-const SETTINGS_PARTS = [
-  ["set-channel", "Channel"],
-  ["set-look", "Look"],
-  ["set-covers", "Covers & ads"],
-  ["set-ai", "AI services"],
-  ["set-saathi", "SAATHI & PDF"],
-  ["set-factbite", "Fact Bite"],
-  ["set-collect", "Collection"],
-  ["set-style", "House style"],
-  ["set-glossary", "Glossary"],
+// The settings, one tab a topic; the form fields on each tab, to show which
+// tabs have changes that aren't saved.
+const SETTINGS_TABS = [
+  { id: "channel", label: "Channel" },
+  { id: "look", label: "Look" },
+  { id: "covers", label: "Covers & ads" },
+  { id: "writing", label: "Writing" },
+  { id: "language", label: "Hindi & style" },
+  { id: "collection", label: "Collection" },
+  { id: "reports", label: "Reports & services" },
 ] as const;
+type SettingsTab = (typeof SETTINGS_TABS)[number]["id"];
+const SETTINGS_TAB_IDS = SETTINGS_TABS.map((t) => t.id);
+const SETTINGS_FIELDS: Record<SettingsTab, string[]> = {
+  channel: [
+    "channel",
+    "join_url",
+    "join_text",
+    "post_time",
+    "test_chat_id",
+    "channel_quiz",
+    "channel_quiz_count",
+    "post_corrections",
+  ],
+  look: [
+    "title_hi",
+    "title_en",
+    "brand_line",
+    "tagline_en",
+    "tagline_hi",
+    "accent",
+    "box_static",
+    "box_dyk",
+    "box_why",
+  ],
+  covers: ["daily_cover", "daily_back_cover", "print_binding"],
+  writing: [
+    "daily_stories",
+    "min_rajasthan",
+    "summary_words",
+    "visuals",
+    "do_you_know",
+    "trusted_domains",
+  ],
+  language: [],
+  collection: ["auto_collect", "collect_time", "daily_editorials", "notify_when_ready"],
+  reports: ["weekly_report", "add_to_knowledge_base", "add_to_flashcards"],
+};
 
 function SettingsPanel() {
   const qc = useQueryClient();
@@ -1371,6 +1471,7 @@ function SettingsPanel() {
   const saveFn = useServerFn(saveMagazineSettings);
   const logoFn = useServerFn(uploadMagazineLogo);
   const q = useQuery({ queryKey: ["caSettings"], queryFn: () => getFn() });
+  const [tab, setTab] = useUrlTab<SettingsTab>(SETTINGS_TAB_IDS, "channel");
   const [form, setForm] = useState<Record<string, string | boolean> | null>(null);
   // The form as last loaded or saved, to tell when something changed.
   const [base, setBase] = useState("");
@@ -1511,434 +1612,467 @@ function SettingsPanel() {
     </div>
   );
 
-  return (
-    <div className="space-y-5">
-      {/* The page is long: a link to each part. */}
-      <nav aria-label="Parts of the settings" className="flex flex-wrap gap-1.5">
-        {SETTINGS_PARTS.map(([id, label]) => (
-          <a
-            key={id}
-            href={`#${id}`}
-            onClick={(e) => {
-              e.preventDefault();
-              document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }}
-            className="rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            {label}
-          </a>
-        ))}
-      </nav>
-      <section
-        id="set-channel"
-        className="scroll-mt-20 space-y-3 rounded-2xl border border-border bg-card p-4"
-      >
-        <h3 className="font-semibold">Telegram channel</h3>
-        <p className="text-sm text-muted-foreground">
-          Each day's stories become two issues, an English PDF and a Hindi PDF, both posted to this
-          channel. Add the bot to the channel as an admin with “Post messages”.
-        </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {field("channel", "Channel", "@yourchannel or -100…")}
-          {field(
-            "join_url",
-            "Join link",
-            "https://t.me/RASbandhu",
-            "Linked at the bottom of every page of both issues and on the cover.",
-          )}
-          {field("join_text", "Join link text", "Join us on Telegram", "English letters only.")}
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {field(
-            "post_time",
-            "Daily post time (IST)",
-            "10:00",
-            "A day's issue is posted the next day at this time.",
-          )}
-          {field(
-            "test_chat_id",
-            "Your chat id for tests",
-            "123456789",
-            "Send /start to the bot, then find your id in Bot users.",
-          )}
-        </div>
-        <label className="flex items-start gap-3">
-          <Switch
-            checked={Boolean(form.channel_quiz)}
-            onCheckedChange={(v) => set("channel_quiz", v)}
-          />
-          <span className="text-sm">
-            <span className="font-medium">Post a quiz after each daily issue</span>
-            <span className="block text-muted-foreground">
-              Right after each PDF, the issue's MCQs go to its channel as Telegram quiz polls in
-              that issue's language, so readers can test themselves and share them. The same
-              questions reach students who turned on the bot's daily quiz (/daily), in the language
-              each student picks.
-            </span>
-          </span>
-        </label>
-        <label className="flex items-start gap-3">
-          <Switch
-            checked={Boolean(form.post_corrections)}
-            onCheckedChange={(v) => set("post_corrections", v)}
-          />
-          <span className="text-sm">
-            <span className="font-medium">Post corrections to the channel</span>
-            <span className="block text-muted-foreground">
-              When you approve a correction to a story whose issue is already posted, a short note
-              goes to each channel as a reply under that day's PDF, in that issue's language.
-            </span>
-          </span>
-        </label>
-        {form.channel_quiz && (
-          <div className="sm:max-w-xs">
-            {field(
-              "channel_quiz_count",
-              "Questions in the channel quiz",
-              "5",
-              "1 to 10; they go out about 3 seconds apart.",
-            )}
-          </div>
-        )}
-      </section>
+  const baseForm = JSON.parse(base) as Record<string, string | boolean>;
+  const tabs = SETTINGS_TABS.map((t) => ({
+    ...t,
+    dot: SETTINGS_FIELDS[t.id].some((k) => JSON.stringify(form[k]) !== JSON.stringify(baseForm[k])),
+  }));
+  const changedIn = tabs.filter((t) => t.dot).map((t) => t.label);
 
-      <section
-        id="set-look"
-        className="scroll-mt-20 space-y-3 rounded-2xl border border-border bg-card p-4"
+  return (
+    <div className="space-y-4">
+      <PageTabs label="Settings" tabs={tabs} value={tab} onChange={setTab} />
+      <div
+        className="space-y-4"
+        role="tabpanel"
+        aria-label={SETTINGS_TABS.find((t) => t.id === tab)?.label}
       >
-        <h3 className="font-semibold">Look of the magazine</h3>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {field("title_hi", "Title (Hindi)")}
-          {field("title_en", "Title (English)")}
-          {field("brand_line", "Brand line", "FlashGyan by RASbandhu")}
-          {field(
-            "tagline_en",
-            "Tagline (English)",
-            "For all Rajasthan competitive exams · Special focus: RAS Mains",
-            "On the cover and in the post captions.",
-          )}
-          {field(
-            "tagline_hi",
-            "Tagline (Hindi)",
-            "",
-            text("tagline_hi").trim()
-              ? "On the Hindi issue's cover and post captions."
-              : "Empty: the Hindi issue uses the English tagline.",
-          )}
-          <div className="space-y-1">
-            <Label>Accent colour</Label>
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={text("accent")}
-                onChange={(e) => set("accent", e.target.value)}
-                className="h-9 w-12 rounded border border-border"
-              />
-              <Input
-                value={text("accent")}
-                onChange={(e) => set("accent", e.target.value)}
-                className="w-32"
-              />
-            </div>
-          </div>
-        </div>
-        <div className="space-y-1">
-          <p className="text-sm font-medium">Story box names</p>
-          <p className="text-xs text-muted-foreground">
-            Printed the same in the Hindi and English issues.
-          </p>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-3">
-          {field("box_static", "Static Context box", "Static Context")}
-          {field("box_dyk", "Fact Bite box", "Fact Bite")}
-          {field("box_why", "Exam Angle box", "Exam Angle")}
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {(["main", "partner"] as const).map((kind) => {
-            const url = kind === "main" ? s.logo_main_url : s.logo_partner_url;
-            return (
-              <div key={kind} className="space-y-2 rounded-xl border border-border p-3">
-                <Label>
-                  {kind === "main" ? "Main logo (FlashGyan)" : "Partner logo (RASbandhu)"}
-                </Label>
-                <div className="flex h-16 items-center justify-center rounded-lg bg-muted/40">
-                  {url ? (
-                    <img src={url} alt="" className="max-h-14 max-w-full object-contain" />
-                  ) : (
-                    <span className="text-xs text-muted-foreground">No logo yet</span>
+        {tab === "channel" && (
+          <>
+            <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+              <h3 className="font-semibold">Telegram channel</h3>
+              <p className="text-sm text-muted-foreground">
+                Each day's stories become two issues, an English PDF and a Hindi PDF, both posted to
+                this channel. Add the bot to the channel as an admin with “Post messages”.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {field("channel", "Channel", "@yourchannel or -100…")}
+                {field(
+                  "join_url",
+                  "Join link",
+                  "https://t.me/RASbandhu",
+                  "Linked at the bottom of every page of both issues and on the cover.",
+                )}
+                {field(
+                  "join_text",
+                  "Join link text",
+                  "Join us on Telegram",
+                  "English letters only.",
+                )}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {field(
+                  "post_time",
+                  "Daily post time (IST)",
+                  "10:00",
+                  "A day's issue is posted the next day at this time.",
+                )}
+                {field(
+                  "test_chat_id",
+                  "Your chat id for tests",
+                  "123456789",
+                  "Send /start to the bot, then find your id in Bot users.",
+                )}
+              </div>
+              <label className="flex items-start gap-3">
+                <Switch
+                  checked={Boolean(form.channel_quiz)}
+                  onCheckedChange={(v) => set("channel_quiz", v)}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Post a quiz after each daily issue</span>
+                  <span className="block text-muted-foreground">
+                    Right after each PDF, the issue's MCQs go to its channel as Telegram quiz polls
+                    in that issue's language, so readers can test themselves and share them. The
+                    same questions reach students who turned on the bot's daily quiz (/daily), in
+                    the language each student picks.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3">
+                <Switch
+                  checked={Boolean(form.post_corrections)}
+                  onCheckedChange={(v) => set("post_corrections", v)}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Post corrections to the channel</span>
+                  <span className="block text-muted-foreground">
+                    When you approve a correction to a story whose issue is already posted, a short
+                    note goes to each channel as a reply under that day's PDF, in that issue's
+                    language.
+                  </span>
+                </span>
+              </label>
+              {form.channel_quiz && (
+                <div className="sm:max-w-xs">
+                  {field(
+                    "channel_quiz_count",
+                    "Questions in the channel quiz",
+                    "5",
+                    "1 to 10; they go out about 3 seconds apart.",
                   )}
                 </div>
-                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted">
-                  <Upload className="h-4 w-4" /> Upload PNG / JPG
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) void uploadLogo(kind, f);
-                      e.target.value = "";
-                    }}
-                  />
-                </label>
+              )}
+            </section>
+          </>
+        )}
+        {tab === "look" && (
+          <>
+            <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+              <h3 className="font-semibold">Titles, colour and box names</h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {field("title_hi", "Title (Hindi)")}
+                {field("title_en", "Title (English)")}
+                {field("brand_line", "Brand line", "FlashGyan by RASbandhu")}
+                {field(
+                  "tagline_en",
+                  "Tagline (English)",
+                  "For all Rajasthan competitive exams · Special focus: RAS Mains",
+                  "On the cover and in the post captions.",
+                )}
+                {field(
+                  "tagline_hi",
+                  "Tagline (Hindi)",
+                  "",
+                  text("tagline_hi").trim()
+                    ? "On the Hindi issue's cover and post captions."
+                    : "Empty: the Hindi issue uses the English tagline.",
+                )}
+                <div className="space-y-1">
+                  <Label>Accent colour</Label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={text("accent")}
+                      onChange={(e) => set("accent", e.target.value)}
+                      className="h-9 w-12 rounded border border-border"
+                    />
+                    <Input
+                      value={text("accent")}
+                      onChange={(e) => set("accent", e.target.value)}
+                      className="w-32"
+                    />
+                  </div>
+                </div>
               </div>
-            );
-          })}
-        </div>
-      </section>
-
-      <section
-        id="set-covers"
-        className="scroll-mt-20 space-y-3 rounded-2xl border border-border bg-card p-4"
-      >
-        <h3 className="font-semibold">Covers and printing</h3>
-        <p className="text-sm text-muted-foreground">
-          The daily issue's cover layout and back cover. Each monthly issue's cover is designed on
-          the Monthly page.
-        </p>
-        <DailyCoverSettings
-          layout={text("daily_cover") || "classic"}
-          backCover={text("daily_back_cover")}
-          binding={text("print_binding") || "booklet"}
-          ads={s.ads ?? []}
-          period={istDate()}
-          onChange={(k, v) => set(k, v)}
-        />
-      </section>
-      <AdLibrary />
-
-      <div id="set-ai" className="scroll-mt-20">
-        <AiServicesBox />
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Story box names</p>
+                <p className="text-xs text-muted-foreground">
+                  Printed the same in the Hindi and English issues.
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {field("box_static", "Static Context box", "Static Context")}
+                {field("box_dyk", "Fact Bite box", "Fact Bite")}
+                {field("box_why", "Exam Angle box", "Exam Angle")}
+              </div>
+            </section>
+            <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="font-semibold">Logos</h3>
+                <SavesInstantly />
+              </div>
+              <p className="text-sm text-muted-foreground">
+                On the cover of both issues and faintly behind every page.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {(["main", "partner"] as const).map((kind) => {
+                  const url = kind === "main" ? s.logo_main_url : s.logo_partner_url;
+                  return (
+                    <div key={kind} className="space-y-2 rounded-xl border border-border p-3">
+                      <Label>
+                        {kind === "main" ? "Main logo (FlashGyan)" : "Partner logo (RASbandhu)"}
+                      </Label>
+                      <div className="flex h-16 items-center justify-center rounded-lg bg-muted/40">
+                        {url ? (
+                          <img src={url} alt="" className="max-h-14 max-w-full object-contain" />
+                        ) : (
+                          <span className="text-xs text-muted-foreground">No logo yet</span>
+                        )}
+                      </div>
+                      <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted">
+                        <Upload className="h-4 w-4" /> Upload PNG / JPG
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) void uploadLogo(kind, f);
+                            e.target.value = "";
+                          }}
+                        />
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          </>
+        )}
+        {tab === "covers" && (
+          <>
+            <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+              <h3 className="font-semibold">Daily cover and printing</h3>
+              <p className="text-sm text-muted-foreground">
+                Each monthly issue's cover and ads are chosen on the Monthly page.
+              </p>
+              <DailyCoverSettings
+                layout={text("daily_cover") || "classic"}
+                backCover={text("daily_back_cover")}
+                binding={text("print_binding") || "booklet"}
+                ads={s.ads ?? []}
+                period={istDate()}
+                onChange={(k, v) => set(k, v)}
+              />
+            </section>
+            <AdLibrary />
+          </>
+        )}
+        {tab === "writing" && (
+          <>
+            <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+              <h3 className="font-semibold">Stories</h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {field(
+                  "daily_stories",
+                  "Stories per day",
+                  "15",
+                  "Must-know stories always go in, and Rajasthan stories up to twice this number. Others beyond it, and unlikely ones, arrive already dropped; you can bring any back.",
+                )}
+                {field(
+                  "min_rajasthan",
+                  "Minimum Rajasthan stories",
+                  "5",
+                  "RPSC asks a lot about Rajasthan. A day with fewer is flagged on its page and in the “draft ready” message. 0 turns the warning off.",
+                )}
+                {field(
+                  "summary_words",
+                  "Summary length (words)",
+                  String(DEFAULT_SUMMARY_WORDS),
+                  `About this many words for each story's summary (${MIN_SUMMARY_WORDS} to ${MAX_SUMMARY_WORDS}): the whole news in context. Used for new stories and rewrites; “Write another” in a story can pick a different length.`,
+                )}
+              </div>
+              <label className="flex items-start gap-3">
+                <Switch
+                  checked={Boolean(form.visuals)}
+                  onCheckedChange={(v) => set("visuals", v)}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Add a visual to each story</span>
+                  <span className="block text-muted-foreground">
+                    SAATHI picks a chart, table, timeline, flow chart, key-number cards or a mind
+                    map for each story, built only from its facts. A visual with any number that
+                    isn't in the facts is rejected. Every issue also gets a 60-second revision page.
+                  </span>
+                </span>
+              </label>
+            </section>
+            <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+              <h3 className="font-semibold">Fact Bite: related recent developments</h3>
+              <label className="flex items-start gap-3">
+                <Switch
+                  checked={Boolean(form.do_you_know)}
+                  onCheckedChange={(v) => set("do_you_know", v)}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Add a “Fact Bite” box</span>
+                  <span className="block text-muted-foreground">
+                    For each news item SAATHI adds up to 3 developments of the same kind (other
+                    missiles tested, other amendments, other new Ramsar sites): first from this
+                    magazine's own stories of the last 12 months, credited to the issue's date, then
+                    from the trusted websites below (Tavily). Each line is quoted word for word from
+                    its story or page; any whose quote isn't found is dropped. You can add more (up
+                    to 5) in each story's Fact Bite tab. The static concept itself goes in the
+                    Static Context box, from your books.
+                  </span>
+                </span>
+              </label>
+              <div className="text-sm">
+                Web search (Tavily):{" "}
+                {s.web_search_ready ? (
+                  <Badge tone="good">Ready</Badge>
+                ) : (
+                  <Badge tone="warn">Add TAVILY_API_KEY to the project's secrets</Badge>
+                )}
+              </div>
+              <div className="space-y-1">
+                <Label>Trusted websites (one per line; subdomains included)</Label>
+                <Textarea
+                  rows={6}
+                  value={text("trusted_domains")}
+                  onChange={(e) => set("trusted_domains", e.target.value)}
+                  className="font-mono text-xs"
+                />
+                <p className="text-xs text-muted-foreground">
+                  gov.in also covers pib.gov.in, rajasthan.gov.in and other government sites.
+                </p>
+              </div>
+            </section>
+          </>
+        )}
+        {tab === "language" && (
+          <>
+            <HouseStyle />
+            <Glossary />
+          </>
+        )}
+        {tab === "collection" && (
+          <>
+            <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+              <h3 className="font-semibold">Automatic news collection</h3>
+              <label className="flex items-start gap-3">
+                <Switch
+                  checked={Boolean(form.auto_collect)}
+                  onCheckedChange={(v) => set("auto_collect", v)}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">
+                    Collect the day's news from the websites below
+                  </span>
+                  <span className="block text-muted-foreground">
+                    At the time below SAATHI reads each website's latest articles, picks the ones
+                    that matter for Rajasthan exams, fetches their text and writes the day's draft.
+                    Nothing is posted until you approve it.
+                  </span>
+                </span>
+              </label>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {field(
+                  "collect_time",
+                  "Collection time (IST)",
+                  "21:00",
+                  "Late evening catches the whole day's news.",
+                )}
+                {field(
+                  "daily_editorials",
+                  "Editorials per day",
+                  "2",
+                  "Picked from websites marked “Editorials”, on issues RPSC asks in Mains. 0 turns them off.",
+                )}
+              </div>
+              <label className="flex items-start gap-3">
+                <Switch
+                  checked={Boolean(form.notify_when_ready)}
+                  onCheckedChange={(v) => set("notify_when_ready", v)}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">
+                    Message me on Telegram when the draft is ready
+                  </span>
+                  <span className="block text-muted-foreground">
+                    Sent to your chat id for tests, with a link to review it.
+                  </span>
+                </span>
+              </label>
+              <WatchSitesSettings />
+            </section>
+          </>
+        )}
+        {tab === "reports" && (
+          <>
+            <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+              <h3 className="font-semibold">Reports</h3>
+              <label className="flex items-start gap-3">
+                <Switch
+                  checked={Boolean(form.weekly_report)}
+                  onCheckedChange={(v) => set("weekly_report", v)}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Send me a weekly report on Telegram</span>
+                  <span className="block text-muted-foreground">
+                    Every Sunday from 9 AM, to your chat id for tests: issues posted, stories kept
+                    and dropped, Rajasthan share, facts not found in their source, stories without a
+                    book background (and the books needed), SAATHI's 👍/👎 and unanswered questions,
+                    and the daily quiz's students and streaks.
+                  </span>
+                </span>
+              </label>
+              <div className="pl-12">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={reporting}
+                  onClick={sendReport}
+                >
+                  {reporting ? "Sending…" : "Send this week's report now"}
+                </Button>
+              </div>
+            </section>
+            <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+              <h3 className="font-semibold">Approved issues also go to</h3>
+              <label className="flex items-start gap-3">
+                <Switch
+                  checked={Boolean(form.add_to_knowledge_base)}
+                  onCheckedChange={(v) => set("add_to_knowledge_base", v)}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">
+                    Add approved issues to SAATHI's knowledge base
+                  </span>
+                  <span className="block text-muted-foreground">
+                    Each approved day becomes a “Current Affairs” document, so students can ask
+                    SAATHI about recent events.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3">
+                <Switch
+                  checked={Boolean(form.add_to_flashcards)}
+                  onCheckedChange={(v) => set("add_to_flashcards", v)}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Add approved issues to the app's flashcards</span>
+                  <span className="block text-muted-foreground">
+                    Each story's quick revision question becomes a card in the month's “Current
+                    Affairs” deck (e.g. “Current Affairs – October 2026”), so students revise
+                    current affairs like any other subject. Approving a day again updates its cards.
+                  </span>
+                </span>
+              </label>
+            </section>
+            <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+              <h3 className="font-semibold">Services</h3>
+              <div className="text-sm">
+                PDF making (Cloudflare):{" "}
+                {s.pdf_ready ? (
+                  <Badge tone="good">Ready</Badge>
+                ) : (
+                  <Badge tone="warn">Not set up</Badge>
+                )}
+                {!s.pdf_ready && (
+                  <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted-foreground">
+                    <li>
+                      Copy your Account ID: it's the 32-character code in the address bar after
+                      dash.cloudflare.com/ (also shown under Workers &amp; Pages).
+                    </li>
+                    <li>
+                      Profile icon → My Profile → API Tokens → Create Token → Create Custom Token.
+                      Under Permissions choose Account → “Browser Run” (called “Browser Rendering”
+                      on older dashboards; type “Browser” in the search box) → Edit. Under Account
+                      Resources include your account.
+                    </li>
+                    <li>
+                      Add both to the project's secrets as CLOUDFLARE_ACCOUNT_ID and
+                      CLOUDFLARE_API_TOKEN.
+                    </li>
+                  </ol>
+                )}
+              </div>
+            </section>
+            <AiServicesBox />
+          </>
+        )}
       </div>
 
-      <section
-        id="set-saathi"
-        className="scroll-mt-20 space-y-3 rounded-2xl border border-border bg-card p-4"
-      >
-        <h3 className="font-semibold">SAATHI and PDF</h3>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {field(
-            "daily_stories",
-            "Stories per day",
-            "15",
-            "Must-know stories always go in, and Rajasthan stories up to twice this number. Others beyond it, and unlikely ones, arrive already dropped; you can bring any back.",
-          )}
-          {field(
-            "min_rajasthan",
-            "Minimum Rajasthan stories",
-            "5",
-            "RPSC asks a lot about Rajasthan. A day with fewer is flagged on its page and in the “draft ready” message. 0 turns the warning off.",
-          )}
-          {field(
-            "summary_words",
-            "Summary length (words)",
-            String(DEFAULT_SUMMARY_WORDS),
-            `About this many words for each story's summary (${MIN_SUMMARY_WORDS} to ${MAX_SUMMARY_WORDS}): the whole news in context. Used for new stories and rewrites; “Write another” in a story can pick a different length.`,
-          )}
-        </div>
-        <label className="flex items-start gap-3">
-          <Switch
-            checked={Boolean(form.add_to_knowledge_base)}
-            onCheckedChange={(v) => set("add_to_knowledge_base", v)}
-          />
-          <span className="text-sm">
-            <span className="font-medium">Add approved issues to SAATHI's knowledge base</span>
-            <span className="block text-muted-foreground">
-              Each approved day becomes a “Current Affairs” document, so students can ask SAATHI
-              about recent events.
-            </span>
-          </span>
-        </label>
-        <label className="flex items-start gap-3">
-          <Switch
-            checked={Boolean(form.add_to_flashcards)}
-            onCheckedChange={(v) => set("add_to_flashcards", v)}
-          />
-          <span className="text-sm">
-            <span className="font-medium">Add approved issues to the app's flashcards</span>
-            <span className="block text-muted-foreground">
-              Each story's quick revision question becomes a card in the month's “Current Affairs”
-              deck (e.g. “Current Affairs – October 2026”), so students revise current affairs like
-              any other subject. Approving a day again updates its cards.
-            </span>
-          </span>
-        </label>
-        <label className="flex items-start gap-3">
-          <Switch checked={Boolean(form.visuals)} onCheckedChange={(v) => set("visuals", v)} />
-          <span className="text-sm">
-            <span className="font-medium">Add a visual to each story</span>
-            <span className="block text-muted-foreground">
-              SAATHI picks a chart, table, timeline, flow chart, key-number cards or a mind map for
-              each story, built only from its facts. A visual with any number that isn't in the
-              facts is rejected. Every issue also gets a 60-second revision page.
-            </span>
-          </span>
-        </label>
-        <div className="text-sm">
-          PDF making (Cloudflare):{" "}
-          {s.pdf_ready ? <Badge tone="good">Ready</Badge> : <Badge tone="warn">Not set up</Badge>}
-          {!s.pdf_ready && (
-            <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted-foreground">
-              <li>
-                Copy your Account ID: it's the 32-character code in the address bar after
-                dash.cloudflare.com/ (also shown under Workers &amp; Pages).
-              </li>
-              <li>
-                Profile icon → My Profile → API Tokens → Create Token → Create Custom Token. Under
-                Permissions choose Account → “Browser Run” (called “Browser Rendering” on older
-                dashboards; type “Browser” in the search box) → Edit. Under Account Resources
-                include your account.
-              </li>
-              <li>
-                Add both to the project's secrets as CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN.
-              </li>
-            </ol>
-          )}
-        </div>
-      </section>
-
-      <section
-        id="set-factbite"
-        className="scroll-mt-20 space-y-3 rounded-2xl border border-border bg-card p-4"
-      >
-        <h3 className="font-semibold">Fact Bite: related recent developments</h3>
-        <label className="flex items-start gap-3">
-          <Switch
-            checked={Boolean(form.do_you_know)}
-            onCheckedChange={(v) => set("do_you_know", v)}
-          />
-          <span className="text-sm">
-            <span className="font-medium">Add a “Fact Bite” box</span>
-            <span className="block text-muted-foreground">
-              For each news item SAATHI adds up to 3 developments of the same kind (other missiles
-              tested, other amendments, other new Ramsar sites): first from this magazine's own
-              stories of the last 12 months, credited to the issue's date, then from the trusted
-              websites below (Tavily). Each line is quoted word for word from its story or page; any
-              whose quote isn't found is dropped. You can add more (up to 5) in each story's Fact
-              Bite tab. The static concept itself goes in the Static Context box, from your books.
-            </span>
-          </span>
-        </label>
-        <div className="text-sm">
-          Web search (Tavily):{" "}
-          {s.web_search_ready ? (
-            <Badge tone="good">Ready</Badge>
-          ) : (
-            <Badge tone="warn">Add TAVILY_API_KEY to the project's secrets</Badge>
-          )}
-        </div>
-        <div className="space-y-1">
-          <Label>Trusted websites (one per line; subdomains included)</Label>
-          <Textarea
-            rows={6}
-            value={text("trusted_domains")}
-            onChange={(e) => set("trusted_domains", e.target.value)}
-            className="font-mono text-xs"
-          />
-          <p className="text-xs text-muted-foreground">
-            gov.in also covers pib.gov.in, rajasthan.gov.in and other government sites.
-          </p>
-        </div>
-      </section>
-
-      <section
-        id="set-collect"
-        className="scroll-mt-20 space-y-3 rounded-2xl border border-border bg-card p-4"
-      >
-        <h3 className="font-semibold">Automatic news collection</h3>
-        <label className="flex items-start gap-3">
-          <Switch
-            checked={Boolean(form.auto_collect)}
-            onCheckedChange={(v) => set("auto_collect", v)}
-          />
-          <span className="text-sm">
-            <span className="font-medium">Collect the day's news from the websites below</span>
-            <span className="block text-muted-foreground">
-              At the time below SAATHI reads each website's latest articles, picks the ones that
-              matter for Rajasthan exams, fetches their text and writes the day's draft. Nothing is
-              posted until you approve it.
-            </span>
-          </span>
-        </label>
-        <div className="grid gap-3 sm:grid-cols-3">
-          {field(
-            "collect_time",
-            "Collection time (IST)",
-            "21:00",
-            "Late evening catches the whole day's news.",
-          )}
-          {field(
-            "daily_editorials",
-            "Editorials per day",
-            "2",
-            "Picked from websites marked “Editorials”, on issues RPSC asks in Mains. 0 turns them off.",
-          )}
-        </div>
-        <label className="flex items-start gap-3">
-          <Switch
-            checked={Boolean(form.notify_when_ready)}
-            onCheckedChange={(v) => set("notify_when_ready", v)}
-          />
-          <span className="text-sm">
-            <span className="font-medium">Message me on Telegram when the draft is ready</span>
-            <span className="block text-muted-foreground">
-              Sent to your chat id for tests, with a link to review it.
-            </span>
-          </span>
-        </label>
-        <label className="flex items-start gap-3">
-          <Switch
-            checked={Boolean(form.weekly_report)}
-            onCheckedChange={(v) => set("weekly_report", v)}
-          />
-          <span className="text-sm">
-            <span className="font-medium">Send me a weekly report on Telegram</span>
-            <span className="block text-muted-foreground">
-              Every Sunday from 9 AM, to your chat id for tests: issues posted, stories kept and
-              dropped, Rajasthan share, facts not found in their source, stories without a book
-              background (and the books needed), SAATHI's 👍/👎 and unanswered questions, and the
-              daily quiz's students and streaks.
-            </span>
-          </span>
-        </label>
-        <div className="pl-12">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={reporting}
-            onClick={sendReport}
+      {/* Saving stays in reach, and says which tabs have changes. */}
+      {changed && (
+        <div className="sticky bottom-0 z-20 -mx-2 flex flex-wrap items-center gap-2 rounded-t-2xl border border-b-0 border-border bg-background/95 px-4 py-3 shadow-[0_-4px_12px_rgba(0,0,0,0.04)] backdrop-blur">
+          <span
+            role="status"
+            className="flex-1 text-sm font-medium text-amber-700 dark:text-amber-400"
           >
-            {reporting ? "Sending…" : "Send this week's report now"}
-          </Button>
-        </div>
-        <WatchSitesSettings />
-      </section>
-
-      {/* Saving stays in reach, and says when something is waiting. */}
-      <div className="sticky bottom-0 z-20 -mx-2 flex flex-wrap items-center gap-2 rounded-t-2xl border border-b-0 border-border bg-background/95 px-4 py-3 shadow-[0_-4px_12px_rgba(0,0,0,0.04)] backdrop-blur">
-        <span
-          role="status"
-          className={`flex-1 text-sm ${changed ? "font-medium text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}
-        >
-          {changed ? "You have changes that aren't saved" : "All settings saved"}
-        </span>
-        {changed && (
+            Changes not saved{changedIn.length ? ` in ${changedIn.join(", ")}` : ""}
+          </span>
           <Button variant="ghost" disabled={saving} onClick={() => setForm(JSON.parse(base))}>
             Discard
           </Button>
-        )}
-        <Button onClick={save} disabled={saving}>
-          {saving ? "Saving…" : "Save settings"}
-        </Button>
-      </div>
-
-      <div id="set-style" className="scroll-mt-20">
-        <HouseStyle />
-      </div>
-      <div id="set-glossary" className="scroll-mt-20">
-        <Glossary />
-      </div>
+          <Button onClick={save} disabled={saving}>
+            {saving ? "Saving…" : "Save settings"}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

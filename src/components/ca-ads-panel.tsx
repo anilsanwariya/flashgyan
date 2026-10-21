@@ -10,7 +10,7 @@ import { ImagePlus, Trash2 } from "lucide-react";
 import { getMagazineSettings, saveCaAds, uploadCaAdImage } from "@/lib/current-affairs.functions";
 import { MAX_ADS, a4Off, type MagazineAd } from "@/lib/ca-covers";
 import { prepareImage, toBase64 } from "@/lib/ca-image-file";
-import { errorText } from "@/components/ca-ui";
+import { errorText, SavesInstantly } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -116,7 +116,10 @@ export function AdLibrary() {
   return (
     <section aria-label="Ads" className="space-y-3 rounded-2xl border border-border bg-card p-4">
       <div>
-        <h3 className="font-semibold">Ads</h3>
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="font-semibold">Ad library</h3>
+          <SavesInstantly />
+        </div>
         <p className="text-sm text-muted-foreground">
           Full-page A4 images (2480 × 3508 px is ideal) for the daily back cover and the monthly
           issue's ad pages and back cover. Ad pages print without the page footer. Saved as soon as

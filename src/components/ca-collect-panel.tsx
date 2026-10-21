@@ -1,6 +1,7 @@
 // Admin: automatic news collection from watched websites. The daily page shows
 // the day's collection (what was found, what the AI picked) and can run it
 // now; the settings page manages the websites.
+import { SavesInstantly } from "@/components/ca-ui";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -572,7 +573,9 @@ select cron.schedule('ca-collector', '* * * * *',
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <h4 className="font-medium">Websites to watch</h4>
+        <h4 className="flex flex-wrap items-center gap-2 font-medium">
+          Websites to watch <SavesInstantly />
+        </h4>
         {!adding && (
           <Button size="sm" variant="outline" className="ml-auto" onClick={() => setAdding(true)}>
             <Plus className="mr-1 h-4 w-4" /> Add website
