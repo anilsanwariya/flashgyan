@@ -611,6 +611,7 @@ export type Database = {
           caption: string | null
           caption_hi: string | null
           created_at: string
+          design: Json | null
           error: string | null
           id: string
           item_count: number
@@ -632,6 +633,7 @@ export type Database = {
           caption?: string | null
           caption_hi?: string | null
           created_at?: string
+          design?: Json | null
           error?: string | null
           id?: string
           item_count?: number
@@ -653,6 +655,7 @@ export type Database = {
           caption?: string | null
           caption_hi?: string | null
           created_at?: string
+          design?: Json | null
           error?: string | null
           id?: string
           item_count?: number

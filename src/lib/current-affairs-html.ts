@@ -16,6 +16,22 @@ import {
 } from "@/lib/current-affairs";
 import { VISUAL_CSS, pointsToShow, visualHtml, type Visual } from "@/lib/ca-visuals";
 import type { CaFeature } from "@/lib/ca-feature";
+import {
+  COVER_CSS,
+  COVER_FONTS,
+  adPageHtml,
+  coverHtml,
+  notesPageHtml,
+  type CoverLook,
+  type CoverParts,
+} from "@/lib/ca-cover-html";
+import {
+  DAILY_LAYOUTS,
+  DEFAULT_COLOR2,
+  normalizeAds,
+  normalizeIssueDesign,
+  type IssueDesign,
+} from "@/lib/ca-covers";
 
 export type MagazineItem = {
   id: string;
@@ -374,37 +390,6 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .watermark img { width: 60%; opacity: .06; transform: rotate(-30deg); }
 .watermark span { font-size: 80pt; font-weight: 700; color: ${accent}; opacity: .05; transform: rotate(-30deg); }
 .cover, .section { position: relative; z-index: 1; }
-@page :first { margin: 0; }
-.cover { width: 210mm; height: 297mm; display: flex; flex-direction: column; page-break-after: always; background: #fff; overflow: hidden; }
-.cover-logos { display: flex; justify-content: space-between; align-items: center; padding: 9mm 14mm 7mm; }
-.cover-logos img { height: 16mm; max-width: 75mm; object-fit: contain; }
-.brand { font-weight: 700; color: ${accent}; font-size: 15pt; }
-.cover-hero { position: relative; margin: 0 10mm; border-radius: 7mm; padding: 13mm 12mm 11mm; color: #fff; overflow: hidden;
-  background: radial-gradient(circle at 92% 8%, rgba(255,255,255,.18) 0 22mm, transparent 22.2mm),
-    radial-gradient(circle at 78% 105%, rgba(255,255,255,.10) 0 30mm, transparent 30.2mm),
-    linear-gradient(135deg, ${accent} 0%, ${darken(accent)} 100%); }
-.eyebrow { font-size: 9pt; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; opacity: .85; max-width: 150mm; }
-.cover-hero h1 { margin: 3mm 0 0; font-size: 38pt; line-height: 1.05; font-weight: 700; letter-spacing: -.01em; max-width: 140mm; }
-.date-pill { display: inline-block; margin-top: 6mm; padding: 1.8mm 5mm; border-radius: 20mm; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35); font-size: 11pt; font-weight: 600; }
-.stats { display: flex; gap: 4mm; margin-top: 9mm; }
-.stats div { flex: 1; background: rgba(255,255,255,.12); border-radius: 3.5mm; padding: 3mm 4mm; }
-.stats b { display: block; font-size: 20pt; line-height: 1.1; }
-.stats span { font-size: 8.5pt; opacity: .9; }
-.cover-body { flex: 1; display: flex; flex-direction: column; padding: 8mm 14mm 6mm; }
-.cta { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 6mm; border-radius: 4mm; padding: 5mm 6mm; background: #f5f3ff; border: 1px solid #ddd6fe; }
-.cta b { display: block; font-size: 11pt; color: #1f2937; }
-.cta span { font-size: 9pt; color: #64748b; }
-.cta-handle { flex: none; padding: 2mm 5mm; border-radius: 20mm; background: ${accent}; color: #fff; font-weight: 700; font-size: 11pt; }
-.cover-h { margin: 0 0 3mm; font-size: 10pt; letter-spacing: .12em; text-transform: uppercase; color: ${accent}; }
-.hl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3.5mm; margin-bottom: 8mm; }
-.hl { border: 1px solid #e5e7eb; border-top: 3px solid ${accent}; border-radius: 3mm; padding: 3mm 3.5mm; background: #fff; }
-.hl-cat { font-size: 7.5pt; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: ${accent}; }
-.hl-hi { margin-top: 1mm; font-weight: 700; font-size: 10pt; line-height: 1.35; }
-.hl-en { margin-top: .8mm; font-size: 8.5pt; color: #64748b; line-height: 1.35; }
-.toc { display: grid; grid-template-columns: 1fr 1fr; column-gap: 8mm; }
-.toc-row { display: flex; justify-content: space-between; padding: 2mm 0; border-bottom: 1px dashed #cbd5e1; font-size: 10pt; }
-.toc-row b { color: ${accent}; }
-.cover-foot { display: flex; justify-content: space-between; margin: 0 10mm 14mm; border-radius: 4mm; padding: 4mm 6mm; background: ${darken(accent, 0.55)}; color: #fff; font-size: 9pt; }
 .section { margin-bottom: 6mm; }
 .section.new-page { page-break-before: always; }
 .section-title { break-after: avoid; display: flex; justify-content: space-between; align-items: baseline; background: ${accent}; color: #fff; padding: 3mm 5mm; border-radius: 3mm; margin-bottom: 5mm; }
@@ -492,9 +477,8 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .images, .item .visual { clear: both; }
 .img-credit { margin-top: .6mm; font-size: 6.8pt; line-height: 1.3; height: 1.3em; color: #94a3b8; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .img-row figcaption { margin-top: 1mm; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; font-size: 8pt; line-height: 1.35; color: #64748b; }
-html[lang="hi"] .eyebrow { letter-spacing: 0; font-size: 10pt; }
-a.cta { text-decoration: none; color: inherit; }
 ${VISUAL_CSS(accent)}
+${COVER_CSS}
 `;
 
 const hasRevision = (i: MagazineItem) =>
@@ -597,15 +581,6 @@ ${mains ? `<h3 class="part">${t.partB}</h3>${mains}` : ""}
 ${key ? `<h3 class="part">${t.key}</h3><table class="answers">${key}</table>` : ""}</section>`;
 }
 
-// A darker shade of the accent colour for the cover gradient.
-function darken(hex: string, amount = 0.45): string {
-  const h = hex.replace("#", "");
-  const full = h.length === 3 ? [...h].map((c) => c + c).join("") : h.slice(0, 6);
-  const n = parseInt(full, 16);
-  const ch = (shift: number) => Math.round(((n >> shift) & 255) * (1 - amount));
-  return `#${[16, 8, 0].map((sh) => ch(sh).toString(16).padStart(2, "0")).join("")}`;
-}
-
 export function renderMagazine(opts: {
   kind: "daily" | "monthly";
   period: string;
@@ -616,12 +591,26 @@ export function renderMagazine(opts: {
   corrections?: MagazineCorrection[];
   // Monthly only: the background article, when included.
   feature?: CaFeature | null;
+  // Monthly only: the issue's cover, ads and back cover.
+  design?: IssueDesign | null;
+  // Ruled notes pages before the back cover, so a printed issue's back
+  // cover lands on the outside.
+  fillers?: number;
+  // Only the cover, for the editor's preview.
+  coverOnly?: boolean;
 }): string {
   const s = opts.settings;
   const lang = opts.lang;
   const t = T[lang];
-  const accent = safeColor(s.accent);
   const monthly = opts.kind === "monthly";
+  const design = monthly ? normalizeIssueDesign(opts.design) : null;
+  const cover = design?.cover;
+  const ownColor = cover?.color ? safeColor(cover.color) : "";
+  // A monthly cover's colour is the whole issue's, unless set for the cover
+  // only.
+  const accent = ownColor && cover?.color_scope !== "cover" ? ownColor : safeColor(s.accent);
+  const ads = normalizeAds(s.ads);
+  const adById = (id: string | undefined) => (id ? ads.find((a) => a.id === id) : undefined);
   const order = new Map<string, number>(CATEGORIES.map((c, i) => [c.id, i]));
   const items = [...opts.items].sort(
     (a, b) =>
@@ -651,20 +640,14 @@ export function renderMagazine(opts: {
   const watermark = safeUrl(s.logo_main_url)
     ? `<div class="watermark"><img src="${esc(safeUrl(s.logo_main_url))}" alt="" /></div>`
     : `<div class="watermark"><span>FlashGyan</span></div>`;
-  const logo = (u: string) => (safeUrl(u) ? `<img src="${esc(safeUrl(u))}" alt="" />` : "");
   // The most exam-relevant stories lead the cover.
-  const top = [...items].sort((a, b) => b.importance - a.importance).slice(0, monthly ? 6 : 4);
-  const highlights = top
-    .map(
-      (i) =>
-        `<div class="hl"><span class="hl-cat">${esc(categoryLabel(i.category)[lang])}</span><div class="hl-hi">${esc(pick(i.content.headline, lang))}</div></div>`,
-    )
-    .join("");
+  const byImportance = [...items].sort((a, b) => b.importance - a.importance);
+  const top = byImportance.slice(0, monthly ? 6 : 4);
   // The join link, shown as its @username (t.me/RASbandhu → @RASbandhu).
   const joinUrl = safeUrl((s.join_url ?? DEFAULT_MAGAZINE_SETTINGS.join_url).trim());
   const handle = /^https:\/\/t\.me\/([A-Za-z0-9_]{4,})\/?$/.exec(joinUrl)?.[1];
   const joinText = esc(s.join_text?.trim() || DEFAULT_MAGAZINE_SETTINGS.join_text);
-  const tagline = esc((lang === "hi" ? s.tagline_hi || s.tagline_en : s.tagline_en) ?? "");
+  const tagline = ((lang === "hi" ? s.tagline_hi || s.tagline_en : s.tagline_en) ?? "").trim();
   const boxes = boxNames(s);
   const questions =
     items.filter((i) => i.content.mcq).length +
@@ -684,9 +667,11 @@ export function renderMagazine(opts: {
   let n = 0;
   const sections = [...groups.entries()]
     .map(([cat, list]) => {
+      // A monthly issue can print an ad page after any section.
+      const ad = adById(design?.section_ads[cat]);
       return `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>${icon(cat)} ${esc(categoryLabel(cat)[lang])}</h2><span>${list.length} ${t.stories(list.length)}</span></div>${list
         .map((it) => itemHtml(it, ++n, monthly, accent, lang, boxes))
-        .join("")}</section>`;
+        .join("")}</section>${ad ? adPageHtml(ad, lang, cat) : ""}`;
     })
     .join("");
 
@@ -711,6 +696,53 @@ export function renderMagazine(opts: {
         .join("")}</ol></section>`
     : "";
 
+  const tocHtml = `${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}`;
+  const parts: CoverParts = {
+    lang,
+    period: opts.period,
+    title,
+    dateLine,
+    tagline,
+    brand: s.brand_line,
+    edition: t.edition,
+    logoMain: safeUrl(s.logo_main_url),
+    logoPartner: safeUrl(s.logo_partner_url),
+    stats: [
+      { n: items.length, label: t.stories(items.length) },
+      { n: groups.size, label: t.sections(groups.size) },
+      ...(visuals ? [{ n: visuals, label: t.charts }] : []),
+      { n: questions, label: t.questions },
+    ],
+    top: top.map((i) => ({
+      cat: categoryLabel(i.category)[lang],
+      headline: pick(i.content.headline, lang),
+      summary: pick(i.content.summary, lang),
+    })),
+    rajasthan: byImportance
+      .filter((i) => i.rajasthan || i.category === "rajasthan")
+      .map((i) => ({ headline: pick(i.content.headline, lang) })),
+    inThisIssue: t.inThisIssue,
+    contents: t.contents,
+    tocHtml,
+    ctaHtml: joinUrl
+      ? `<a class="cta" href="${esc(joinUrl)}"><div><b>${joinText}</b><span>${t.ctaText}</span></div><div class="cta-handle">${handle ? `@${esc(handle)}` : joinText}</div></a>`
+      : "",
+  };
+  const dailyLayout = DAILY_LAYOUTS.find((l) => l.id === s.daily_cover)?.id ?? "classic";
+  const look: CoverLook = cover
+    ? { kind: "monthly", cover }
+    : { kind: "daily", layout: dailyLayout };
+  const coverSection = coverHtml(parts, look, {
+    c: ownColor || accent,
+    c2: cover?.color2 ? safeColor(cover.color2) : DEFAULT_COLOR2,
+  });
+  // The back cover (an ad), after any ruled notes pages that bring it to the
+  // outside of a printed issue.
+  const back = adById(monthly ? design?.back_cover : s.daily_back_cover);
+  const notes = Array.from({ length: Math.max(0, Math.min(3, opts.fillers ?? 0)) }, () =>
+    notesPageHtml(lang, s.brand_line, accent),
+  ).join("");
+
   return `<!doctype html>
 <html lang="${lang}">
 <head>
@@ -718,41 +750,23 @@ export function renderMagazine(opts: {
 <title>${esc(title)} — ${esc(dateLine)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600;700&family=Noto+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600;700&family=Noto+Sans:wght@400;600;700&${COVER_FONTS}&display=swap" rel="stylesheet" />
 <style>${CSS(accent)}</style>
 </head>
 <body>
-${watermark}
-<section class="cover">
-  <div class="cover-logos">${logo(s.logo_main_url) || `<span class="brand">${esc(s.brand_line)}</span>`}${logo(s.logo_partner_url)}</div>
-  <div class="cover-hero">
-    ${tagline ? `<div class="eyebrow">${tagline}</div>` : ""}
-    <h1>${esc(title)}</h1>
-    <div class="date-pill">${esc(dateLine)}</div>
-    <div class="stats">
-      <div><b>${items.length}</b><span>${t.stories(items.length)}</span></div>
-      <div><b>${groups.size}</b><span>${t.sections(groups.size)}</span></div>
-      ${visuals ? `<div><b>${visuals}</b><span>${t.charts}</span></div>` : ""}
-      <div><b>${questions}</b><span>${t.questions}</span></div>
-    </div>
-  </div>
-  <div class="cover-body">
-    ${highlights ? `<h3 class="cover-h">${t.inThisIssue}</h3><div class="hl-grid">${highlights}</div>` : ""}
-    <h3 class="cover-h">${t.contents}</h3>
-    <div class="toc">${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}</div>
-    ${
-      joinUrl
-        ? `<a class="cta" href="${esc(joinUrl)}"><div><b>${joinText}</b><span>${t.ctaText}</span></div><div class="cta-handle">${handle ? `@${esc(handle)}` : joinText}</div></a>`
-        : ""
-    }
-  </div>
-  <div class="cover-foot"><span>${esc(s.brand_line)}</span><span>${t.edition}</span></div>
-</section>
+${
+  opts.coverOnly
+    ? coverSection
+    : `${watermark}
+${coverSection}
 ${sections}
 ${corrections}
 ${opts.feature ? featurePage(opts.feature, lang) : ""}
 ${revisionPage(groups, lang)}
 ${practicePage(items, lang)}
+${notes}
+${back ? adPageHtml(back, lang, "back") : ""}`
+}
 </body>
 </html>`;
 }
