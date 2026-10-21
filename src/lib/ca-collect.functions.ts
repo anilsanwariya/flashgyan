@@ -37,10 +37,14 @@ export const getCaCollection = createServerFn({ method: "POST" })
 
 export const startCaCollection = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ date: dateSchema }).parse(d))
+  .inputValidator((d: unknown) =>
+    z
+      .object({ date: dateSchema, sites: z.array(z.string().uuid()).min(1).max(100).optional() })
+      .parse(d),
+  )
   .handler(async ({ data, context }): Promise<CaRun> => {
     await assertAdmin(context.userId);
-    return (await server()).startRun(data.date, "admin");
+    return (await server()).startRun(data.date, "admin", data.sites);
   });
 
 // One tick of work, run from the admin page while it is open.
