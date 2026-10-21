@@ -113,6 +113,7 @@ import {
   type OutlineEntry,
 } from "@/lib/ca-reader-format";
 import { missingMessages, parseMissing, type MissingCheck } from "@/lib/ca-missing";
+import { parseSummaryOptions, summaryOptionsMessages } from "@/lib/ca-summary";
 import { bestArticle, cosine, meaningText, type CompareMatch } from "@/lib/ca-compare";
 import { ADD_POINTS_MAX, STORY_POINTS_MAX, parsePoints, pointsMessages } from "@/lib/ca-points";
 import { dayChecklist, type Check } from "@/lib/ca-checklist";
@@ -824,7 +825,7 @@ export async function enrichItem(
   const before = opts.before !== undefined ? opts.before : snapshotOf(item);
   const context = opts.context ?? item.content?.context_facts ?? [];
   const key = apiKey();
-  const { style_rules: style } = await getMagazineSettings();
+  const { style_rules: style, summary_words: summaryWords } = await getMagazineSettings();
   try {
     // The background explains the story's static concept, so the books are
     // searched for the concept, and for the headline in case the concept's
@@ -863,6 +864,7 @@ export async function enrichItem(
         context: context.map((f) => (f.note ? `${f.text} [Editor's note: ${f.note}]` : f.text)),
         note: opts.note,
         style,
+        summaryWords,
         visual: look.visual
           ? { type: VISUAL_LABELS[look.visual.type].toLowerCase(), covers: look.visual_covers }
           : null,
@@ -1568,6 +1570,52 @@ export async function updateItem(
 }
 
 export const getItem = (id: string) => loadItem(id);
+
+// "Write another" summary: three summaries of the length asked, from the
+// story's facts and background. Nothing in the story changes until the
+// editor picks one (saved like a hand edit, so History keeps the old one).
+export async function suggestSummaries(
+  itemId: string,
+  opts: { words: number; note?: string | null; avoid?: Bi[] },
+): Promise<{ summaries: Bi[]; dropped: number }> {
+  const item = await loadItem(itemId);
+  const c = item.content;
+  if (!c) throw new Error("Write the story first.");
+  const context = (c.context_facts ?? []).map((f) => f.text);
+  const facts = item.facts.map((f) => f.text);
+  const { style_rules } = await getMagazineSettings();
+  const raw = await saathiComplete(
+    apiKey(),
+    summaryOptionsMessages({
+      headline: c.headline.en || c.headline.hi || item.headline,
+      facts,
+      context,
+      current: c.summary,
+      words: opts.words,
+      note: opts.note,
+      avoid: opts.avoid,
+      style: style_rules,
+    }),
+  );
+  const known = [
+    item.headline,
+    c.headline.en,
+    c.headline.hi,
+    c.summary.en,
+    c.summary.hi,
+    ...facts,
+    ...context,
+    ...c.points.flatMap((p) => [p.en, p.hi]),
+  ].join("\n");
+  const r = parseSummaryOptions(raw, known);
+  if (!r.summaries.length)
+    throw new Error(
+      r.dropped
+        ? "SAATHI's summaries had numbers that aren't in the story's facts. Try again."
+        : "The AI's reply could not be read. Try again.",
+    );
+  return r;
+}
 
 async function loadItem(id: string): Promise<CaItem> {
   const { data, error } = await from("ca_items").select(ITEM_COLS).eq("id", id).single();
