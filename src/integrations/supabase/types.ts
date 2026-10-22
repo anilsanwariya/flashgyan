@@ -554,6 +554,48 @@ export type Database = {
           },
         ]
       }
+      ca_backfills: {
+        Row: {
+          created_at: string
+          date_from: string
+          date_to: string
+          error: string | null
+          finished_at: string | null
+          id: string
+          next_date: string
+          sites: string[]
+          started_by: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          date_from: string
+          date_to: string
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          next_date: string
+          sites?: string[]
+          started_by?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          date_from?: string
+          date_to?: string
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          next_date?: string
+          sites?: string[]
+          started_by?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       ca_corrections: {
         Row: {
           changes: Json
@@ -757,6 +799,7 @@ export type Database = {
       ca_items: {
         Row: {
           category: string
+          collected_later: boolean
           concept: string | null
           content: Json | null
           context_sources: Json
@@ -783,6 +826,7 @@ export type Database = {
         }
         Insert: {
           category?: string
+          collected_later?: boolean
           concept?: string | null
           content?: Json | null
           context_sources?: Json
@@ -809,6 +853,7 @@ export type Database = {
         }
         Update: {
           category?: string
+          collected_later?: boolean
           concept?: string | null
           content?: Json | null
           context_sources?: Json
@@ -852,12 +897,14 @@ export type Database = {
       }
       ca_runs: {
         Row: {
+          backfill_id: string | null
           discovered: string[]
           error: string | null
           finished_at: string | null
           id: string
           issue_date: string
           locked_until: string | null
+          mode: string
           notified: boolean
           sites: string[] | null
           started_at: string
@@ -866,12 +913,14 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          backfill_id?: string | null
           discovered?: string[]
           error?: string | null
           finished_at?: string | null
           id?: string
           issue_date: string
           locked_until?: string | null
+          mode?: string
           notified?: boolean
           sites?: string[] | null
           started_at?: string
@@ -880,12 +929,14 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          backfill_id?: string | null
           discovered?: string[]
           error?: string | null
           finished_at?: string | null
           id?: string
           issue_date?: string
           locked_until?: string | null
+          mode?: string
           notified?: boolean
           sites?: string[] | null
           started_at?: string
@@ -893,7 +944,15 @@ export type Database = {
           status?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "ca_runs_backfill_id_fkey"
+            columns: ["backfill_id"]
+            isOneToOne: false
+            referencedRelation: "ca_backfills"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       ca_sources: {
         Row: {
@@ -1984,12 +2043,14 @@ export type Database = {
       ca_claim_run: {
         Args: { p_seconds?: number }
         Returns: {
+          backfill_id: string | null
           discovered: string[]
           error: string | null
           finished_at: string | null
           id: string
           issue_date: string
           locked_until: string | null
+          mode: string
           notified: boolean
           sites: string[] | null
           started_at: string
