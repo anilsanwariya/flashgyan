@@ -49,6 +49,7 @@ import {
   type Bi,
   type CaContent,
   type StaticFact,
+  storyVisuals,
 } from "@/lib/current-affairs";
 import { StoryEditor } from "@/components/ca-story-editor";
 import { useQuery } from "@tanstack/react-query";
@@ -735,14 +736,11 @@ function StoryCard({
                 <AlertTriangle className="h-3 w-3" /> {unverified} to check
               </Badge>
             )}
-            {[c?.visual, c?.visual2].map(
-              (v, i) =>
-                v && (
-                  <Badge key={i} tone="primary">
-                    <BarChart3 className="h-3 w-3" /> {VISUAL_LABELS[v.type]}
-                  </Badge>
-                ),
-            )}
+            {storyVisuals(c).map(({ visual: v }, i) => (
+              <Badge key={i} tone="primary">
+                <BarChart3 className="h-3 w-3" /> {VISUAL_LABELS[v.type]}
+              </Badge>
+            ))}
             {(c?.images?.length ?? 0) > 0 && (
               <Badge title="Images">
                 <ImageIcon className="h-3 w-3" /> {c!.images!.length}

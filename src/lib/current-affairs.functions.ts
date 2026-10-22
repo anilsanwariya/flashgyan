@@ -119,6 +119,12 @@ export const contentSchema = z.object({
   visual_covers: z.array(z.number().int().min(0).max(100)).max(50).optional(),
   visual2: z.unknown().optional(),
   visual2_covers: z.array(z.number().int().min(0).max(100)).max(50).optional(),
+  visual3: z.unknown().optional(),
+  visual3_covers: z.array(z.number().int().min(0).max(100)).max(50).optional(),
+  visual4: z.unknown().optional(),
+  visual4_covers: z.array(z.number().int().min(0).max(100)).max(50).optional(),
+  visual_below: z.array(z.boolean()).max(4).optional(),
+  visual_pair: z.boolean().optional(),
   oneliner: bi.nullable().optional(),
   quick: z.object({ q: bi, a: bi }).nullable().optional(),
   hide_summary: z.boolean().optional(),
@@ -507,11 +513,18 @@ export const updateCaItem = createServerFn({ method: "POST" })
     // A visual the editor made or changed must still be a whole one (one
     // saved earlier is kept as it is). Checked after the languages are
     // matched, so text typed in one language gets the other written for it.
-    if (patch.content && (patch.content.visual || patch.content.visual2)) {
+    if (patch.content) {
       const { cleanVisual } = await import("@/lib/ca-visuals");
-      for (const key of ["visual", "visual2"] as const) {
+      const { VISUAL_SLOTS } = await import("@/lib/current-affairs");
+      // Unchanged visuals may have moved to another slot.
+      const before = new Set(
+        VISUAL_SLOTS.map(([k]) => item?.content?.[k])
+          .filter(Boolean)
+          .map((v) => JSON.stringify(v)),
+      );
+      for (const [key] of VISUAL_SLOTS) {
         const v = patch.content[key];
-        if (!v || JSON.stringify(v) === JSON.stringify(item?.content?.[key] ?? null)) continue;
+        if (!v || before.has(JSON.stringify(v))) continue;
         const clean = cleanVisual(v);
         if (!clean.visual) throw new Error(clean.problem ?? "This visual isn't complete.");
         patch.content[key] = clean.visual;
@@ -1050,9 +1063,11 @@ export const previewCaVisual = createServerFn({ method: "POST" })
     z
       .object({
         id: z.string().uuid(),
-        slot: z.union([z.literal(1), z.literal(2)]),
+        slot: z.number().int().min(1).max(4),
         type: z.enum(VISUAL_TYPES as [VisualType, ...VisualType[]]).optional(),
         note: z.string().max(300).optional(),
+        // Build it from these key points only (0-based); they leave the text.
+        facts: z.array(z.number().int().min(0).max(100)).min(2).max(30).optional(),
       })
       .parse(d),
   )

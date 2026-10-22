@@ -60,6 +60,7 @@ import {
   categoryLabel,
   type CaContent,
   type DykFact,
+  storyVisuals,
 } from "@/lib/current-affairs";
 import { storyPreviewHtml } from "@/lib/current-affairs-html";
 import { SUMMARY_LENGTHS, SUMMARY_OPTIONS, wordCount } from "@/lib/ca-summary";
@@ -67,7 +68,7 @@ import { unitLabel } from "../../supabase/functions/_shared/ras-syllabus.ts";
 import { SourceReader } from "@/components/ca-source-reader";
 import { StoryHistory } from "@/components/ca-story-history";
 import { StoryImages } from "@/components/ca-story-images";
-import { StoryVisuals } from "@/components/ca-story-visuals";
+import { PickedPointsVisual, StoryVisuals } from "@/components/ca-story-visuals";
 import { MaterialPanel } from "@/components/ca-story-material";
 import { BiLine, IconButton, Part, StaticConnect, type Lang } from "@/components/ca-story-review";
 import { Badge, errorText } from "@/components/ca-ui";
@@ -281,7 +282,7 @@ export function StoryEditor({
       id: "visuals",
       label: "Visuals",
       icon: BarChart3,
-      count: (c?.visual ? 1 : 0) + (c?.visual2 ? 1 : 0),
+      count: storyVisuals(c).length,
     },
     {
       id: "static",
@@ -529,7 +530,7 @@ export function StoryEditor({
             </main>
           ) : (
             <main ref={main} className="min-h-0 flex-1 overflow-y-auto">
-              <div className="mx-auto max-w-3xl space-y-4 p-3 text-[15px] leading-relaxed sm:p-5 sm:text-sm">
+              <div className="mx-auto max-w-3xl space-y-4 p-3 pb-16 text-[15px] leading-relaxed sm:p-5 sm:text-sm">
                 {!ctx ? (
                   <NotWritten item={item} job={job} onWrite={() => void review.write(item)} />
                 ) : tab === "summary" ? (
@@ -546,7 +547,7 @@ export function StoryEditor({
                 ) : tab === "visuals" ? (
                   <Section
                     title="Visuals"
-                    hint="Up to two per story. Rebuild one as the type you pick, or edit its text and numbers."
+                    hint="Up to four per story, each above or below the key points. Rebuild one as the type you pick, or edit its text and numbers."
                   >
                     <StoryVisuals item={item} content={c!} busy={busy} onSave={save} />
                   </Section>
@@ -593,7 +594,8 @@ export function StoryEditor({
           )}
         </div>
 
-        {/* Previous and next: round buttons on the edges. */}
+        {/* Previous and next: round buttons on the edges (at the bottom on
+            phones, so they don't sit over the ends of the rows). */}
         {[
           // Past the list of tabs on laptops.
           {
@@ -611,7 +613,7 @@ export function StoryEditor({
             title={label}
             disabled={!to}
             onClick={() => to && leave(() => onNavigate(to.id))}
-            className={`absolute ${side} top-1/2 z-30 -translate-y-1/2 place-items-center rounded-full border border-border bg-background/90 shadow-lg backdrop-blur transition-opacity hover:bg-muted disabled:pointer-events-none disabled:opacity-0 h-10 w-10 sm:h-12 sm:w-12 ${tab === "article" ? "hidden lg:grid" : "grid"}`}
+            className={`absolute ${side} bottom-16 z-30 place-items-center sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2 rounded-full border border-border bg-background/90 shadow-lg backdrop-blur transition-opacity hover:bg-muted disabled:pointer-events-none disabled:opacity-0 h-10 w-10 sm:h-12 sm:w-12 ${tab === "article" ? "hidden lg:grid" : "grid"}`}
           >
             <Icon className="h-5 w-5" />
           </button>
@@ -969,10 +971,17 @@ function PointsTab({ item, c, lang, busy, save, act, onChanged, goTo }: Ctx) {
   const deletePointFn = useServerFn(deleteCaPoint);
   const redoFn = useServerFn(redoCaVisual);
   const checkFn = useServerFn(setCaFactChecked);
-  const inVisual = new Set([
-    ...(c.visual ? (c.visual_covers ?? []) : []),
-    ...(c.visual2 ? (c.visual2_covers ?? []) : []),
-  ]);
+  const inVisual = new Set(storyVisuals(c).flatMap((v) => v.covers));
+  // Points ticked to make a visual from.
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [making, setMaking] = useState(false);
+  const pick = (i: number, on: boolean) =>
+    setPicked((cur) => {
+      const next = new Set(cur);
+      if (on) next.add(i);
+      else next.delete(i);
+      return next;
+    });
   // A deleted key point is hidden at once and removed (with its fact) after a
   // few seconds, unless undone. Pending deletes are sent when the tab closes.
   const [hidden, setHidden] = useState<Set<string>>(new Set());
@@ -1056,6 +1065,48 @@ function PointsTab({ item, c, lang, busy, save, act, onChanged, goTo }: Ctx) {
         </Button>
       }
     >
+      {c.points.length >= 2 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-muted/40 px-2.5 py-2 text-xs text-muted-foreground">
+          {picked.size ? (
+            <>
+              <span className="font-medium text-foreground">{picked.size} picked</span>
+              <Button
+                size="sm"
+                className="h-7"
+                disabled={busy || picked.size < 2}
+                onClick={() => setMaking(true)}
+              >
+                <BarChart3 className="mr-1 h-3.5 w-3.5" /> Make a visual from these
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7"
+                onClick={() => setPicked(new Set())}
+              >
+                Clear
+              </Button>
+              {picked.size < 2 && <span>Pick at least two.</span>}
+            </>
+          ) : (
+            <span>
+              Tick two or more points to show them as a visual (they then leave the text).
+            </span>
+          )}
+        </div>
+      )}
+      {making && (
+        <PickedPointsVisual
+          item={item}
+          content={c}
+          facts={[...picked].sort((a, b) => a - b)}
+          onClose={() => setMaking(false)}
+          onSave={async (patch) => {
+            await save(patch);
+            setPicked(new Set());
+          }}
+        />
+      )}
       <ul className="space-y-2">
         {c.points.map((p, i) => {
           const f = item.facts[i];
@@ -1065,6 +1116,16 @@ function PointsTab({ item, c, lang, busy, save, act, onChanged, goTo }: Ctx) {
               key={`${i}-${f?.text ?? ""}`}
               className={`rounded-xl border p-2 ${f && !f.verified ? "border-amber-500/50 bg-amber-500/5" : "border-border"}`}
             >
+              {f && (
+                <label className="mb-1 flex w-fit items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <Checkbox
+                    checked={picked.has(i)}
+                    onCheckedChange={(on) => pick(i, on === true)}
+                    aria-label={`Pick point ${i + 1} for a visual`}
+                  />
+                  {inVisual.has(i) ? "In a visual" : "Pick for a visual"}
+                </label>
+              )}
               <BiLine
                 value={p}
                 lang={lang}
