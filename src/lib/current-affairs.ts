@@ -247,7 +247,14 @@ export type RawItem = {
   facts: CaFact[];
   // The static textbook concept behind the story, as a short search phrase.
   concept: string | null;
+  // The news event in a few fixed English words (place · scheme or body ·
+  // what happened), the same for every source on it: finds the same story
+  // told from another angle or in another language.
+  key: string | null;
 };
+
+// What the extraction prompt asks for as the story's event key.
+const KEY_FIELD = `"key": the news event in 4 to 12 English words as "place · main subject's official name · what happened" (e.g. "Rajasthan · Mukhyamantri Jal Swavlamban Abhiyan 3.0 · launch", "India · RBI monetary policy · repo rate unchanged", "Jaipur · Rajasthan High Court · ruling on panchayat polls"); every report on the same event must get the same key whatever its angle, so name the scheme, body, person or law, never the angle`;
 
 // What the extraction prompt asks for as the story's static concept.
 const CONCEPT_FIELD = `"concept": the static textbook concept behind the story that an NCERT-level book explains, as a short search phrase naming it exactly (e.g. "ballistic missile", "Article 14 equality before law", "Article 368 amendment of the Constitution", "Ramsar Convention wetlands", "repo rate monetary policy"), or null when there is none (awards, appointments, sports results)`;
@@ -381,7 +388,7 @@ export function extractMessages(opts: {
 ${blueprintText()}
 Categories: "rajasthan" for anything about Rajasthan; "national" for India-wide polity, governance, schemes and judgments; "international"; "science" for science, technology, defence, space, health and environment; "economy"; "sports"; "misc" for awards, appointments, persons in news, important days, reports and indices that fit nowhere else; "editorial" only for editorials.
 Skip: advertisements, crime and accidents, purely local incidents, opinion without facts, market tips, entertainment.
-Reply with JSON only: [{"type": one story type id, "headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 as described above, "rajasthan": true if it concerns Rajasthan, ${CONCEPT_FIELD}, "facts": [{"slot": the slot id this fact fills, "text": one short fact in English, "quote": the exact words from the source that state this fact, copied character for character (5 to 30 words, in the source's language)}]}].
+Reply with JSON only: [{"type": one story type id, "headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 as described above, "rajasthan": true if it concerns Rajasthan, ${KEY_FIELD}, ${CONCEPT_FIELD}, "facts": [{"slot": the slot id this fact fills, "text": one short fact in English, "quote": the exact words from the source that state this fact, copied character for character (5 to 30 words, in the source's language)}]}].
 Every fact must fill one slot of its story's type; leave a slot out if the source doesn't state it, and drop any fact that fits no slot. Use only facts stated in the source and keep every number, name and date exactly. Reply [] if nothing is exam-relevant.`,
     },
     {
@@ -403,7 +410,7 @@ function editorialExtractMessages(opts: {
       role: "system",
       content: `You are the editorials editor of a current affairs magazine for RAS (Rajasthan Administrative Service) Mains aspirants. From the newspaper editorial text, return one item per editorial on an issue RPSC asks in RAS Mains.
 ${editorialBlueprintText()}
-Reply with JSON only: [{"type": "editorial", "headline": a short factual headline in English naming the issue (not the editorial's figurative title), "category": "editorial", "importance": 2 or 3, "rajasthan": true if it concerns Rajasthan, ${CONCEPT_FIELD}, "facts": [{"slot": the slot id this fact fills, "text": one short point in English, "quote": the exact words from the source that state it, copied character for character (5 to 30 words, in the source's language)}]}].
+Reply with JSON only: [{"type": "editorial", "headline": a short factual headline in English naming the issue (not the editorial's figurative title), "category": "editorial", "importance": 2 or 3, "rajasthan": true if it concerns Rajasthan, ${KEY_FIELD}, ${CONCEPT_FIELD}, "facts": [{"slot": the slot id this fact fills, "text": one short point in English, "quote": the exact words from the source that state it, copied character for character (5 to 30 words, in the source's language)}]}].
 Keep the editorial's own reasoning but drop rhetoric, quotes of politicians and vague lines. Use only what the editorial states, keeping every number, name and date exactly. Reply [] if no editorial is on an exam issue.`,
     },
     {
@@ -447,6 +454,7 @@ export function parseExtracted(raw: string, source: string, sourceId: string): R
         rajasthan: o.rajasthan === true,
         facts,
         concept: str(o.concept, 160) || null,
+        key: str(o.key, 160) || null,
       };
     })
     .filter((i) => i.headline && i.facts.length > 0);

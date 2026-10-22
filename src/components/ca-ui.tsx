@@ -86,6 +86,7 @@ export function BulkBar({
   noun,
   busy,
   onDelete,
+  actions,
 }: {
   ids: string[];
   chosen: Set<string>;
@@ -93,6 +94,8 @@ export function BulkBar({
   noun: string;
   busy: boolean;
   onDelete: (ids: string[], all: boolean) => void;
+  // More for the chosen ones, beside Delete.
+  actions?: React.ReactNode;
 }) {
   const all = ids.length > 0 && ids.every((id) => chosen.has(id));
   return (
@@ -108,6 +111,7 @@ export function BulkBar({
       {chosen.size > 0 && (
         <>
           <span className="text-muted-foreground">{chosen.size} selected</span>
+          {actions}
           <Button
             size="sm"
             variant="outline"

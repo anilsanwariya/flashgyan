@@ -265,6 +265,28 @@ async function nextStep(run: CaRun): Promise<string | "wait" | null> {
     return `${ok ? "read" : "couldn't read"} “${src.title.slice(0, 60)}”`;
   }
 
+  // 5b) Once every source is read: the whole day's duplicate check, before
+  // any story is written (merged stories are written once).
+  if (!(parsing ?? []).length) {
+    const key = `ca_dupcheck:${run.issue_date}`;
+    const { data: last } = await from("bot_settings").select("value").eq("key", key).maybeSingle();
+    if ((last as { value?: { run?: string } } | null)?.value?.run !== run.id) {
+      const r = await CA.mergeDayDuplicates(run.issue_date).catch((e: unknown) => {
+        console.error("duplicate check:", e);
+        return null;
+      });
+      await from("bot_settings").upsert({
+        key,
+        value: { run: run.id, at: now() },
+        updated_at: now(),
+      } as never);
+      if (r)
+        return r.removed || r.suggestions
+          ? `merged ${r.removed} duplicate stories${r.suggestions ? `; ${r.suggestions} to check` : ""}`
+          : "no duplicate stories";
+    }
+  }
+
   // 6) Write the magazine text.
   const { data: items } = await from("ca_items")
     .select("id,headline")
