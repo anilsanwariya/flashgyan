@@ -3,7 +3,7 @@
 // the daily stories with subsections as topics recur, and keeps adding
 // stories until the magazine is marked final. Its stories are copies, edited
 // on the same story page as the daily ones without changing the archive.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,19 +28,24 @@ import {
   deleteCaMag,
   fillCaMag,
   getCaMag,
+  joinCaMagStories,
   listCaMags,
   placeCaMagStories,
   previewCaMag,
   saveCaMagSections,
   setCaMagStatus,
+  splitCaMagTopic,
+  takeOutCaMagStory,
   updateCaMag,
+  updateCaMagFromDaily,
+  writeCaMagTopic,
   type MagItem,
 } from "@/lib/ca-mags.functions";
 import { enrichCaItem, updateCaItem, type CaItem } from "@/lib/current-affairs.functions";
 import { OTHER_SECTION, magPeriod, type CustomMag, type MagSection } from "@/lib/ca-mags";
 import { formatDate, istDate } from "@/lib/current-affairs";
 import { StoryEditor } from "@/components/ca-story-editor";
-import { useStoryJobs } from "@/components/ca-story-jobs";
+import { JobBar, useStoryJobs, type StoryJob } from "@/components/ca-story-jobs";
 import type { Lang } from "@/components/ca-story-review";
 import { Badge, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
@@ -84,6 +89,30 @@ export function CustomMagazines() {
     <MagazineList onOpen={setOpen} />
   );
 }
+
+// What a magazine still has to do, in words (empty when nothing).
+function workLeft(d: { mag: CustomMag; items: MagItem[]; checked: number; total: number }): string {
+  if (d.mag.status !== "growing") return "";
+  if (d.checked < d.total) return `Sorting stories in: ${d.checked} of ${d.total} checked`;
+  const toJoin = d.items.filter(
+    (i) => i.mag_grouped === false && !i.mag_parent && !i.mag_combined && i.status === "included",
+  ).length;
+  if (toJoin) return `Looking for stories on the same topic: ${toJoin} to check`;
+  const toWrite = d.items.filter((i) => i.mag_combined && i.needs_enrich && !i.enrich_error).length;
+  if (toWrite) return `Writing combined articles: ${toWrite} to write`;
+  return "";
+}
+
+// The combined articles' actions, for the story rows.
+type TopicActions = {
+  joined: Map<string, MagItem[]>;
+  job: (id: string) => StoryJob | undefined;
+  write: (id: string, done: string) => Promise<boolean>;
+  split: (id: string) => Promise<void>;
+  takeOut: (id: string) => Promise<void>;
+  update: (id: string) => Promise<void>;
+};
+const TopicCtx = createContext<TopicActions | null>(null);
 
 // ====================== The list ======================
 
@@ -268,7 +297,7 @@ function MagazineView({ id, onBack }: { id: string; onBack: () => void }) {
     queryFn: () => getFn({ data: { id } }),
     refetchInterval: (query) => {
       const d = query.state.data;
-      return d && d.mag.status === "growing" && d.checked < d.total ? 20_000 : false;
+      return d && d.mag.status === "growing" && workLeft(d) ? 20_000 : false;
     },
   });
   const refresh = () =>
@@ -277,6 +306,31 @@ function MagazineView({ id, onBack }: { id: string; onBack: () => void }) {
       qc.invalidateQueries({ queryKey: ["caMags"] }),
     ]);
   const jobs = useStoryJobs(() => void refresh());
+  const joinFn = useServerFn(joinCaMagStories);
+  const writeTopicFn = useServerFn(writeCaMagTopic);
+  const splitFn = useServerFn(splitCaMagTopic);
+  const takeOutFn = useServerFn(takeOutCaMagStory);
+  const syncFn = useServerFn(updateCaMagFromDaily);
+  const once = async (fn: () => Promise<unknown>, done: string) => {
+    try {
+      await fn();
+      toast.success(done);
+    } catch (e) {
+      toast.error(errorText(e, "Something went wrong"));
+    } finally {
+      await refresh();
+    }
+  };
+  const topic: TopicActions = {
+    joined: new Map(),
+    job: (itemId) => jobs.jobs.get(itemId),
+    write: (itemId, done) =>
+      jobs.run(itemId, "write", () => writeTopicFn({ data: { id: itemId } }), done),
+    split: (itemId) => once(() => splitFn({ data: { id: itemId } }), "Taken apart"),
+    takeOut: (itemId) => once(() => takeOutFn({ data: { id: itemId } }), "Taken out"),
+    update: (itemId) =>
+      once(() => syncFn({ data: { id: itemId } }), "Updated from the daily story"),
+  };
   const [busy, setBusy] = useState("");
   const [driving, setDriving] = useState(false);
   const stop = useRef(false);
@@ -303,10 +357,18 @@ function MagazineView({ id, onBack }: { id: string; onBack: () => void }) {
       ? [...list, OTHER_SECTION]
       : list;
   }, [mag, items]);
+  // Stories joined into a combined article show under it, not on their own.
+  const top = useMemo(() => items.filter((i) => !i.mag_parent), [items]);
+  const joined = useMemo(() => {
+    const m = new Map<string, MagItem[]>();
+    for (const i of items)
+      if (i.mag_parent) m.set(i.mag_parent, [...(m.get(i.mag_parent) ?? []), i]);
+    return m;
+  }, [items]);
   const groups = useMemo<Group[]>(
     () =>
       sections.map((section) => {
-        const own = items.filter((i) => i.mag_section === section.id);
+        const own = top.filter((i) => i.mag_section === section.id);
         return {
           section,
           loose: own.filter((i) => !i.mag_sub || !section.subs.some((x) => x.id === i.mag_sub)),
@@ -316,7 +378,7 @@ function MagazineView({ id, onBack }: { id: string; onBack: () => void }) {
           })),
         };
       }),
-    [sections, items],
+    [sections, top],
   );
   // The story page's arrows go through the stories in print order.
   const ordered = useMemo(
@@ -367,8 +429,10 @@ function MagazineView({ id, onBack }: { id: string; onBack: () => void }) {
       </div>
     );
 
-  const included = items.filter((i) => i.status === "included").length;
+  // As printed: a combined article once, not the stories in it.
+  const included = top.filter((i) => i.status === "included").length;
   const sorting = mag.status === "growing" && data!.checked < data!.total;
+  const work = workLeft(data!);
   const target = (value: string) => {
     const [section, sub] = value.split("|");
     return { section, sub: sub || null };
@@ -504,12 +568,14 @@ function MagazineView({ id, onBack }: { id: string; onBack: () => void }) {
         {mag.status === "growing" && (
           <div className="space-y-1.5">
             <div className="flex flex-wrap items-center gap-2 text-sm">
-              <span className={sorting ? "text-primary" : "text-muted-foreground"}>
+              <span className={work ? "text-primary" : "text-muted-foreground"}>
                 {sorting
                   ? `Sorting stories in: ${data!.checked} of ${data!.total} checked`
-                  : `All ${data!.total} stories of the period checked; new ones are added as they come.`}
+                  : work
+                    ? work
+                    : `All ${data!.total} stories of the period checked; new ones are added as they come.`}
               </span>
-              {sorting && !driving && (
+              {!!work && !driving && (
                 <Button size="sm" variant="outline" onClick={() => void drive()}>
                   <RefreshCw className="mr-1 h-4 w-4" /> Speed up
                 </Button>
@@ -596,6 +662,33 @@ function MagazineView({ id, onBack }: { id: string; onBack: () => void }) {
               Put back
             </Button>
           )}
+          {chosenRows.filter((r) => !r.mag_parent).length >= 2 && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!!busy}
+              onClick={() =>
+                void (async () => {
+                  setBusy("join");
+                  try {
+                    const r = await joinFn({
+                      data: { id, ids: chosenRows.filter((x) => !x.mag_parent).map((x) => x.id) },
+                    });
+                    setChosen(new Set());
+                    toast.success("Joined into one article: writing it");
+                    await refresh();
+                    void topic.write(r.combined, "Combined article written");
+                  } catch (e) {
+                    toast.error(errorText(e, "Couldn't join them"));
+                  } finally {
+                    setBusy("");
+                  }
+                })()
+              }
+            >
+              Join into one
+            </Button>
+          )}
           <Button size="sm" variant="ghost" onClick={() => setChosen(new Set())}>
             Clear
           </Button>
@@ -610,27 +703,29 @@ function MagazineView({ id, onBack }: { id: string; onBack: () => void }) {
         </p>
       ) : (
         groups.map((g) => (
-          <SectionCard
-            key={g.section.id}
-            mag={mag}
-            group={g}
-            folded={folded.has(g.section.id)}
-            onFold={() => {
-              const next = new Set(folded);
-              if (next.has(g.section.id)) next.delete(g.section.id);
-              else next.add(g.section.id);
-              setFolded(next);
-            }}
-            chosen={chosen}
-            onChoose={(itemId, on) => {
-              const next = new Set(chosen);
-              if (on) next.add(itemId);
-              else next.delete(itemId);
-              setChosen(next);
-            }}
-            onOpen={setEditing}
-            onChanged={refresh}
-          />
+          <TopicCtx.Provider key={g.section.id} value={{ ...topic, joined }}>
+            <SectionCard
+              key={g.section.id}
+              mag={mag}
+              group={g}
+              folded={folded.has(g.section.id)}
+              onFold={() => {
+                const next = new Set(folded);
+                if (next.has(g.section.id)) next.delete(g.section.id);
+                else next.add(g.section.id);
+                setFolded(next);
+              }}
+              chosen={chosen}
+              onChoose={(itemId, on) => {
+                const next = new Set(chosen);
+                if (on) next.add(itemId);
+                else next.delete(itemId);
+                setChosen(next);
+              }}
+              onOpen={setEditing}
+              onChanged={refresh}
+            />
+          </TopicCtx.Provider>
         ))
       )}
 
@@ -665,7 +760,10 @@ function MagazineView({ id, onBack }: { id: string; onBack: () => void }) {
               jobs.run(
                 it.id,
                 "write",
-                () => enrichFn({ data: { id: it.id } }),
+                () =>
+                  (it as MagItem).mag_combined
+                    ? writeTopicFn({ data: { id: it.id } })
+                    : enrichFn({ data: { id: it.id } }),
                 "Story written again",
               ),
             job: (it) => jobs.jobs.get(it.id),
@@ -892,37 +990,153 @@ function StoryRows({
   onChoose: (id: string, on: boolean) => void;
   onOpen: (id: string) => void;
 }) {
+  const t = useContext(TopicCtx)!;
+  const [open, setOpen] = useState<Set<string>>(new Set());
   return (
     <ul className="divide-y divide-border rounded-xl border border-border">
       {items.map((i) => {
         const out = i.status === "dropped";
+        const members = t.joined.get(i.id) ?? [];
+        const dates = members.map((m) => m.mag_date).sort();
+        const changedMembers = members.filter((m) => m.changed).length;
+        const job = t.job(i.id);
+        const shown = open.has(i.id);
         return (
           <li
             key={i.id}
             data-story={i.content?.headline.en || i.headline}
-            className={`flex items-start gap-2 px-2.5 py-2 ${out ? "opacity-60" : ""}`}
+            className={out ? "opacity-60" : ""}
           >
-            <Checkbox
-              className="mt-1"
-              checked={chosen.has(i.id)}
-              onCheckedChange={(on) => onChoose(i.id, on === true)}
-              aria-label={`Select ${i.content?.headline.en || i.headline}`}
-            />
-            <button type="button" onClick={() => onOpen(i.id)} className="min-w-0 flex-1 text-left">
-              <span className="block text-sm font-medium" lang="hi">
-                {i.content?.headline.hi || i.headline}
-              </span>
-              <span className="block text-xs text-muted-foreground">
-                {i.content?.headline.en ? `${i.content.headline.en} · ` : ""}
-                {formatDate(i.mag_date, "en")}
-              </span>
-            </button>
-            <div className="flex shrink-0 flex-wrap gap-1">
-              {out && <Badge tone="bad">Left out</Badge>}
-              {i.mag_pinned && (
-                <Badge title="You placed it; the AI won't move it">Placed by you</Badge>
-              )}
+            <div className="flex flex-wrap items-start gap-2 px-2.5 py-2 sm:flex-nowrap">
+              <Checkbox
+                className="mt-1"
+                checked={chosen.has(i.id)}
+                onCheckedChange={(on) => onChoose(i.id, on === true)}
+                aria-label={`Select ${i.content?.headline.en || i.headline}`}
+              />
+              <button
+                type="button"
+                onClick={() => onOpen(i.id)}
+                className="min-w-0 flex-1 text-left"
+              >
+                <span className="block text-sm font-medium" lang="hi">
+                  {i.content?.headline.hi || i.headline}
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  {i.content?.headline.en ? `${i.content.headline.en} · ` : ""}
+                  {i.mag_combined && dates.length
+                    ? `${formatDate(dates[0], "en")} – ${formatDate(dates[dates.length - 1], "en")}`
+                    : formatDate(i.mag_date, "en")}
+                </span>
+              </button>
+              <div className="flex w-full flex-wrap items-center gap-1 pl-6 sm:w-auto sm:max-w-[55%] sm:shrink-0 sm:justify-end sm:pl-0">
+                {i.mag_combined && (
+                  <Badge tone="primary" title="One article written from these daily stories">
+                    Combined · {members.length} stories
+                  </Badge>
+                )}
+                {i.mag_combined && !i.content && !job && (
+                  <Badge tone="warn">Waiting to be written</Badge>
+                )}
+                {out && <Badge tone="bad">Left out</Badge>}
+                {i.mag_pinned && (
+                  <Badge title="You placed it; the AI won't move it">Placed by you</Badge>
+                )}
+                {!!i.mag_pending && !job && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7"
+                    onClick={() => void t.write(i.id, "New stories added")}
+                    title="Your text is kept in the story's history"
+                  >
+                    {i.mag_pending} new {i.mag_pending === 1 ? "story" : "stories"}: add
+                  </Button>
+                )}
+                {changedMembers > 0 && !job && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7"
+                    onClick={() => void t.write(i.id, "Written again from the changed stories")}
+                  >
+                    {changedMembers} daily {changedMembers === 1 ? "story" : "stories"} changed:
+                    write again
+                  </Button>
+                )}
+                {i.changed && !i.mag_combined && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7"
+                    onClick={() => void t.update(i.id)}
+                    title="Its text here is kept in the story's history"
+                  >
+                    Daily story changed: update
+                  </Button>
+                )}
+                {i.mag_combined && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7"
+                    aria-expanded={shown}
+                    onClick={() => {
+                      const next = new Set(open);
+                      if (shown) next.delete(i.id);
+                      else next.add(i.id);
+                      setOpen(next);
+                    }}
+                  >
+                    {shown ? "Hide stories" : "Show stories"}
+                  </Button>
+                )}
+              </div>
             </div>
+            {job && <JobBar job={job} className="mx-2.5 mb-2" />}
+            {i.mag_combined && shown && (
+              <div
+                className="mx-2.5 mb-2 space-y-1 rounded-lg bg-muted/40 p-2"
+                aria-label="Joined stories"
+              >
+                {members.map((m) => (
+                  <div
+                    key={m.id}
+                    data-joined={m.headline}
+                    className="flex flex-wrap items-center gap-2 text-xs"
+                  >
+                    <span className="w-24 shrink-0 text-muted-foreground">
+                      {formatDate(m.mag_date, "en")}
+                    </span>
+                    <span className="min-w-0 flex-1">{m.content?.headline.en || m.headline}</span>
+                    {m.changed && <Badge tone="warn">Changed</Badge>}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => void t.takeOut(m.id)}
+                    >
+                      Take out
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs"
+                  onClick={() => {
+                    if (
+                      confirm(
+                        "Take this combined article apart? Its stories print on their own again.",
+                      )
+                    )
+                      void t.split(i.id);
+                  }}
+                >
+                  Take apart
+                </Button>
+              </div>
+            )}
           </li>
         );
       })}

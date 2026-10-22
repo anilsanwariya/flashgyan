@@ -271,3 +271,221 @@ export function magPeriod(from: string, to: string, lang: "en" | "hi"): string {
   if (fy === ty && fm === tm) return `${fd} – ${td} ${months[tm - 1]} ${ty}`;
   return `${fd} ${months[fm - 1]}${fy === ty ? "" : ` ${fy}`} – ${td} ${months[tm - 1]} ${ty}`;
 }
+
+// ---------- Joining stories on one topic (step 3) ----------
+
+// Stories this close (by meaning) may be on the same topic; the AI decides.
+export const TOPIC_LIKENESS = 0.6;
+// Most stories the AI looks at together as one possible topic.
+export const MAX_CLUSTER = 15;
+// Most facts (and so key points) a combined article keeps.
+export const COMBINED_FACTS = 14;
+
+// Groups of stories close enough to be on one topic, each containing at
+// least one of `fresh` (indexes into `vecs`): each fresh story with its
+// closest neighbours, joined when they overlap. At most MAX_CLUSTER each.
+export function topicClusters(
+  vecs: (number[] | null)[],
+  fresh: number[],
+  likeness: (a: number[], b: number[]) => number,
+  threshold = TOPIC_LIKENESS,
+): number[][] {
+  const parent = vecs.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const touched = new Set<number>();
+  for (const i of fresh) {
+    const v = vecs[i];
+    if (!v) continue;
+    const near = vecs
+      .map((w, j) => ({ j, s: j !== i && w ? likeness(v, w) : -1 }))
+      .filter((x) => x.s >= threshold)
+      .sort((a, b) => b.s - a.s)
+      .slice(0, 6);
+    for (const { j } of near) {
+      parent[find(j)] = find(i);
+      touched.add(i);
+      touched.add(j);
+    }
+  }
+  const groups = new Map<number, number[]>();
+  for (const i of touched) groups.set(find(i), [...(groups.get(find(i)) ?? []), i]);
+  return [...groups.values()]
+    .filter((g) => g.length >= 2)
+    .map((g) => {
+      if (g.length <= MAX_CLUSTER) return g.sort((a, b) => a - b);
+      // Too many: the fresh ones first, then the rest in order.
+      const f = g.filter((i) => fresh.includes(i));
+      return [...f, ...g.filter((i) => !fresh.includes(i))]
+        .slice(0, MAX_CLUSTER)
+        .sort((a, b) => a - b);
+    });
+}
+
+export type TopicStory = { headline: string; date: string; combined: boolean };
+
+export function groupMessages(opts: {
+  title: string;
+  theme: string;
+  clusters: TopicStory[][];
+}): ChatMessage[] {
+  let n = 0;
+  const list = opts.clusters
+    .map(
+      (c, ci) =>
+        `Cluster ${ci + 1}:\n${c
+          .map((s) => `${++n}. [${s.date}]${s.combined ? " [COMBINED ARTICLE]" : ""} ${s.headline}`)
+          .join("\n")}`,
+    )
+    .join("\n\n");
+  return [
+    {
+      role: "system",
+      content: `You edit a special current affairs magazine for Rajasthan competitive exam aspirants that covers several months. Stories in it that follow ONE topic over time are printed as one combined article: a mission's stages (approval, launch, landing), a scheme's launch and later phases, one tournament's matches and result, one summit's days, one bill's passage. Each cluster below lists stories that may be on one topic.
+RULES: Within a cluster, give each group of 2 or more stories that are the same topic followed over time. Never join stories that only share a broad subject (two different missiles, two different schemes, two different tournaments), and never join across clusters. A [COMBINED ARTICLE] already joins earlier stories: put new stories of its topic in its group. Give each new group a short title naming the topic (at most 8 words) in English and in natural standard Hindi as used in RPSC exams. Stories in no group stay on their own.
+Reply with JSON only: {"groups": [{"stories": [story numbers], "title": {"en": "...", "hi": "..."}}]}`,
+    },
+    {
+      role: "user",
+      content: `Magazine: ${opts.title}\nTheme: ${opts.theme}\n\n${list}`,
+    },
+  ];
+}
+
+// The AI's groups as indexes into the flattened stories: 2 or more stories
+// of one cluster each, every story in one group at most.
+export function parseGroups(
+  raw: string,
+  clusterOf: number[],
+): { stories: number[]; title: Bi | null }[] {
+  const o = jsonOf(raw) as { groups?: unknown } | null;
+  if (!o || !Array.isArray(o.groups)) return [];
+  const used = new Set<number>();
+  const out: { stories: number[]; title: Bi | null }[] = [];
+  for (const g of o.groups as Record<string, unknown>[]) {
+    const nums = (Array.isArray(g?.stories) ? g.stories : [])
+      .map((x) => Number(x) - 1)
+      .filter((i) => Number.isInteger(i) && i >= 0 && i < clusterOf.length && !used.has(i));
+    const unique = [...new Set(nums)];
+    if (unique.length < 2) continue;
+    // One cluster only: the first story's.
+    const own = unique.filter((i) => clusterOf[i] === clusterOf[unique[0]]);
+    if (own.length < 2) continue;
+    for (const i of own) used.add(i);
+    const t = g.title as Record<string, unknown> | null | undefined;
+    const en = clean(t?.en, 120);
+    out.push({ stories: own, title: en ? { en, hi: clean(t?.hi, 120) || en } : null });
+  }
+  return out;
+}
+
+// The facts of a combined article: newest first so the latest figure of
+// each kind wins, at most COMBINED_FACTS, then in date order.
+export function combinedFacts<F extends { text: string; slot?: string | null }>(
+  stories: { date: string; facts: F[] }[],
+  merge: (base: F[], extra: F[], max: number) => F[],
+): F[] {
+  const newest = [...stories].sort((a, b) => b.date.localeCompare(a.date));
+  let kept: F[] = [];
+  for (const s of newest) kept = merge(kept, s.facts, COMBINED_FACTS);
+  const dateOf = new Map<F, string>();
+  for (const s of stories) for (const f of s.facts) dateOf.set(f, s.date);
+  return kept
+    .map((f, i) => ({ f, i, d: dateOf.get(f) ?? "" }))
+    .sort((a, b) => a.d.localeCompare(b.d) || a.i - b.i)
+    .map((x) => x.f);
+}
+
+// The writing note for a combined article.
+export function combinedNote(count: number, from: string, to: string): string {
+  return `This is ONE combined article joining ${count} daily reports on the same topic from ${from} to ${to}. Write it as the whole development in order (what happened first, what followed, where it stands now); where a later report changed a figure or status, give the latest one.`;
+}
+
+// ---------- Re-sorting a section's subsections ----------
+
+export function reorgMessages(opts: {
+  title: string;
+  section: { en: string };
+  subs: { en: string }[];
+  stories: { headline: string; sub: number | null; pinned: boolean }[];
+  glossary?: GlossaryEntry[];
+}): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: `You organise one section of a special current affairs magazine for Rajasthan competitive exam aspirants into subsections, now that more stories have arrived.
+RULES: Keep a subsection that holds 2 or more stories on one recurring topic (rename it only if the name no longer fits). Create a subsection for 3 or more stories on one recurring topic (a sport, a mission or programme, a scheme, a body). Drop a subsection left with fewer than 2 stories (its stories go to no subsection). At most ${MAX_SUBS} subsections; names at most 4 words, in English and natural standard Hindi as used in RPSC exams. Stories marked [PLACED] stay where they are: keep their subsection. Every story goes into at most one subsection; stories in none stay directly in the section.${hindiGuide(opts.glossary)}
+Reply with JSON only: {"subs": [{"keep": existing subsection number or null, "en": "...", "hi": "...", "stories": [story numbers]}]}`,
+    },
+    {
+      role: "user",
+      content: `Magazine: ${opts.title}\nSection: ${opts.section.en}\n\nSubsections now:\n${
+        opts.subs.length ? opts.subs.map((s, i) => `${i + 1}. ${s.en}`).join("\n") : "(none)"
+      }\n\nStories (with their subsection now):\n${opts.stories
+        .map(
+          (s, i) =>
+            `${i + 1}. ${s.headline}${s.sub !== null ? ` — in ${s.sub + 1}` : ""}${s.pinned ? " [PLACED]" : ""}`,
+        )
+        .join("\n")}`,
+    },
+  ];
+}
+
+// The section's new subsections (existing ids kept, new ones made) and
+// each story's subsection (index into the new list, or null). Placed
+// stories keep theirs. Null when the reply can't be read.
+export function parseReorg(
+  raw: string,
+  section: MagSection,
+  stories: { sub: string | null; pinned: boolean }[],
+): { subs: MagSub[]; place: (string | null)[] } | null {
+  const o = jsonOf(raw) as { subs?: unknown } | null;
+  if (!o || !Array.isArray(o.subs)) return null;
+  const taken = new Set(section.subs.map((x) => x.id.split("/").pop()!));
+  const subs: MagSub[] = [];
+  const place: (string | null)[] = stories.map((s) => (s.pinned ? s.sub : null));
+  const used = new Set<number>();
+  for (const g of (o.subs as Record<string, unknown>[]).slice(0, MAX_SUBS)) {
+    const keep = Number(g?.keep) - 1;
+    const old = Number.isInteger(keep) ? section.subs[keep] : undefined;
+    const en = clean(g?.en) || old?.en || "";
+    if (!en) continue;
+    const sub: MagSub = old
+      ? { id: old.id, en, hi: clean(g.hi) || old.hi }
+      : { id: `${section.id}/${slugId(en, taken)}`, en, hi: clean(g.hi) || en };
+    if (subs.some((s) => s.id === sub.id)) continue;
+    subs.push(sub);
+    for (const n of Array.isArray(g.stories) ? g.stories : []) {
+      const i = Number(n) - 1;
+      if (!Number.isInteger(i) || i < 0 || i >= stories.length || used.has(i) || stories[i].pinned)
+        continue;
+      used.add(i);
+      place[i] = sub.id;
+    }
+  }
+  // A subsection holding a placed story stays.
+  for (const s of stories)
+    if (s.pinned && s.sub && !subs.some((x) => x.id === s.sub)) {
+      const old = section.subs.find((x) => x.id === s.sub);
+      if (old) subs.push(old);
+    }
+  // Subsections left empty go.
+  const filled = subs.filter((x) => place.includes(x.id));
+  return {
+    subs: filled,
+    place: place.map((p) => (p && filled.some((x) => x.id === p) ? p : null)),
+  };
+}
+
+// A short fingerprint of a story's text, to notice changes.
+export function storySig(facts: { text: string }[], content: unknown): string {
+  const c = content as { headline?: Bi; summary?: Bi; points?: Bi[] } | null;
+  const s = JSON.stringify([
+    facts.map((f) => f.text),
+    c?.headline ?? null,
+    c?.summary ?? null,
+    c?.points ?? null,
+  ]);
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return `${s.length}:${(h >>> 0).toString(36)}`;
+}
