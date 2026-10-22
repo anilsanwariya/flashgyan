@@ -1372,6 +1372,37 @@ export const saveCaFeature = createServerFn({ method: "POST" })
     return (await server()).saveFeature(data.month, data.feature);
   });
 
+// Groups the duplicate check wasn't sure about, waiting for the editor.
+export const getCaDupeSuggestions = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ date: dateSchema }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).getDupeSuggestions(data.date);
+  });
+
+// Merges the chosen stories into one (written again by the caller).
+export const mergeCaStories = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ date: dateSchema, ids: z.array(z.string().uuid()).min(2).max(20) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return { kept: await (await server()).mergeStories(data.date, data.ids) };
+  });
+
+export const keepCaStoriesApart = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ date: dateSchema, ids: z.array(z.string().uuid()).min(2).max(20) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).keepStoriesApart(data.date, data.ids);
+    return { ok: true };
+  });
+
 export const mergeCaDuplicates = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ date: dateSchema }).parse(d))

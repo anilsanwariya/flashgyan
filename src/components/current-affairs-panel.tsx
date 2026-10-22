@@ -539,6 +539,9 @@ function DailyPanel() {
         setWork(`Saving “${next.title}”…`);
         const src = await addFn({ data: next });
         await readSource(src);
+        // After the last source waiting: the whole day's duplicate check,
+        // before the stories are written.
+        if (pending.length <= 1) await checkDuplicates(next.issue_date);
         await writeItems(next.issue_date);
       } catch (e) {
         toast.error(`${next.title}: ${errorText(e, "failed")}`);
@@ -564,6 +567,25 @@ function DailyPanel() {
     toast.success(
       `“${src.title}”: ${created} new item${created === 1 ? "" : "s"}${merged ? `, ${merged} added to existing stories` : ""}`,
     );
+  }
+
+  async function checkDuplicates(forDate: string) {
+    setWork("Looking for stories that are the same news…");
+    try {
+      const r = await mergeFn({ data: { date: forDate } });
+      if (r.removed)
+        toast.success(
+          `Merged ${r.removed + r.groups} stories that were the same news into ${r.groups}`,
+        );
+      if (r.suggestions)
+        toast.info(
+          `${r.suggestions} group${r.suggestions === 1 ? "" : "s"} of stories may be the same news: see “Possibly the same news”`,
+        );
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't check for duplicate stories"));
+    } finally {
+      qc.invalidateQueries({ queryKey: ["caDupes", forDate] });
+    }
   }
 
   async function writeItems(forDate: string) {
@@ -643,8 +665,13 @@ function DailyPanel() {
     try {
       setWork("Looking for stories that are the same news…");
       const r = await mergeFn({ data: { date } });
+      qc.invalidateQueries({ queryKey: ["caDupes", date] });
+      if (r.suggestions)
+        toast.info(
+          `${r.suggestions} group${r.suggestions === 1 ? "" : "s"} may be the same news: see “Possibly the same news”`,
+        );
       if (!r.removed) {
-        toast.success("No duplicate stories found");
+        if (!r.suggestions) toast.success("No duplicate stories found");
       } else {
         toast.success(
           `Merged ${r.removed + r.groups} stories into ${r.groups}. Writing the merged ${r.groups === 1 ? "story" : "stories"} again…`,
