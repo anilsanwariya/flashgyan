@@ -63,13 +63,15 @@ export const getCaMag = createServerFn({ method: "POST" })
     return (await server()).getMag(data.id);
   });
 
-// One batch of stories sorted in now (the page's "Speed up").
+// One unit of work now (the page's "Speed up"): stories sorted in, topics
+// joined, combined articles written or subsections re-sorted.
 export const fillCaMag = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id }).parse(d))
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    return { done: !(await (await server()).fillMag(data.id)) };
+    const step = await (await server()).stepMag(data.id);
+    return { done: !step, step };
   });
 
 export const updateCaMag = createServerFn({ method: "POST" })
@@ -161,4 +163,51 @@ export const previewCaMag = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return { html: (await (await server()).magHtml(data.id, data.lang)).html };
+  });
+
+// ---------- Combined articles ----------
+
+export const joinCaMagStories = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id, ids: z.array(id).min(2).max(50) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return { combined: await (await server()).joinStories(data.id, data.ids) };
+  });
+
+// Writes a combined article now (also adds the stories waiting for it).
+export const writeCaMagTopic = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).writeCombined(data.id);
+    return { ok: true };
+  });
+
+export const splitCaMagTopic = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).splitTopic(data.id);
+    return { ok: true };
+  });
+
+export const takeOutCaMagStory = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).takeOut(data.id);
+    return { ok: true };
+  });
+
+export const updateCaMagFromDaily = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).updateFromDaily(data.id);
+    return { ok: true };
   });

@@ -12,8 +12,17 @@ import {
   SORT_BATCH,
   biName,
   magPeriod,
+  COMBINED_FACTS,
+  combinedFacts,
+  combinedNote,
+  groupMessages,
   normalizeSections,
+  parseGroups,
   parsePlan,
+  parseReorg,
+  reorgMessages,
+  storySig,
+  topicClusters,
   parseSort,
   planMessages,
   sortMessages,
@@ -22,7 +31,8 @@ import {
 } from "@/lib/ca-mags";
 import { renderMagazine, type CustomLayout, type Lang } from "@/lib/current-affairs-html";
 import { fillerPages, normalizeIssueDesign } from "@/lib/ca-covers";
-import type { CaFact } from "@/lib/current-affairs";
+import { mergeFacts, type Bi, type CaFact } from "@/lib/current-affairs";
+import { cosine, parseVector } from "@/lib/ca-duplicates";
 import * as CA from "@/lib/current-affairs.server";
 import type { CaItem } from "@/lib/current-affairs.server";
 
@@ -55,7 +65,21 @@ export type MagItem = CaItem & {
   mag_sub: string | null;
   mag_pinned: boolean;
   origin_id: string | null;
+  // Step 3 (missing before its migration): the combined article a copy is
+  // joined into, whether this is one, stories waiting to be added to it,
+  // and whether the daily story changed since it was copied.
+  mag_parent?: string | null;
+  mag_combined?: boolean;
+  mag_pending?: number;
+  mag_grouped?: boolean;
+  changed?: boolean;
 };
+
+// The step 3 columns (combined articles); a database without them works as
+// before.
+const TOPIC_COLS = ",mag_parent,mag_combined,mag_grouped,mag_pending,mag_origin_sig";
+const missingTopics = (e: { message: string } | null) =>
+  !!e && /mag_parent|mag_combined|mag_grouped|mag_pending|mag_origin_sig|reorg_/.test(e.message);
 export type MagSummary = CustomMag & { stories: number; checked: number; total: number };
 
 const now = () => new Date().toISOString();
@@ -111,10 +135,17 @@ async function seenIds(magId: string): Promise<Set<string>> {
   return out;
 }
 
+// The magazine's stories as printed (a combined article counts once, not
+// the stories joined into it).
 async function countCopies(magId: string, status?: string): Promise<number> {
-  let q = from("ca_items").select("id", { count: "exact", head: true }).eq("magazine_id", magId);
-  if (status) q = q.eq("status", status);
-  const { count } = await q;
+  const q = (top: boolean) => {
+    let x = from("ca_items").select("id", { count: "exact", head: true }).eq("magazine_id", magId);
+    if (status) x = x.eq("status", status);
+    if (top) x = x.is("mag_parent", null);
+    return x;
+  };
+  let { count, error } = await q(true);
+  if (missingTopics(error)) ({ count, error } = await q(false));
   return count ?? 0;
 }
 
@@ -265,7 +296,15 @@ export async function fillMag(magId: string): Promise<{ checked: number; added: 
       position: (had ?? 0) + i,
     };
   });
-  if (copies.length) fail((await from("ca_items").insert(copies as never)).error);
+  if (copies.length) {
+    const signed = copies.map((c) => ({
+      ...c,
+      mag_origin_sig: storySig(((c as { facts?: CaFact[] }).facts ?? []) as CaFact[], c.content),
+    }));
+    let { error: iErr } = await from("ca_items").insert(signed as never);
+    if (missingTopics(iErr)) ({ error: iErr } = await from("ca_items").insert(copies as never));
+    fail(iErr);
+  }
   const fits = new Set(sorted.placed.map((p) => rows[p.index].id as string));
   fail(
     (
@@ -300,8 +339,8 @@ export async function magStep(): Promise<string | null> {
   fail(error);
   for (const m of (data ?? []) as { id: string; title_en: string }[]) {
     try {
-      const r = await fillMag(m.id);
-      if (r) return `“${m.title_en}”: checked ${r.checked} stories, added ${r.added}`;
+      const r = await stepMag(m.id);
+      if (r) return `“${m.title_en}”: ${r}`;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       await from("ca_mags")
@@ -313,6 +352,15 @@ export async function magStep(): Promise<string | null> {
   return null;
 }
 
+// One unit of work on a magazine: sort the next stories in, then join
+// stories on one topic, write combined articles, and re-sort subsections.
+// Null when there's nothing to do.
+export async function stepMag(id: string): Promise<string | null> {
+  const r = await fillMag(id);
+  if (r) return `checked ${r.checked} stories, added ${r.added}`;
+  return (await groupStep(id)) ?? (await writeStep(id)) ?? (await reorgStep(id));
+}
+
 // ---------- One magazine ----------
 
 export async function getMag(id: string): Promise<{
@@ -322,16 +370,34 @@ export async function getMag(id: string): Promise<{
   total: number;
 }> {
   const mag = await loadMag(id);
-  const { data, error } = await from("ca_items")
-    .select(ITEM_COLS)
-    .eq("magazine_id", id)
-    .order("mag_date")
-    .order("position");
+  const query = (cols: string) =>
+    from("ca_items").select(cols).eq("magazine_id", id).order("mag_date").order("position");
+  let { data, error } = await query(ITEM_COLS + TOPIC_COLS);
+  if (missingTopics(error)) ({ data, error } = await query(ITEM_COLS));
   fail(error);
   // Each copy works with the day its story came from.
-  const items = ((data ?? []) as unknown as MagItem[]).map((i) => ({
+  const rows = (data ?? []) as unknown as (MagItem & { mag_origin_sig?: string | null })[];
+  // Copies whose daily story changed since they were copied.
+  const signed = rows.filter((r) => r.origin_id && r.mag_origin_sig);
+  const origins = new Map<string, string>();
+  for (let i = 0; i < signed.length; i += 200) {
+    const { data: o } = await from("ca_items")
+      .select("id,facts,content")
+      .in(
+        "id",
+        signed.slice(i, i + 200).map((r) => r.origin_id!),
+      );
+    for (const r of (o ?? []) as Pick<CaItem, "id" | "facts" | "content">[])
+      origins.set(r.id, storySig(r.facts ?? [], r.content));
+  }
+  const items: MagItem[] = rows.map(({ mag_origin_sig, ...i }) => ({
     ...i,
     issue_date: i.mag_date,
+    changed:
+      !!mag_origin_sig &&
+      !!i.origin_id &&
+      origins.has(i.origin_id) &&
+      origins.get(i.origin_id) !== mag_origin_sig,
   }));
   const [seen, total] = await Promise.all([
     from("ca_mag_seen").select("item_id", { count: "exact", head: true }).eq("mag_id", id),
@@ -470,7 +536,8 @@ function layout(mag: CustomMag): CustomLayout {
 export async function magHtml(id: string, lang: Lang, fillers = 0) {
   const { mag, items } = await getMag(id);
   const settings = await CA.getMagazineSettings();
-  const included = items.filter((i) => i.status === "included" && i.content);
+  // Stories joined into a combined article print as that article.
+  const included = items.filter((i) => i.status === "included" && i.content && !i.mag_parent);
   const printed = await CA.toMagazineItems(included);
   const place = new Map(included.map((i) => [i.id, i]));
   const design = normalizeIssueDesign(mag.design ?? null);
@@ -524,4 +591,497 @@ export async function buildMagPdf(id: string): Promise<CustomMag> {
     .single();
   fail(error);
   return readMag(data);
+}
+
+// ---------- Combined articles (step 3) ----------
+
+type PoolRow = {
+  id: string;
+  headline: string;
+  ch: { en?: string; hi?: string } | null;
+  mag_date: string;
+  mag_section: string | null;
+  mag_sub: string | null;
+  mag_combined: boolean;
+  mag_grouped: boolean;
+  mag_pinned: boolean;
+  embedding: unknown;
+};
+
+const headlineOf = (r: Pick<PoolRow, "headline" | "ch">) => r.ch?.en || r.headline;
+
+// The magazine's stories that print on their own (not joined into another).
+async function topLevel(magId: string): Promise<PoolRow[] | null> {
+  const { data, error } = await from("ca_items")
+    .select(
+      "id,headline,ch:content->headline,mag_date,mag_section,mag_sub,mag_combined,mag_grouped,mag_pinned,embedding",
+    )
+    .eq("magazine_id", magId)
+    .eq("status", "included")
+    .is("mag_parent", null)
+    .order("mag_date");
+  if (missingTopics(error)) return null;
+  fail(error);
+  return (data ?? []) as unknown as PoolRow[];
+}
+
+// Whether the last change to a story was a hand edit (so writing it again
+// would replace the editor's text).
+async function editedByHand(id: string): Promise<boolean> {
+  const { data } = await from("ca_item_versions")
+    .select("reason")
+    .eq("item_id", id)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  return ((data ?? []) as { reason: string }[])[0]?.reason === "edit";
+}
+
+const most = (xs: (string | null)[]) => {
+  const n = new Map<string | null, number>();
+  for (const x of xs) n.set(x, (n.get(x) ?? 0) + 1);
+  return [...n.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+};
+
+// A combined article from these stories (their copies), waiting to be
+// written; the stories are joined into it.
+async function makeCombined(magId: string, ids: string[], title: Bi | null): Promise<string> {
+  const { data, error } = await from("ca_items").select("*").in("id", ids);
+  fail(error);
+  const rows = ((data ?? []) as Record<string, unknown>[]).sort((a, b) =>
+    String(a.mag_date).localeCompare(String(b.mag_date)),
+  );
+  if (rows.length < 2) throw new Error("Pick at least two stories to join.");
+  const latest = rows[rows.length - 1];
+  const facts = combinedFacts(
+    rows.map((r) => ({ date: String(r.mag_date), facts: (r.facts as CaFact[]) ?? [] })),
+    mergeFacts,
+  );
+  const { data: made, error: mErr } = await from("ca_items")
+    .insert({
+      magazine_id: magId,
+      issue_date: null,
+      mag_date: latest.mag_date,
+      category: latest.category,
+      headline: title?.en ?? latest.headline,
+      facts,
+      source_ids: [...new Set(rows.flatMap((r) => (r.source_ids as string[]) ?? []))],
+      importance: Math.max(...rows.map((r) => Number(r.importance) || 1)),
+      rajasthan: rows.some((r) => r.rajasthan),
+      concept: latest.concept ?? null,
+      embedding: latest.embedding ?? null,
+      content: null,
+      context_sources: [],
+      status: "included",
+      needs_enrich: true,
+      position: Math.min(...rows.map((r) => Number(r.position) || 0)),
+      mag_section: most(rows.map((r) => (r.mag_section as string | null) ?? null)),
+      mag_sub: most(rows.map((r) => (r.mag_sub as string | null) ?? null)),
+      mag_combined: true,
+      mag_grouped: true,
+    } as never)
+    .select("id")
+    .single();
+  fail(mErr);
+  const id = (made as unknown as { id: string }).id;
+  fail(
+    (
+      await from("ca_items")
+        .update({ mag_parent: id, mag_grouped: true } as never)
+        .in(
+          "id",
+          rows.map((r) => r.id as string),
+        )
+    ).error,
+  );
+  return id;
+}
+
+// Stories join an existing combined article: it is written again, unless
+// the editor changed its text by hand (then they wait to be added).
+async function joinInto(combinedId: string, ids: string[]) {
+  if (!ids.length) return;
+  fail(
+    (
+      await from("ca_items")
+        .update({ mag_parent: combinedId, mag_grouped: true } as never)
+        .in("id", ids)
+    ).error,
+  );
+  const { data } = await from("ca_items").select("mag_pending").eq("id", combinedId).single();
+  const pending = Number((data as { mag_pending?: number } | null)?.mag_pending ?? 0);
+  fail(
+    (
+      await from("ca_items")
+        .update(
+          ((await editedByHand(combinedId))
+            ? { mag_pending: pending + ids.length }
+            : { needs_enrich: true }) as never,
+        )
+        .eq("id", combinedId)
+    ).error,
+  );
+}
+
+// Looks at the next stories not yet checked for a topic: those close to
+// others in their section go to the AI, which says which follow one topic;
+// those are joined into a combined article (new, or one already there).
+export async function groupStep(magId: string): Promise<string | null> {
+  const mag = await loadMag(magId);
+  const pool = await topLevel(magId);
+  if (!pool) return null;
+  const first = pool.find((r) => !r.mag_grouped && !r.mag_combined);
+  if (!first) return null;
+  const sec = pool.filter((r) => r.mag_section === first.mag_section);
+  const fresh = sec
+    .map((r, i) => (!r.mag_grouped && !r.mag_combined ? i : -1))
+    .filter((i) => i >= 0)
+    .slice(0, 40);
+  const done = async () =>
+    fail(
+      (
+        await from("ca_items")
+          .update({ mag_grouped: true } as never)
+          .in(
+            "id",
+            fresh.map((i) => sec[i].id),
+          )
+      ).error,
+    );
+  // A combined article is also matched through the stories joined into it
+  // (its own text covers the whole topic; theirs match the new reports).
+  const combinedIds = sec.filter((r) => r.mag_combined).map((r) => r.id);
+  const { data: joinedRows } = combinedIds.length
+    ? await from("ca_items")
+        .select("mag_parent,embedding")
+        .in("mag_parent", combinedIds)
+        .eq("status", "included")
+    : { data: [] };
+  const inTopics = (joinedRows ?? []) as { mag_parent: string; embedding: unknown }[];
+  const at = new Map(sec.map((r, i) => [r.id, i]));
+  const clusters = topicClusters(
+    [...sec, ...inTopics].map((r) => parseVector(r.embedding)),
+    fresh,
+    cosine,
+  )
+    // A joined story stands for its combined article.
+    .map((c) => [
+      ...new Set(c.map((i) => (i < sec.length ? i : at.get(inTopics[i - sec.length].mag_parent)!))),
+    ])
+    .filter((c) => c.length >= 2)
+    .map((c) => c.sort((a, b) => a - b));
+  if (!clusters.length) {
+    await done();
+    return `checked ${fresh.length} stories for topics: none to join`;
+  }
+  const flat = clusters.flat();
+  const clusterOf = clusters.flatMap((c, ci) => c.map(() => ci));
+  const groups = parseGroups(
+    await saathiComplete(
+      apiKey(),
+      groupMessages({
+        title: mag.title_en,
+        theme: mag.theme,
+        clusters: clusters.map((c) =>
+          c.map((i) => ({
+            headline: headlineOf(sec[i]),
+            date: sec[i].mag_date,
+            combined: sec[i].mag_combined,
+          })),
+        ),
+      }),
+    ),
+    clusterOf,
+  );
+  let joined = 0;
+  for (const g of groups) {
+    const rows = g.stories.map((k) => sec[flat[k]]);
+    const combined = rows.filter((r) => r.mag_combined);
+    const plain = rows.filter((r) => !r.mag_combined).map((r) => r.id);
+    if (combined.length) {
+      const [main, ...more] = combined;
+      // Two combined articles on one topic become one.
+      for (const extra of more) {
+        await from("ca_items")
+          .update({ mag_parent: main.id } as never)
+          .eq("mag_parent", extra.id);
+        await from("ca_items").delete().eq("id", extra.id);
+      }
+      await joinInto(main.id, plain);
+      if (more.length && !(await editedByHand(main.id)))
+        await from("ca_items")
+          .update({ needs_enrich: true } as never)
+          .eq("id", main.id);
+    } else await makeCombined(magId, plain, g.title);
+    joined += plain.length;
+  }
+  await done();
+  return joined
+    ? `joined ${joined} stories on ${groups.length} ${groups.length === 1 ? "topic" : "topics"}`
+    : `checked ${fresh.length} stories for topics: none to join`;
+}
+
+// Writes a combined article from the stories joined into it: their facts
+// (the latest figures winning), as one development in order. A combined
+// article left with one story is taken apart.
+export async function writeCombined(id: string) {
+  const { data, error } = await from("ca_items")
+    .select("id,mag_date,facts,source_ids")
+    .eq("mag_parent", id)
+    .eq("status", "included")
+    .order("mag_date");
+  fail(error);
+  const members = (data ?? []) as {
+    id: string;
+    mag_date: string;
+    facts: CaFact[];
+    source_ids: string[];
+  }[];
+  if (members.length < 2) {
+    await splitTopic(id);
+    return null;
+  }
+  const facts = combinedFacts(
+    members.map((m) => ({ date: m.mag_date, facts: m.facts ?? [] })),
+    mergeFacts,
+  ).slice(0, COMBINED_FACTS);
+  fail(
+    (
+      await from("ca_items")
+        .update({
+          facts,
+          source_ids: [...new Set(members.flatMap((m) => m.source_ids ?? []))],
+          mag_date: members[members.length - 1].mag_date,
+          mag_pending: 0,
+          needs_enrich: true,
+        } as never)
+        .eq("id", id)
+    ).error,
+  );
+  return CA.enrichItem(id, {
+    note: combinedNote(members.length, members[0].mag_date, members[members.length - 1].mag_date),
+  });
+}
+
+// The next combined article waiting to be written.
+export async function writeStep(magId: string): Promise<string | null> {
+  const { data, error } = await from("ca_items")
+    .select("id,headline")
+    .eq("magazine_id", magId)
+    .eq("mag_combined", true)
+    .eq("needs_enrich", true)
+    .is("enrich_error", null)
+    .order("created_at")
+    .limit(1);
+  if (missingTopics(error)) return null;
+  fail(error);
+  const row = ((data ?? []) as { id: string; headline: string }[])[0];
+  if (!row) return null;
+  try {
+    await writeCombined(row.id);
+  } catch (e) {
+    await from("ca_items")
+      .update({ enrich_error: (e instanceof Error ? e.message : String(e)).slice(0, 300) } as never)
+      .eq("id", row.id);
+  }
+  return `wrote the combined article “${row.headline.slice(0, 60)}”`;
+}
+
+// Re-sorts subsections as the magazine grows: after 8 or more new stories,
+// each section in turn (one a step); stories the editor placed stay.
+export async function reorgStep(magId: string): Promise<string | null> {
+  const { data, error } = await from("ca_mags")
+    .select("reorg_at,reorg_queue")
+    .eq("id", magId)
+    .single();
+  if (missingTopics(error)) return null;
+  fail(error);
+  const state = data as unknown as { reorg_at: string | null; reorg_queue: string[] | null };
+  let queue = state.reorg_queue ?? [];
+  const mag = await loadMag(magId);
+  if (!queue.length) {
+    let q = from("ca_items")
+      .select("id", { count: "exact", head: true })
+      .eq("magazine_id", magId)
+      .is("mag_parent", null);
+    if (state.reorg_at) q = q.gt("created_at", state.reorg_at);
+    const { count } = await q;
+    if ((count ?? 0) < 8) return null;
+    queue = mag.sections.map((s) => s.id);
+    if (!queue.length) return null;
+  }
+  const [secId, ...rest] = queue;
+  const section = mag.sections.find((s) => s.id === secId);
+  const pool = (await topLevel(magId)) ?? [];
+  const rows = pool.filter((r) => r.mag_section === secId);
+  let changed = 0;
+  if (section && rows.length >= 3) {
+    const glossary = (await CA.getMagazineSettings()).glossary ?? [];
+    const r = parseReorg(
+      await saathiComplete(
+        apiKey(),
+        reorgMessages({
+          title: mag.title_en,
+          section,
+          subs: section.subs,
+          stories: rows
+            .map((x) => ({
+              headline: headlineOf(x),
+              sub: x.mag_sub ? section.subs.findIndex((s) => s.id === x.mag_sub) : null,
+              pinned: x.mag_pinned,
+            }))
+            .map((x) => ({ ...x, sub: x.sub === -1 ? null : x.sub })),
+          glossary,
+        }),
+      ),
+      section,
+      rows.map((x) => ({ sub: x.mag_sub, pinned: x.mag_pinned })),
+    );
+    if (r) {
+      const sections = mag.sections.map((s) => (s.id === secId ? { ...s, subs: r.subs } : s));
+      fail(
+        (
+          await from("ca_mags")
+            .update({ sections, updated_at: now() } as never)
+            .eq("id", magId)
+        ).error,
+      );
+      const moves = new Map<string | null, string[]>();
+      rows.forEach((x, i) => {
+        if (x.mag_pinned || r.place[i] === x.mag_sub) return;
+        moves.set(r.place[i], [...(moves.get(r.place[i]) ?? []), x.id]);
+      });
+      for (const [sub, ids] of moves) {
+        changed += ids.length;
+        fail(
+          (
+            await from("ca_items")
+              .update({ mag_sub: sub } as never)
+              .in("id", ids)
+          ).error,
+        );
+      }
+    }
+  }
+  fail(
+    (
+      await from("ca_mags")
+        .update({
+          reorg_queue: rest,
+          ...(rest.length ? {} : { reorg_at: now() }),
+        } as never)
+        .eq("id", magId)
+    ).error,
+  );
+  return `re-sorted ${section?.en ?? secId}${changed ? ` (${changed} stories moved)` : ""}`;
+}
+
+// ---------- The editor's changes to topics ----------
+
+// Joins the stories picked into one combined article (into the combined
+// article among them, when there is one). Returns the combined article.
+export async function joinStories(magId: string, ids: string[], title?: Bi | null) {
+  const { data, error } = await from("ca_items")
+    .select("id,mag_combined,mag_parent,magazine_id")
+    .in("id", ids);
+  fail(error);
+  const rows = (data ?? []) as {
+    id: string;
+    mag_combined: boolean;
+    mag_parent: string | null;
+    magazine_id: string;
+  }[];
+  if (rows.some((r) => r.magazine_id !== magId)) throw new Error("Unknown story");
+  if (rows.length < 2) throw new Error("Pick at least two stories to join.");
+  const combined = rows.filter((r) => r.mag_combined);
+  if (combined.length) {
+    const [main, ...more] = combined;
+    for (const extra of more) {
+      await from("ca_items")
+        .update({ mag_parent: main.id } as never)
+        .eq("mag_parent", extra.id);
+      await from("ca_items").delete().eq("id", extra.id);
+    }
+    const plain = rows.filter((r) => !r.mag_combined).map((r) => r.id);
+    fail(
+      (
+        await from("ca_items")
+          .update({ mag_parent: main.id, mag_grouped: true, mag_pending: 0 } as never)
+          .in("id", plain)
+      ).error,
+    );
+    fail(
+      (
+        await from("ca_items")
+          .update({ needs_enrich: true, mag_pending: 0 } as never)
+          .eq("id", main.id)
+      ).error,
+    );
+    return main.id;
+  }
+  return makeCombined(magId, ids, title ?? null);
+}
+
+// Takes a combined article apart: its stories print on their own again.
+export async function splitTopic(id: string) {
+  fail(
+    (
+      await from("ca_items")
+        .update({ mag_parent: null, mag_grouped: true } as never)
+        .eq("mag_parent", id)
+    ).error,
+  );
+  fail((await from("ca_items").delete().eq("id", id).eq("mag_combined", true)).error);
+}
+
+// Takes one story out of its combined article (written again without it,
+// unless edited by hand); a combined article left with one story goes.
+export async function takeOut(id: string) {
+  const { data } = await from("ca_items").select("mag_parent").eq("id", id).single();
+  const parent = (data as { mag_parent: string | null } | null)?.mag_parent;
+  if (!parent) return;
+  fail(
+    (
+      await from("ca_items")
+        .update({ mag_parent: null, mag_grouped: true, mag_pinned: true } as never)
+        .eq("id", id)
+    ).error,
+  );
+  const { count } = await from("ca_items")
+    .select("id", { count: "exact", head: true })
+    .eq("mag_parent", parent);
+  if ((count ?? 0) < 2) await splitTopic(parent);
+  else if (!(await editedByHand(parent)))
+    await from("ca_items")
+      .update({ needs_enrich: true } as never)
+      .eq("id", parent);
+}
+
+// A copy takes the daily story's text again (its own text is kept in the
+// story's history).
+export async function updateFromDaily(id: string) {
+  const { data } = await from("ca_items").select("origin_id").eq("id", id).single();
+  const origin = (data as { origin_id: string | null } | null)?.origin_id;
+  if (!origin) throw new Error("This story has no daily story to update from.");
+  const { data: o, error } = await from("ca_items")
+    .select("headline,facts,content,source_ids,context_sources,importance,rajasthan")
+    .eq("id", origin)
+    .single();
+  fail(error);
+  const src = o as unknown as Pick<
+    CaItem,
+    "headline" | "facts" | "content" | "source_ids" | "context_sources" | "importance" | "rajasthan"
+  >;
+  return CA.asEdit(id, async () => {
+    fail(
+      (
+        await from("ca_items")
+          .update({
+            ...src,
+            mag_origin_sig: storySig(src.facts ?? [], src.content),
+            updated_at: now(),
+          } as never)
+          .eq("id", id)
+      ).error,
+    );
+  });
 }
