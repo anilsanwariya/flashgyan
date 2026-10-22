@@ -124,6 +124,7 @@ export const contentSchema = z.object({
   visual4: z.unknown().optional(),
   visual4_covers: z.array(z.number().int().min(0).max(100)).max(50).optional(),
   visual_below: z.array(z.boolean()).max(4).optional(),
+  visual_beside: z.array(z.boolean()).max(4).optional(),
   visual_pair: z.boolean().optional(),
   oneliner: bi.nullable().optional(),
   quick: z.object({ q: bi, a: bi }).nullable().optional(),

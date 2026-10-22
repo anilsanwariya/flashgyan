@@ -992,16 +992,16 @@ export const VISUAL_CSS = (accent: string) => `
 .ven { color: #64748b; font-size: .9em; }
 .v-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; align-items: start; break-inside: avoid; }
 .v-pair > .visual { margin-top: 0 !important; min-width: 0; }
-.v-pair .v-flow { flex-direction: column; }
-.v-pair .v-arrow { transform: rotate(90deg); }
-.v-pair .v-glance { grid-template-columns: 1fr; }
-.v-pair .v-glance > div { border-right: 0 !important; border-bottom: 1px solid #e2e8f0 !important; }
-.v-pair .v-glance > div:last-child { border-bottom: 0 !important; }
-.v-pair .v-stats { grid-template-columns: repeat(auto-fit, minmax(24mm, 1fr)); }
-.v-pair .v-pie { flex-direction: column; align-items: flex-start; gap: 3mm; }
-.v-pair .v-proscons { grid-template-columns: 1fr; }
-.v-pair .v-chg { grid-template-columns: 1fr; gap: 1mm; }
-.v-pair .v-bar-row { grid-template-columns: 34% 1fr; gap: 2mm; }
+.v-pair .v-flow, .pts-visuals .v-flow { flex-direction: column; }
+.v-pair .v-arrow, .pts-visuals .v-arrow { transform: rotate(90deg); }
+.v-pair .v-glance, .pts-visuals .v-glance { grid-template-columns: 1fr; }
+.v-pair .v-glance > div, .pts-visuals .v-glance > div { border-right: 0 !important; border-bottom: 1px solid #e2e8f0 !important; }
+.v-pair .v-glance > div:last-child, .pts-visuals .v-glance > div:last-child { border-bottom: 0 !important; }
+.v-pair .v-stats, .pts-visuals .v-stats { grid-template-columns: repeat(auto-fit, minmax(24mm, 1fr)); }
+.v-pair .v-pie, .pts-visuals .v-pie { flex-direction: column; align-items: flex-start; gap: 3mm; }
+.v-pair .v-proscons, .pts-visuals .v-proscons { grid-template-columns: 1fr; }
+.v-pair .v-chg, .pts-visuals .v-chg { grid-template-columns: 1fr; gap: 1mm; }
+.v-pair .v-bar-row, .pts-visuals .v-bar-row { grid-template-columns: 34% 1fr; gap: 2mm; }
 .v-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(32mm, 1fr)); gap: 2.5mm; }
 .v-stat { border-radius: 2.5mm; padding: 2.5mm 3mm; background: #f5f3ff; border-top: 3px solid ${accent}; }
 .v-stat b { display: block; font-size: 14pt; line-height: 1.15; color: ${accent}; margin-bottom: .8mm; }

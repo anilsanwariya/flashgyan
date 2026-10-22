@@ -1811,7 +1811,14 @@ function keptVisuals(
   if (!content || !old.length) return {};
   const list = [
     ...(look.visual
-      ? [{ visual: look.visual, covers: look.visual_covers, below: old[0].below }]
+      ? [
+          {
+            visual: look.visual,
+            covers: look.visual_covers,
+            below: old[0].below,
+            beside: old[0].beside,
+          },
+        ]
       : []),
     ...old
       .slice(1)

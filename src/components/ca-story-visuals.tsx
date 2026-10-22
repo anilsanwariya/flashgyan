@@ -1,5 +1,5 @@
-// A story's visuals (up to four), in order, each above or below the key
-// points, optionally paired side by side. The editor picks a type from the list
+// A story's visuals (up to four), in order, each above, beside or below the
+// key points, optionally paired side by side. The editor picks a type from the list
 // (types that the facts likely can't make are marked, with the reason), adds
 // a note if they like, and sees SAATHI's visual before it replaces anything.
 // Any visual's text and numbers can also be changed by hand.
@@ -33,7 +33,9 @@ import { previewCaVisual, type CaItem } from "@/lib/current-affairs.functions";
 import {
   MAX_VISUALS,
   storyVisuals,
+  visualPlace,
   visualsPatch,
+  type VisualPlace,
   type Bi,
   type CaContent,
   type StoryVisual,
@@ -43,13 +45,14 @@ import {
   VISUAL_LABELS,
   coveredFacts,
   halfWidthProblem,
+  pointsToShow,
   unverifiedNumbers,
   visualFit,
   visualRows,
   type Visual,
   type VisualType,
 } from "@/lib/ca-visuals";
-import { visualPreviewHtml } from "@/lib/current-affairs-html";
+import { printedPlaces, visualPreviewHtml } from "@/lib/current-affairs-html";
 import { errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -143,11 +146,14 @@ export function StoryVisuals({
   };
   const off = busy || saving;
   const pair = !!content.visual_pair;
-  // Which visuals print beside another (and why the others can't).
+  // Where each prints (one set beside the points may not fit there), and
+  // which print beside another visual.
+  const hasPoints = pointsToShow(content).length > 0;
+  const places = printedPlaces(content, hasPoints).map((p) => p.place);
   const paired = new Set(
     (["above", "below"] as const).flatMap((g) =>
       visualRows(
-        list.filter((v) => v.below === (g === "below")),
+        list.filter((_, i) => places[i] === g),
         pair,
       )
         .filter((r) => r.length === 2)
@@ -177,7 +183,15 @@ export function StoryVisuals({
         </label>
       )}
       {list.map((v, i) => {
-        const narrow = pair ? halfWidthProblem(v.visual) : null;
+        const tooWide = halfWidthProblem(v.visual);
+        const narrow = pair && !v.beside ? tooWide : null;
+        // Set beside the points but printing above them, and why.
+        const notBeside =
+          v.beside && places[i] !== "beside"
+            ? tooWide
+              ? `${tooWide}: prints above the key points`
+              : "No key points left to sit beside: prints above them"
+            : null;
         return (
           <div
             key={`${i}-${v.visual.type}`}
@@ -204,23 +218,28 @@ export function StoryVisuals({
                   Full width: {narrow.charAt(0).toLowerCase() + narrow.slice(1)}
                 </span>
               )}
+              {notBeside && (
+                <span className="text-[11px] text-amber-700 dark:text-amber-400">{notBeside}</span>
+              )}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-1">
               <select
                 aria-label={`Where visual ${i + 1} prints`}
-                value={v.below ? "below" : "above"}
+                value={visualPlace(v)}
                 disabled={off}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const to = e.target.value as VisualPlace;
                   void saveList(
-                    list.map((x, j) => (j === i ? { ...x, below: e.target.value === "below" } : x)),
-                    e.target.value === "below"
-                      ? "Prints below the key points"
-                      : "Prints above the key points",
-                  )
-                }
+                    list.map((x, j) =>
+                      j === i ? { ...x, below: to === "below", beside: to === "beside" } : x,
+                    ),
+                    `Prints ${to} the key points`,
+                  );
+                }}
                 className="h-7 rounded-md border border-input bg-background px-2 text-xs"
               >
                 <option value="above">Above the key points</option>
+                <option value="beside">Beside the key points</option>
                 <option value="below">Below the key points</option>
               </select>
               {list.length > 1 && (
