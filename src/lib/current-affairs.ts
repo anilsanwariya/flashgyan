@@ -130,6 +130,10 @@ export type CaContent = {
   // Photos, maps or diagrams the editor uploaded (the AI can't take images
   // from the sources), in order; w × h is the image's size in pixels.
   images?: CaImage[];
+  // Left out of the issue when the key points or visuals tell the story
+  // (the text is kept, so it can be put back).
+  hide_summary?: boolean;
+  hide_why?: boolean;
 };
 
 export type CaQuick = { q: Bi; a: Bi };
