@@ -1013,7 +1013,7 @@ function SourcesList({ sources, onChanged }: { sources: CaSource[]; onChanged: (
         busy={busy}
         onDelete={deleteMany}
       />
-      <ul className="divide-y divide-border rounded-xl border border-border text-sm">
+      <ul className="max-h-96 divide-y divide-border overflow-y-auto overscroll-contain rounded-xl border border-border text-sm">
         {sources.map((s) => (
           <li key={s.id} className="flex flex-wrap items-center gap-2 p-2.5">
             <Checkbox
