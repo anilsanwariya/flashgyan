@@ -2,6 +2,7 @@
 // check facts against their sources, merge duplicate stories, apply
 // corrections and schedule posts. No database or network access here.
 
+import { EVENT_FIELD, parseRawEvent, roundupNote, type RawEvent } from "@/lib/ca-events";
 import type { Binding, CoverPreset, DailyLayout, MagazineAd } from "@/lib/ca-covers";
 import { unverifiedNumbers, type Visual } from "@/lib/ca-visuals";
 import { DEFAULT_MIN_RAJASTHAN } from "@/lib/ca-report";
@@ -251,6 +252,8 @@ export type RawItem = {
   // what happened), the same for every source on it: finds the same story
   // told from another angle or in another language.
   key: string | null;
+  // The several-day event the story is part of (the Olympics, a summit).
+  event: RawEvent | null;
 };
 
 // What the extraction prompt asks for as the story's event key.
@@ -388,7 +391,7 @@ export function extractMessages(opts: {
 ${blueprintText()}
 Categories: "rajasthan" for anything about Rajasthan; "national" for India-wide polity, governance, schemes and judgments; "international"; "science" for science, technology, defence, space, health and environment; "economy"; "sports"; "misc" for awards, appointments, persons in news, important days, reports and indices that fit nowhere else; "editorial" only for editorials.
 Skip: advertisements, crime and accidents, purely local incidents, opinion without facts, market tips, entertainment.
-Reply with JSON only: [{"type": one story type id, "headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 as described above, "rajasthan": true if it concerns Rajasthan, ${KEY_FIELD}, ${CONCEPT_FIELD}, "facts": [{"slot": the slot id this fact fills, "text": one short fact in English, "quote": the exact words from the source that state this fact, copied character for character (5 to 30 words, in the source's language)}]}].
+Reply with JSON only: [{"type": one story type id, "headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 as described above, "rajasthan": true if it concerns Rajasthan, ${KEY_FIELD}, ${EVENT_FIELD}, ${CONCEPT_FIELD}, "facts": [{"slot": the slot id this fact fills, "text": one short fact in English, "quote": the exact words from the source that state this fact, copied character for character (5 to 30 words, in the source's language)}]}].
 Every fact must fill one slot of its story's type; leave a slot out if the source doesn't state it, and drop any fact that fits no slot. Use only facts stated in the source and keep every number, name and date exactly. Reply [] if nothing is exam-relevant.`,
     },
     {
@@ -410,7 +413,7 @@ function editorialExtractMessages(opts: {
       role: "system",
       content: `You are the editorials editor of a current affairs magazine for RAS (Rajasthan Administrative Service) Mains aspirants. From the newspaper editorial text, return one item per editorial on an issue RPSC asks in RAS Mains.
 ${editorialBlueprintText()}
-Reply with JSON only: [{"type": "editorial", "headline": a short factual headline in English naming the issue (not the editorial's figurative title), "category": "editorial", "importance": 2 or 3, "rajasthan": true if it concerns Rajasthan, ${KEY_FIELD}, ${CONCEPT_FIELD}, "facts": [{"slot": the slot id this fact fills, "text": one short point in English, "quote": the exact words from the source that state it, copied character for character (5 to 30 words, in the source's language)}]}].
+Reply with JSON only: [{"type": "editorial", "headline": a short factual headline in English naming the issue (not the editorial's figurative title), "category": "editorial", "importance": 2 or 3, "rajasthan": true if it concerns Rajasthan, ${KEY_FIELD}, ${EVENT_FIELD}, ${CONCEPT_FIELD}, "facts": [{"slot": the slot id this fact fills, "text": one short point in English, "quote": the exact words from the source that state it, copied character for character (5 to 30 words, in the source's language)}]}].
 Keep the editorial's own reasoning but drop rhetoric, quotes of politicians and vague lines. Use only what the editorial states, keeping every number, name and date exactly. Reply [] if no editorial is on an exam issue.`,
     },
     {
@@ -455,6 +458,7 @@ export function parseExtracted(raw: string, source: string, sourceId: string): R
         facts,
         concept: str(o.concept, 160) || null,
         key: str(o.key, 160) || null,
+        event: parseRawEvent(o.event),
       };
     })
     .filter((i) => i.headline && i.facts.length > 0);
@@ -527,6 +531,8 @@ export function enrichMessages(opts: {
   style?: string[];
   // About how many words the summary has (Magazine settings).
   summaryWords?: number;
+  // The several-day event the story belongs to: the day's roundup of it.
+  event?: string | null;
 }): ChatMessage[] {
   const words = clampSummaryWords(opts.summaryWords);
   const facts = opts.facts
@@ -549,7 +555,7 @@ export function enrichMessages(opts: {
       role: "system",
       content: `You write a bilingual (Hindi and English) current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). Write one news item from the numbered facts.
 RULES: Use only the facts given (numbered facts and any Context). Never add a number, name, date or claim that is not in them. Follow the editor's instruction when one is given, and an [Editor's note] on a fact (for example: put it in the headline, build the MCQ or the Mains question on it, keep it word for word), within these rules.
-BE BRIEF: students revise from this, so less theory, more memorable facts. ${summaryRule(words)} Nothing is repeated between the points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}${styleBlock(opts.style)}
+BE BRIEF: students revise from this, so less theory, more memorable facts. ${summaryRule(words)} Nothing is repeated between the points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}${opts.event ? roundupNote(opts.event) : ""}${styleBlock(opts.style)}
 STATIC CONNECT links the news to the static syllabus. "keywords" lists up to ${MAX_KEYWORDS} static concepts the news links to that RPSC could ask about (constitutional articles, acts, institutions, technologies, schemes, places, conventions, terms), most important first (the "Static concept" in the message, when given), whether or not the passages explain them; each is a short name of at most 5 words. "statics" explains the first 1 or 2 keywords the way a textbook does: what it is, what it says, how it works, in 1-2 sentences of at most 40 words each, without retelling the news. Base each on the knowledge-base passages [K…] that explain it, even if they never mention the news, and list them in "from"; when no passage explains it, write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. Use [] for both when the news has no static concept worth explaining.${hindiGuide(opts.glossary)}
 Reply with JSON only:
 {"headline": {"en": "...", "hi": "..."},

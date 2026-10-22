@@ -47,6 +47,9 @@ import {
   suggestCaSummaries,
   updateCaItem,
   type CaItem,
+  type EventBrief,
+  createCaEvent,
+  linkCaStoryEvent,
 } from "@/lib/current-affairs.functions";
 import {
   CATEGORIES,
@@ -118,6 +121,7 @@ type Ctx = {
 
 export function StoryEditor({
   items,
+  events = [],
   id,
   lang,
   setLang,
@@ -128,6 +132,8 @@ export function StoryEditor({
 }: {
   // The stories the arrows go through, in the order of the list.
   items: CaItem[];
+  // The events the story can be linked to.
+  events?: EventBrief[];
   id: string;
   lang: Lang;
   setLang: (l: Lang) => void;
@@ -462,6 +468,7 @@ export function StoryEditor({
             )}
             {item.unit && <Badge>{unitLabel(item.unit)}</Badge>}
             {item.related_item_id && <Badge tone="primary">Follow-up</Badge>}
+            <EventChip item={item} events={events} disabled={busy} onChanged={onChanged} />
             {unverified > 0 && (
               <Badge tone="warn">
                 <AlertTriangle className="h-3 w-3" /> {unverified} to check
@@ -1706,5 +1713,63 @@ function PreviewFrame({ html, label, quiet }: { html: string; label: string; qui
         style={{ height }}
       />
     </div>
+  );
+}
+
+// The several-day event the story belongs to (the Olympics, a summit): its
+// day's stories print as one roundup, and the monthly issue groups them.
+function EventChip({
+  item,
+  events,
+  disabled,
+  onChanged,
+}: {
+  item: CaItem;
+  events: EventBrief[];
+  disabled: boolean;
+  onChanged: () => void;
+}) {
+  const linkFn = useServerFn(linkCaStoryEvent);
+  const createFn = useServerFn(createCaEvent);
+  const [busy, setBusy] = useState(false);
+  // undefined: the database has no events yet (migration not run).
+  if (item.event_id === undefined) return null;
+  const current = events.find((e) => e.id === item.event_id);
+  async function choose(value: string) {
+    setBusy(true);
+    try {
+      let eventId: string | null = value || null;
+      if (value === "__new") {
+        const name = prompt("The event's name, e.g. Asian Games 2026")?.trim();
+        if (!name || name.length < 3) return;
+        eventId = (await createFn({ data: { name, kind: "other" } })).id;
+      }
+      await linkFn({ data: { itemId: item.id, eventId } });
+      toast.success(eventId ? "Linked to the event" : "Unlinked from the event");
+      onChanged();
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't change the event"));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <select
+      aria-label="Event"
+      title="The several-day event this story belongs to"
+      value={item.event_id ?? ""}
+      disabled={disabled || busy}
+      onChange={(e) => void choose(e.target.value)}
+      className={`h-7 max-w-[14rem] truncate rounded-full border-0 px-3 text-xs font-medium ${current ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}
+    >
+      <option value="">No event</option>
+      {events.map((e) => (
+        <option key={e.id} value={e.id}>
+          {e.name}
+          {e.status === "concluded" ? " (concluded)" : ""}
+        </option>
+      ))}
+      <option value="__new">New event…</option>
+    </select>
   );
 }

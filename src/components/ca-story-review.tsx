@@ -37,6 +37,7 @@ import {
   setCaReview,
   updateCaItem,
   type CaItem,
+  type EventBrief,
 } from "@/lib/current-affairs.functions";
 import { JobBar, useStoryJobs, type StoryJob } from "@/components/ca-story-jobs";
 import {
@@ -102,12 +103,15 @@ function storyState(it: CaItem, review: Record<string, ReviewState>): Exclude<Fi
 
 export function StoryList({
   items,
+  events = [],
   date,
   onChanged,
   jump = null,
   onReviewed,
 }: {
   items: CaItem[];
+  // The events a story can belong to (its own and the running ones).
+  events?: EventBrief[];
   date: string;
   onChanged: () => void;
   // A story to open and scroll to (from the day's checklist).
@@ -573,6 +577,7 @@ export function StoryList({
                     else cards.current.delete(it.id);
                   }}
                   item={it}
+                  eventName={events.find((e) => e.id === it.event_id)?.name}
                   number={number.get(it.id) ?? 0}
                   lang={lang}
                   state={stateOf(it)}
@@ -591,6 +596,7 @@ export function StoryList({
       {editing && byId.has(editing) && (
         <StoryEditor
           items={navItems.length ? navItems : ordered}
+          events={events}
           id={editing}
           lang={lang}
           setLang={setLang}
@@ -628,6 +634,8 @@ type CardProps = {
   onSelect: (on: boolean) => void;
   onChanged: () => void;
   ref?: React.Ref<HTMLElement>;
+  // The several-day event it belongs to.
+  eventName?: string;
 };
 
 // A story in the day's list: its headline, state and summary. Tapping it
@@ -643,6 +651,7 @@ function StoryCard({
   selected,
   onSelect,
   ref,
+  eventName,
 }: CardProps) {
   const c = item.content;
   const dropped = state === "dropped";
@@ -759,6 +768,7 @@ function StoryCard({
               </Badge>
             )}
             {item.related_item_id && <Badge tone="primary">Follow-up</Badge>}
+            {eventName && <Badge tone="primary">{eventName}</Badge>}
             {dropped && <Badge tone="bad">Dropped</Badge>}
             {approved && <Badge tone="good">Approved</Badge>}
             {state === "later" && <Badge tone="warn">Read later</Badge>}

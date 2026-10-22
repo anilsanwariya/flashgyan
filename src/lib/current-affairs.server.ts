@@ -1,6 +1,16 @@
 // Server-only current affairs magazine: sources → news items → bilingual
 // issues → PDF (Cloudflare browser rendering) → scheduled Telegram post.
 import {
+  EVENT_POINTS_MAX,
+  eventNameKey,
+  eventSummaryMessages,
+  monthlyEvents,
+  type CaEvent,
+  type EventBlock,
+  type EventKind,
+  type RawEvent,
+} from "@/lib/ca-events";
+import {
   adImage,
   fillerPages,
   normalizeAds,
@@ -81,6 +91,7 @@ import {
   enrichMessages,
   extractMessages,
   formatDate,
+  istDate,
   isCategory,
   normalizeCategory,
   CATEGORIES,
@@ -349,6 +360,8 @@ export type CaItem = {
   created_at: string;
   // The static textbook concept the background explains (older items: null).
   concept?: string | null;
+  // The several-day event the story belongs to (missing before events).
+  event_id?: string | null;
 };
 
 export type CaIssue = {
@@ -467,13 +480,14 @@ type DayStoryRow = {
   category: string;
   concept: string | null;
   story_key: string | null;
+  event_id: string | null;
   vec: number[] | null;
   keyVec: number[] | null;
 };
 const DAY_STORY_COLS =
   "id,headline,facts,importance,rajasthan,status,position,source_ids,related_item_id,category,concept,embedding";
 const missingKeyColumns = (e: { message: string } | null) =>
-  !!e && /story_key|key_embedding/.test(e.message);
+  !!e && /story_key|key_embedding|event_id/.test(e.message);
 
 async function dayStoryRows(filter: { date?: string; ids?: string[] }): Promise<DayStoryRow[]> {
   const query = (cols: string) => {
@@ -482,13 +496,15 @@ async function dayStoryRows(filter: { date?: string; ids?: string[] }): Promise<
     if (filter.ids) q = q.in("id", filter.ids);
     return q.order("position");
   };
-  let r = await query(`${DAY_STORY_COLS},story_key,key_embedding`);
+  let r = await query(`${DAY_STORY_COLS},story_key,key_embedding,event_id`);
+  if (missingKeyColumns(r.error)) r = await query(`${DAY_STORY_COLS},story_key,key_embedding`);
   if (missingKeyColumns(r.error)) r = await query(DAY_STORY_COLS);
   fail(r.error);
   return ((r.data ?? []) as unknown as Record<string, unknown>[]).map((x) => ({
     ...(x as unknown as DayStoryRow),
     category: normalizeCategory(x.category),
     story_key: (x.story_key as string | null | undefined) ?? null,
+    event_id: (x.event_id as string | null | undefined) ?? null,
     vec: parseVector(x.embedding),
     keyVec: parseVector(x.key_embedding),
   }));
@@ -498,7 +514,7 @@ async function dayStoryRows(filter: { date?: string; ids?: string[] }): Promise<
 async function insertItem(row: Record<string, unknown>) {
   let { error } = await from("ca_items").insert(row as never);
   if (missingKeyColumns(error)) {
-    const { story_key: _k, key_embedding: _e, ...rest } = row;
+    const { story_key: _k, key_embedding: _e, event_id: _v, ...rest } = row;
     ({ error } = await from("ca_items").insert(rest as never));
   }
   fail(error);
@@ -513,7 +529,13 @@ async function sameDayStory(
   vecs: { vec: number[]; keyVec: number[] | null },
   day: DayStoryRow[],
   editorial: boolean,
+  eventId: string | null = null,
 ): Promise<DayStoryRow | null> {
+  // A running event's stories of the day make one roundup.
+  const sameEvent = eventId
+    ? day.find((d) => d.event_id === eventId && d.category !== "editorial")
+    : undefined;
+  if (sameEvent && !editorial) return sameEvent;
   const ranked = day
     .filter((d) => (d.category === "editorial") === editorial)
     .map((d) => ({ d, similarity: likeness(vecs, d) }))
@@ -574,10 +596,20 @@ export async function extractSourceChunk(sourceId: string, index: number) {
     const { daily_stories } = await getMagazineSettings();
     // The day's stories, kept up to date as this part adds to them.
     const day = found.length ? await dayStoryRows({ date: src.issue_date }) : [];
+    const eventIds = new Map<string, string | null>();
     let created = 0;
     let merged = 0;
     for (const item of found) {
       const category: Category = src.section === "editorial" ? "editorial" : item.category;
+      // The several-day event it belongs to, found or started (never for an
+      // editorial).
+      let eventId: string | null = null;
+      if (item.event && category !== "editorial") {
+        const k = eventNameKey(item.event.name);
+        if (!eventIds.has(k)) eventIds.set(k, await resolveEvent(item.event, src.issue_date));
+        eventId = eventIds.get(k) ?? null;
+        if (item.event.ended && eventId) await concludeEvent(eventId, src.issue_date);
+      }
       const [embedding, keyEmbedding] = await Promise.all([
         embedOne(storyText(item)),
         item.key ? embedOne(item.key).catch(() => null) : Promise.resolve(null),
@@ -588,6 +620,7 @@ export async function extractSourceChunk(sourceId: string, index: number) {
         { vec: embedding, keyVec: keyEmbedding },
         day,
         editorial,
+        eventId,
       );
       if (same) {
         const facts = mergeFacts(same.facts, item.facts);
@@ -616,11 +649,12 @@ export async function extractSourceChunk(sourceId: string, index: number) {
         // An older story without an event key takes this one's.
         if (!same.story_key && item.key && keyEmbedding)
           Object.assign(update, { story_key: item.key, key_embedding: keyEmbedding });
+        if (!same.event_id && eventId) Object.assign(update, { event_id: eventId });
         let { error: uErr } = await from("ca_items")
           .update(update as never)
           .eq("id", same.id);
         if (missingKeyColumns(uErr)) {
-          const { story_key: _k, key_embedding: _e, ...rest } = update;
+          const { story_key: _k, key_embedding: _e, event_id: _v, ...rest } = update;
           ({ error: uErr } = await from("ca_items")
             .update(rest as never)
             .eq("id", same.id));
@@ -631,6 +665,7 @@ export async function extractSourceChunk(sourceId: string, index: number) {
           source_ids: update.source_ids,
           story_key: same.story_key ?? item.key,
           keyVec: same.keyVec ?? keyEmbedding,
+          event_id: same.event_id ?? eventId,
         });
         merged++;
         continue;
@@ -669,6 +704,7 @@ export async function extractSourceChunk(sourceId: string, index: number) {
         embedding: embedding as unknown as string,
         story_key: item.key,
         key_embedding: keyEmbedding as unknown as string,
+        ...(eventId ? { event_id: eventId } : {}),
         related_item_id: earlier?.id ?? null,
         position: 1000 + created,
       });
@@ -685,6 +721,7 @@ export async function extractSourceChunk(sourceId: string, index: number) {
         category,
         concept: item.concept,
         story_key: item.key,
+        event_id: eventId,
         vec: embedding,
         keyVec: keyEmbedding,
       });
@@ -791,12 +828,15 @@ async function mergeGroup(members: DayStoryRow[]): Promise<string> {
     ...(!keeper.story_key && keyed
       ? { story_key: keyed.story_key, key_embedding: keyed.keyVec }
       : {}),
+    ...(!keeper.event_id && members.some((m) => m.event_id)
+      ? { event_id: members.find((m) => m.event_id)!.event_id }
+      : {}),
   };
   let { error } = await from("ca_items")
     .update(update as never)
     .eq("id", keeper.id);
   if (missingKeyColumns(error)) {
-    const { story_key: _k, key_embedding: _e, ...rest } = update;
+    const { story_key: _k, key_embedding: _e, event_id: _v, ...rest } = update;
     ({ error } = await from("ca_items")
       .update(rest as never)
       .eq("id", keeper.id));
@@ -867,7 +907,12 @@ export async function mergeDayDuplicates(
   const pairs = candidatePairs(items.map((i) => ({ vec: i.vec, keyVec: i.keyVec }))).filter((p) =>
     together(p.a, p.b),
   );
-  const sure = pairs.filter((p) => p.similarity >= SURELY_SAME);
+  const sure: { a: number; b: number }[] = pairs.filter((p) => p.similarity >= SURELY_SAME);
+  // One running event's stories of the day make one roundup.
+  for (let a = 0; a < items.length; a++)
+    for (let b = a + 1; b < items.length; b++)
+      if (items[a].event_id && items[a].event_id === items[b].event_id && together(a, b))
+        sure.push({ a, b });
   // Close pairs: the AI says whether each is the same story.
   const doubtful = pairs.filter((p) => p.similarity < SURELY_SAME).slice(0, MAX_PAIRS);
   if (doubtful.length) {
@@ -1111,6 +1156,7 @@ export async function enrichItem(
   const key = apiKey();
   const { style_rules: style, summary_words: summaryWords, glossary } = await getMagazineSettings();
   const step = (pct: number, stage: string) => setWriteProgress(itemId, pct, stage);
+  const event = await eventOfItem(itemId);
   try {
     await step(5, "Reading the facts");
     // The background explains the story's static concept, so the books are
@@ -1156,6 +1202,7 @@ export async function enrichItem(
         visual: look.visual
           ? { type: VISUAL_LABELS[look.visual.type].toLowerCase(), covers: look.visual_covers }
           : null,
+        event: event?.name ?? null,
       }),
     );
     const parsed = parseContent(
@@ -1295,6 +1342,340 @@ export async function writeProgress(ids: string[]): Promise<Record<string, Write
     out[r.key.slice("ca_write:".length)] = r.value;
   }
   return out;
+}
+
+// ---------- Several-day events ----------
+
+// A database without the events table or column (its migration not run yet)
+// has no events: everything else works as before.
+const missingEvents = (e: { message: string } | null) =>
+  !!e && /ca_events|event_id/.test(e.message);
+const EVENT_COLS =
+  "id,name,name_hi,kind,place,starts_on,ends_on,status,summary,created_at,updated_at";
+export type EventBrief = Pick<CaEvent, "id" | "name" | "name_hi" | "status">;
+
+type LinkFilter = { date?: string; from?: string; to?: string; ids?: string[] };
+
+// Which event each story belongs to.
+async function eventLinks(filter: LinkFilter): Promise<Map<string, string>> {
+  return (await eventLinksOrNull(filter)) ?? new Map();
+}
+
+// The same, or null before the events migration.
+async function eventLinksOrNull(filter: LinkFilter): Promise<Map<string, string> | null> {
+  let q = from("ca_items").select("id,event_id").not("event_id", "is", null);
+  if (filter.date) q = q.eq("issue_date", filter.date);
+  if (filter.from) q = q.gte("issue_date", filter.from);
+  if (filter.to) q = q.lte("issue_date", filter.to);
+  if (filter.ids) q = q.in("id", filter.ids);
+  const { data, error } = await q;
+  if (missingEvents(error)) return null;
+  fail(error);
+  return new Map(
+    ((data ?? []) as { id: string; event_id: string }[]).map((r) => [r.id, r.event_id]),
+  );
+}
+
+async function eventsById(ids: string[]): Promise<CaEvent[]> {
+  if (!ids.length) return [];
+  const { data, error } = await from("ca_events").select(EVENT_COLS).in("id", ids);
+  if (missingEvents(error)) return [];
+  fail(error);
+  return (data ?? []) as unknown as CaEvent[];
+}
+
+// The events a story of this day can be linked to: those of the day's
+// stories, and every event still running or concluded in the last 30 days.
+async function pickableEvents(date: string, ids: string[]): Promise<EventBrief[]> {
+  const since = new Date(`${date}T00:00:00Z`);
+  since.setUTCDate(since.getUTCDate() - 30);
+  const { data, error } = await from("ca_events")
+    .select("id,name,name_hi,status,ends_on")
+    .or(`status.eq.running,ends_on.gte.${since.toISOString().slice(0, 10)}`)
+    .order("updated_at", { ascending: false })
+    .limit(40);
+  if (missingEvents(error)) return [];
+  fail(error);
+  const list = (data ?? []) as unknown as EventBrief[];
+  const missing = ids.filter((id) => !list.some((e) => e.id === id));
+  const more = (await eventsById(missing)).map(({ id, name, name_hi, status }) => ({
+    id,
+    name,
+    name_hi,
+    status,
+  }));
+  return [...list, ...more].map(({ id, name, name_hi, status }) => ({ id, name, name_hi, status }));
+}
+
+async function eventOfItem(itemId: string): Promise<CaEvent | null> {
+  const links = await eventLinks({ ids: [itemId] });
+  const id = links.get(itemId);
+  return id ? ((await eventsById([id]))[0] ?? null) : null;
+}
+
+// The event a story names: one already known by the same name (or a name
+// that means the same, by embedding), still running or ended within the
+// last 10 days; otherwise a new running event.
+async function resolveEvent(raw: RawEvent, date: string): Promise<string | null> {
+  const since = new Date(`${date}T00:00:00Z`);
+  since.setUTCDate(since.getUTCDate() - 10);
+  const { data, error } = await from("ca_events")
+    .select("id,name,embedding,starts_on")
+    .or(`status.eq.running,ends_on.gte.${since.toISOString().slice(0, 10)}`);
+  if (missingEvents(error)) return null;
+  fail(error);
+  const known = (data ?? []) as {
+    id: string;
+    name: string;
+    embedding: unknown;
+    starts_on: string | null;
+  }[];
+  const key = eventNameKey(raw.name);
+  let match = known.find((e) => eventNameKey(e.name) === key);
+  let vec: number[] | null = null;
+  if (!match) {
+    vec = await embedOne(raw.name).catch(() => null);
+    if (vec)
+      match = known
+        .map((e) => ({
+          e,
+          s: parseVector(e.embedding) ? cosine(vec!, parseVector(e.embedding)!) : 0,
+        }))
+        .filter((x) => x.s >= 0.9)
+        .sort((x, y) => y.s - x.s)[0]?.e;
+  }
+  if (match) {
+    if (!match.starts_on || date < match.starts_on)
+      await from("ca_events")
+        .update({ starts_on: date, updated_at: new Date().toISOString() } as never)
+        .eq("id", match.id);
+    return match.id;
+  }
+  const { data: made, error: mErr } = await from("ca_events")
+    .insert({
+      name: raw.name,
+      kind: raw.kind,
+      starts_on: date,
+      status: "running",
+      embedding: vec as unknown as string,
+    } as never)
+    .select("id")
+    .single();
+  if (missingEvents(mErr)) return null;
+  fail(mErr);
+  return (made as unknown as { id: string }).id;
+}
+
+// A story reports the whole event has ended.
+async function concludeEvent(id: string, date: string) {
+  const [e] = await eventsById([id]);
+  if (!e || (e.status === "concluded" && e.ends_on && e.ends_on >= date)) return;
+  fail(
+    (
+      await from("ca_events")
+        .update({
+          status: "concluded",
+          ends_on: date,
+          updated_at: new Date().toISOString(),
+        } as never)
+        .eq("id", id)
+    ).error,
+  );
+}
+
+export type EventWithStories = CaEvent & {
+  stories: { id: string; issue_date: string; headline: string; status: CaItem["status"] }[];
+};
+
+// Events for the Events panel: those with stories or ending in the last
+// months, newest first. ready: false when the migration hasn't been run.
+export async function listEvents(): Promise<{ ready: boolean; events: EventWithStories[] }> {
+  const since = new Date();
+  since.setUTCMonth(since.getUTCMonth() - 6);
+  const { data, error } = await from("ca_events")
+    .select(EVENT_COLS)
+    .gte("updated_at", since.toISOString())
+    .order("updated_at", { ascending: false })
+    .limit(100);
+  if (missingEvents(error)) return { ready: false, events: [] };
+  fail(error);
+  const events = (data ?? []) as unknown as CaEvent[];
+  if (!events.length) return { ready: true, events: [] };
+  const { data: items } = await from("ca_items")
+    .select("id,issue_date,headline,status,content,event_id")
+    .in(
+      "event_id",
+      events.map((e) => e.id),
+    )
+    .order("issue_date");
+  const byEvent = new Map<string, EventWithStories["stories"]>();
+  for (const r of (items ?? []) as (Pick<
+    CaItem,
+    "id" | "issue_date" | "headline" | "status" | "content"
+  > & {
+    event_id: string;
+  })[]) {
+    byEvent.set(r.event_id, [
+      ...(byEvent.get(r.event_id) ?? []),
+      {
+        id: r.id,
+        issue_date: r.issue_date,
+        headline: r.content?.headline.hi || r.content?.headline.en || r.headline,
+        status: r.status,
+      },
+    ]);
+  }
+  return { ready: true, events: events.map((e) => ({ ...e, stories: byEvent.get(e.id) ?? [] })) };
+}
+
+export async function createEvent(name: string, kind: EventKind): Promise<string> {
+  const { data, error } = await from("ca_events")
+    .insert({
+      name,
+      kind,
+      status: "running",
+      embedding: (await embedOne(name).catch(() => null)) as unknown as string,
+    } as never)
+    .select("id")
+    .single();
+  fail(error);
+  return (data as unknown as { id: string }).id;
+}
+
+export async function updateEvent(
+  id: string,
+  patch: Partial<
+    Pick<
+      CaEvent,
+      "name" | "name_hi" | "kind" | "place" | "starts_on" | "ends_on" | "status" | "summary"
+    >
+  >,
+): Promise<CaEvent> {
+  const next: Record<string, unknown> = { ...patch, updated_at: new Date().toISOString() };
+  // Concluded without an end date: it ended on its last story's day.
+  if (patch.status === "concluded" && !patch.ends_on) {
+    const [e] = await eventsById([id]);
+    if (!e?.ends_on) {
+      const { data } = await from("ca_items")
+        .select("issue_date")
+        .eq("event_id", id)
+        .order("issue_date", { ascending: false })
+        .limit(1);
+      next.ends_on = ((data ?? []) as { issue_date: string }[])[0]?.issue_date ?? istDate();
+    }
+  }
+  if (patch.status === "running") next.ends_on = null;
+  if (patch.name) next.embedding = await embedOne(patch.name).catch(() => null);
+  const { data, error } = await from("ca_events")
+    .update(next as never)
+    .eq("id", id)
+    .select(EVENT_COLS)
+    .single();
+  fail(error);
+  return data as unknown as CaEvent;
+}
+
+// One event's stories move to another, and the first is removed.
+export async function mergeEvents(fromId: string, intoId: string) {
+  if (fromId === intoId) return;
+  fail(
+    (
+      await from("ca_items")
+        .update({ event_id: intoId } as never)
+        .eq("event_id", fromId)
+    ).error,
+  );
+  fail((await from("ca_events").delete().eq("id", fromId)).error);
+}
+
+export async function deleteEvent(id: string) {
+  fail((await from("ca_events").delete().eq("id", id)).error);
+}
+
+export async function linkStoryToEvent(itemId: string, eventId: string | null) {
+  const { data } = await from("ca_items").select("issue_date").eq("id", itemId).single();
+  if (data) await assertDayEditable([(data as { issue_date: string }).issue_date]);
+  fail(
+    (
+      await from("ca_items")
+        .update({ event_id: eventId, updated_at: new Date().toISOString() } as never)
+        .eq("id", itemId)
+    ).error,
+  );
+}
+
+// The complete summary of an event, from all its stories (included ones;
+// all of them when none is).
+export async function writeEventSummary(id: string): Promise<CaEvent> {
+  const [e] = await eventsById([id]);
+  if (!e) throw new Error("No such event");
+  const { data } = await from("ca_items")
+    .select("issue_date,headline,facts,status,content")
+    .eq("event_id", id)
+    .order("issue_date");
+  const all = (data ?? []) as Pick<
+    CaItem,
+    "issue_date" | "headline" | "facts" | "status" | "content"
+  >[];
+  const used = all.some((s) => s.status === "included")
+    ? all.filter((s) => s.status === "included")
+    : all;
+  if (!used.length) throw new Error("This event has no stories yet.");
+  const { glossary, summary_words } = await getMagazineSettings();
+  const raw = await saathiComplete(
+    apiKey(),
+    eventSummaryMessages({
+      event: e,
+      stories: used.map((s) => ({
+        date: s.issue_date,
+        headline: s.content?.headline.en || s.headline,
+        facts: s.facts,
+      })),
+      glossary,
+      summaryWords: summary_words,
+    }),
+  );
+  const parsed = parseContent(raw, EVENT_POINTS_MAX);
+  if (!parsed) throw new Error("The AI's reply could not be read. Try again.");
+  return updateEvent(id, { summary: fixShortFormsDeep(parsed.content) });
+}
+
+// The next concluded event with stories and no summary, for the evening
+// collection to write.
+export async function eventNeedingSummary(skip: string[] = []): Promise<string | null> {
+  const { data, error } = await from("ca_events")
+    .select("id")
+    .eq("status", "concluded")
+    .is("summary", null)
+    .order("ends_on")
+    .limit(5 + skip.length);
+  if (missingEvents(error)) return null;
+  fail(error);
+  for (const { id } of (data ?? []) as { id: string }[]) {
+    if (skip.includes(id)) continue;
+    const { count } = await from("ca_items")
+      .select("id", { count: "exact", head: true })
+      .eq("event_id", id);
+    if (count) return id;
+  }
+  return null;
+}
+
+// The month's events for the magazine and its checks.
+export async function monthEvents(month: string): Promise<CaEvent[]> {
+  const range = monthRange(month);
+  const links = await eventLinks({ from: range.from, to: range.to });
+  const { data, error } = await from("ca_events")
+    .select(EVENT_COLS)
+    .gte("ends_on", range.from)
+    .lte("ends_on", range.to);
+  if (missingEvents(error)) return [];
+  fail(error);
+  const ending = (data ?? []) as unknown as CaEvent[];
+  const linked = await eventsById(
+    [...new Set(links.values())].filter((id) => !ending.some((e) => e.id === id)),
+  );
+  return [...ending, ...linked];
 }
 
 // ---------- Monthly background article ----------
@@ -1882,6 +2263,8 @@ export type DayData = {
   items: CaItem[];
   issue: CaIssue | null;
   corrections: (CaCorrection & { item_date: string; headline: string })[];
+  // The day's stories' events and the running ones, for the event picker.
+  events: EventBrief[];
 };
 
 export async function getDay(date: string): Promise<DayData> {
@@ -1893,14 +2276,20 @@ export async function getDay(date: string): Promise<DayData> {
   fail(sources.error);
   fail(items.error);
   const month = monthRange(date);
+  // Without the events migration, stories have no event_id at all (the
+  // editor then hides the event picker).
+  const links = await eventLinksOrNull({ date });
+  const list = ((items.data ?? []) as unknown as CaItem[]).map((i) => ({
+    ...i,
+    category: normalizeCategory(i.category),
+    ...(links ? { event_id: links.get(i.id) ?? null } : {}),
+  }));
   return {
     sources: (sources.data ?? []) as unknown as CaSource[],
-    items: ((items.data ?? []) as unknown as CaItem[]).map((i) => ({
-      ...i,
-      category: normalizeCategory(i.category),
-    })),
+    items: list,
     issue: (issue.data as unknown as CaIssue | null) ?? null,
     corrections: await listCorrections(month.from, month.to, "pending"),
+    events: links ? await pickableEvents(date, [...new Set(links.values())]) : [],
   };
 }
 
@@ -3719,7 +4108,20 @@ export async function issueHtml(
   const saved = await getMagazineSettings();
   const settings = opts.dailyCover ? { ...saved, daily_cover: opts.dailyCover } : saved;
   const range = kind === "daily" ? { from: period, to: period } : monthRange(period);
-  const items = await magazineItems(range.from, range.to);
+  let items = await magazineItems(range.from, range.to);
+  // A monthly issue's several-day events: their stories print together near
+  // the front, or a concluded event's complete summary in their place.
+  let events: EventBlock<MagazineItem>[] = [];
+  if (kind === "monthly") {
+    const links = await eventLinks({ from: range.from, to: range.to });
+    const plan = monthlyEvents(
+      items.map((i) => ({ ...i, event_id: links.get(i.id) ?? null })),
+      await monthEvents(range.from),
+      range.from,
+    );
+    events = plan.blocks;
+    items = plan.rest;
+  }
   let corrections: MagazineCorrection[] = [];
   if (kind === "monthly") {
     corrections = (await listCorrections(range.from, range.to, "approved"))
@@ -3750,6 +4152,7 @@ export async function issueHtml(
       design,
       fillers: opts.fillers,
       coverOnly: opts.coverOnly,
+      events,
     }),
     // A monthly cover's own colour, when it is the whole issue's, also
     // colours the Telegram link on every page.
@@ -3757,7 +4160,8 @@ export async function issueHtml(
       design?.cover.color && design.cover.color_scope !== "cover"
         ? { ...settings, accent: design.cover.color }
         : settings,
-    count: items.length,
+    count:
+      items.length + events.reduce((n, b) => n + (b.mode === "summary" ? 1 : b.items.length), 0),
   };
 }
 

@@ -301,6 +301,31 @@ async function nextStep(run: CaRun): Promise<string | "wait" | null> {
     return `wrote “${item.headline.slice(0, 60)}”`;
   }
 
+  // 7) A concluded event without its complete summary: write it (each
+  // event tried once per run).
+  if (!(parsing ?? []).length) {
+    const key = `ca_eventsum:${run.id}`;
+    const { data: last } = await from("bot_settings").select("value").eq("key", key).maybeSingle();
+    const tried = ((last as { value?: { tried?: string[] } } | null)?.value?.tried ?? []).filter(
+      (x) => typeof x === "string",
+    );
+    const id = await CA.eventNeedingSummary(tried).catch(() => null);
+    if (id) {
+      await from("bot_settings").upsert({
+        key,
+        value: { tried: [...tried, id] },
+        updated_at: now(),
+      } as never);
+      const e = await CA.writeEventSummary(id).catch((err: unknown) => {
+        console.error("event summary:", err);
+        return null;
+      });
+      return e
+        ? `wrote the summary of “${e.name.slice(0, 60)}”`
+        : "couldn't write an event summary";
+    }
+  }
+
   if ((parsing ?? []).length) return "wait";
   return null;
 }
