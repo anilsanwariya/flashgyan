@@ -605,6 +605,51 @@ export type Database = {
           },
         ]
       }
+      ca_events: {
+        Row: {
+          created_at: string
+          embedding: string | null
+          ends_on: string | null
+          id: string
+          kind: string
+          name: string
+          name_hi: string
+          place: string
+          starts_on: string | null
+          status: string
+          summary: Json | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          embedding?: string | null
+          ends_on?: string | null
+          id?: string
+          kind?: string
+          name: string
+          name_hi?: string
+          place?: string
+          starts_on?: string | null
+          status?: string
+          summary?: Json | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          embedding?: string | null
+          ends_on?: string | null
+          id?: string
+          kind?: string
+          name?: string
+          name_hi?: string
+          place?: string
+          starts_on?: string | null
+          status?: string
+          summary?: Json | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       ca_issues: {
         Row: {
           approved_at: string | null
@@ -718,6 +763,7 @@ export type Database = {
           created_at: string
           embedding: string | null
           enrich_error: string | null
+          event_id: string | null
           facts: Json
           headline: string
           id: string
@@ -743,6 +789,7 @@ export type Database = {
           created_at?: string
           embedding?: string | null
           enrich_error?: string | null
+          event_id?: string | null
           facts?: Json
           headline: string
           id?: string
@@ -768,6 +815,7 @@ export type Database = {
           created_at?: string
           embedding?: string | null
           enrich_error?: string | null
+          event_id?: string | null
           facts?: Json
           headline?: string
           id?: string
@@ -786,6 +834,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "ca_items_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "ca_events"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "ca_items_related_item_id_fkey"
             columns: ["related_item_id"]
