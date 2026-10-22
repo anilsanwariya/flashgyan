@@ -811,9 +811,15 @@ export type Database = {
           headline: string
           id: string
           importance: number
-          issue_date: string
+          issue_date: string | null
           key_embedding: string | null
+          mag_date: string | null
+          mag_pinned: boolean
+          mag_section: string | null
+          mag_sub: string | null
+          magazine_id: string | null
           needs_enrich: boolean
+          origin_id: string | null
           position: number
           rajasthan: boolean
           related_item_id: string | null
@@ -838,9 +844,15 @@ export type Database = {
           headline: string
           id?: string
           importance?: number
-          issue_date: string
+          issue_date?: string | null
           key_embedding?: string | null
+          mag_date?: string | null
+          mag_pinned?: boolean
+          mag_section?: string | null
+          mag_sub?: string | null
+          magazine_id?: string | null
           needs_enrich?: boolean
+          origin_id?: string | null
           position?: number
           rajasthan?: boolean
           related_item_id?: string | null
@@ -865,9 +877,15 @@ export type Database = {
           headline?: string
           id?: string
           importance?: number
-          issue_date?: string
+          issue_date?: string | null
           key_embedding?: string | null
+          mag_date?: string | null
+          mag_pinned?: boolean
+          mag_section?: string | null
+          mag_sub?: string | null
+          magazine_id?: string | null
           needs_enrich?: boolean
+          origin_id?: string | null
           position?: number
           rajasthan?: boolean
           related_item_id?: string | null
@@ -887,6 +905,20 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "ca_items_magazine_id_fkey"
+            columns: ["magazine_id"]
+            isOneToOne: false
+            referencedRelation: "ca_mags"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ca_items_origin_id_fkey"
+            columns: ["origin_id"]
+            isOneToOne: false
+            referencedRelation: "ca_items"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "ca_items_related_item_id_fkey"
             columns: ["related_item_id"]
             isOneToOne: false
@@ -894,6 +926,96 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      ca_mag_seen: {
+        Row: {
+          fits: boolean
+          item_id: string
+          mag_id: string
+        }
+        Insert: {
+          fits?: boolean
+          item_id: string
+          mag_id: string
+        }
+        Update: {
+          fits?: boolean
+          item_id?: string
+          mag_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ca_mag_seen_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "ca_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ca_mag_seen_mag_id_fkey"
+            columns: ["mag_id"]
+            isOneToOne: false
+            referencedRelation: "ca_mags"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ca_mags: {
+        Row: {
+          created_at: string
+          date_from: string
+          date_to: string
+          design: Json | null
+          error: string | null
+          finalized_at: string | null
+          id: string
+          pdf_at: string | null
+          pdf_url_en: string | null
+          pdf_url_hi: string | null
+          sections: Json
+          status: string
+          theme: string
+          title_en: string
+          title_hi: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          date_from: string
+          date_to: string
+          design?: Json | null
+          error?: string | null
+          finalized_at?: string | null
+          id?: string
+          pdf_at?: string | null
+          pdf_url_en?: string | null
+          pdf_url_hi?: string | null
+          sections?: Json
+          status?: string
+          theme: string
+          title_en: string
+          title_hi?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          date_from?: string
+          date_to?: string
+          design?: Json | null
+          error?: string | null
+          finalized_at?: string | null
+          id?: string
+          pdf_at?: string | null
+          pdf_url_en?: string | null
+          pdf_url_hi?: string | null
+          sections?: Json
+          status?: string
+          theme?: string
+          title_en?: string
+          title_hi?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       ca_runs: {
         Row: {
