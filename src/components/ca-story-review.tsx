@@ -144,7 +144,7 @@ export function StoryList({
   });
   const [review, setReviewState] = useState<Record<string, ReviewState>>({});
   useEffect(() => {
-    if (reviewQ.data) setReviewState(reviewQ.data);
+    if (reviewQ.data && typeof reviewQ.data === "object") setReviewState(reviewQ.data);
   }, [reviewQ.data]);
   useEffect(() => setReviewState({}), [date]);
   async function setReview(ids: string[], state: ReviewState | null) {
@@ -157,7 +157,8 @@ export function StoryList({
       return next;
     });
     try {
-      setReviewState(await setReviewFn({ data: { date, ids, state } }));
+      const saved = await setReviewFn({ data: { date, ids, state } });
+      if (saved && typeof saved === "object") setReviewState(saved);
     } catch (e) {
       toast.error(errorText(e, "Couldn't save"));
       void reviewQ.refetch();
