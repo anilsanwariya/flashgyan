@@ -67,6 +67,8 @@ export type CustomLayout = {
   title: Bi;
   dateLine: Bi;
   sections: { id: string; title: Bi; subs: { id: string; title: Bi }[] }[];
+  // Each section's background article, printed after its stories.
+  features?: Record<string, CaFeature>;
 };
 
 export type MagazineCorrection = {
@@ -699,6 +701,9 @@ export function renderMagazine(opts: {
   // sections with subsections, in print order; items' category is the
   // section and `sub` the subsection.
   custom?: CustomLayout | null;
+  // A part of a long PDF: the stories it prints (the cover, contents and
+  // pages after the stories only where asked), numbered on from `start`.
+  part?: { only: string[]; cover: boolean; tail: boolean; start: number } | null;
 }): string {
   const s = opts.settings;
   const lang = opts.lang;
@@ -851,10 +856,23 @@ export function renderMagazine(opts: {
         })
         .join("")}</section>`
     : "";
+  // A part of a long PDF prints only its own stories.
+  const part = opts.part ?? null;
+  const inPart = part ? new Set(part.only) : null;
+  if (part) n = part.start;
   const sections = [...groups.entries()]
+    .map(([cat, all]) => [cat, inPart ? all.filter((i) => inPart.has(i.id)) : all] as const)
+    .filter(([, list]) => list.length)
     .map(([cat, list]) => {
       // A monthly issue can print an ad page after any section.
       const ad = adById(design?.section_ads[cat]);
+      // A custom magazine's section ends with its background article, once
+      // its last story is printed.
+      const last = groups.get(cat)!.at(-1);
+      const feature =
+        custom?.features?.[cat] && (!inPart || (last && inPart.has(last.id)))
+          ? featurePage(custom.features[cat], lang)
+          : "";
       // A custom magazine's subsections get a heading of their own.
       let sub: string | null | undefined;
       const body = list
@@ -867,7 +885,7 @@ export function renderMagazine(opts: {
           return head + itemHtml(it, ++n, monthly, accent, lang, boxes);
         })
         .join("");
-      return `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>${icon(cat)} ${esc(label(cat)[lang])}</h2><span>${list.length} ${t.stories(list.length)}</span></div>${body}</section>${ad ? adPageHtml(ad, lang, cat) : ""}`;
+      return `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>${icon(cat)} ${esc(label(cat)[lang])}</h2><span>${list.length} ${t.stories(list.length)}</span></div>${body}</section>${feature}${ad ? adPageHtml(ad, lang, cat) : ""}`;
     })
     .join("");
 
@@ -954,23 +972,28 @@ ${
   opts.coverOnly
     ? coverSection
     : `${watermark}
-${coverSection}
-${eventsHtml}
+${!part || part.cover ? `${coverSection}\n${eventsHtml}` : ""}
 ${sections}
-${corrections}
+${
+  !part || part.tail
+    ? `${corrections}
 ${opts.feature ? featurePage(opts.feature, lang) : ""}
 ${revisionPage(allGroups, lang, label)}
 ${practicePage(everything, lang)}
 ${notes}
 ${back ? adPageHtml(back, lang, "back") : ""}`
+    : ""
+}`
 }
 </body>
 </html>`;
 }
 
 // Page numbers and brand line printed at the bottom of every page.
-export function footerTemplate(settings: MagazineSettings): string {
-  return `<div style="width:100%;font-size:8px;color:#94a3b8;padding:0 12mm;display:flex;justify-content:space-between;font-family:sans-serif"><span>${esc(settings.brand_line)}</span><span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>`;
+// A part of a long PDF leaves the numbers out (they are stamped on once the
+// parts are joined).
+export function footerTemplate(settings: MagazineSettings, numbered = true): string {
+  return `<div style="width:100%;font-size:8px;color:#94a3b8;padding:0 12mm;display:flex;justify-content:space-between;font-family:sans-serif"><span>${esc(settings.brand_line)}</span>${numbered ? `<span><span class="pageNumber"></span> / <span class="totalPages"></span></span>` : ""}</div>`;
 }
 
 // One story as the issue prints it, in one language, for the editor's

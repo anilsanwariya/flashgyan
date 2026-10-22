@@ -4,6 +4,7 @@
 import { hindiGuide, type GlossaryEntry } from "../../supabase/functions/_shared/ca-hindi.ts";
 import type { Bi } from "@/lib/current-affairs";
 import type { IssueDesign } from "@/lib/ca-covers";
+import type { CaFeature } from "@/lib/ca-feature";
 
 export type MagSub = { id: string; en: string; hi: string };
 export type MagSection = MagSub & { subs: MagSub[] };
@@ -25,6 +26,12 @@ export type CustomMag = {
   created_at: string;
   updated_at: string;
   finalized_at: string | null;
+  // After the ca_mag_finishing migration: background articles by section,
+  // the websites it collects from, and its last post to the channel.
+  features?: Record<string, CaFeature> | null;
+  site_ids?: string[] | null;
+  posted_at?: string | null;
+  post_error?: string | null;
 };
 
 // Stories judged in one AI call.

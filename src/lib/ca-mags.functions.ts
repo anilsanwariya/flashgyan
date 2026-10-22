@@ -211,3 +211,122 @@ export const updateCaMagFromDaily = createServerFn({ method: "POST" })
     await (await server()).updateFromDaily(data.id);
     return { ok: true };
   });
+
+// ---------- Cover and ads, Telegram, background articles ----------
+
+export const getCaMagDesign = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).getMagDesign(data.id);
+  });
+
+export const saveCaMagDesign = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ id, design: z.record(z.string(), z.unknown()) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).saveMagDesign(data.id, data.design);
+  });
+
+// The PDFs to the channel, or to the editor's test chat.
+export const postCaMag = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id, test: z.boolean() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).postMag(data.id, data.test);
+    return { ok: true };
+  });
+
+export const writeCaMagFeature = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id, section: z.string().min(1).max(80) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).writeSectionFeature(data.id, data.section);
+  });
+
+export const removeCaMagFeature = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id, section: z.string().min(1).max(80) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).removeSectionFeature(data.id, data.section);
+    return { ok: true };
+  });
+
+// ---------- Material and websites ----------
+
+export const listCaMagMaterials = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).listMaterials(data.id);
+  });
+
+export const addCaMagMaterial = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id,
+        title: z.string().trim().max(300),
+        source_name: z.string().trim().max(120),
+        content: z.string().min(1).max(600_000).optional(),
+        url: z.string().url().max(2000).optional(),
+        date: dateSchema.nullable().optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    let { content, title } = data;
+    // A web page: read it first.
+    if (!content && data.url) {
+      const { readPage } = await import("@/lib/ca-collect.server");
+      const page = await readPage(data.url);
+      if (!page) throw new Error("That page couldn't be read.");
+      content = page.text;
+      title = title || page.title;
+    }
+    if (!content) throw new Error("Add a file, a link or some text.");
+    return (await server()).addMaterial(data.id, {
+      title,
+      source_name: data.source_name || (data.url ? new URL(data.url).hostname : "Material"),
+      content,
+      date: data.date ?? null,
+      url: data.url ?? null,
+    });
+  });
+
+export const deleteCaMagMaterial = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id, source: id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).deleteMaterial(data.id, data.source);
+    return { ok: true };
+  });
+
+export const setCaMagSites = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id, sites: z.array(id).max(100) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).setMagSites(data.id, data.sites);
+    return { ok: true };
+  });
+
+export const collectCaMagSites = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).collectMagSites(data.id);
+    return { ok: true };
+  });

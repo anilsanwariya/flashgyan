@@ -25,6 +25,7 @@ import {
   saveCaIssueDesign,
   uploadCaCoverPhoto,
 } from "@/lib/current-affairs.functions";
+import { getCaMagDesign, saveCaMagDesign } from "@/lib/ca-mags.functions";
 import {
   BINDINGS,
   DAILY_LAYOUTS,
@@ -121,6 +122,8 @@ type PreviewArgs = {
   period: string;
   design?: IssueDesign;
   daily_cover?: string;
+  // A custom magazine's cover.
+  mag?: string;
 };
 
 function PreviewBox(props: PreviewArgs) {
@@ -138,6 +141,7 @@ function PreviewBox(props: PreviewArgs) {
           lang: settled.lang,
           design: settled.design as unknown as Record<string, unknown> | undefined,
           daily_cover: settled.daily_cover,
+          mag: settled.mag,
         },
       }),
     placeholderData: keepPreviousData,
@@ -446,20 +450,24 @@ export function DailyCoverSettings({
 // ---------- Monthly: the issue's cover and ads ----------
 
 // The month's cover and ads as edited, before they are saved; shared by the
-// Cover and Ads & printing tabs and their save bar.
-export function useIssueDesign(month: string) {
+// Cover and Ads & printing tabs and their save bar. With `mag`, a custom
+// magazine's own (month is then its first date, for the preview's period).
+export function useIssueDesign(month: string, mag?: string) {
   const qc = useQueryClient();
   const getFn = useServerFn(getCaIssueDesign);
   const saveFn = useServerFn(saveCaIssueDesign);
+  const getMagFn = useServerFn(getCaMagDesign);
+  const saveMagFn = useServerFn(saveCaMagDesign);
+  const key = mag ? ["caMagDesign", mag] : ["caIssueDesign", month];
   const q = useQuery({
-    queryKey: ["caIssueDesign", month],
-    queryFn: () => getFn({ data: { period: month } }),
+    queryKey: key,
+    queryFn: () => (mag ? getMagFn({ data: { id: mag } }) : getFn({ data: { period: month } })),
   });
   const [design, setDesign] = useState<IssueDesign | null>(null);
   const [base, setBase] = useState("");
   const [saving, setSaving] = useState(false);
   // A new month starts from what is saved for it.
-  useEffect(() => setDesign(null), [month]);
+  useEffect(() => setDesign(null), [month, mag]);
   useEffect(() => {
     if (q.data && !design) {
       setDesign(q.data);
@@ -474,13 +482,14 @@ export function useIssueDesign(month: string) {
     if (!design) return false;
     setSaving(true);
     try {
-      const saved = await saveFn({
-        data: { period: month, design: design as unknown as Record<string, unknown> },
-      });
+      const raw = design as unknown as Record<string, unknown>;
+      const saved = mag
+        ? await saveMagFn({ data: { id: mag, design: raw } })
+        : await saveFn({ data: { period: month, design: raw } });
       setDesign(saved);
       setBase(JSON.stringify(saved));
       toast.success("Cover and ads saved");
-      qc.invalidateQueries({ queryKey: ["caIssueDesign", month] });
+      qc.invalidateQueries({ queryKey: key });
       return true;
     } catch (e) {
       toast.error(errorText(e, "Couldn't save the cover"));
@@ -492,6 +501,7 @@ export function useIssueDesign(month: string) {
   const discard = () => setDesign(JSON.parse(base) as IssueDesign);
   return {
     month,
+    mag,
     design: d,
     ready: !!design,
     loading: q.isLoading,
@@ -969,7 +979,7 @@ export function MonthlyCoverEditor({ state }: { state: IssueDesignState }) {
           </div>
         </Step>
       </div>
-      <PreviewAside kind="monthly" period={state.month} design={d} />
+      <PreviewAside kind="monthly" period={state.month} design={d} mag={state.mag} />
     </div>
   );
 }
@@ -979,18 +989,22 @@ export function MonthlyCoverEditor({ state }: { state: IssueDesignState }) {
 export function MonthlyAdsEditor({
   state,
   sections,
+  names,
 }: {
   state: IssueDesignState;
   // Stories this month in each section.
   sections: Record<string, number>;
+  // A custom magazine's own sections, in order (default: the categories).
+  names?: { id: string; name: string }[];
 }) {
   const sq = useCoverSettings();
   const ads = sq.data?.ads ?? [];
   const [showAll, setShowAll] = useState(false);
   const d = state.design;
-  const withStories = CATEGORIES.filter((c) => (sections[c.id] ?? 0) > 0);
-  const without = CATEGORIES.filter((c) => !(sections[c.id] ?? 0));
-  const shown = showAll || !withStories.length ? CATEGORIES : withStories;
+  const all = names ?? CATEGORIES.map((c) => ({ id: c.id, name: categoryLabel(c.id).en }));
+  const withStories = all.filter((c) => (sections[c.id] ?? 0) > 0);
+  const without = all.filter((c) => !(sections[c.id] ?? 0));
+  const shown = showAll || !withStories.length ? all : withStories;
   const binding = BINDINGS.find((b) => b.id === (sq.data?.print_binding as Binding));
   const setAd = (id: string, ad: string) =>
     state.update((x) => ({ ...x, section_ads: { ...x.section_ads, [id]: ad } }));
@@ -1053,14 +1067,14 @@ export function MonthlyAdsEditor({
           {shown.map((c) => (
             <div key={c.id} className="flex flex-wrap items-center gap-2 px-3 py-2">
               <span className="min-w-0 flex-1 text-sm">
-                After <span className="font-medium">{categoryLabel(c.id).en}</span>
+                After <span className="font-medium">{c.name}</span>
                 <span className="ml-2 text-xs text-muted-foreground">
                   {sections[c.id] ?? 0} {(sections[c.id] ?? 0) === 1 ? "story" : "stories"}
                 </span>
               </span>
               <div className="w-full sm:w-56">
                 <AdSelect
-                  label={`Ad after ${categoryLabel(c.id).en}`}
+                  label={`Ad after ${c.name}`}
                   value={d.section_ads[c.id] ?? ""}
                   ads={ads}
                   onChange={(v) => setAd(c.id, v)}
@@ -1076,7 +1090,7 @@ export function MonthlyAdsEditor({
             className="text-xs text-primary hover:underline"
           >
             {showAll
-              ? "Show only sections with stories this month"
+              ? `Show only sections with stories${names ? "" : " this month"}`
               : `Show ${without.length} section${without.length === 1 ? "" : "s"} without stories`}
           </button>
         )}
@@ -1090,7 +1104,7 @@ export function MonthlyAdsEditor({
         <div className="flex flex-col gap-1 sm:w-80">
           <Label>Back cover</Label>
           <AdSelect
-            label="Monthly back cover"
+            label={names ? "Back cover" : "Monthly back cover"}
             value={d.back_cover}
             ads={ads}
             none="None"

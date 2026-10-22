@@ -1777,6 +1777,18 @@ export async function writeFeature(
   month: string,
   topic: { topic: Bi; query: string; stories: string[] },
 ): Promise<CaFeature> {
+  const feature = await composeFeature(topic);
+  await saveFeature(month, feature);
+  return feature;
+}
+
+// A background article on a topic from the knowledge base (not saved). A
+// draft with a number the passages don't contain gets one retry, then fails.
+export async function composeFeature(topic: {
+  topic: Bi;
+  query: string;
+  stories: string[];
+}): Promise<CaFeature> {
   const passages = await featurePassages(topic.query || topic.topic.en);
   if (passages.length < 2) throw new Error(NOT_COVERED);
   let problem: string | undefined;
@@ -1802,7 +1814,6 @@ export async function writeFeature(
         included: true,
         created_at: new Date().toISOString(),
       };
-      await saveFeature(month, feature);
       return feature;
     }
     if (r.reason === "not covered") throw new Error(NOT_COVERED);
@@ -2008,6 +2019,14 @@ export async function readMaterial(
         .eq("id", source.id)
     ).error,
   );
+  // Material for a custom magazine's story belongs to the magazine, not to a
+  // day (no daily issue lists it). Before that migration it stays on the day.
+  const { data: own } = await from("ca_items").select("magazine_id").eq("id", itemId).single();
+  const magId = (own as { magazine_id?: string | null } | null)?.magazine_id;
+  if (magId)
+    await from("ca_sources")
+      .update({ issue_date: null, magazine_id: magId, mag_date: item.issue_date } as never)
+      .eq("id", source.id);
   const c = item.content;
   const known =
     input.target === "static"
@@ -4244,7 +4263,9 @@ export async function renderPdf(
   html: string,
   settings: MagazineSettings,
   lang: Lang = "en",
-): Promise<{ pdf: Uint8Array; pages: number }> {
+  // A part of a long PDF: no page numbers yet (stamped once joined).
+  opts: { numbered?: boolean } = {},
+): Promise<{ pdf: Uint8Array; pages: number; ads: number[] }> {
   const account = process.env.CLOUDFLARE_ACCOUNT_ID;
   const token = process.env.CLOUDFLARE_API_TOKEN;
   if (!account || !token) {
@@ -4267,7 +4288,7 @@ export async function renderPdf(
           preferCSSPageSize: true,
           displayHeaderFooter: true,
           headerTemplate: "<span></span>",
-          footerTemplate: footerTemplate(settings),
+          footerTemplate: footerTemplate(settings, opts.numbered !== false),
         },
       }),
     });
@@ -4319,7 +4340,7 @@ export async function renderPdf(
   } catch (e) {
     // The issue still goes out, without the link.
     console.error("join link:", e instanceof Error ? e.message : e);
-    return { pdf, pages: 0 };
+    return { pdf, pages: 0, ads: [] };
   }
 }
 
@@ -4529,7 +4550,7 @@ export async function postIssueNow(kind: "daily" | "monthly", period: string) {
 
 // ---------- Telegram ----------
 
-async function sendPdf(chatId: string, path: string, caption: string | null) {
+export async function sendPdf(chatId: string, path: string, caption: string | null) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
   const { data, error } = await supabaseAdmin.storage.from(BUCKET).download(path);
