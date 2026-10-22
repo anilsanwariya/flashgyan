@@ -17,6 +17,7 @@ import {
   ChevronsUpDown,
   Clock,
   Image as ImageIcon,
+  Layers,
   Library,
   Pencil,
   Sparkles,
@@ -29,7 +30,10 @@ import {
   deleteCaItems,
   enrichCaItem,
   getCaKeywordBooks,
+  getCaDupeSuggestions,
   getCaReview,
+  keepCaStoriesApart,
+  mergeCaStories,
   setCaReview,
   updateCaItem,
   type CaItem,
@@ -301,6 +305,40 @@ export function StoryList({
       setBusy(false);
     }
   }
+  // Stories that are the same news become one, written again in the
+  // background.
+  const mergeFn = useServerFn(mergeCaStories);
+  const apartFn = useServerFn(keepCaStoriesApart);
+  const dupesFn = useServerFn(getCaDupeSuggestions);
+  const dupesQ = useQuery({
+    queryKey: ["caDupes", date],
+    queryFn: () => dupesFn({ data: { date } }),
+  });
+  const dupes = Array.isArray(dupesQ.data) ? dupesQ.data : [];
+  async function mergeIds(list: string[]) {
+    setBusy(true);
+    try {
+      const { kept } = await mergeFn({ data: { date, ids: list } });
+      setChosen(new Set());
+      toast.success(`${list.length} stories merged into one`);
+      onChanged();
+      void dupesQ.refetch();
+      void jobs.run(kept, "write", () => enrichFn({ data: { id: kept } }), "Merged story written");
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't merge"));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function keepApart(list: string[]) {
+    try {
+      await apartFn({ data: { date, ids: list } });
+      toast.success("Kept as separate stories");
+      void dupesQ.refetch();
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't save"));
+    }
+  }
   const firstTodo = ordered.find((it) => stateOf(it) === "todo");
   const navItems = navIds.map((id) => byId.get(id)).filter((it): it is CaItem => !!it);
 
@@ -397,7 +435,72 @@ export function StoryList({
         noun="items"
         busy={busy}
         onDelete={deleteMany}
+        actions={
+          chosen.size >= 2 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7"
+              disabled={busy}
+              onClick={() => {
+                if (
+                  confirm(
+                    `Merge ${chosen.size} stories into one? Their facts and sources are combined and the story is written again.`,
+                  )
+                )
+                  void mergeIds([...chosen]);
+              }}
+            >
+              <Layers className="mr-1 h-3.5 w-3.5" /> Merge into one
+            </Button>
+          )
+        }
       />
+
+      {/* Groups the duplicate check wasn't sure about: one tap each. */}
+      {dupes.length > 0 && (
+        <section
+          aria-label="Possibly the same news"
+          className="space-y-2 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-3"
+        >
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <Layers className="h-4 w-4 text-amber-600" /> Possibly the same news
+          </div>
+          {dupes.map((g) => (
+            <div
+              key={g.ids.join(",")}
+              data-dupe={g.ids.length}
+              className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-2.5"
+            >
+              <ul className="min-w-0 flex-1 basis-60 space-y-0.5 text-sm">
+                {g.ids.map((id, i) => (
+                  <li key={id} className="flex gap-2">
+                    <span className="shrink-0 text-xs font-semibold text-muted-foreground">
+                      #{number.get(id) ?? "?"}
+                    </span>
+                    <span lang="hi" className="min-w-0">
+                      {g.headlines[i]}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <div className="flex gap-1.5">
+                <Button size="sm" disabled={busy} onClick={() => void mergeIds(g.ids)}>
+                  Merge
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void keepApart(g.ids)}
+                >
+                  Keep apart
+                </Button>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
 
       {!shown.length && ordered.length > 0 && (
         <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">

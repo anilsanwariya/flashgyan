@@ -729,6 +729,8 @@ export type Database = {
           related_item_id: string | null
           source_ids: string[]
           status: string
+          story_key: string | null
+          key_embedding: string | null
           syllabus_topic_id: string | null
           unit: string | null
           updated_at: string
@@ -752,6 +754,8 @@ export type Database = {
           related_item_id?: string | null
           source_ids?: string[]
           status?: string
+          story_key?: string | null
+          key_embedding?: string | null
           syllabus_topic_id?: string | null
           unit?: string | null
           updated_at?: string
@@ -775,6 +779,8 @@ export type Database = {
           related_item_id?: string | null
           source_ids?: string[]
           status?: string
+          story_key?: string | null
+          key_embedding?: string | null
           syllabus_topic_id?: string | null
           unit?: string | null
           updated_at?: string

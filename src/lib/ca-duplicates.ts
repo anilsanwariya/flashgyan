@@ -1,17 +1,41 @@
 // Finding the same news printed as several stories: one PIB release about a
 // scheme's allocation and another about its achievements are one story for a
-// magazine. Embeddings find likely pairs; the AI confirms the doubtful ones.
-// Pure helpers, no network here.
+// magazine. Two embeddings find likely pairs (the story's headline and facts,
+// and its event key, "Rajasthan · scheme · launch", which stays the same
+// whatever the angle); the AI confirms the doubtful ones, and once a day
+// reads the whole list to group what the embeddings missed. Pure helpers, no
+// network here.
 
 // At or above this similarity two stories are merged without asking.
 export const SURELY_SAME = 0.88;
 // Between this and SURELY_SAME the AI decides.
-export const MAYBE_SAME = 0.75;
+export const MAYBE_SAME = 0.6;
+// Stories compared with each new item as a source is read.
+export const COMPARE_WITH = 8;
+// Of those, the most the AI is asked about.
+export const ASK_ABOUT = 5;
 // Most doubtful pairs sent to the AI in one go.
 export const MAX_PAIRS = 40;
 
 type ChatMessage = { role: "system" | "user"; content: string };
-export type StoryBrief = { headline: string; facts: { text: string }[] };
+export type StoryBrief = {
+  headline: string;
+  facts: { text: string }[];
+  key?: string | null;
+};
+
+// Two stories' likeness: the closer of their story and event-key embeddings.
+export function likeness(
+  a: { vec: number[] | null; keyVec: number[] | null },
+  b: { vec: number[] | null; keyVec: number[] | null },
+): number {
+  const story = a.vec && b.vec ? cosine(a.vec, b.vec) : 0;
+  const key = a.keyVec && b.keyVec ? cosine(a.keyVec, b.keyVec) : 0;
+  return Math.max(story, key);
+}
+
+// A pair of story ids in a fixed order, for remembering pairs kept apart.
+export const pairKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 
 // A pgvector value as PostgREST returns it ("[0.1,0.2,…]") or a number array.
 export function parseVector(v: unknown): number[] | null {
@@ -41,14 +65,15 @@ export function cosine(a: number[], b: number[]): number {
 export type Pair = { a: number; b: number; similarity: number };
 
 // Pairs of stories similar enough to be the same news, most similar first.
-export function candidatePairs(vectors: (number[] | null)[]): Pair[] {
+// Each story has its story embedding and, when known, its event-key one.
+export function candidatePairs(
+  vectors: (number[] | null | { vec: number[] | null; keyVec: number[] | null })[],
+): Pair[] {
+  const both = vectors.map((v) => (Array.isArray(v) || !v ? { vec: v, keyVec: null } : v));
   const out: Pair[] = [];
-  for (let a = 0; a < vectors.length; a++) {
-    for (let b = a + 1; b < vectors.length; b++) {
-      const va = vectors[a];
-      const vb = vectors[b];
-      if (!va || !vb) continue;
-      const similarity = cosine(va, vb);
+  for (let a = 0; a < both.length; a++) {
+    for (let b = a + 1; b < both.length; b++) {
+      const similarity = likeness(both[a], both[b]);
       if (similarity >= MAYBE_SAME) out.push({ a, b, similarity });
     }
   }
@@ -56,7 +81,7 @@ export function candidatePairs(vectors: (number[] | null)[]): Pair[] {
 }
 
 const brief = (s: StoryBrief) =>
-  `${s.headline}\n${s.facts
+  `${s.key ? `[${s.key}] ` : ""}${s.headline}\n${s.facts
     .slice(0, 6)
     .map((f) => `- ${f.text}`)
     .join("\n")}`;
@@ -91,6 +116,64 @@ export function parseSameStory(raw: string, count: number): Set<number> {
     }
   } catch {
     /* unreadable: treat as no duplicates */
+  }
+  return out;
+}
+
+// The whole day's stories in one list, for the AI to group the ones that are
+// the same news (what the embeddings missed).
+export type DayStory = StoryBrief & { section: string; editorial: boolean };
+
+export function dayGroupMessages(stories: DayStory[]): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: `You edit a daily current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). Below is the day's list of news stories, each with its event key in brackets, headline and first facts. They came from several newspapers and releases, so the same news may appear more than once with different headlines, angles or details (a scheme's launch and the same scheme's targets; a report's release and its findings; an appointment announced and the same person taking charge). Find every group of stories that the magazine should print as ONE story because they are about the same event, scheme, programme, report, decision or person.
+RULES: Two different schemes, events, reports or people are NOT the same, even in the same field or place. A news story and an editorial are never the same. Mark a group "sure" only when the stories are plainly the same news; otherwise "sure": false. Use each story at most once.
+Reply with JSON only: {"groups": [{"stories": [story numbers], "sure": true or false}]}. Reply {"groups": []} if every story is different.`,
+    },
+    {
+      role: "user",
+      content: stories
+        .map(
+          (s, i) =>
+            `${i + 1}. (${s.editorial ? "editorial" : s.section}) ${s.key ? `[${s.key}] ` : ""}${s.headline}\n${s.facts
+              .slice(0, 3)
+              .map((f) => `   - ${f.text}`)
+              .join("\n")}`,
+        )
+        .join("\n"),
+    },
+  ];
+}
+
+export type DayGroup = { stories: number[]; sure: boolean };
+
+// The AI's groups as 0-based story indexes: two or more stories each, every
+// story in one group at most, never a news story with an editorial.
+export function parseDayGroups(raw: string, stories: { editorial: boolean }[]): DayGroup[] {
+  const text = raw.replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
+  let o: { groups?: unknown } = {};
+  for (const t of [text, /\{[\s\S]*\}/.exec(text)?.[0] ?? ""]) {
+    try {
+      o = JSON.parse(t) as { groups?: unknown };
+      break;
+    } catch {
+      // try the next form
+    }
+  }
+  const used = new Set<number>();
+  const out: DayGroup[] = [];
+  for (const g of Array.isArray(o.groups) ? o.groups : []) {
+    const r = (g ?? {}) as Record<string, unknown>;
+    const ids = (Array.isArray(r.stories) ? r.stories : [])
+      .map((x) => Number(x) - 1)
+      .filter((i) => Number.isInteger(i) && i >= 0 && i < stories.length && !used.has(i));
+    const unique = [...new Set(ids)];
+    if (unique.length < 2) continue;
+    if (new Set(unique.map((i) => stories[i].editorial)).size > 1) continue;
+    unique.forEach((i) => used.add(i));
+    out.push({ stories: unique, sure: r.sure === true });
   }
   return out;
 }
