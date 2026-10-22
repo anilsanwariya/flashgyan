@@ -813,7 +813,12 @@ export type Database = {
           importance: number
           issue_date: string | null
           key_embedding: string | null
+          mag_combined: boolean
           mag_date: string | null
+          mag_grouped: boolean
+          mag_origin_sig: string | null
+          mag_parent: string | null
+          mag_pending: number
           mag_pinned: boolean
           mag_section: string | null
           mag_sub: string | null
@@ -846,7 +851,12 @@ export type Database = {
           importance?: number
           issue_date?: string | null
           key_embedding?: string | null
+          mag_combined?: boolean
           mag_date?: string | null
+          mag_grouped?: boolean
+          mag_origin_sig?: string | null
+          mag_parent?: string | null
+          mag_pending?: number
           mag_pinned?: boolean
           mag_section?: string | null
           mag_sub?: string | null
@@ -879,7 +889,12 @@ export type Database = {
           importance?: number
           issue_date?: string | null
           key_embedding?: string | null
+          mag_combined?: boolean
           mag_date?: string | null
+          mag_grouped?: boolean
+          mag_origin_sig?: string | null
+          mag_parent?: string | null
+          mag_pending?: number
           mag_pinned?: boolean
           mag_section?: string | null
           mag_sub?: string | null
@@ -902,6 +917,13 @@ export type Database = {
             columns: ["event_id"]
             isOneToOne: false
             referencedRelation: "ca_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ca_items_mag_parent_fkey"
+            columns: ["mag_parent"]
+            isOneToOne: false
+            referencedRelation: "ca_items"
             referencedColumns: ["id"]
           },
           {
@@ -972,6 +994,8 @@ export type Database = {
           pdf_at: string | null
           pdf_url_en: string | null
           pdf_url_hi: string | null
+          reorg_at: string | null
+          reorg_queue: string[]
           sections: Json
           status: string
           theme: string
@@ -990,6 +1014,8 @@ export type Database = {
           pdf_at?: string | null
           pdf_url_en?: string | null
           pdf_url_hi?: string | null
+          reorg_at?: string | null
+          reorg_queue?: string[]
           sections?: Json
           status?: string
           theme: string
@@ -1008,6 +1034,8 @@ export type Database = {
           pdf_at?: string | null
           pdf_url_en?: string | null
           pdf_url_hi?: string | null
+          reorg_at?: string | null
+          reorg_queue?: string[]
           sections?: Json
           status?: string
           theme?: string

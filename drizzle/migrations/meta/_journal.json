@@ -113,6 +113,13 @@
       "when": 1792686691252,
       "tag": "0015_ca_custom_magazines",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1792688175206,
+      "tag": "0016_ca_mags_combined",
+      "breakpoints": true
     }
   ]
 }
