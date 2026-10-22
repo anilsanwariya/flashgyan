@@ -152,4 +152,7 @@ export type StoryReview = {
   drop: (it: CaItem, drop: boolean) => void;
   write: (it: CaItem) => Promise<boolean>;
   job: (it: CaItem) => StoryJob | undefined;
+  // The choices on the story's bar and their names (a custom magazine has
+  // only "In the magazine" and "Leave out").
+  choices?: { state: "approved" | "dropped" | "later"; label: string }[];
 };

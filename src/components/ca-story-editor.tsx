@@ -634,28 +634,31 @@ export function StoryEditor({
                 ["dropped", "Drop", XCircle, "text-destructive"],
                 ["later", "Read later", Clock, "text-amber-700 dark:text-amber-400"],
               ] as const
-            ).map(([s0, label, Icon, tone]) => {
-              const on = state === s0;
-              return (
-                <label
-                  key={s0}
-                  className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-2 py-1 text-xs sm:px-2.5 sm:text-sm ${on ? "border-current bg-muted/60 font-medium " + tone : "border-border text-muted-foreground"} ${job && s0 === "dropped" ? "opacity-60" : ""}`}
-                >
-                  <Checkbox
-                    checked={on}
-                    disabled={!!job && s0 === "dropped"}
-                    onCheckedChange={(v) => {
-                      const want = v === true;
-                      if (s0 === "dropped") review.drop(item, want);
-                      else review.set(item, want ? s0 : null);
-                    }}
-                    aria-label={label}
-                  />
-                  <Icon className="hidden h-3.5 w-3.5 sm:block" />
-                  {label}
-                </label>
-              );
-            })}
+            )
+              .filter(([s0]) => !review.choices || review.choices.some((c) => c.state === s0))
+              .map(([s0, name, Icon, tone]) => {
+                const label = review.choices?.find((c) => c.state === s0)?.label ?? name;
+                const on = state === s0;
+                return (
+                  <label
+                    key={s0}
+                    className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-2 py-1 text-xs sm:px-2.5 sm:text-sm ${on ? "border-current bg-muted/60 font-medium " + tone : "border-border text-muted-foreground"} ${job && s0 === "dropped" ? "opacity-60" : ""}`}
+                  >
+                    <Checkbox
+                      checked={on}
+                      disabled={!!job && s0 === "dropped"}
+                      onCheckedChange={(v) => {
+                        const want = v === true;
+                        if (s0 === "dropped") review.drop(item, want);
+                        else review.set(item, want ? s0 : null);
+                      }}
+                      aria-label={label}
+                    />
+                    <Icon className="hidden h-3.5 w-3.5 sm:block" />
+                    {label}
+                  </label>
+                );
+              })}
           </div>
           <span
             role="status"

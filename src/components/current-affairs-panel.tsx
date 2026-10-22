@@ -1,6 +1,7 @@
 // Admin: daily and monthly current affairs magazine. Upload the day's sources,
 // review the news items SAATHI writes from them, approve the issue and it is
 // posted to the Telegram channels as an English PDF and a Hindi PDF.
+import { CustomMagazines } from "@/components/ca-custom-panel";
 import { PastCollection } from "@/components/ca-past-collection";
 import { EventsPanel } from "@/components/ca-events-panel";
 import { useEffect, useRef, useState } from "react";
@@ -110,7 +111,7 @@ import {
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-export type CaSection = "daily" | "monthly" | "settings";
+export type CaSection = "daily" | "monthly" | "custom" | "settings";
 
 const shiftDate = (date: string, days: number) => {
   const d = new Date(`${date}T00:00:00Z`);
@@ -127,6 +128,7 @@ const timeIst = (iso: string) =>
 
 export function CurrentAffairsPanel({ section }: { section: CaSection }) {
   if (section === "monthly") return <MonthlyPanel />;
+  if (section === "custom") return <CustomMagazines />;
   if (section === "settings") return <SettingsPanel />;
   return <DailyPanel />;
 }

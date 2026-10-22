@@ -186,6 +186,12 @@ export async function tick(origin?: string): Promise<TickResult> {
   } catch (e) {
     console.error("past-date collection:", e);
   }
+  // Custom magazines take their next batch of stories.
+  try {
+    await (await import("@/lib/ca-mags.server")).magStep();
+  } catch (e) {
+    console.error("custom magazines:", e);
+  }
 
   const { data: claimed, error } = await supabaseAdmin.rpc(
     "ca_claim_run" as never,

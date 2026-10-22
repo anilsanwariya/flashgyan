@@ -756,9 +756,11 @@ export async function extractSourceChunk(sourceId: string, index: number) {
 
 // Removes a source and the facts that came only from it.
 export async function deleteSource(sourceId: string) {
+  // Custom magazines' copies (no day of their own) keep their facts.
   const { data } = await from("ca_items")
     .select("id,facts,source_ids")
-    .contains("source_ids", [sourceId]);
+    .contains("source_ids", [sourceId])
+    .not("issue_date", "is", null);
   for (const it of (data ?? []) as Pick<CaItem, "id" | "facts" | "source_ids">[]) {
     const rest = it.source_ids.filter((s) => s !== sourceId);
     if (!rest.length) {
@@ -1153,9 +1155,7 @@ export async function enrichItem(
     reason?: CaVersion["reason"];
   } = {},
 ): Promise<CaItem> {
-  const { data, error } = await from("ca_items").select(ITEM_COLS).eq("id", itemId).single();
-  fail(error);
-  const item = data as unknown as CaItem;
+  const item = await loadItem(itemId);
   item.category = normalizeCategory(item.category);
   const before = opts.before !== undefined ? opts.before : snapshotOf(item);
   const context = opts.context ?? item.content?.context_facts ?? [];
@@ -1935,9 +1935,7 @@ export async function previewVisual(
 
 // Makes the visual again (the admin's "Redo visual").
 export async function redoVisual(itemId: string): Promise<CaItem> {
-  const { data, error } = await from("ca_items").select(ITEM_COLS).eq("id", itemId).single();
-  fail(error);
-  const item = data as unknown as CaItem;
+  const item = await loadItem(itemId);
   if (!item.content) throw new Error("Write the text first");
   const look = await makeVisual(item);
   if (!look.visual) {
@@ -2453,7 +2451,14 @@ export async function suggestSummaries(
 async function loadItem(id: string): Promise<CaItem> {
   const { data, error } = await from("ca_items").select(ITEM_COLS).eq("id", id).single();
   fail(error);
-  return data as unknown as CaItem;
+  const item = data as unknown as CaItem;
+  // A custom magazine's copy has no day of its own: it works with the day
+  // its story came from.
+  if (!item.issue_date) {
+    const { data: m } = await from("ca_items").select("mag_date").eq("id", id).single();
+    item.issue_date = (m as { mag_date?: string } | null)?.mag_date ?? istDate();
+  }
+  return item;
 }
 
 // ---------- The article reader: highlighting facts in the full source ----------
@@ -2484,7 +2489,11 @@ const READER_SOURCE_COLS = "id,title,source_name,section,url,content";
 
 // The stories made from these sources (except one), with their quotes.
 async function storiesOn(sourceIds: string[], except: string | null) {
-  let q = from("ca_items").select("id,headline,status,facts").overlaps("source_ids", sourceIds);
+  // Daily stories only (not custom magazines' copies of them).
+  let q = from("ca_items")
+    .select("id,headline,status,facts")
+    .overlaps("source_ids", sourceIds)
+    .not("issue_date", "is", null);
   if (except) q = q.neq("id", except);
   const { data } = await q.limit(300);
   return (data ?? []) as unknown as Pick<CaItem, "id" | "headline" | "status" | "facts">[];
@@ -2649,7 +2658,8 @@ async function findSkipped(date: string): Promise<{ found: FoundArticle[]; readi
     .overlaps(
       "source_ids",
       rows.map((r) => r.id),
-    );
+    )
+    .not("issue_date", "is", null);
   fail(iErr);
   const items = (its ?? []) as unknown as (Pick<CaItem, "facts" | "source_ids"> & {
     context_facts: CaFact[] | null;
@@ -4126,7 +4136,12 @@ async function magazineItems(fromDate: string, toDate: string): Promise<Magazine
     .order("issue_date")
     .order("position");
   fail(error);
-  const items = ((data ?? []) as unknown as CaItem[]).filter((i) => i.content);
+  return toMagazineItems((data ?? []) as unknown as CaItem[]);
+}
+
+// Written stories as the issue prints them, with their sources' names.
+export async function toMagazineItems(rows: CaItem[]): Promise<MagazineItem[]> {
+  const items = rows.filter((i) => i.content);
   const sourceIds = [...new Set(items.flatMap((i) => i.source_ids))];
   const { data: srcs } = sourceIds.length
     ? await from("ca_sources").select("id,source_name,section").in("id", sourceIds)
