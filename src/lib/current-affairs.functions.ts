@@ -117,6 +117,8 @@ export const contentSchema = z.object({
   visual2_covers: z.array(z.number().int().min(0).max(100)).max(50).optional(),
   oneliner: bi.nullable().optional(),
   quick: z.object({ q: bi, a: bi }).nullable().optional(),
+  hide_summary: z.boolean().optional(),
+  hide_why: z.boolean().optional(),
   images: z
     .array(
       z.object({
@@ -1073,6 +1075,40 @@ export const decideCaCorrection = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     const r = await (await server()).decideCorrection(data.id, data.approve);
     return { ok: true, noted: r.noted };
+  });
+
+// Approved and read-later stories of a day.
+export const getCaReview = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ date: dateSchema }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).getReview(data.date);
+  });
+
+export const setCaReview = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        date: dateSchema,
+        ids: z.array(z.string().uuid()).min(1).max(200),
+        state: z.enum(["approved", "later"]).nullable(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).setReview(data.date, data.ids, data.state);
+  });
+
+// How far each story being written has got (for the progress bars).
+export const getCaWriteProgress = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ ids: z.array(z.string().uuid()).max(100) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).writeProgress(data.ids);
   });
 
 // ---------- Issues ----------

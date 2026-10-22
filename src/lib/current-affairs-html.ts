@@ -355,9 +355,10 @@ function itemHtml(
             : ""
         }</div>`
       : "";
-  const why = pick(c.why, lang)
-    ? `<div class="box why"><div class="box-title">${boxes.why}</div>${block(c.why, lang)}</div>`
-    : "";
+  const why =
+    !c.hide_why && pick(c.why, lang)
+      ? `<div class="box why"><div class="box-title">${boxes.why}</div>${block(c.why, lang)}</div>`
+      : "";
   const dyk = (c.dyk ?? []).filter((d) => pick(d, lang));
   const dykBox = dyk.length
     ? `<div class="box dyk"><div class="box-title">${boxes.dyk}</div><ul>${dyk
@@ -368,7 +369,7 @@ function itemHtml(
   <div class="item-head"><span class="num">${number}</span><div class="heads"><h3>${esc(pick(c.headline, lang))}</h3></div></div>
   ${tags ? `<div class="tags">${tags}</div>` : ""}
   ${sideImagesHtml(c.images, lang)}
-  ${block(c.summary, lang, "summary")}
+  ${c.hide_summary ? "" : block(c.summary, lang, "summary")}
   ${imagesHtml(c.images, lang)}
   ${c.visual ? visualHtml(c.visual, accent, lang) : ""}
   ${c.visual2 ? visualHtml(c.visual2, accent, lang) : ""}

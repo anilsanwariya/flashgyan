@@ -875,7 +875,9 @@ export async function enrichItem(
   const context = opts.context ?? item.content?.context_facts ?? [];
   const key = apiKey();
   const { style_rules: style, summary_words: summaryWords, glossary } = await getMagazineSettings();
+  const step = (pct: number, stage: string) => setWriteProgress(itemId, pct, stage);
   try {
+    await step(5, "Reading the facts");
     // The background explains the story's static concept, so the books are
     // searched for the concept, and for the headline in case the concept's
     // words differ from the book's; older stories without one use the news.
@@ -896,6 +898,7 @@ export async function enrichItem(
     const { data: topic } = await rpc("saathi_nearest_syllabus_topic", { p_embedding: embedding });
     const t = topic as { id: string; unit_id: string; similarity: number } | null;
     const syllabusId = t && t.similarity >= 0.5 ? t.id : null;
+    await step(35, "Writing the text");
 
     // Each passage is cited by its book and publisher ("NCERT · …").
     const kb = kbMatches.map((m) => ({ title: matchLabel(m), content: m.content }));
@@ -930,7 +933,9 @@ export async function enrichItem(
     const kept = item.content?.statics_edited ? item.content : null;
     const statics = kept ? (kept.statics ?? []) : (parsed.content.statics ?? []);
 
+    await step(75, "Finding Fact Bites");
     const dyk = await findDidYouKnow(item, embedding, parsed.content.headline.en || item.headline);
+    await step(92, "Saving");
     const update = {
       content: {
         ...parsed.content,
@@ -949,6 +954,9 @@ export async function enrichItem(
         // second visual whose numbers are all still in the facts (its facts
         // print as points again, as their order may have changed).
         ...(item.content?.images?.length ? { images: item.content.images } : {}),
+        // So does leaving out the summary or the Exam Angle.
+        ...(item.content?.hide_summary ? { hide_summary: true } : {}),
+        ...(item.content?.hide_why ? { hide_why: true } : {}),
         ...(item.content?.visual2 && !unverifiedNumbers(item.content.visual2, item.facts).length
           ? { visual2: item.content.visual2, visual2_covers: [] }
           : {}),
@@ -969,13 +977,89 @@ export async function enrichItem(
     fail(uErr);
     if (before) await saveVersion(itemId, before, opts.reason ?? "write");
     if (item.related_item_id) await checkForCorrections(item.related_item_id, itemId);
+    await clearWriteProgress(itemId);
     return saved as unknown as CaItem;
   } catch (e) {
+    await clearWriteProgress(itemId);
     await from("ca_items")
       .update({ enrich_error: saathiErrorDetail(e) } as never)
       .eq("id", itemId);
     throw new Error(saathiErrorDetail(e));
   }
+}
+
+// The editor's decision on each of a day's stories: approved, or kept to
+// read later (dropping is the story's own status). Kept with the settings,
+// one row a day, so it's the same on every device.
+export type ReviewState = "approved" | "later";
+const reviewKey = (date: string) => `ca_review:${date}`;
+
+export async function getReview(date: string): Promise<Record<string, ReviewState>> {
+  const { data } = await from("bot_settings")
+    .select("value")
+    .eq("key", reviewKey(date))
+    .maybeSingle();
+  const value = ((data as { value?: unknown } | null)?.value ?? {}) as Record<string, unknown>;
+  const out: Record<string, ReviewState> = {};
+  for (const [id, v] of Object.entries(value)) if (v === "approved" || v === "later") out[id] = v;
+  return out;
+}
+
+export async function setReview(
+  date: string,
+  ids: string[],
+  state: ReviewState | null,
+): Promise<Record<string, ReviewState>> {
+  const next = await getReview(date);
+  for (const id of ids) {
+    if (state) next[id] = state;
+    else delete next[id];
+  }
+  const { error } = await from("bot_settings").upsert({
+    key: reviewKey(date),
+    value: next,
+    updated_at: new Date().toISOString(),
+  } as never);
+  fail(error);
+  return next;
+}
+
+// How far writing a story has got, for the progress bar: kept for a few
+// minutes in the settings table (one row a story being written), so any
+// server can answer. Failing to note it never stops the writing.
+const progressKey = (id: string) => `ca_write:${id}`;
+export type WriteProgress = { pct: number; stage: string; at: string };
+
+async function setWriteProgress(id: string, pct: number, stage: string) {
+  try {
+    await from("bot_settings").upsert({
+      key: progressKey(id),
+      value: { pct, stage, at: new Date().toISOString() },
+      updated_at: new Date().toISOString(),
+    } as never);
+  } catch {
+    // The bar just moves less.
+  }
+}
+
+async function clearWriteProgress(id: string) {
+  try {
+    await from("bot_settings").delete().eq("key", progressKey(id));
+  } catch {
+    // Left behind: ignored once older than a few minutes.
+  }
+}
+
+export async function writeProgress(ids: string[]): Promise<Record<string, WriteProgress>> {
+  if (!ids.length) return {};
+  const { data } = await from("bot_settings").select("key,value").in("key", ids.map(progressKey));
+  const out: Record<string, WriteProgress> = {};
+  const fresh = Date.now() - 5 * 60_000;
+  for (const r of (data ?? []) as { key: string; value: WriteProgress }[]) {
+    if (new Date(r.value?.at ?? 0).getTime() < fresh) continue;
+    out[r.key.slice("ca_write:".length)] = r.value;
+  }
+  return out;
 }
 
 // ---------- Monthly background article ----------

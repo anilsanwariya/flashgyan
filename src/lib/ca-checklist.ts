@@ -41,7 +41,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 
 export function dayChecklist(o: {
   items: DayItem[];
-  // Stories opened in the review list (null: not known, e.g. on Telegram).
+  // Stories approved in the review list (null: not known, e.g. on Telegram).
   reviewed: Set<string> | null;
   unfinishedSources: number;
   // Pending corrections to this day's stories.
@@ -94,13 +94,13 @@ export function dayChecklist(o: {
         ? {
             key: "reviewed",
             state: "todo",
-            text: `${unread.length} of ${plural(included.length, "story", "stories")} not opened yet`,
+            text: `${unread.length} of ${plural(included.length, "story", "stories")} not approved yet`,
             action: { kind: "story", id: unread[0].id, label: "Next" },
           }
         : {
             key: "reviewed",
             state: "done",
-            text: `All ${plural(included.length, "story", "stories")} reviewed`,
+            text: `All ${plural(included.length, "story", "stories")} approved`,
           },
     );
   }

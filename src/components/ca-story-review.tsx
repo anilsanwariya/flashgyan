@@ -12,6 +12,10 @@ import {
   BarChart3,
   Plus,
   Check,
+  ChevronDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Clock,
   Image as ImageIcon,
   Library,
   Pencil,
@@ -25,9 +29,12 @@ import {
   deleteCaItems,
   enrichCaItem,
   getCaKeywordBooks,
+  getCaReview,
+  setCaReview,
   updateCaItem,
   type CaItem,
 } from "@/lib/current-affairs.functions";
+import { JobBar, useStoryJobs, type StoryJob } from "@/components/ca-story-jobs";
 import {
   CATEGORIES,
   MAX_STATICS,
@@ -50,7 +57,6 @@ import { Textarea } from "@/components/ui/textarea";
 export type Lang = "hi" | "en" | "both";
 
 const LANG_KEY = "ca-review-lang";
-const reviewedKey = (date: string) => `ca-reviewed:${date}`;
 
 function readStore<T>(key: string, fallback: T): T {
   try {
@@ -71,6 +77,25 @@ function writeStore(key: string, value: unknown) {
 
 // ====================== The list ======================
 
+// What the editor decided about each story: approved, kept to read later or
+// dropped; "to do" until then.
+export type ReviewState = "approved" | "later";
+type Filter = "all" | "todo" | "approved" | "later" | "dropped";
+const FILTERS: { id: Filter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "todo", label: "To do" },
+  { id: "approved", label: "Approved" },
+  { id: "later", label: "Read later" },
+  { id: "dropped", label: "Dropped" },
+];
+const FILTER_KEY = "ca-review-filter";
+const FOLDED_KEY = "ca-folded-sections";
+
+function storyState(it: CaItem, review: Record<string, ReviewState>): Exclude<Filter, "all"> {
+  if (it.status === "dropped") return "dropped";
+  return review[it.id] ?? "todo";
+}
+
 export function StoryList({
   items,
   date,
@@ -83,23 +108,20 @@ export function StoryList({
   onChanged: () => void;
   // A story to open and scroll to (from the day's checklist).
   jump?: { id: string; n: number } | null;
-  // The stories opened so far, for the day's checklist.
+  // The stories approved so far, for the day's checklist.
   onReviewed?: (ids: Set<string>) => void;
 }) {
-  const groups = useMemo(() => {
+  const ordered = useMemo(() => {
     const order = new Map<string, number>(CATEGORIES.map((c, i) => [c.id, i]));
-    const sorted = [...items].sort(
+    return [...items].sort(
       (a, b) =>
         (order.get(a.category) ?? 99) - (order.get(b.category) ?? 99) ||
         Number(a.status === "dropped") - Number(b.status === "dropped") ||
         a.position - b.position,
     );
-    const map = new Map<string, CaItem[]>();
-    for (const it of sorted) map.set(it.category, [...(map.get(it.category) ?? []), it]);
-    return [...map.entries()];
   }, [items]);
-  const ordered = useMemo(() => groups.flatMap(([, list]) => list), [groups]);
   const number = useMemo(() => new Map(ordered.map((it, i) => [it.id, i + 1])), [ordered]);
+  const byId = useMemo(() => new Map(items.map((it) => [it.id, it])), [items]);
 
   // Hindi on phones, both side by side on wider screens, unless chosen before.
   const [lang, setLangState] = useState<Lang>("both");
@@ -112,45 +134,147 @@ export function StoryList({
     writeStore(LANG_KEY, l);
   };
 
-  // The story open in the editor.
-  const [editing, setEditing] = useState<string | null>(null);
-  const [reviewed, setReviewed] = useState<Set<string>>(new Set());
+  // Approved and read-later stories, kept on the server (the same on every
+  // device); changes show at once.
+  const reviewFn = useServerFn(getCaReview);
+  const setReviewFn = useServerFn(setCaReview);
+  const reviewQ = useQuery({
+    queryKey: ["caReview", date],
+    queryFn: () => reviewFn({ data: { date } }),
+  });
+  const [review, setReviewState] = useState<Record<string, ReviewState>>({});
   useEffect(() => {
-    setEditing(null);
-    setReviewed(new Set(readStore<string[]>(reviewedKey(date), [])));
-  }, [date]);
-  const markReviewed = (id: string) =>
-    setReviewed((cur) => {
-      if (cur.has(id)) return cur;
-      const next = new Set(cur).add(id);
-      writeStore(reviewedKey(date), [...next]);
+    if (reviewQ.data && typeof reviewQ.data === "object") setReviewState(reviewQ.data);
+  }, [reviewQ.data]);
+  useEffect(() => setReviewState({}), [date]);
+  async function setReview(ids: string[], state: ReviewState | null) {
+    setReviewState((cur) => {
+      const next = { ...cur };
+      for (const id of ids) {
+        if (state) next[id] = state;
+        else delete next[id];
+      }
       return next;
     });
+    try {
+      const saved = await setReviewFn({ data: { date, ids, state } });
+      if (saved && typeof saved === "object") setReviewState(saved);
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't save"));
+      void reviewQ.refetch();
+    }
+  }
 
+  const jobs = useStoryJobs(onChanged);
+  const updateFn = useServerFn(updateCaItem);
+  const enrichFn = useServerFn(enrichCaItem);
+  // Dropping or bringing back a story runs on while the editor moves on;
+  // one that arrived dropped is written when it comes back.
+  const setDropped = (it: CaItem, drop: boolean) => {
+    if (drop) void setReview([it.id], null);
+    void jobs.run(
+      it.id,
+      drop ? "drop" : "include",
+      async () => {
+        await updateFn({ data: { id: it.id, status: drop ? "dropped" : "included" } });
+        if (!drop && it.needs_enrich) await enrichFn({ data: { id: it.id } });
+      },
+      drop ? "Dropped from the issue" : "Back in the issue",
+    );
+  };
+  const writeStory = (it: CaItem) =>
+    jobs.run(
+      it.id,
+      "write",
+      () => enrichFn({ data: { id: it.id } }),
+      it.content ? "Story written again" : "Story written",
+    );
+
+  const [filter, setFilterState] = useState<Filter>("all");
+  useEffect(() => setFilterState(readStore<Filter>(FILTER_KEY, "all")), []);
+  const setFilter = (f: Filter) => {
+    setFilterState(f);
+    writeStore(FILTER_KEY, f);
+  };
+  // A story keeps its place while its state is changing.
+  const stateOf = (it: CaItem) => {
+    const job = jobs.jobs.get(it.id);
+    if (job?.kind === "drop") return "dropped";
+    if (job?.kind === "include") return review[it.id] ?? "todo";
+    return storyState(it, review);
+  };
+  const counts = useMemo(() => {
+    const n: Record<Filter, number> = {
+      all: ordered.length,
+      todo: 0,
+      approved: 0,
+      later: 0,
+      dropped: 0,
+    };
+    for (const it of ordered) n[stateOf(it)]++;
+    return n;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ordered, review, jobs.jobs]);
+  const shown = filter === "all" ? ordered : ordered.filter((it) => stateOf(it) === filter);
+  const groups = useMemo(() => {
+    const map = new Map<string, CaItem[]>();
+    for (const it of shown) map.set(it.category, [...(map.get(it.category) ?? []), it]);
+    return [...map.entries()];
+  }, [shown]);
+
+  // Sections fold into a stack; remembered on this device.
+  const [folded, setFolded] = useState<Set<string>>(new Set());
+  useEffect(() => setFolded(new Set(readStore<string[]>(FOLDED_KEY, []))), []);
+  const fold = (next: Set<string>) => {
+    setFolded(next);
+    writeStore(FOLDED_KEY, [...next]);
+  };
+  const allFolded = groups.length > 0 && groups.every(([cat]) => folded.has(cat));
+
+  // The story open in the editor, and the stories its arrows go through:
+  // those shown when it opened, so approving one doesn't lose the place.
+  const [editing, setEditing] = useState<string | null>(null);
+  const [navIds, setNavIds] = useState<string[]>([]);
+  useEffect(() => setEditing(null), [date]);
   const cards = useRef(new Map<string, HTMLElement>());
   const openStory = (id: string) => {
+    if (!editing) {
+      const list = shown.some((it) => it.id === id) ? shown : ordered;
+      setNavIds(list.map((it) => it.id));
+    }
     setEditing(id);
-    markReviewed(id);
   };
   // Back in the list at the story last open.
   const closeEditor = () => {
     const id = editing;
     setEditing(null);
-    if (id)
+    if (id) {
+      const it = byId.get(id);
+      if (it && folded.has(it.category)) {
+        const next = new Set(folded);
+        next.delete(it.category);
+        fold(next);
+      }
       requestAnimationFrame(() =>
         cards.current.get(id)?.scrollIntoView({ behavior: "smooth", block: "center" }),
       );
+    }
   };
+  const approvedKey = Object.entries(review)
+    .filter(([, v]) => v === "approved")
+    .map(([k]) => k)
+    .sort()
+    .join(",");
   useEffect(() => {
-    onReviewed?.(reviewed);
-  }, [reviewed, onReviewed]);
+    onReviewed?.(new Set(approvedKey ? approvedKey.split(",") : []));
+  }, [approvedKey, onReviewed]);
   useEffect(() => {
-    if (jump) openStory(jump.id);
+    if (jump) {
+      setNavIds(ordered.map((it) => it.id));
+      setEditing(jump.id);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jump]);
-
-  const included = items.filter((i) => i.status === "included").length;
-  const done = ordered.filter((it) => reviewed.has(it.id)).length;
 
   const deleteFn = useServerFn(deleteCaItems);
   const ids = items.map((i) => i.id);
@@ -177,58 +301,93 @@ export function StoryList({
       setBusy(false);
     }
   }
+  const firstTodo = ordered.find((it) => stateOf(it) === "todo");
+  const navItems = navIds.map((id) => byId.get(id)).filter((it): it is CaItem => !!it);
 
   return (
     <div className="space-y-4">
-      {items.length - included > 0 && (
+      {counts.dropped > 0 && (
         <p className="text-xs text-muted-foreground">
           Stories unlikely in the exam, and less important ones beyond your stories-per-day limit
-          (Magazine settings), arrive dropped at the bottom. Press “Include” on one to add it and
-          write it.
+          (Magazine settings), arrive dropped. Tick “Drop” off on one to add it and write it.
         </p>
       )}
 
       {/* Reading controls stay in reach while scrolling. */}
-      <div className="sticky top-[3.75rem] z-20 -mx-4 flex flex-wrap items-center gap-2 border-b border-border bg-background/95 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6 lg:top-0 lg:-mx-2 lg:px-2">
-        <div className="flex rounded-lg border border-border p-0.5 text-sm" role="group">
-          {(
-            [
-              ["hi", "हिंदी"],
-              ["en", "English"],
-              ["both", "Both"],
-            ] as const
-          ).map(([k, label]) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => setLang(k)}
-              aria-pressed={lang === k}
-              className={`rounded-md px-3 py-1 ${lang === k ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+      <div className="sticky top-[3.75rem] z-20 -mx-4 space-y-2 border-b border-border bg-background/95 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6 lg:top-0 lg:-mx-2 lg:px-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-lg border border-border p-0.5 text-sm" role="group">
+            {(
+              [
+                ["hi", "हिंदी"],
+                ["en", "English"],
+                ["both", "Both"],
+              ] as const
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setLang(k)}
+                aria-pressed={lang === k}
+                className={`rounded-md px-3 py-1 ${lang === k ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {groups.length > 1 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8"
+              onClick={() => fold(allFolded ? new Set() : new Set(groups.map(([cat]) => cat)))}
             >
-              {label}
+              {allFolded ? (
+                <ChevronsUpDown className="mr-1 h-3.5 w-3.5" />
+              ) : (
+                <ChevronsDownUp className="mr-1 h-3.5 w-3.5" />
+              )}
+              {allFolded ? "Open all sections" : "Fold all sections"}
+            </Button>
+          )}
+          {ordered.length > 0 && (
+            <Button
+              size="sm"
+              className="ml-auto h-8"
+              onClick={() => openStory((firstTodo ?? shown[0] ?? ordered[0]).id)}
+            >
+              <Pencil className="mr-1 h-3.5 w-3.5" />
+              {firstTodo
+                ? counts.todo === counts.all - counts.dropped
+                  ? "Start reviewing"
+                  : "Continue"
+                : "Open first story"}
+            </Button>
+          )}
+        </div>
+        <div
+          role="radiogroup"
+          aria-label="Show stories"
+          className="-mx-1 flex gap-1 overflow-x-auto px-1 [scrollbar-width:none]"
+        >
+          {FILTERS.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              role="radio"
+              aria-checked={filter === f.id}
+              onClick={() => setFilter(f.id)}
+              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${filter === f.id ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:bg-muted"}`}
+            >
+              {f.label}
+              <span
+                className={`rounded-full px-1.5 tabular-nums ${filter === f.id ? "bg-primary-foreground/20" : "bg-muted"}`}
+              >
+                {counts[f.id]}
+              </span>
             </button>
           ))}
         </div>
-        <span className="text-sm text-muted-foreground">
-          Reviewed{" "}
-          <b className={done === ordered.length ? "text-emerald-600" : "text-foreground"}>
-            {done} of {ordered.length}
-          </b>
-        </span>
-        {ordered.length > 0 && (
-          <Button
-            size="sm"
-            className="ml-auto h-8"
-            onClick={() => openStory((ordered.find((it) => !reviewed.has(it.id)) ?? ordered[0]).id)}
-          >
-            <Pencil className="mr-1 h-3.5 w-3.5" />
-            {done === 0
-              ? "Start reviewing"
-              : done < ordered.length
-                ? "Continue"
-                : "Open first story"}
-          </Button>
-        )}
       </div>
 
       <BulkBar
@@ -240,39 +399,111 @@ export function StoryList({
         onDelete={deleteMany}
       />
 
-      {groups.map(([cat, list]) => (
-        <section key={cat} className="space-y-2">
-          <h3 className="pt-2 text-sm font-semibold">
-            {categoryLabel(cat).hi} · {categoryLabel(cat).en}
-          </h3>
-          {list.map((it) => (
-            <StoryCard
-              key={it.id}
-              ref={(el) => {
-                if (el) cards.current.set(it.id, el);
-                else cards.current.delete(it.id);
+      {!shown.length && ordered.length > 0 && (
+        <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+          No {FILTERS.find((f) => f.id === filter)?.label.toLowerCase()} stories.
+        </p>
+      )}
+
+      {groups.map(([cat, list]) => {
+        const isFolded = folded.has(cat);
+        const approved = list.filter((it) => stateOf(it) === "approved").length;
+        return (
+          <section key={cat} className="space-y-2" aria-label={categoryLabel(cat).en}>
+            <button
+              type="button"
+              aria-expanded={!isFolded}
+              onClick={() => {
+                const next = new Set(folded);
+                if (isFolded) next.delete(cat);
+                else next.add(cat);
+                fold(next);
               }}
-              item={it}
-              number={number.get(it.id) ?? 0}
-              lang={lang}
-              reviewed={reviewed.has(it.id)}
-              onOpen={() => openStory(it.id)}
-              selected={chosen.has(it.id)}
-              onSelect={(on) => choose(it.id, on)}
-              onChanged={onChanged}
-            />
-          ))}
-        </section>
-      ))}
-      {editing && ordered.some((it) => it.id === editing) && (
+              className="flex w-full items-center gap-2 rounded-lg pt-2 text-left"
+            >
+              <ChevronDown
+                className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${isFolded ? "-rotate-90" : ""}`}
+              />
+              <span className="text-sm font-semibold">
+                {categoryLabel(cat).hi} · {categoryLabel(cat).en}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {list.length} {list.length === 1 ? "story" : "stories"}
+                {approved > 0 && filter !== "approved" ? ` · ${approved} approved` : ""}
+              </span>
+            </button>
+            {isFolded ? (
+              // A stack: the section's first story with the others behind it.
+              <button
+                type="button"
+                aria-label={`Open the ${categoryLabel(cat).en} section`}
+                onClick={() => {
+                  const next = new Set(folded);
+                  next.delete(cat);
+                  fold(next);
+                }}
+                className="relative block w-full pb-2 text-left"
+              >
+                {list.length > 2 && (
+                  <span className="absolute inset-x-6 bottom-0 h-4 rounded-b-2xl border border-t-0 border-border bg-card/60" />
+                )}
+                {list.length > 1 && (
+                  <span className="absolute inset-x-3 bottom-1 h-4 rounded-b-2xl border border-t-0 border-border bg-card/80" />
+                )}
+                <span className="relative block rounded-2xl border border-border bg-card px-4 py-3 shadow-sm">
+                  <span lang="hi" className="line-clamp-1 font-medium">
+                    {list[0].content?.headline.hi || list[0].headline}
+                  </span>
+                  {list.length > 1 && (
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      and {list.length - 1} more
+                    </span>
+                  )}
+                </span>
+              </button>
+            ) : (
+              list.map((it) => (
+                <StoryCard
+                  key={it.id}
+                  ref={(el) => {
+                    if (el) cards.current.set(it.id, el);
+                    else cards.current.delete(it.id);
+                  }}
+                  item={it}
+                  number={number.get(it.id) ?? 0}
+                  lang={lang}
+                  state={stateOf(it)}
+                  job={jobs.jobs.get(it.id)}
+                  onOpen={() => openStory(it.id)}
+                  onDrop={(drop) => setDropped(it, drop)}
+                  selected={chosen.has(it.id)}
+                  onSelect={(on) => choose(it.id, on)}
+                  onChanged={onChanged}
+                />
+              ))
+            )}
+          </section>
+        );
+      })}
+      {editing && byId.has(editing) && (
         <StoryEditor
-          items={ordered}
+          items={navItems.length ? navItems : ordered}
           id={editing}
           lang={lang}
           setLang={setLang}
           onNavigate={openStory}
           onClose={closeEditor}
           onChanged={onChanged}
+          review={{
+            state: (it) => stateOf(it),
+            set: (it, state) => {
+              if (it.status === "dropped" && state) setDropped(it, false);
+              void setReview([it.id], state);
+            },
+            drop: setDropped,
+            write: writeStory,
+            job: (it) => jobs.jobs.get(it.id),
+          }}
         />
       )}
     </div>
@@ -285,8 +516,11 @@ type CardProps = {
   item: CaItem;
   number: number;
   lang: Lang;
-  reviewed: boolean;
+  state: Exclude<Filter, "all">;
+  // Writing, dropping or bringing back, running on in the background.
+  job?: StoryJob;
   onOpen: () => void;
+  onDrop: (drop: boolean) => void;
   selected: boolean;
   onSelect: (on: boolean) => void;
   onChanged: () => void;
@@ -299,18 +533,17 @@ function StoryCard({
   item,
   number,
   lang,
-  reviewed,
+  state,
+  job,
   onOpen,
+  onDrop,
   selected,
   onSelect,
-  onChanged,
   ref,
 }: CardProps) {
-  const updateFn = useServerFn(updateCaItem);
-  const enrichFn = useServerFn(enrichCaItem);
-  const [busy, setBusy] = useState(false);
   const c = item.content;
-  const dropped = item.status === "dropped";
+  const dropped = state === "dropped";
+  const approved = state === "approved";
   const unverified = item.facts.filter((f) => !f.verified).length;
   const headHi = c?.headline.hi || item.headline;
   const headEn = c?.headline.en || "";
@@ -319,21 +552,6 @@ function StoryCard({
       ? c.summary.en || c.summary.hi
       : c.summary.hi || c.summary.en
     : "";
-
-  async function toggleDrop() {
-    setBusy(true);
-    try {
-      await updateFn({ data: { id: item.id, status: dropped ? "included" : "dropped" } });
-      // Stories that arrived dropped were never written.
-      if (dropped && item.needs_enrich) await enrichFn({ data: { id: item.id } });
-      toast.success(dropped ? "Back in the issue" : "Dropped from the issue");
-      onChanged();
-    } catch (e) {
-      toast.error(errorText(e, "Failed"));
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <article
@@ -361,10 +579,16 @@ function StoryCard({
           />
         </span>
         <span
-          className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-bold ${reviewed ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "bg-primary/10 text-primary"}`}
-          title={reviewed ? "Reviewed" : "Not opened yet"}
+          className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-bold ${approved ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : state === "later" ? "bg-amber-500/15 text-amber-700 dark:text-amber-400" : "bg-primary/10 text-primary"}`}
+          title={approved ? "Approved" : state === "later" ? "Read later" : "To do"}
         >
-          {reviewed ? <Check className="h-3.5 w-3.5" /> : number}
+          {approved ? (
+            <Check className="h-3.5 w-3.5" />
+          ) : state === "later" ? (
+            <Clock className="h-3.5 w-3.5" />
+          ) : (
+            number
+          )}
         </span>
         <div className="min-w-0 flex-1 basis-[calc(100%-4.5rem)] sm:basis-auto">
           {lang !== "en" && (
@@ -433,11 +657,17 @@ function StoryCard({
             )}
             {item.related_item_id && <Badge tone="primary">Follow-up</Badge>}
             {dropped && <Badge tone="bad">Dropped</Badge>}
+            {approved && <Badge tone="good">Approved</Badge>}
+            {state === "later" && <Badge tone="warn">Read later</Badge>}
+            {c?.hide_summary && (
+              <Badge title="The summary is left out of the issue">No summary</Badge>
+            )}
             {item.enrich_error && <Badge tone="bad">Writing failed</Badge>}
-            {(item.needs_enrich || !c) && !item.enrich_error && (
+            {(item.needs_enrich || !c) && !item.enrich_error && !job && (
               <Badge tone="warn">Not written</Badge>
             )}
           </div>
+          {job && <JobBar job={job} className="mt-2" />}
         </div>
         {/* Beside the story on wider screens, a row under it on phones. */}
         <div
@@ -451,8 +681,8 @@ function StoryCard({
             size="sm"
             variant="ghost"
             className="h-7 px-2 text-xs"
-            disabled={busy}
-            onClick={() => void toggleDrop()}
+            disabled={!!job}
+            onClick={() => onDrop(!dropped)}
           >
             {dropped ? (
               "Include"

@@ -19,6 +19,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   ChevronRight,
+  Clock,
   Eye,
   FileText,
   HelpCircle,
@@ -68,6 +69,8 @@ import { MaterialPanel } from "@/components/ca-story-material";
 import { BiLine, IconButton, Part, StaticConnect, type Lang } from "@/components/ca-story-review";
 import { Badge, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { JobBar, type StoryJob, type StoryReview } from "@/components/ca-story-jobs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -121,8 +124,9 @@ export function StoryEditor({
   onNavigate,
   onClose,
   onChanged,
+  review,
 }: {
-  // The day's stories, in the order of the list.
+  // The stories the arrows go through, in the order of the list.
   items: CaItem[];
   id: string;
   lang: Lang;
@@ -130,6 +134,9 @@ export function StoryEditor({
   onNavigate: (id: string) => void;
   onClose: () => void;
   onChanged: () => void;
+  // Approve, drop, read later and writing, kept by the list so they run on
+  // when moving to another story.
+  review: StoryReview;
 }) {
   const updateFn = useServerFn(updateCaItem);
   const enrichFn = useServerFn(enrichCaItem);
@@ -177,7 +184,9 @@ export function StoryEditor({
 
   if (!item) return null;
   const c = item.content;
-  const dropped = item.status === "dropped";
+  const state = review.state(item);
+  const dropped = state === "dropped";
+  const job = review.job(item);
   const unverified = item.facts.filter((f) => !f.verified).length;
   // Same section, for moving within it.
   const siblings = items.filter((i) => i.category === item.category);
@@ -250,9 +259,9 @@ export function StoryEditor({
       icon: FileText,
       warn:
         !!c &&
-        (!(c.summary.en || c.summary.hi)
+        (!c.hide_summary && !(c.summary.en || c.summary.hi)
           ? "No summary"
-          : !(c.why.en || c.why.hi) && "No Exam Angle"),
+          : !c.hide_why && !(c.why.en || c.why.hi) && "No Exam Angle"),
     },
     {
       id: "points",
@@ -375,15 +384,15 @@ export function StoryEditor({
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem
-                    disabled={busy}
+                    disabled={!!job}
                     onSelect={() => {
                       if (
                         !c ||
                         confirm(
-                          "Write the whole story again from its facts? Your hand edits to the text are replaced (they stay in History).",
+                          "Write the whole story again from its facts? Your hand edits to the text are replaced (they stay in History). It runs on while you go to other stories.",
                         )
                       )
-                        void act(() => enrichFn({ data: { id: item.id } }), "Story written again");
+                        void review.write(item);
                     }}
                   >
                     <RefreshCw className="mr-2 h-4 w-4" />{" "}
@@ -403,22 +412,7 @@ export function StoryEditor({
                     <ArrowDown className="mr-2 h-4 w-4" /> Move down in the section
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    disabled={busy}
-                    onSelect={() =>
-                      void act(
-                        async () => {
-                          await updateFn({
-                            data: { id: item.id, status: dropped ? "included" : "dropped" },
-                          });
-                          // Stories that arrived dropped were never written.
-                          if (dropped && item.needs_enrich)
-                            await enrichFn({ data: { id: item.id } });
-                        },
-                        dropped ? "Back in the issue" : "Dropped from the issue",
-                      )
-                    }
-                  >
+                  <DropdownMenuItem disabled={!!job} onSelect={() => review.drop(item, !dropped)}>
                     <XCircle className="mr-2 h-4 w-4" />{" "}
                     {dropped ? "Include in the issue" : "Drop from the issue"}
                   </DropdownMenuItem>
@@ -426,6 +420,7 @@ export function StoryEditor({
               </DropdownMenu>
             </div>
           </div>
+          {job && c && <JobBar job={job} className="px-2 pb-2 sm:px-4" />}
           {/* Section, importance and the story's state. */}
           <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2 sm:px-4">
             <Select
@@ -529,7 +524,7 @@ export function StoryEditor({
             <main ref={main} className="min-h-0 flex-1 overflow-y-auto">
               <div className="mx-auto max-w-3xl space-y-4 p-3 text-[15px] leading-relaxed sm:p-5 sm:text-sm">
                 {!ctx ? (
-                  <NotWritten item={item} busy={busy} act={act} />
+                  <NotWritten item={item} job={job} onWrite={() => void review.write(item)} />
                 ) : tab === "summary" ? (
                   <SummaryTab {...ctx} />
                 ) : tab === "points" ? (
@@ -591,40 +586,80 @@ export function StoryEditor({
           )}
         </div>
 
+        {/* Previous and next: round buttons on the edges. */}
+        {[
+          // Past the list of tabs on laptops.
+          {
+            to: prev,
+            side: "left-2 lg:left-[13.5rem]",
+            label: "Previous story (Alt+P)",
+            Icon: ChevronLeft,
+          },
+          { to: next, side: "right-2", label: "Next story (Alt+N)", Icon: ChevronRight },
+        ].map(({ to, side, label, Icon }) => (
+          <button
+            key={side}
+            type="button"
+            aria-label={label.replace(/ \(.*\)$/, "")}
+            title={label}
+            disabled={!to}
+            onClick={() => to && leave(() => onNavigate(to.id))}
+            className={`absolute ${side} top-1/2 z-30 -translate-y-1/2 place-items-center rounded-full border border-border bg-background/90 shadow-lg backdrop-blur transition-opacity hover:bg-muted disabled:pointer-events-none disabled:opacity-0 h-10 w-10 sm:h-12 sm:w-12 ${tab === "article" ? "hidden lg:grid" : "grid"}`}
+          >
+            <Icon className="h-5 w-5" />
+          </button>
+        ))}
+
+        {/* The decision on the story, and Done. */}
         <footer
-          className={`items-center gap-2 border-t border-border bg-background p-2 sm:px-4 ${tab === "article" ? "hidden lg:flex" : "flex"}`}
+          className={`items-center gap-2 border-t border-border bg-background px-2 py-2 sm:px-4 ${tab === "article" ? "hidden lg:flex" : "flex"}`}
         >
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={!prev}
-            title="Previous story (Alt+P)"
-            onClick={() => prev && leave(() => onNavigate(prev.id))}
+          <div
+            role="group"
+            aria-label="This story"
+            className="flex flex-1 flex-wrap items-center gap-1.5"
           >
-            <ChevronLeft className="mr-0.5 h-4 w-4" /> Previous
-          </Button>
-          <div className="mx-auto flex items-center gap-2">
-            <span
-              role="status"
-              className="hidden min-w-[6.5rem] text-right text-xs text-muted-foreground sm:inline"
-            >
-              {saving > 0
-                ? "Saving…"
-                : savedAt
-                  ? `Saved · ${savedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
-                  : "Changes save as you go"}
-            </span>
-            <Button size="sm" variant="outline" onClick={() => leave(onClose)}>
-              <Check className="mr-1 h-4 w-4" /> Done
-            </Button>
+            {(
+              [
+                ["approved", "Approve", Check, "text-emerald-700 dark:text-emerald-400"],
+                ["dropped", "Drop", XCircle, "text-destructive"],
+                ["later", "Read later", Clock, "text-amber-700 dark:text-amber-400"],
+              ] as const
+            ).map(([s0, label, Icon, tone]) => {
+              const on = state === s0;
+              return (
+                <label
+                  key={s0}
+                  className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-2 py-1 text-xs sm:px-2.5 sm:text-sm ${on ? "border-current bg-muted/60 font-medium " + tone : "border-border text-muted-foreground"} ${job && s0 === "dropped" ? "opacity-60" : ""}`}
+                >
+                  <Checkbox
+                    checked={on}
+                    disabled={!!job && s0 === "dropped"}
+                    onCheckedChange={(v) => {
+                      const want = v === true;
+                      if (s0 === "dropped") review.drop(item, want);
+                      else review.set(item, want ? s0 : null);
+                    }}
+                    aria-label={label}
+                  />
+                  <Icon className="hidden h-3.5 w-3.5 sm:block" />
+                  {label}
+                </label>
+              );
+            })}
           </div>
-          <Button
-            size="sm"
-            disabled={!next}
-            title="Next story (Alt+N)"
-            onClick={() => next && leave(() => onNavigate(next.id))}
+          <span
+            role="status"
+            className="hidden min-w-[6.5rem] text-right text-xs text-muted-foreground md:inline"
           >
-            Next story <ChevronRight className="ml-0.5 h-4 w-4" />
+            {saving > 0
+              ? "Saving…"
+              : savedAt
+                ? `Saved · ${savedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+                : "Changes save as you go"}
+          </span>
+          <Button size="sm" variant="outline" onClick={() => leave(onClose)}>
+            <Check className="mr-1 h-4 w-4" /> Done
           </Button>
         </footer>
         <StoryHistory
@@ -664,27 +699,26 @@ function Section({
   );
 }
 
-function NotWritten({
-  item,
-  busy,
-  act,
-}: {
-  item: CaItem;
-  busy: boolean;
-  act: (fn: () => Promise<unknown>, ok?: string) => Promise<void>;
-}) {
-  const enrichFn = useServerFn(enrichCaItem);
+function NotWritten({ item, job, onWrite }: { item: CaItem; job?: StoryJob; onWrite: () => void }) {
   return (
     <div className="space-y-3 rounded-xl border border-dashed border-border p-6 text-center">
-      <p className="text-sm text-muted-foreground">
-        {item.enrich_error ?? "This story hasn't been written yet."}
-      </p>
-      <Button
-        disabled={busy}
-        onClick={() => act(() => enrichFn({ data: { id: item.id } }), "Story written")}
-      >
-        <RefreshCw className="mr-1 h-4 w-4" /> Write text
-      </Button>
+      {job ? (
+        <>
+          <JobBar job={job} className="mx-auto max-w-sm text-left" />
+          <p className="text-xs text-muted-foreground">
+            You can go to the next story: this one keeps writing.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-muted-foreground">
+            {item.enrich_error ?? "This story hasn't been written yet."}
+          </p>
+          <Button onClick={onWrite}>
+            <RefreshCw className="mr-1 h-4 w-4" /> Write text
+          </Button>
+        </>
+      )}
     </div>
   );
 }
@@ -708,7 +742,19 @@ function SummaryTab({ item, c, lang, busy, save, act }: Ctx) {
         />
       </Part>
       <Part title="Summary · सारांश">
-        <BiLine value={c.summary} lang={lang} editing onSave={(v) => save({ summary: v })} />
+        <InIssue
+          label="Print the summary"
+          on={!c.hide_summary}
+          busy={busy}
+          onChange={(on) => void save({ hide_summary: !on })}
+        />
+        <BiLine
+          value={c.summary}
+          lang={lang}
+          editing
+          faded={!!c.hide_summary}
+          onSave={(v) => save({ summary: v })}
+        />
         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span>{wordCount(c.summary.en || c.summary.hi)} words</span>
           {!another && (
@@ -739,7 +785,19 @@ function SummaryTab({ item, c, lang, busy, save, act }: Ctx) {
         )}
       </Part>
       <Part title="Exam Angle" tone="why">
-        <BiLine value={c.why} lang={lang} editing onSave={(v) => save({ why: v })} />
+        <InIssue
+          label="Print the Exam Angle"
+          on={!c.hide_why}
+          busy={busy}
+          onChange={(on) => void save({ hide_why: !on })}
+        />
+        <BiLine
+          value={c.why}
+          lang={lang}
+          editing
+          faded={!!c.hide_why}
+          onSave={(v) => save({ why: v })}
+        />
       </Part>
       {c.oneliner && (c.oneliner.en || c.oneliner.hi) && (
         <Part title="Revision line · एक पंक्ति">
@@ -747,6 +805,27 @@ function SummaryTab({ item, c, lang, busy, save, act }: Ctx) {
         </Part>
       )}
     </Section>
+  );
+}
+
+// Whether a part prints: some stories are told by their key points or
+// visuals alone. The text stays, so it can be put back.
+function InIssue({
+  label,
+  on,
+  busy,
+  onChange,
+}: {
+  label: string;
+  on: boolean;
+  busy: boolean;
+  onChange: (on: boolean) => void;
+}) {
+  return (
+    <label className="mb-1.5 flex items-center gap-2 text-xs text-muted-foreground">
+      <Switch checked={on} disabled={busy} onCheckedChange={onChange} aria-label={label} />
+      {on ? "Printed in the issue" : "Left out of the issue: the key points tell the story"}
+    </label>
   );
 }
 
