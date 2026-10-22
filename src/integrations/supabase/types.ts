@@ -811,13 +811,7 @@ export type Database = {
           headline: string
           id: string
           importance: number
-          issue_date: string | null
-          mag_date: string | null
-          mag_pinned: boolean
-          mag_section: string | null
-          mag_sub: string | null
-          magazine_id: string | null
-          origin_id: string | null
+          issue_date: string
           key_embedding: string | null
           needs_enrich: boolean
           position: number
@@ -844,13 +838,7 @@ export type Database = {
           headline: string
           id?: string
           importance?: number
-          issue_date?: string | null
-          mag_date?: string | null
-          mag_pinned?: boolean
-          mag_section?: string | null
-          mag_sub?: string | null
-          magazine_id?: string | null
-          origin_id?: string | null
+          issue_date: string
           key_embedding?: string | null
           needs_enrich?: boolean
           position?: number
@@ -877,13 +865,7 @@ export type Database = {
           headline?: string
           id?: string
           importance?: number
-          issue_date?: string | null
-          mag_date?: string | null
-          mag_pinned?: boolean
-          mag_section?: string | null
-          mag_sub?: string | null
-          magazine_id?: string | null
-          origin_id?: string | null
+          issue_date?: string
           key_embedding?: string | null
           needs_enrich?: boolean
           position?: number
@@ -912,81 +894,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      ca_mag_seen: {
-        Row: {
-          fits: boolean
-          item_id: string
-          mag_id: string
-        }
-        Insert: {
-          fits?: boolean
-          item_id: string
-          mag_id: string
-        }
-        Update: {
-          fits?: boolean
-          item_id?: string
-          mag_id?: string
-        }
-        Relationships: []
-      }
-      ca_mags: {
-        Row: {
-          created_at: string
-          date_from: string
-          date_to: string
-          design: Json | null
-          error: string | null
-          finalized_at: string | null
-          id: string
-          pdf_at: string | null
-          pdf_url_en: string | null
-          pdf_url_hi: string | null
-          sections: Json
-          status: string
-          theme: string
-          title_en: string
-          title_hi: string
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          date_from: string
-          date_to: string
-          design?: Json | null
-          error?: string | null
-          finalized_at?: string | null
-          id?: string
-          pdf_at?: string | null
-          pdf_url_en?: string | null
-          pdf_url_hi?: string | null
-          sections?: Json
-          status?: string
-          theme: string
-          title_en: string
-          title_hi?: string
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          date_from?: string
-          date_to?: string
-          design?: Json | null
-          error?: string | null
-          finalized_at?: string | null
-          id?: string
-          pdf_at?: string | null
-          pdf_url_en?: string | null
-          pdf_url_hi?: string | null
-          sections?: Json
-          status?: string
-          theme?: string
-          title_en?: string
-          title_hi?: string
-          updated_at?: string
-        }
-        Relationships: []
       }
       ca_runs: {
         Row: {
