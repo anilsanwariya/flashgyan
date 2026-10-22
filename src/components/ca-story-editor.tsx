@@ -547,7 +547,7 @@ export function StoryEditor({
                 ) : tab === "visuals" ? (
                   <Section
                     title="Visuals"
-                    hint="Up to four per story, each above or below the key points. Rebuild one as the type you pick, or edit its text and numbers."
+                    hint="Up to four per story, each above, beside or below the key points. Rebuild one as the type you pick, or edit its text and numbers."
                   >
                     <StoryVisuals item={item} content={c!} busy={busy} onSave={save} />
                   </Section>

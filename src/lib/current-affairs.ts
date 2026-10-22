@@ -132,6 +132,9 @@ export type CaContent = {
   // Which visuals (by slot) print below the key points; the rest print
   // above them.
   visual_below?: boolean[];
+  // Which visuals (by slot) print beside the key points, in a column of
+  // their own (when they fit at half width); this wins over visual_below.
+  visual_beside?: boolean[];
   // Visuals placed two to a row, when they fit at half width.
   visual_pair?: boolean;
   oneliner?: Bi | null;
@@ -159,7 +162,10 @@ export const VISUAL_SLOTS = [
 export const MAX_VISUALS = VISUAL_SLOTS.length;
 
 // One of a story's visuals, as the editor arranges them.
-export type StoryVisual = { visual: Visual; covers: number[]; below: boolean };
+export type VisualPlace = "above" | "beside" | "below";
+export type StoryVisual = { visual: Visual; covers: number[]; below: boolean; beside?: boolean };
+export const visualPlace = (v: Pick<StoryVisual, "below" | "beside">): VisualPlace =>
+  v.beside ? "beside" : v.below ? "below" : "above";
 
 // The story's visuals in order (empty slots skipped).
 export function storyVisuals(c: Partial<CaContent> | null | undefined): StoryVisual[] {
@@ -167,7 +173,13 @@ export function storyVisuals(c: Partial<CaContent> | null | undefined): StoryVis
   const out: StoryVisual[] = [];
   VISUAL_SLOTS.forEach(([key, coversKey], i) => {
     const v = c[key];
-    if (v) out.push({ visual: v, covers: c[coversKey] ?? [], below: !!c.visual_below?.[i] });
+    if (v)
+      out.push({
+        visual: v,
+        covers: c[coversKey] ?? [],
+        below: !!c.visual_below?.[i],
+        beside: !!c.visual_beside?.[i],
+      });
   });
   return out;
 }
@@ -177,12 +189,15 @@ export function storyVisuals(c: Partial<CaContent> | null | undefined): StoryVis
 export function visualsPatch(list: StoryVisual[]): Partial<CaContent> {
   const patch: Partial<CaContent> = {};
   const below: boolean[] = [];
+  const beside: boolean[] = [];
   VISUAL_SLOTS.forEach(([key, coversKey], i) => {
     const v = list[i];
     Object.assign(patch, { [key]: v?.visual ?? null, [coversKey]: v ? v.covers : [] });
-    below.push(!!v?.below);
+    below.push(!!v?.below && !v?.beside);
+    beside.push(!!v?.beside);
   });
   patch.visual_below = below;
+  patch.visual_beside = beside;
   return patch;
 }
 

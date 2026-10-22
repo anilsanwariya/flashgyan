@@ -14,8 +14,17 @@ import {
   type MagazineSettings,
   sourcePublishers,
   storyVisuals,
+  visualPlace,
+  type VisualPlace,
 } from "@/lib/current-affairs";
-import { VISUAL_CSS, pointsToShow, visualHtml, visualRows, type Visual } from "@/lib/ca-visuals";
+import {
+  VISUAL_CSS,
+  halfWidthProblem,
+  pointsToShow,
+  visualHtml,
+  visualRows,
+  type Visual,
+} from "@/lib/ca-visuals";
 import type { CaFeature } from "@/lib/ca-feature";
 import type { EventBlock } from "@/lib/ca-events";
 import {
@@ -331,11 +340,28 @@ function sideImagesHtml(images: CaImage[] | undefined, lang: Lang): string {
     .join("");
 }
 
-// The story's visuals above or below its key points, in order; paired two
-// to a row when the editor chose it and both fit at half width.
-function visualsHtml(c: CaContent, below: boolean, accent: string, lang: Lang): string {
-  const list = storyVisuals(c).filter((v) => v.below === below);
-  return visualRows(list, !!c.visual_pair)
+// Where each visual prints: one set beside the key points goes there only
+// when it fits at half width and there are points to sit beside; otherwise
+// above them.
+export function printedPlaces(c: CaContent, hasPoints: boolean) {
+  return storyVisuals(c).map((v) => ({
+    ...v,
+    place:
+      v.beside && (!hasPoints || halfWidthProblem(v.visual)) ? ("above" as const) : visualPlace(v),
+  }));
+}
+
+// The story's visuals in one place, in order; paired two to a row when the
+// editor chose it and both fit at half width.
+function visualsHtml(
+  list: ReturnType<typeof printedPlaces>,
+  place: VisualPlace,
+  pair: boolean,
+  accent: string,
+  lang: Lang,
+): string {
+  const here = list.filter((v) => v.place === place);
+  return visualRows(here, pair && place !== "beside")
     .map((row) =>
       row.length === 2
         ? `<div class="v-pair">${row.map((v) => visualHtml(v.visual, accent, lang)).join("")}</div>`
@@ -361,6 +387,9 @@ function itemHtml(
   const points = shown.length
     ? `<div class="bi points"><ul>${shown.map((p) => `<li>${esc(p)}</li>`).join("")}</ul></div>`
     : "";
+  // Visuals beside the key points sit in a column to their right.
+  const placed = printedPlaces(c, shown.length > 0);
+  const besideHtml = visualsHtml(placed, "beside", false, accent, lang);
   const tags = [
     item.rajasthan && item.category !== "rajasthan"
       ? `<span class="tag raj">${t.rajasthan}</span>`
@@ -403,9 +432,13 @@ function itemHtml(
   ${sideImagesHtml(c.images, lang)}
   ${c.hide_summary ? "" : block(c.summary, lang, "summary")}
   ${imagesHtml(c.images, lang)}
-  ${visualsHtml(c, false, accent, lang)}
-  ${points}
-  ${visualsHtml(c, true, accent, lang)}
+  ${visualsHtml(placed, "above", !!c.visual_pair, accent, lang)}
+  ${
+    besideHtml
+      ? `<div class="pts-beside">${points}<div class="pts-visuals">${besideHtml}</div></div>`
+      : points
+  }
+  ${visualsHtml(placed, "below", !!c.visual_pair, accent, lang)}
   ${why}
   ${background}
   ${dykBox}
@@ -489,7 +522,12 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .toc-row .icon { color: ${accent}; }
 .rev-cat { display: flex; align-items: center; gap: 2mm; font-size: 10pt; color: ${accent}; margin: 4mm 0 2mm; break-after: avoid; text-transform: uppercase; letter-spacing: .06em; }
 .rev { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.visual + .points, .v-pair + .points { margin-top: 2.5mm; }
+.visual + .points, .v-pair + .points, .visual + .pts-beside, .v-pair + .pts-beside { margin-top: 2.5mm; }
+.pts-beside { display: grid; grid-template-columns: 1fr 1fr; gap: 3.5mm; align-items: start; }
+.pts-beside > .points { margin-top: 0; min-width: 0; }
+.pts-visuals { min-width: 0; display: flex; flex-direction: column; gap: 2.5mm; }
+.pts-visuals .visual { margin-top: 0 !important; }
+.pts-beside + .visual, .pts-beside + .v-pair { margin-top: 2.5mm; }
 .visual + .visual, .visual + .v-pair, .v-pair + .visual, .v-pair + .v-pair, .points + .visual, .points + .v-pair { margin-top: 2.5mm; }
 .rev td { padding: 1.6mm 2.5mm; border-bottom: 1px solid #e5e7eb; vertical-align: top; font-size: 9.2pt; }
 .rev tr { break-inside: avoid; }
