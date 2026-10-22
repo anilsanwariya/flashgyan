@@ -26,12 +26,16 @@ import type {
   CaSource,
   CaVersion,
   DayData,
+  EventBrief,
+  EventWithStories,
   FactCheck,
   ReaderSource,
   SkippedArticle,
 } from "@/lib/current-affairs.server";
 
 export type {
+  EventBrief,
+  EventWithStories,
   CaCorrection,
   CaIssue,
   CaItem,
@@ -1269,6 +1273,8 @@ export type MonthSummary = {
   corrections: (CaCorrection & { item_date: string; headline: string })[];
   // Stories this month in each section.
   sections: Record<string, number>;
+  // Events that concluded this month without their complete summary.
+  events_missing: string[];
 };
 
 export const getCaMonth = createServerFn({ method: "POST" })
@@ -1294,6 +1300,10 @@ export const getCaMonth = createServerFn({ method: "POST" })
         .lte("period", range.to),
       s.listCorrections(range.from, range.to),
     ]);
+    const { summariesMissing } = await import("@/lib/ca-events");
+    const missing = summariesMissing(await s.monthEvents(range.from), range.from).map(
+      (e) => e.name,
+    );
     const counts = new Map<string, number>();
     const sections: Record<string, number> = {};
     for (const r of (items.data ?? []) as { issue_date: string; category: string }[]) {
@@ -1311,6 +1321,7 @@ export const getCaMonth = createServerFn({ method: "POST" })
       issue: all.find((i) => i.kind === "monthly" && i.period === range.from) ?? null,
       corrections,
       sections,
+      events_missing: missing,
     };
   });
 
@@ -1409,4 +1420,95 @@ export const mergeCaDuplicates = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return (await server()).mergeDayDuplicates(data.date);
+  });
+
+// ---------- Several-day events ----------
+
+const eventKind = z.enum(["sports", "summit", "conference", "exhibition", "election", "other"]);
+
+export const listCaEvents = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).listEvents();
+  });
+
+export const createCaEvent = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ name: z.string().trim().min(3).max(120), kind: eventKind }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return { id: await (await server()).createEvent(data.name, data.kind) };
+  });
+
+export const updateCaEvent = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        patch: z
+          .object({
+            name: z.string().trim().min(3).max(120),
+            name_hi: z.string().trim().max(120),
+            kind: eventKind,
+            place: z.string().trim().max(120),
+            starts_on: dateSchema.nullable(),
+            ends_on: dateSchema.nullable(),
+            status: z.enum(["running", "concluded"]),
+            summary: contentSchema.nullable(),
+          })
+          .partial(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    const { summary, ...rest } = data.patch;
+    return (await server()).updateEvent(data.id, {
+      ...rest,
+      ...(summary !== undefined ? { summary: summary as CaItem["content"] } : {}),
+    });
+  });
+
+export const mergeCaEvents = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ from: z.string().uuid(), into: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).mergeEvents(data.from, data.into);
+    return { ok: true };
+  });
+
+export const deleteCaEvent = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).deleteEvent(data.id);
+    return { ok: true };
+  });
+
+// Links a story to an event (or none).
+export const linkCaStoryEvent = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ itemId: z.string().uuid(), eventId: z.string().uuid().nullable() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).linkStoryToEvent(data.itemId, data.eventId);
+    return { ok: true };
+  });
+
+export const writeCaEventSummary = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).writeEventSummary(data.id);
   });

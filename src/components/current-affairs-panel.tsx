@@ -1,6 +1,7 @@
 // Admin: daily and monthly current affairs magazine. Upload the day's sources,
 // review the news items SAATHI writes from them, approve the issue and it is
 // posted to the Telegram channels as an English PDF and a Hindi PDF.
+import { EventsPanel } from "@/components/ca-events-panel";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -839,6 +840,7 @@ function DailyPanel() {
           />
           <StoryList
             items={items}
+            events={dayQ.data?.events ?? []}
             date={date}
             onChanged={refresh}
             jump={storyJump}
@@ -1144,6 +1146,7 @@ const MONTHLY_TABS = [
   { id: "issue", label: "Issue" },
   { id: "cover", label: "Cover" },
   { id: "ads", label: "Ads & printing" },
+  { id: "events", label: "Events" },
 ] as const;
 type MonthlyTab = (typeof MONTHLY_TABS)[number]["id"];
 const MONTHLY_TAB_IDS = MONTHLY_TABS.map((t) => t.id);
@@ -1201,7 +1204,11 @@ function MonthlyPanel() {
 
       <PageTabs
         label="Monthly issue"
-        tabs={MONTHLY_TABS.map((t) => ({ ...t, dot: t.id !== "issue" && design.changed }))}
+        tabs={MONTHLY_TABS.map((t) => ({
+          ...t,
+          dot:
+            t.id === "events" ? !!data?.events_missing?.length : t.id !== "issue" && design.changed,
+        }))}
         value={tab}
         onChange={setTab}
       />
@@ -1228,8 +1235,23 @@ function MonthlyPanel() {
                 ? "The cover or ads have changes that aren't saved: the PDFs use the saved ones."
                 : null
             }
+            warnings={(data?.events_missing ?? []).map(
+              (n) =>
+                `“${n}” concluded this month but its complete summary isn't written (Events tab); its daily stories print instead.`,
+            )}
             onChanged={refresh}
           />
+          {(data?.events_missing ?? []).length > 0 && (
+            <p className="rounded-xl border border-amber-400/60 bg-amber-500/10 p-3 text-sm">
+              {data!.events_missing.length === 1
+                ? `“${data!.events_missing[0]}” concluded this month without its complete summary.`
+                : `${data!.events_missing.length} events concluded this month without their complete summary.`}{" "}
+              <button type="button" className="underline" onClick={() => setTab("events")}>
+                Write it on the Events tab
+              </button>
+              ; until then their daily stories print instead.
+            </p>
+          )}
 
           {items > 0 && <FeatureBox month={month} />}
 
@@ -1261,6 +1283,11 @@ function MonthlyPanel() {
       {tab === "ads" && (
         <div role="tabpanel" aria-label="Ads & printing">
           <MonthlyAdsEditor state={design} sections={data?.sections ?? {}} />
+        </div>
+      )}
+      {tab === "events" && (
+        <div role="tabpanel" aria-label="Events">
+          <EventsPanel month={month} />
         </div>
       )}
       <DesignSaveBar state={design} />

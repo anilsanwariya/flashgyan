@@ -16,6 +16,7 @@ import {
 } from "@/lib/current-affairs";
 import { VISUAL_CSS, pointsToShow, visualHtml, type Visual } from "@/lib/ca-visuals";
 import type { CaFeature } from "@/lib/ca-feature";
+import type { EventBlock } from "@/lib/ca-events";
 import {
   COVER_CSS,
   COVER_FONTS,
@@ -43,6 +44,8 @@ export type MagazineItem = {
   facts: CaFact[];
   context_sources: { title: string }[];
   source_names: string[];
+  // The several-day event it belongs to (monthly issue only).
+  event_id?: string | null;
 };
 
 // A correction approved this month: the story's day and headline, what
@@ -104,6 +107,13 @@ const T = {
     oneLine: "One line per story",
     article: "Background Article",
     articleSub: "Static topic behind this month's news",
+    events: "Events of the month",
+    eventsSub: (n: number) => `${n} ${n === 1 ? "event" : "events"}`,
+    concluded: "Concluded",
+    running: "Running",
+    continues:
+      "Continues next month: its complete summary prints in the issue of the month it concludes.",
+    fullSummary: "Complete summary",
     thisMonth: (n: number) => `${n} this month`,
     correctionsIntro:
       "These facts changed after the day's issue was posted. The stories in this issue already show them corrected.",
@@ -134,6 +144,12 @@ const T = {
     oneLine: "हर खबर एक पंक्ति में",
     article: "पृष्ठभूमि लेख",
     articleSub: "इस महीने की खबरों के पीछे का स्थैतिक विषय",
+    events: "इस माह के आयोजन",
+    eventsSub: (n: number) => `${n} आयोजन`,
+    concluded: "संपन्न",
+    running: "जारी",
+    continues: "अगले माह जारी: इसका संपूर्ण सारांश उस माह के अंक में छपेगा जिसमें यह संपन्न होगा।",
+    fullSummary: "संपूर्ण सारांश",
     thisMonth: (n: number) => `इस महीने ${n}`,
     correctionsIntro:
       "ये तथ्य दैनिक अंक प्रकाशित होने के बाद बदले। इस अंक की खबरों में सही तथ्य दिए गए हैं।",
@@ -158,6 +174,8 @@ const ICON_PATHS: Record<string, string> = {
   misc: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>',
   editorial: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   revision: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
+  events:
+    '<rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/><path d="m9 16 2 2 4-4"/>',
   practice:
     '<rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/>',
 };
@@ -436,6 +454,13 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .answers td { padding: 1.5mm 2.5mm; border: 1px solid #e5e7eb; font-size: 9pt; vertical-align: top; }
 .answers .kn, .answers .ka { width: 9mm; text-align: center; font-weight: 600; }
 .answers .en { color: #475569; }
+.event { margin-bottom: 6mm; }
+.event-head { break-after: avoid; border-bottom: 2px solid ${accent}; padding-bottom: 1.5mm; margin-bottom: 3mm; display: flex; justify-content: space-between; align-items: baseline; gap: 3mm; flex-wrap: wrap; }
+.event-head h3 { margin: 0; font-size: 13pt; color: ${accent}; }
+.event-head span { font-size: 9pt; color: #475569; }
+.event-badge { font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: .5mm 2mm; border-radius: 2mm; background: #f1f5f9; color: #475569; }
+.event-badge.done { background: ${accent}; color: #fff; }
+.event-note { font-size: 9pt; color: #475569; font-style: italic; margin: -1mm 0 0; break-before: avoid; }
 .corrections { list-style: none; margin: 0; padding: 0; }
 .corrections li { margin-bottom: 3.5mm; padding-bottom: 3mm; border-bottom: 1px dashed #e5e7eb; break-inside: avoid; }
 .corrections .c-date { font-size: 8.5pt; font-weight: 600; color: ${accent}; text-transform: uppercase; letter-spacing: .04em; }
@@ -599,6 +624,9 @@ export function renderMagazine(opts: {
   fillers?: number;
   // Only the cover, for the editor's preview.
   coverOnly?: boolean;
+  // Monthly only: the month's several-day events (their stories are not in
+  // items): a concluded event's complete summary, or a running one's stories.
+  events?: EventBlock<MagazineItem>[];
 }): string {
   const s = opts.settings;
   const lang = opts.lang;
@@ -625,6 +653,34 @@ export function renderMagazine(opts: {
     list.push(it);
     groups.set(it.category, list);
   }
+  // A concluded event's complete summary prints as one story of the section
+  // most of its daily stories were in.
+  const blocks = monthly ? (opts.events ?? []) : [];
+  const summaryItem = (b: EventBlock<MagazineItem>): MagazineItem => {
+    const cats = new Map<string, number>();
+    for (const i of b.items) cats.set(i.category, (cats.get(i.category) ?? 0) + 1);
+    return {
+      id: `event-${b.event.id}`,
+      issue_date: b.event.ends_on ?? opts.period,
+      category: [...cats.entries()].sort((x, y) => y[1] - x[1])[0]?.[0] ?? "misc",
+      importance: 5,
+      rajasthan: b.items.some((i) => i.rajasthan),
+      content: b.event.summary!,
+      facts: [],
+      context_sources: [],
+      source_names: [],
+    };
+  };
+  const eventItems = blocks.flatMap((b) => (b.mode === "summary" ? [summaryItem(b)] : b.items));
+  // Everything the issue prints, for the cover, revision and practice pages.
+  const everything = [...eventItems, ...items];
+  const allGroups = new Map<string, MagazineItem[]>();
+  for (const it of [...everything].sort(
+    (a, b) =>
+      (order.get(a.category) ?? 99) - (order.get(b.category) ?? 99) ||
+      a.issue_date.localeCompare(b.issue_date),
+  ))
+    allGroups.set(it.category, [...(allGroups.get(it.category) ?? []), it]);
 
   const title =
     lang === "hi"
@@ -642,7 +698,7 @@ export function renderMagazine(opts: {
     ? `<div class="watermark"><img src="${esc(safeUrl(s.logo_main_url))}" alt="" /></div>`
     : `<div class="watermark"><span>FlashGyan</span></div>`;
   // The most exam-relevant stories lead the cover.
-  const byImportance = [...items].sort((a, b) => b.importance - a.importance);
+  const byImportance = [...everything].sort((a, b) => b.importance - a.importance);
   const top = byImportance.slice(0, monthly ? 6 : 4);
   // The join link, shown as its @username (t.me/RASbandhu → @RASbandhu).
   const joinUrl = safeUrl((s.join_url ?? DEFAULT_MAGAZINE_SETTINGS.join_url).trim());
@@ -651,10 +707,10 @@ export function renderMagazine(opts: {
   const tagline = ((lang === "hi" ? s.tagline_hi || s.tagline_en : s.tagline_en) ?? "").trim();
   const boxes = boxNames(s);
   const questions =
-    items.filter((i) => i.content.mcq).length +
-    items.filter((i) => pick(i.content.mains, lang)).length;
-  const revisionCount = items.filter(hasRevision).length;
-  const visuals = items.reduce(
+    everything.filter((i) => i.content.mcq).length +
+    everything.filter((i) => pick(i.content.mains, lang)).length;
+  const revisionCount = everything.filter(hasRevision).length;
+  const visuals = everything.reduce(
     (n, i) => n + (i.content.visual ? 1 : 0) + (i.content.visual2 ? 1 : 0),
     0,
   );
@@ -666,6 +722,39 @@ export function renderMagazine(opts: {
     .join("");
 
   let n = 0;
+  // Events of the month, near the front: each event under its name and
+  // dates.
+  const eventName = (b: EventBlock<MagazineItem>) =>
+    lang === "hi" ? b.event.name_hi || b.event.name : b.event.name;
+  const span = (from?: string | null, to?: string | null) =>
+    from && to && from !== to
+      ? `${formatDate(from, lang)} – ${formatDate(to, lang)}`
+      : from || to
+        ? formatDate((from || to)!, lang)
+        : "";
+  const eventsHtml = blocks.length
+    ? `<section class="section new-page events"><div class="section-title"><h2>${icon("events")} ${t.events}</h2><span>${t.eventsSub(blocks.length)}</span></div>${blocks
+        .map((b) => {
+          const dates = b.items.map((i) => i.issue_date).sort();
+          const when =
+            b.mode === "summary"
+              ? span(b.event.starts_on ?? dates[0], b.event.ends_on)
+              : span(dates[0], dates[dates.length - 1]);
+          const place = b.event.place ? `${esc(b.event.place)} · ` : "";
+          const badge =
+            b.mode === "summary"
+              ? `<span class="event-badge done">${t.concluded} · ${t.fullSummary}</span>`
+              : `<span class="event-badge">${b.continues ? t.running : t.concluded}</span>`;
+          const body =
+            b.mode === "summary"
+              ? itemHtml(summaryItem(b), ++n, false, accent, lang, boxes)
+              : b.items.map((it) => itemHtml(it, ++n, true, accent, lang, boxes)).join("");
+          return `<div class="event"><div class="event-head"><h3>${esc(eventName(b))}</h3><span>${place}${esc(when)} ${badge}</span></div>${body}${
+            b.mode === "stories" && b.continues ? `<p class="event-note">${t.continues}</p>` : ""
+          }</div>`;
+        })
+        .join("")}</section>`
+    : "";
   const sections = [...groups.entries()]
     .map(([cat, list]) => {
       // A monthly issue can print an ad page after any section.
@@ -697,7 +786,7 @@ export function renderMagazine(opts: {
         .join("")}</ol></section>`
     : "";
 
-  const tocHtml = `${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}`;
+  const tocHtml = `${blocks.length ? `<div class="toc-row"><span>${icon("events")} ${t.events}</span><b>${blocks.length}</b></div>` : ""}${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}`;
   const parts: CoverParts = {
     lang,
     period: opts.period,
@@ -709,7 +798,7 @@ export function renderMagazine(opts: {
     logoMain: safeUrl(s.logo_main_url),
     logoPartner: safeUrl(s.logo_partner_url),
     stats: [
-      { n: items.length, label: t.stories(items.length) },
+      { n: everything.length, label: t.stories(everything.length) },
       { n: groups.size, label: t.sections(groups.size) },
       ...(visuals ? [{ n: visuals, label: t.charts }] : []),
       { n: questions, label: t.questions },
@@ -760,11 +849,12 @@ ${
     ? coverSection
     : `${watermark}
 ${coverSection}
+${eventsHtml}
 ${sections}
 ${corrections}
 ${opts.feature ? featurePage(opts.feature, lang) : ""}
-${revisionPage(groups, lang)}
-${practicePage(items, lang)}
+${revisionPage(allGroups, lang)}
+${practicePage(everything, lang)}
 ${notes}
 ${back ? adPageHtml(back, lang, "back") : ""}`
 }
