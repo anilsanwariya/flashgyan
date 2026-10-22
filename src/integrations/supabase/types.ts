@@ -989,14 +989,18 @@ export type Database = {
           date_to: string
           design: Json | null
           error: string | null
+          features: Json
           finalized_at: string | null
           id: string
           pdf_at: string | null
           pdf_url_en: string | null
           pdf_url_hi: string | null
+          post_error: string | null
+          posted_at: string | null
           reorg_at: string | null
           reorg_queue: string[]
           sections: Json
+          site_ids: string[]
           status: string
           theme: string
           title_en: string
@@ -1009,14 +1013,18 @@ export type Database = {
           date_to: string
           design?: Json | null
           error?: string | null
+          features?: Json
           finalized_at?: string | null
           id?: string
           pdf_at?: string | null
           pdf_url_en?: string | null
           pdf_url_hi?: string | null
+          post_error?: string | null
+          posted_at?: string | null
           reorg_at?: string | null
           reorg_queue?: string[]
           sections?: Json
+          site_ids?: string[]
           status?: string
           theme: string
           title_en: string
@@ -1029,14 +1037,18 @@ export type Database = {
           date_to?: string
           design?: Json | null
           error?: string | null
+          features?: Json
           finalized_at?: string | null
           id?: string
           pdf_at?: string | null
           pdf_url_en?: string | null
           pdf_url_hi?: string | null
+          post_error?: string | null
+          posted_at?: string | null
           reorg_at?: string | null
           reorg_queue?: string[]
           sections?: Json
+          site_ids?: string[]
           status?: string
           theme?: string
           title_en?: string
@@ -1112,7 +1124,9 @@ export type Database = {
           created_at: string
           error: string | null
           id: string
-          issue_date: string
+          issue_date: string | null
+          mag_date: string | null
+          magazine_id: string | null
           section: string
           source_name: string
           status: string
@@ -1127,7 +1141,9 @@ export type Database = {
           created_at?: string
           error?: string | null
           id?: string
-          issue_date: string
+          issue_date?: string | null
+          mag_date?: string | null
+          magazine_id?: string | null
           section: string
           source_name?: string
           status?: string
@@ -1142,7 +1158,9 @@ export type Database = {
           created_at?: string
           error?: string | null
           id?: string
-          issue_date?: string
+          issue_date?: string | null
+          mag_date?: string | null
+          magazine_id?: string | null
           section?: string
           source_name?: string
           status?: string
@@ -1150,7 +1168,15 @@ export type Database = {
           updated_at?: string
           url?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "ca_sources_magazine_id_fkey"
+            columns: ["magazine_id"]
+            isOneToOne: false
+            referencedRelation: "ca_mags"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       ca_watch_sites: {
         Row: {
