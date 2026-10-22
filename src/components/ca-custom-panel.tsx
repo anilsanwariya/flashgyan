@@ -47,7 +47,19 @@ import { formatDate, istDate } from "@/lib/current-affairs";
 import { StoryEditor } from "@/components/ca-story-editor";
 import { JobBar, useStoryJobs, type StoryJob } from "@/components/ca-story-jobs";
 import type { Lang } from "@/components/ca-story-review";
-import { Badge, errorText } from "@/components/ca-ui";
+import { Badge, PageTabs, errorText } from "@/components/ca-ui";
+import {
+  DesignSaveBar,
+  MonthlyAdsEditor,
+  MonthlyCoverEditor,
+  useIssueDesign,
+} from "@/components/ca-cover-designer";
+import {
+  MaterialTab,
+  PostButtons,
+  SectionFeature,
+  useMagMaterials,
+} from "@/components/ca-mag-finishing";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -90,10 +102,27 @@ export function CustomMagazines() {
   );
 }
 
-// What a magazine still has to do, in words (empty when nothing).
-function workLeft(d: { mag: CustomMag; items: MagItem[]; checked: number; total: number }): string {
+// What a magazine still has to do, in words (empty when nothing). `reading`:
+// parts of its own material still to read.
+function workLeft(
+  d: { mag: CustomMag; items: MagItem[]; checked: number; total: number },
+  reading = 0,
+): string {
   if (d.mag.status !== "growing") return "";
   if (d.checked < d.total) return `Sorting stories in: ${d.checked} of ${d.total} checked`;
+  if (reading) return `Reading your material: ${reading} ${reading === 1 ? "part" : "parts"} to go`;
+  const toPlace = d.items.filter((i) => !i.mag_section).length;
+  if (toPlace) return `Sorting stories from your material into sections: ${toPlace} to sort`;
+  const fromMaterial = d.items.filter(
+    (i) =>
+      i.needs_enrich &&
+      i.status === "included" &&
+      !!i.mag_section &&
+      !i.mag_parent &&
+      !i.mag_combined &&
+      !i.enrich_error,
+  ).length;
+  if (fromMaterial) return `Writing stories from your material: ${fromMaterial} to write`;
   const toJoin = d.items.filter(
     (i) => i.mag_grouped === false && !i.mag_parent && !i.mag_combined && i.status === "included",
   ).length;
@@ -113,6 +142,14 @@ type TopicActions = {
   update: (id: string) => Promise<void>;
 };
 const TopicCtx = createContext<TopicActions | null>(null);
+
+const MAG_TABS = [
+  { id: "stories", label: "Stories" },
+  { id: "cover", label: "Cover" },
+  { id: "ads", label: "Ads & printing" },
+  { id: "material", label: "Material & websites" },
+] as const;
+type MagTab = (typeof MAG_TABS)[number]["id"];
 
 // ====================== The list ======================
 
@@ -292,18 +329,25 @@ function MagazineView({ id, onBack }: { id: string; onBack: () => void }) {
   const placeFn = useServerFn(placeCaMagStories);
   const updateFn = useServerFn(updateCaItem);
   const enrichFn = useServerFn(enrichCaItem);
+  const materials = useMagMaterials(id);
+  const readingRef = useRef(0);
+  readingRef.current = materials.reading;
   const q = useQuery({
     queryKey: ["caMag", id],
     queryFn: () => getFn({ data: { id } }),
     refetchInterval: (query) => {
       const d = query.state.data;
-      return d && d.mag.status === "growing" && workLeft(d) ? 20_000 : false;
+      return d && d.mag.status === "growing" && workLeft(d, readingRef.current) ? 20_000 : false;
     },
   });
+  const [tab, setTab] = useState<MagTab>("stories");
+  // The cover and ads as edited, kept while moving between tabs.
+  const design = useIssueDesign(q.data?.mag.date_from ?? "2026-01-01", id);
   const refresh = () =>
     Promise.all([
       qc.invalidateQueries({ queryKey: ["caMag", id] }),
       qc.invalidateQueries({ queryKey: ["caMags"] }),
+      qc.invalidateQueries({ queryKey: ["caMagMaterials", id] }),
     ]);
   const jobs = useStoryJobs(() => void refresh());
   const joinFn = useServerFn(joinCaMagStories);
@@ -432,7 +476,7 @@ function MagazineView({ id, onBack }: { id: string; onBack: () => void }) {
   // As printed: a combined article once, not the stories in it.
   const included = top.filter((i) => i.status === "included").length;
   const sorting = mag.status === "growing" && data!.checked < data!.total;
-  const work = workLeft(data!);
+  const work = workLeft(data!, materials.reading);
   const target = (value: string) => {
     const [section, sub] = value.split("|");
     return { section, sub: sub || null };
@@ -449,7 +493,18 @@ function MagazineView({ id, onBack }: { id: string; onBack: () => void }) {
 
   return (
     <div className="space-y-4">
-      <Button variant="ghost" size="sm" onClick={onBack}>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => {
+          if (
+            design.changed &&
+            !confirm("The cover or ads have changes that aren't saved. Leave them?")
+          )
+            return;
+          onBack();
+        }}
+      >
         <ArrowLeft className="mr-1 h-4 w-4" /> All custom magazines
       </Button>
 
@@ -565,6 +620,12 @@ function MagazineView({ id, onBack }: { id: string; onBack: () => void }) {
             )}
           </p>
         )}
+        <PostButtons mag={mag} onPosted={refresh} />
+        {design.changed && (
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            The cover or ads have changes that aren't saved: the PDFs use the saved ones.
+          </p>
+        )}
         {mag.status === "growing" && (
           <div className="space-y-1.5">
             <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -602,7 +663,43 @@ function MagazineView({ id, onBack }: { id: string; onBack: () => void }) {
         {mag.error && <p className="text-xs text-destructive">Last problem: {mag.error}</p>}
       </section>
 
-      {chosen.size > 0 && (
+      <PageTabs
+        label="Custom magazine"
+        tabs={MAG_TABS.map((t) => ({
+          ...t,
+          dot: (t.id === "cover" || t.id === "ads") && design.changed,
+        }))}
+        value={tab}
+        onChange={setTab}
+      />
+
+      {tab === "cover" && (
+        <div role="tabpanel" aria-label="Cover">
+          <MonthlyCoverEditor state={design} />
+        </div>
+      )}
+      {tab === "ads" && (
+        <div role="tabpanel" aria-label="Ads & printing">
+          <MonthlyAdsEditor
+            state={design}
+            names={sections.map((s) => ({ id: s.id, name: s.en }))}
+            sections={Object.fromEntries(
+              sections.map((s) => [
+                s.id,
+                top.filter((i) => i.mag_section === s.id && i.status === "included").length,
+              ]),
+            )}
+          />
+        </div>
+      )}
+      {tab === "material" && (
+        <div role="tabpanel" aria-label="Material & websites">
+          <MaterialTab mag={mag} onChanged={refresh} />
+        </div>
+      )}
+      <DesignSaveBar state={design} />
+
+      {tab === "stories" && chosen.size > 0 && (
         <div className="sticky top-2 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-primary/40 bg-background/95 p-2 text-sm shadow-lg backdrop-blur">
           <span className="font-medium">{chosen.size} selected</span>
           <select
@@ -695,11 +792,11 @@ function MagazineView({ id, onBack }: { id: string; onBack: () => void }) {
         </div>
       )}
 
-      {!items.length ? (
+      {tab !== "stories" ? null : !items.length ? (
         <p className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
           {sorting
             ? "Sorting the period's stories in…"
-            : "No stories fit yet. Collect past dates on the Monthly page, or widen the dates in Details."}
+            : "No stories fit yet. Add material or websites on the Material & websites tab, collect past dates on the Monthly page, or widen the dates in Details."}
         </p>
       ) : (
         groups.map((g) => (
@@ -934,6 +1031,7 @@ function SectionCard({
           {!group.loose.length && !group.subs.length && (
             <p className="text-xs text-muted-foreground">No stories yet.</p>
           )}
+          {count > 0 && <SectionFeature mag={mag} section={section} onChanged={onChanged} />}
         </div>
       )}
     </section>

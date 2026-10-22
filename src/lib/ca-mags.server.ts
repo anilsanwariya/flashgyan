@@ -30,8 +30,17 @@ import {
   type MagSection,
 } from "@/lib/ca-mags";
 import { renderMagazine, type CustomLayout, type Lang } from "@/lib/current-affairs-html";
-import { fillerPages, normalizeIssueDesign } from "@/lib/ca-covers";
-import { mergeFacts, type Bi, type CaFact } from "@/lib/current-affairs";
+import type { CaFeature } from "@/lib/ca-feature";
+import { fillerPages, normalizeIssueDesign, type IssueDesign } from "@/lib/ca-covers";
+import {
+  extractMessages,
+  mergeFacts,
+  parseExtracted,
+  splitSource,
+  type Bi,
+  type CaFact,
+  type UploadSection,
+} from "@/lib/current-affairs";
 import { cosine, parseVector } from "@/lib/ca-duplicates";
 import * as CA from "@/lib/current-affairs.server";
 import type { CaItem } from "@/lib/current-affairs.server";
@@ -358,7 +367,14 @@ export async function magStep(): Promise<string | null> {
 export async function stepMag(id: string): Promise<string | null> {
   const r = await fillMag(id);
   if (r) return `checked ${r.checked} stories, added ${r.added}`;
-  return (await groupStep(id)) ?? (await writeStep(id)) ?? (await reorgStep(id));
+  return (
+    (await materialStep(id)) ??
+    (await placeStep(id)) ??
+    (await writeMaterialStory(id)) ??
+    (await groupStep(id)) ??
+    (await writeStep(id)) ??
+    (await reorgStep(id))
+  );
 }
 
 // ---------- One magazine ----------
@@ -530,53 +546,130 @@ function layout(mag: CustomMag): CustomLayout {
       title: biName(s),
       subs: s.subs.map((x) => ({ id: x.id, title: biName(x) })),
     })),
+    features: readFeatures(mag),
   };
 }
 
-export async function magHtml(id: string, lang: Lang, fillers = 0) {
+// The stories as printed, in order (sections, subsections, dates).
+async function printedItems(id: string) {
   const { mag, items } = await getMag(id);
-  const settings = await CA.getMagazineSettings();
   // Stories joined into a combined article print as that article.
   const included = items.filter((i) => i.status === "included" && i.content && !i.mag_parent);
   const printed = await CA.toMagazineItems(included);
   const place = new Map(included.map((i) => [i.id, i]));
-  const design = normalizeIssueDesign(mag.design ?? null);
+  const list = printed.map((p) => ({
+    ...p,
+    category: place.get(p.id)?.mag_section ?? OTHER_SECTION.id,
+    sub: place.get(p.id)?.mag_sub ?? null,
+  }));
+  return { mag, list };
+}
+
+export async function magHtml(
+  id: string,
+  lang: Lang,
+  opts: {
+    fillers?: number;
+    // The cover being designed (not saved yet).
+    design?: IssueDesign;
+    coverOnly?: boolean;
+    part?: { only: string[]; cover: boolean; tail: boolean; start: number };
+  } = {},
+) {
+  const { mag, list } = await printedItems(id);
+  const settings = await CA.getMagazineSettings();
+  const design = opts.design ?? normalizeIssueDesign(mag.design ?? null);
   return {
     html: renderMagazine({
       kind: "monthly",
       period: mag.date_from,
       lang,
       settings,
-      items: printed.map((p) => ({
-        ...p,
-        category: place.get(p.id)?.mag_section ?? OTHER_SECTION.id,
-        sub: place.get(p.id)?.mag_sub ?? null,
-      })),
+      items: list,
       design,
-      fillers,
+      fillers: opts.fillers ?? 0,
+      coverOnly: opts.coverOnly,
       custom: layout(mag),
+      part: opts.part ?? null,
     }),
-    settings,
-    count: printed.length,
+    settings:
+      design.cover.color && design.cover.color_scope !== "cover"
+        ? { ...settings, accent: design.cover.color }
+        : settings,
+    count: list.length,
+    order: printOrder(mag, list),
   };
 }
 
+// The printed stories' ids in print order (as the renderer sorts them).
+function printOrder(
+  mag: CustomMag,
+  list: {
+    id: string;
+    category: string;
+    sub?: string | null;
+    issue_date: string;
+    importance: number;
+  }[],
+) {
+  const sections = layout(mag).sections;
+  const sec = new Map(sections.map((s, i) => [s.id, i]));
+  const sub = new Map(sections.flatMap((s) => s.subs.map((x, i) => [x.id, i] as const)));
+  return [...list]
+    .sort(
+      (a, b) =>
+        (sec.get(a.category) ?? 99) - (sec.get(b.category) ?? 99) ||
+        (a.sub ? (sub.get(a.sub) ?? 98) : -1) - (b.sub ? (sub.get(b.sub) ?? 98) : -1) ||
+        a.issue_date.localeCompare(b.issue_date) ||
+        b.importance - a.importance,
+    )
+    .map((i) => i.id);
+}
+
+// Stories in one PDF request: a longer magazine is made in parts and joined
+// (one request has a time limit), with page numbers stamped across it.
+export const PART_STORIES = 60;
+
+async function magPdf(id: string, lang: Lang, fillers: number) {
+  const first = await magHtml(id, lang, { fillers });
+  if (!first.count) throw new Error("There are no stories in this magazine yet.");
+  if (first.count <= PART_STORIES) {
+    const made = await CA.renderPdf(first.html, first.settings, lang);
+    return { pdf: made.pdf, pages: made.pages, settings: first.settings, parts: 1 };
+  }
+  const chunks: string[][] = [];
+  for (let i = 0; i < first.order.length; i += PART_STORIES)
+    chunks.push(first.order.slice(i, i + PART_STORIES));
+  const made: { pdf: Uint8Array; ads: number[] }[] = [];
+  for (let k = 0; k < chunks.length; k++) {
+    const part = await magHtml(id, lang, {
+      fillers,
+      part: {
+        only: chunks[k],
+        cover: k === 0,
+        tail: k === chunks.length - 1,
+        start: k * PART_STORIES,
+      },
+    });
+    made.push(await CA.renderPdf(part.html, part.settings, lang, { numbered: false }));
+  }
+  const { joinPdfs } = await import("@/lib/ca-pdf-link");
+  const joined = await joinPdfs(made);
+  return { pdf: joined.pdf, pages: joined.pages, settings: first.settings, parts: chunks.length };
+}
+
+const pdfPath = (id: string, lang: Lang) =>
+  `custom/FlashGyan-${id.slice(0, 8)}-${lang === "hi" ? "Hindi" : "English"}.pdf`;
+
 // The magazine's English and Hindi PDFs, made now (it stays growing until
-// marked final).
+// marked final). For print, ruled notes pages bring the back cover outside.
 export async function buildMagPdf(id: string): Promise<CustomMag> {
   const urls: Record<Lang, string> = { en: "", hi: "" };
   for (const lang of ["en", "hi"] as const) {
-    const first = await magHtml(id, lang);
-    if (!first.count) throw new Error("There are no stories in this magazine yet.");
-    let made = await CA.renderPdf(first.html, first.settings, lang);
-    const need = made.pages
-      ? fillerPages(made.pages, first.settings.print_binding ?? "booklet")
-      : 0;
-    if (need) {
-      const again = await magHtml(id, lang, need);
-      made = await CA.renderPdf(again.html, again.settings, lang);
-    }
-    const path = `custom/FlashGyan-${id.slice(0, 8)}-${lang === "hi" ? "Hindi" : "English"}.pdf`;
+    let made = await magPdf(id, lang, 0);
+    const need = made.pages ? fillerPages(made.pages, made.settings.print_binding ?? "booklet") : 0;
+    if (need) made = await magPdf(id, lang, need);
+    const path = pdfPath(id, lang);
     const { error } = await supabaseAdmin.storage
       .from(BUCKET)
       .upload(path, made.pdf, { contentType: "application/pdf", upsert: true });
@@ -591,6 +684,419 @@ export async function buildMagPdf(id: string): Promise<CustomMag> {
     .single();
   fail(error);
   return readMag(data);
+}
+
+// ---------- Cover and ads ----------
+
+export async function getMagDesign(id: string): Promise<IssueDesign> {
+  return normalizeIssueDesign((await loadMag(id)).design ?? null);
+}
+
+export async function saveMagDesign(id: string, design: unknown): Promise<IssueDesign> {
+  const clean = normalizeIssueDesign(design);
+  fail(
+    (
+      await from("ca_mags")
+        .update({ design: clean, updated_at: now() } as never)
+        .eq("id", id)
+    ).error,
+  );
+  return clean;
+}
+
+// ---------- Telegram ----------
+
+// The caption with the PDF: the title, the period and the join link.
+function magCaption(
+  mag: CustomMag,
+  lang: Lang,
+  settings: { join_url?: string; join_text?: string },
+) {
+  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const title = lang === "hi" ? mag.title_hi || mag.title_en : mag.title_en;
+  const join = (settings.join_url ?? "").trim();
+  return `📚 <b>${esc(title)}</b>\n${esc(magPeriod(mag.date_from, mag.date_to, lang))}${
+    join ? `\n\n${esc(settings.join_text?.trim() || "Join us on Telegram")}: ${esc(join)}` : ""
+  }`;
+}
+
+// Sends the magazine's PDFs (English, then Hindi) to the channel, or to the
+// editor's test chat. The PDFs are the ones last made.
+export async function postMag(id: string, test: boolean) {
+  const mag = await loadMag(id);
+  if (!mag.pdf_url_en) throw new Error("Make the PDFs first.");
+  const settings = await CA.getMagazineSettings();
+  const chat = test ? settings.test_chat_id : settings.channel;
+  if (!chat)
+    throw new Error(
+      test
+        ? "Add your Telegram chat id in Magazine settings first."
+        : "Set the channel in Magazine settings first.",
+    );
+  try {
+    await CA.sendPdf(chat, pdfPath(id, "en"), magCaption(mag, "en", settings));
+    if (mag.pdf_url_hi) await CA.sendPdf(chat, pdfPath(id, "hi"), magCaption(mag, "hi", settings));
+  } catch (e) {
+    if (!test)
+      await from("ca_mags")
+        .update({ post_error: (e instanceof Error ? e.message : String(e)).slice(0, 300) } as never)
+        .eq("id", id);
+    throw e;
+  }
+  if (!test)
+    fail(
+      (
+        await from("ca_mags")
+          .update({ posted_at: now(), post_error: null, updated_at: now() } as never)
+          .eq("id", id)
+      ).error,
+    );
+}
+
+// ---------- Background articles ----------
+
+// A background article for one section, from the knowledge base, on what
+// the section's stories are about (it prints after them).
+export async function writeSectionFeature(magId: string, sectionId: string) {
+  const mag = await loadMag(magId);
+  const section = [...mag.sections, OTHER_SECTION].find((s) => s.id === sectionId);
+  if (!section) throw new Error("Unknown section");
+  const pool = (await topLevel(magId)) ?? [];
+  const stories = pool
+    .filter((r) => r.mag_section === sectionId)
+    .slice(-15)
+    .map((r) => headlineOf(r));
+  if (!stories.length) throw new Error("This section has no stories yet.");
+  const feature = await CA.composeFeature({
+    topic: { en: section.en, hi: section.hi },
+    query: `${section.en} ${mag.theme}`.slice(0, 300),
+    stories,
+  });
+  await saveFeatures(magId, { ...readFeatures(mag), [sectionId]: feature });
+  return feature;
+}
+
+export async function removeSectionFeature(magId: string, sectionId: string) {
+  const mag = await loadMag(magId);
+  const next = { ...readFeatures(mag) };
+  delete next[sectionId];
+  await saveFeatures(magId, next);
+}
+
+function readFeatures(mag: CustomMag): Record<string, CaFeature> {
+  const f = (mag as CustomMag & { features?: unknown }).features;
+  return f && typeof f === "object" && !Array.isArray(f) ? (f as Record<string, CaFeature>) : {};
+}
+
+async function saveFeatures(magId: string, features: Record<string, CaFeature>) {
+  const { error } = await from("ca_mags")
+    .update({ features, updated_at: now() } as never)
+    .eq("id", magId);
+  if (missingFinishing(error)) throw new Error(NOT_READY_4);
+  fail(error);
+}
+
+// ---------- Material and websites of its own ----------
+
+const missingFinishing = (e: { message: string } | null) =>
+  !!e && /features|site_ids|posted_at|post_error|magazine_id|mag_date/.test(e.message);
+const NOT_READY_4 =
+  "This needs a database update: run the latest migration (ca_mag_finishing) in Lovable or the SQL editor.";
+
+export type MagMaterial = {
+  id: string;
+  title: string;
+  source_name: string;
+  mag_date: string;
+  chunks: number;
+  chunks_done: number;
+  status: string;
+  error: string | null;
+  created_at: string;
+  stories: number;
+};
+
+// Material for this magazine only (a report, a yearbook chapter, a page):
+// read into stories that are sorted into the sections and written like the
+// others. `date` is the day it is about (the period's end when unknown).
+export async function addMaterial(
+  magId: string,
+  input: {
+    title: string;
+    source_name: string;
+    content: string;
+    date?: string | null;
+    url?: string | null;
+  },
+): Promise<MagMaterial> {
+  const mag = await loadMag(magId);
+  const date =
+    input.date && input.date >= mag.date_from && input.date <= mag.date_to
+      ? input.date
+      : mag.date_to;
+  const content = input.content.trim().slice(0, 600_000);
+  if (content.length < 40) throw new Error("There is too little text in this material.");
+  const { data, error } = await from("ca_sources")
+    .insert({
+      issue_date: null,
+      magazine_id: magId,
+      mag_date: date,
+      section: "other",
+      source_name: input.source_name.trim().slice(0, 120) || "Material",
+      title: input.title.trim().slice(0, 300) || "Material",
+      content,
+      url: input.url ?? null,
+      chunks: splitSource(content).length,
+      chunks_done: 0,
+      status: "new",
+    } as never)
+    .select("id,title,source_name,mag_date,chunks,chunks_done,status,error,created_at")
+    .single();
+  if (missingFinishing(error)) throw new Error(NOT_READY_4);
+  fail(error);
+  return { ...(data as unknown as MagMaterial), stories: 0 };
+}
+
+export async function listMaterials(
+  magId: string,
+): Promise<{ ready: boolean; list: MagMaterial[] }> {
+  const { data, error } = await from("ca_sources")
+    .select("id,title,source_name,mag_date,chunks,chunks_done,status,error,created_at")
+    .eq("magazine_id", magId)
+    .order("created_at");
+  if (missingFinishing(error)) return { ready: false, list: [] };
+  fail(error);
+  const list = (data ?? []) as unknown as MagMaterial[];
+  const counts = new Map<string, number>();
+  if (list.length) {
+    const { data: its } = await from("ca_items")
+      .select("source_ids")
+      .eq("magazine_id", magId)
+      .overlaps(
+        "source_ids",
+        list.map((m) => m.id),
+      );
+    for (const r of (its ?? []) as { source_ids: string[] }[])
+      for (const s of r.source_ids) counts.set(s, (counts.get(s) ?? 0) + 1);
+  }
+  return { ready: true, list: list.map((m) => ({ ...m, stories: counts.get(m.id) ?? 0 })) };
+}
+
+// Removes material, with the stories made only from it.
+export async function deleteMaterial(magId: string, sourceId: string) {
+  const { data } = await from("ca_items")
+    .select("id,source_ids")
+    .eq("magazine_id", magId)
+    .contains("source_ids", [sourceId]);
+  const only = ((data ?? []) as { id: string; source_ids: string[] }[])
+    .filter((r) => r.source_ids.every((s) => s === sourceId))
+    .map((r) => r.id);
+  if (only.length) fail((await from("ca_items").delete().in("id", only)).error);
+  fail((await from("ca_sources").delete().eq("id", sourceId).eq("magazine_id", magId)).error);
+}
+
+// Reads the next part of the magazine's material into stories (not yet in
+// a section; the next step sorts them in).
+export async function materialStep(magId: string): Promise<string | null> {
+  const { data, error } = await from("ca_sources")
+    .select("id,title,source_name,section,content,mag_date,chunks,chunks_done")
+    .eq("magazine_id", magId)
+    .in("status", ["new", "extracting"])
+    .order("created_at")
+    .limit(1);
+  if (missingFinishing(error)) return null;
+  fail(error);
+  const src = (
+    (data ?? []) as {
+      id: string;
+      title: string;
+      source_name: string;
+      section: UploadSection;
+      content: string;
+      mag_date: string;
+      chunks: number;
+      chunks_done: number;
+    }[]
+  )[0];
+  if (!src) return null;
+  const parts = splitSource(src.content);
+  const text = parts[src.chunks_done];
+  let added = 0;
+  if (text) {
+    try {
+      const found = parseExtracted(
+        await saathiComplete(
+          apiKey(),
+          extractMessages({
+            section: src.section,
+            sourceName: src.source_name,
+            date: src.mag_date,
+            text,
+          }),
+        ),
+        text,
+        src.id,
+      ).filter((x) => x.facts.length);
+      const { count: had } = await from("ca_items")
+        .select("id", { count: "exact", head: true })
+        .eq("magazine_id", magId);
+      const rows = found.map((x, i) => ({
+        magazine_id: magId,
+        issue_date: null,
+        mag_date: src.mag_date,
+        category: x.category,
+        headline: x.headline,
+        facts: x.facts,
+        source_ids: [src.id],
+        importance: x.importance,
+        rajasthan: x.rajasthan,
+        concept: x.concept,
+        content: null,
+        context_sources: [],
+        status: "included",
+        needs_enrich: true,
+        position: (had ?? 0) + i,
+        mag_section: null,
+      }));
+      if (rows.length) fail((await from("ca_items").insert(rows as never)).error);
+      added = rows.length;
+    } catch (e) {
+      await from("ca_sources")
+        .update({
+          status: "error",
+          error: (e instanceof Error ? e.message : String(e)).slice(0, 300),
+        } as never)
+        .eq("id", src.id);
+      return `couldn't read “${src.title.slice(0, 50)}”`;
+    }
+  }
+  const done = src.chunks_done + 1 >= parts.length;
+  fail(
+    (
+      await from("ca_sources")
+        .update({
+          chunks_done: Math.min(parts.length, src.chunks_done + 1),
+          status: done ? "done" : "extracting",
+          updated_at: now(),
+        } as never)
+        .eq("id", src.id)
+    ).error,
+  );
+  return `read part ${src.chunks_done + 1} of “${src.title.slice(0, 50)}”: ${added} stories`;
+}
+
+// Puts stories read from material into sections (those off the theme are
+// left out, still listed).
+export async function placeStep(magId: string): Promise<string | null> {
+  const mag = await loadMag(magId);
+  const { data, error } = await from("ca_items")
+    .select("id,headline,facts,mag_date")
+    .eq("magazine_id", magId)
+    .is("mag_section", null)
+    .order("position")
+    .limit(SORT_BATCH);
+  fail(error);
+  const rows = (data ?? []) as {
+    id: string;
+    headline: string;
+    facts: CaFact[];
+    mag_date: string;
+  }[];
+  if (!rows.length) return null;
+  const glossary = (await CA.getMagazineSettings()).glossary ?? [];
+  const sorted = parseSort(
+    await saathiComplete(
+      apiKey(),
+      sortMessages({
+        title: mag.title_en,
+        theme: mag.theme,
+        sections: mag.sections,
+        stories: rows.map((r) => ({
+          headline: r.headline,
+          facts: (r.facts ?? []).map((f) => f.text),
+          date: r.mag_date,
+        })),
+        glossary,
+      }),
+    ),
+    rows.length,
+    mag.sections,
+  );
+  if (!sorted) throw new Error("SAATHI's sorting couldn't be read; it will try again.");
+  const placed = new Map(sorted.placed.map((p) => [p.index, p]));
+  for (let i = 0; i < rows.length; i++) {
+    const p = placed.get(i);
+    fail(
+      (
+        await from("ca_items")
+          .update(
+            (p
+              ? { mag_section: p.section, mag_sub: p.sub }
+              : { mag_section: OTHER_SECTION.id, status: "dropped", needs_enrich: false }) as never,
+          )
+          .eq("id", rows[i].id)
+      ).error,
+    );
+  }
+  fail(
+    (
+      await from("ca_mags")
+        .update({ sections: sorted.sections, updated_at: now() } as never)
+        .eq("id", magId)
+    ).error,
+  );
+  return `sorted ${rows.length} stories from material into sections (${sorted.placed.length} fit)`;
+}
+
+// A story read from material, waiting to be written.
+async function writeMaterialStory(magId: string): Promise<string | null> {
+  const { data, error } = await from("ca_items")
+    .select("id,headline")
+    .eq("magazine_id", magId)
+    .eq("needs_enrich", true)
+    .eq("status", "included")
+    .not("mag_section", "is", null)
+    .is("mag_parent", null)
+    .is("enrich_error", null)
+    .eq("mag_combined", false)
+    .order("position")
+    .limit(1);
+  if (missingTopics(error)) return null;
+  fail(error);
+  const row = ((data ?? []) as { id: string; headline: string }[])[0];
+  if (!row) return null;
+  try {
+    await CA.enrichItem(row.id);
+  } catch (e) {
+    await from("ca_items")
+      .update({ enrich_error: (e instanceof Error ? e.message : String(e)).slice(0, 300) } as never)
+      .eq("id", row.id);
+  }
+  return `wrote “${row.headline.slice(0, 60)}”`;
+}
+
+// The websites collected for this magazine (from the watched websites).
+export async function setMagSites(magId: string, siteIds: string[]) {
+  const { error } = await from("ca_mags")
+    .update({ site_ids: siteIds, updated_at: now() } as never)
+    .eq("id", magId);
+  if (missingFinishing(error)) throw new Error(NOT_READY_4);
+  fail(error);
+}
+
+// Collects the magazine's dates (up to yesterday) from its websites, as a
+// past-date collection: the stories go into the daily archive under their
+// real dates, so the monthly magazines get them too, and this magazine
+// sorts them in.
+export async function collectMagSites(magId: string) {
+  const mag = (await loadMag(magId)) as CustomMag & { site_ids?: string[] };
+  const sites = mag.site_ids ?? [];
+  if (!sites.length) throw new Error("Pick the websites first.");
+  const yesterday = new Date(Date.now() + 330 * 60_000 - 86_400_000).toISOString().slice(0, 10);
+  const to = mag.date_to < yesterday ? mag.date_to : yesterday;
+  if (to < mag.date_from) throw new Error("The magazine's dates haven't passed yet.");
+  const { startBackfill } = await import("@/lib/ca-collect.server");
+  return startBackfill(mag.date_from, to, sites, "magazine");
 }
 
 // ---------- Combined articles (step 3) ----------
@@ -729,11 +1235,13 @@ export async function groupStep(magId: string): Promise<string | null> {
   const mag = await loadMag(magId);
   const pool = await topLevel(magId);
   if (!pool) return null;
-  const first = pool.find((r) => !r.mag_grouped && !r.mag_combined);
+  // Stories still to be written wait (their meaning isn't known yet).
+  const waiting = (r: PoolRow) => !r.mag_grouped && !r.mag_combined && !!r.ch;
+  const first = pool.find(waiting);
   if (!first) return null;
   const sec = pool.filter((r) => r.mag_section === first.mag_section);
   const fresh = sec
-    .map((r, i) => (!r.mag_grouped && !r.mag_combined ? i : -1))
+    .map((r, i) => (waiting(r) ? i : -1))
     .filter((i) => i >= 0)
     .slice(0, 40);
   const done = async () =>

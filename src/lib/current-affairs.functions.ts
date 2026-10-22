@@ -1220,11 +1220,21 @@ export const previewCaCover = createServerFn({ method: "POST" })
         lang: z.enum(["en", "hi"]).default("en"),
         design: z.record(z.string(), z.unknown()).nullish(),
         daily_cover: z.string().max(20).nullish(),
+        // A custom magazine's cover.
+        mag: z.string().uuid().nullish(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }): Promise<{ html: string }> => {
     await assertAdmin(context.userId);
+    if (data.mag) {
+      const { magHtml } = await import("@/lib/ca-mags.server");
+      const { html } = await magHtml(data.mag, data.lang, {
+        coverOnly: true,
+        design: data.design ? normalizeIssueDesign(data.design) : undefined,
+      });
+      return { html };
+    }
     const s = await server();
     const { html } = await s.issueHtml(data.kind, data.period, data.lang, {
       coverOnly: true,

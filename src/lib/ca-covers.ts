@@ -250,7 +250,7 @@ export function normalizeIssueDesign(v: unknown): IssueDesign {
   const ads: Record<string, string> = {};
   const s = (o.section_ads ?? {}) as Record<string, unknown>;
   for (const [k, id] of Object.entries(s)) {
-    if (/^[a-z_]{1,30}$/.test(k) && typeof id === "string" && id) ads[k] = id.slice(0, 60);
+    if (/^[a-z0-9_-]{1,40}$/.test(k) && typeof id === "string" && id) ads[k] = id.slice(0, 60);
   }
   return {
     cover: normalizeCover(o.cover),

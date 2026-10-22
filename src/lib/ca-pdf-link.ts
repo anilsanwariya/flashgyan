@@ -103,9 +103,11 @@ export async function finishPdf(
     join?: { text: string; url: string; color: string };
     loadAd?: (id: string) => Promise<AdImage | null>;
   },
-): Promise<{ pdf: Uint8Array; pages: number }> {
+): Promise<{ pdf: Uint8Array; pages: number; ads: number[] }> {
   const doc = await PDFDocument.load(pdf);
   const marks = takeMarks(doc);
+  // The ad pages (no footer, no page number).
+  const ads = [...marks.entries()].filter(([, m]) => m.kind === "ad").map(([i]) => i);
   for (const [i, mark] of marks) {
     if (mark.kind !== "ad" || !mark.id || !opts.loadAd) continue;
     try {
@@ -143,7 +145,35 @@ export async function finishPdf(
       linkAnnot(doc, page, [x - 4, y - 5, x + width + 4, y + SIZE + 3], link.url);
     });
   }
-  return { pdf: await doc.save(), pages: doc.getPageCount() };
+  return { pdf: await doc.save(), pages: doc.getPageCount(), ads };
+}
+
+// Joins PDFs one after another, and stamps "n / total" where the page
+// footer prints it (the parts were made without numbers). Ad pages get no
+// number.
+export async function joinPdfs(
+  parts: { pdf: Uint8Array; ads: number[] }[],
+): Promise<{ pdf: Uint8Array; pages: number }> {
+  const out = await PDFDocument.create();
+  const skip = new Set<number>();
+  for (const part of parts) {
+    const doc = await PDFDocument.load(part.pdf);
+    const start = out.getPageCount();
+    for (const i of part.ads) skip.add(start + i);
+    for (const page of await out.copyPages(doc, doc.getPageIndices())) out.addPage(page);
+  }
+  const font = await out.embedFont(StandardFonts.Helvetica);
+  const total = out.getPageCount();
+  out.getPages().forEach((page, i) => {
+    if (skip.has(i)) return;
+    const text = `${i + 1} / ${total}`;
+    const box = page.getMediaBox();
+    const size = 6;
+    // 12 mm from the right edge, on the footer's line.
+    const x = box.x + box.width - 34 - font.widthOfTextAtSize(text, size);
+    page.drawText(text, { x, y: box.y + 10, size, font, color: rgb(0.58, 0.64, 0.72) });
+  });
+  return { pdf: await out.save(), pages: total };
 }
 
 export async function addJoinLink(
