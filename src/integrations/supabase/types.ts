@@ -723,6 +723,7 @@ export type Database = {
           id: string
           importance: number
           issue_date: string
+          key_embedding: string | null
           needs_enrich: boolean
           position: number
           rajasthan: boolean
@@ -730,7 +731,6 @@ export type Database = {
           source_ids: string[]
           status: string
           story_key: string | null
-          key_embedding: string | null
           syllabus_topic_id: string | null
           unit: string | null
           updated_at: string
@@ -748,6 +748,7 @@ export type Database = {
           id?: string
           importance?: number
           issue_date: string
+          key_embedding?: string | null
           needs_enrich?: boolean
           position?: number
           rajasthan?: boolean
@@ -755,7 +756,6 @@ export type Database = {
           source_ids?: string[]
           status?: string
           story_key?: string | null
-          key_embedding?: string | null
           syllabus_topic_id?: string | null
           unit?: string | null
           updated_at?: string
@@ -773,6 +773,7 @@ export type Database = {
           id?: string
           importance?: number
           issue_date?: string
+          key_embedding?: string | null
           needs_enrich?: boolean
           position?: number
           rajasthan?: boolean
@@ -780,7 +781,6 @@ export type Database = {
           source_ids?: string[]
           status?: string
           story_key?: string | null
-          key_embedding?: string | null
           syllabus_topic_id?: string | null
           unit?: string | null
           updated_at?: string
