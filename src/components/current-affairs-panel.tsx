@@ -1,6 +1,7 @@
 // Admin: daily and monthly current affairs magazine. Upload the day's sources,
 // review the news items SAATHI writes from them, approve the issue and it is
 // posted to the Telegram channels as an English PDF and a Hindi PDF.
+import { PastCollection } from "@/components/ca-past-collection";
 import { EventsPanel } from "@/components/ca-events-panel";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -871,6 +872,7 @@ function DailyPanel() {
         </button>
         <div className={showSources ? "space-y-5 px-2 pb-2 sm:px-3 sm:pb-3" : "hidden"}>
           <CollectionBox date={date} onChanged={refresh} />
+          <PastCollection />
 
           {/* Upload */}
           <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
@@ -1273,6 +1275,8 @@ function MonthlyPanel() {
               )}
             </section>
           )}
+
+          <PastCollection month={month} />
         </div>
       )}
       {tab === "cover" && (
