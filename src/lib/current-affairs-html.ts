@@ -54,12 +54,21 @@ export type MagazineItem = {
   facts: CaFact[];
   context_sources: { title: string }[];
   source_names: string[];
+  // A custom magazine's subsection (its section is the category).
+  sub?: string | null;
   // The several-day event it belongs to (monthly issue only).
   event_id?: string | null;
 };
 
 // A correction approved this month: the story's day and headline, what
 // changed, and the values before and after.
+// A custom magazine's layout for the renderer.
+export type CustomLayout = {
+  title: Bi;
+  dateLine: Bi;
+  sections: { id: string; title: Bi; subs: { id: string; title: Bi }[] }[];
+};
+
 export type MagazineCorrection = {
   date: string;
   summary: Bi;
@@ -520,6 +529,9 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .section-title h2 { display: flex; align-items: center; gap: 2.5mm; }
 .toc-row span { display: inline-flex; align-items: center; gap: 2mm; }
 .toc-row .icon { color: ${accent}; }
+.toc-group { break-inside: avoid; }
+.toc-row.toc-sub { padding-left: 7mm; font-size: .92em; color: #475569; }
+.sub-title { break-after: avoid; margin: 5mm 0 3mm; padding: 1.5mm 3mm; font-size: 12pt; color: ${accent}; border-left: 3px solid ${accent}; background: #f8fafc; border-radius: 0 2mm 2mm 0; }
 .rev-cat { display: flex; align-items: center; gap: 2mm; font-size: 10pt; color: ${accent}; margin: 4mm 0 2mm; break-after: avoid; text-transform: uppercase; letter-spacing: .06em; }
 .rev { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .visual + .points, .v-pair + .points, .visual + .pts-beside, .v-pair + .pts-beside { margin-top: 2.5mm; }
@@ -567,7 +579,11 @@ const hasRevision = (i: MagazineItem) =>
 
 // One quick question (or, on older stories, one line) per story, by section,
 // for last-minute revision.
-function revisionPage(groups: Map<string, MagazineItem[]>, lang: Lang): string {
+function revisionPage(
+  groups: Map<string, MagazineItem[]>,
+  lang: Lang,
+  label: (cat: string) => Bi = categoryLabel,
+): string {
   const t = T[lang];
   let n = 0;
   let asked = 0;
@@ -585,7 +601,7 @@ function revisionPage(groups: Map<string, MagazineItem[]>, lang: Lang): string {
         })
         .join("");
       return rows
-        ? `<h3 class="rev-cat">${icon(cat)} ${esc(categoryLabel(cat)[lang])}</h3><table class="rev">${rows}</table>`
+        ? `<h3 class="rev-cat">${icon(cat)} ${esc(label(cat)[lang])}</h3><table class="rev">${rows}</table>`
         : "";
     })
     .join("");
@@ -679,6 +695,10 @@ export function renderMagazine(opts: {
   // Monthly only: the month's several-day events (their stories are not in
   // items): a concluded event's complete summary, or a running one's stories.
   events?: EventBlock<MagazineItem>[];
+  // A custom magazine (printed like a monthly one): its title, period and
+  // sections with subsections, in print order; items' category is the
+  // section and `sub` the subsection.
+  custom?: CustomLayout | null;
 }): string {
   const s = opts.settings;
   const lang = opts.lang;
@@ -692,10 +712,25 @@ export function renderMagazine(opts: {
   const accent = ownColor && cover?.color_scope !== "cover" ? ownColor : safeColor(s.accent);
   const ads = normalizeAds(s.ads);
   const adById = (id: string | undefined) => (id ? ads.find((a) => a.id === id) : undefined);
-  const order = new Map<string, number>(CATEGORIES.map((c, i) => [c.id, i]));
+  const custom = opts.custom ?? null;
+  const order = new Map<string, number>(
+    custom ? custom.sections.map((c, i) => [c.id, i]) : CATEGORIES.map((c, i) => [c.id, i]),
+  );
+  // A custom magazine's subsections, in order (stories without one first).
+  const subOrder = new Map<string, number>(
+    (custom?.sections ?? []).flatMap((c) => c.subs.map((x, i) => [x.id, i] as const)),
+  );
+  const subRank = (it: MagazineItem) => (it.sub ? (subOrder.get(it.sub) ?? 98) : -1);
+  const label = (cat: string): Bi =>
+    custom
+      ? (custom.sections.find((c) => c.id === cat)?.title ?? { en: cat, hi: cat })
+      : categoryLabel(cat);
+  const subLabel = (id: string): Bi =>
+    custom?.sections.flatMap((c) => c.subs).find((x) => x.id === id)?.title ?? { en: id, hi: id };
   const items = [...opts.items].sort(
     (a, b) =>
       (order.get(a.category) ?? 99) - (order.get(b.category) ?? 99) ||
+      subRank(a) - subRank(b) ||
       a.issue_date.localeCompare(b.issue_date) ||
       b.importance - a.importance,
   );
@@ -734,17 +769,20 @@ export function renderMagazine(opts: {
   ))
     allGroups.set(it.category, [...(allGroups.get(it.category) ?? []), it]);
 
-  const title =
-    lang === "hi"
+  const title = custom
+    ? pick(custom.title, lang)
+    : lang === "hi"
       ? monthly
         ? (s.title_hi || s.title_en).replace(/दैनिक/, "मासिक")
         : s.title_hi || s.title_en
       : monthly
         ? s.title_en.replace(/^Daily/i, "Monthly")
         : s.title_en;
-  const dateLine = monthly
-    ? formatDate(opts.period, lang, false)
-    : `${t.weekdays[new Date(`${opts.period}T00:00:00Z`).getUTCDay()]}, ${formatDate(opts.period, lang)}`;
+  const dateLine = custom
+    ? pick(custom.dateLine, lang)
+    : monthly
+      ? formatDate(opts.period, lang, false)
+      : `${t.weekdays[new Date(`${opts.period}T00:00:00Z`).getUTCDay()]}, ${formatDate(opts.period, lang)}`;
   // Chrome repeats fixed elements on every printed page.
   const watermark = safeUrl(s.logo_main_url)
     ? `<div class="watermark"><img src="${esc(safeUrl(s.logo_main_url))}" alt="" /></div>`
@@ -764,9 +802,18 @@ export function renderMagazine(opts: {
   const revisionCount = everything.filter(hasRevision).length;
   const visuals = everything.reduce((n, i) => n + storyVisuals(i.content).length, 0);
   const toc = [...groups.entries()]
-    .map(
-      ([cat, list]) =>
-        `<div class="toc-row"><span>${icon(cat)} ${esc(categoryLabel(cat)[lang])}</span><b>${list.length}</b></div>`,
+    .map(([cat, list]) =>
+      custom
+        ? // A section and its subsections stay together in the contents.
+          `<div class="toc-group"><div class="toc-row"><span>${icon(cat)} ${esc(label(cat)[lang])}</span><b>${list.length}</b></div>${[
+            ...new Set(list.map((i) => i.sub).filter((x): x is string => !!x)),
+          ]
+            .map(
+              (id) =>
+                `<div class="toc-row toc-sub"><span>${esc(pick(subLabel(id), lang))}</span><b>${list.filter((i) => i.sub === id).length}</b></div>`,
+            )
+            .join("")}</div>`
+        : `<div class="toc-row"><span>${icon(cat)} ${esc(label(cat)[lang])}</span><b>${list.length}</b></div>`,
     )
     .join("");
 
@@ -808,9 +855,19 @@ export function renderMagazine(opts: {
     .map(([cat, list]) => {
       // A monthly issue can print an ad page after any section.
       const ad = adById(design?.section_ads[cat]);
-      return `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>${icon(cat)} ${esc(categoryLabel(cat)[lang])}</h2><span>${list.length} ${t.stories(list.length)}</span></div>${list
-        .map((it) => itemHtml(it, ++n, monthly, accent, lang, boxes))
-        .join("")}</section>${ad ? adPageHtml(ad, lang, cat) : ""}`;
+      // A custom magazine's subsections get a heading of their own.
+      let sub: string | null | undefined;
+      const body = list
+        .map((it) => {
+          const head =
+            custom && it.sub && it.sub !== sub
+              ? `<h3 class="sub-title">${esc(pick(subLabel(it.sub), lang))}</h3>`
+              : "";
+          sub = it.sub;
+          return head + itemHtml(it, ++n, monthly, accent, lang, boxes);
+        })
+        .join("");
+      return `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>${icon(cat)} ${esc(label(cat)[lang])}</h2><span>${list.length} ${t.stories(list.length)}</span></div>${body}</section>${ad ? adPageHtml(ad, lang, cat) : ""}`;
     })
     .join("");
 
@@ -853,7 +910,7 @@ export function renderMagazine(opts: {
       { n: questions, label: t.questions },
     ],
     top: top.map((i) => ({
-      cat: categoryLabel(i.category)[lang],
+      cat: label(i.category)[lang],
       headline: pick(i.content.headline, lang),
       summary: pick(i.content.summary, lang),
     })),
@@ -902,7 +959,7 @@ ${eventsHtml}
 ${sections}
 ${corrections}
 ${opts.feature ? featurePage(opts.feature, lang) : ""}
-${revisionPage(allGroups, lang)}
+${revisionPage(allGroups, lang, label)}
 ${practicePage(everything, lang)}
 ${notes}
 ${back ? adPageHtml(back, lang, "back") : ""}`

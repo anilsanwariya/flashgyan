@@ -12,6 +12,7 @@ import {
   Home,
   Keyboard,
   Layers,
+  Library,
   ListChecks,
   LogOut,
   Megaphone,
@@ -40,6 +41,7 @@ export type AdminSectionId =
   | "saathiAnswers"
   | "ca.daily"
   | "ca.monthly"
+  | "ca.custom"
   | "ca.settings"
   | "bot.broadcast"
   | "bot.commands"
@@ -122,6 +124,13 @@ export const ADMIN_GROUPS: { label: string; sections: SectionDef[] }[] = [
         label: "Monthly magazine",
         icon: CalendarRange,
         description: "The whole month in one magazine, with later corrections applied.",
+      },
+      {
+        id: "ca.custom",
+        label: "Custom magazines",
+        icon: Library,
+        description:
+          "Special magazines on a theme over any dates, sorted into sections and subsections by the AI.",
       },
       {
         id: "ca.settings",
