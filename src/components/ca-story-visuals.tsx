@@ -1,4 +1,5 @@
-// A story's visuals (up to two). The editor picks a type from the list
+// A story's visuals (up to four), in order, each above or below the key
+// points, optionally paired side by side. The editor picks a type from the list
 // (types that the facts likely can't make are marked, with the reason), adds
 // a note if they like, and sees SAATHI's visual before it replaces anything.
 // Any visual's text and numbers can also be changed by hand.
@@ -29,13 +30,22 @@ import {
   Hash,
 } from "lucide-react";
 import { previewCaVisual, type CaItem } from "@/lib/current-affairs.functions";
-import { VISUAL_SLOTS, type Bi, type CaContent } from "@/lib/current-affairs";
+import {
+  MAX_VISUALS,
+  storyVisuals,
+  visualsPatch,
+  type Bi,
+  type CaContent,
+  type StoryVisual,
+} from "@/lib/current-affairs";
 import {
   VISUAL_INFO,
   VISUAL_LABELS,
   coveredFacts,
+  halfWidthProblem,
   unverifiedNumbers,
   visualFit,
+  visualRows,
   type Visual,
   type VisualType,
 } from "@/lib/ca-visuals";
@@ -43,6 +53,7 @@ import { visualPreviewHtml } from "@/lib/current-affairs-html";
 import { errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
@@ -51,9 +62,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-
-type Slot = 1 | 2;
-const keysOf = (slot: Slot) => VISUAL_SLOTS[slot - 1];
 
 const ICONS: Record<VisualType, typeof BarChart3> = {
   glance: LayoutList,
@@ -98,6 +106,9 @@ function VisualFrame({ visual }: { visual: Visual }) {
   );
 }
 
+// What the picker is making: a new visual, or one in place of visual n.
+type Target = { kind: "new" } | { kind: "replace"; index: number };
+
 export function StoryVisuals({
   item,
   content,
@@ -109,54 +120,132 @@ export function StoryVisuals({
   busy: boolean;
   onSave: (patch: Partial<CaContent>) => Promise<void>;
 }) {
-  const [picking, setPicking] = useState<Slot | null>(null);
-  const [editingSlot, setEditingSlot] = useState<Slot | null>(null);
+  const list = storyVisuals(content);
+  const [picking, setPicking] = useState<Target | null>(null);
+  const [editing, setEditing] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const run = async (patch: Partial<CaContent>, ok: string) => {
     setSaving(true);
     try {
       await onSave(patch);
-      toast.success(ok);
+      if (ok) toast.success(ok);
     } catch (e) {
       toast.error(errorText(e, "Couldn't save"));
     } finally {
       setSaving(false);
     }
   };
-  // Removing the first visual moves the second up.
-  const remove = (slot: Slot) =>
-    run(
-      slot === 1
-        ? {
-            visual: content.visual2 ?? null,
-            visual_covers: content.visual2 ? (content.visual2_covers ?? []) : [],
-            visual2: null,
-            visual2_covers: [],
-          }
-        : { visual2: null, visual2_covers: [] },
-      "Visual removed",
-    );
-  const slots: Slot[] = content.visual2 ? [1, 2] : [1];
+  const saveList = (next: StoryVisual[], ok: string) => run(visualsPatch(next), ok);
+  const move = (i: number, by: number) => {
+    const next = [...list];
+    [next[i], next[i + by]] = [next[i + by], next[i]];
+    void saveList(next, "Moved");
+  };
   const off = busy || saving;
+  const pair = !!content.visual_pair;
+  // Which visuals print beside another (and why the others can't).
+  const paired = new Set(
+    (["above", "below"] as const).flatMap((g) =>
+      visualRows(
+        list.filter((v) => v.below === (g === "below")),
+        pair,
+      )
+        .filter((r) => r.length === 2)
+        .flat(),
+    ),
+  );
   return (
     <div className="space-y-2">
-      {slots.map((slot) => {
-        const [key, coversKey] = keysOf(slot);
-        const v = content[key] ?? null;
-        const covers = content[coversKey] ?? [];
+      {list.length >= 2 && (
+        <label className="flex items-start gap-2.5 rounded-xl border border-border bg-muted/30 p-2.5 text-sm">
+          <Switch
+            checked={pair}
+            disabled={off}
+            aria-label="Pair visuals side by side"
+            onCheckedChange={(on) =>
+              void run({ visual_pair: on }, on ? "Visuals paired" : "Visuals stacked")
+            }
+            className="mt-0.5"
+          />
+          <span>
+            <span className="font-medium">Pair visuals side by side</span>
+            <span className="block text-xs text-muted-foreground">
+              Two visuals in a row (above or below the key points, in order) when both fit at half
+              width. New visuals are then made compact.
+            </span>
+          </span>
+        </label>
+      )}
+      {list.map((v, i) => {
+        const narrow = pair ? halfWidthProblem(v.visual) : null;
         return (
-          <div key={slot} className="rounded-xl border border-border p-2.5" data-visual-slot={slot}>
+          <div
+            key={`${i}-${v.visual.type}`}
+            className="rounded-xl border border-border p-2.5"
+            data-visual-slot={i + 1}
+          >
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary">
                 <BarChart3 className="h-3.5 w-3.5" />
-                {v
-                  ? `${content.visual2 ? `Visual ${slot}` : "Visual"} · ${VISUAL_LABELS[v.type]}`
-                  : "No visual"}
+                {list.length > 1 ? `Visual ${i + 1}` : "Visual"} · {VISUAL_LABELS[v.visual.type]}
               </span>
-              {v && covers.length > 0 && (
+              {v.covers.length > 0 && (
                 <span className="text-xs text-muted-foreground">
-                  Shows {covers.length} fact(s), left out of the points
+                  Shows {v.covers.length} fact(s), left out of the points
                 </span>
+              )}
+              {pair && paired.has(v) && (
+                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+                  Side by side
+                </span>
+              )}
+              {narrow && (
+                <span className="text-[11px] text-muted-foreground" title={narrow}>
+                  Full width: {narrow.charAt(0).toLowerCase() + narrow.slice(1)}
+                </span>
+              )}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-1">
+              <select
+                aria-label={`Where visual ${i + 1} prints`}
+                value={v.below ? "below" : "above"}
+                disabled={off}
+                onChange={(e) =>
+                  void saveList(
+                    list.map((x, j) => (j === i ? { ...x, below: e.target.value === "below" } : x)),
+                    e.target.value === "below"
+                      ? "Prints below the key points"
+                      : "Prints above the key points",
+                  )
+                }
+                className="h-7 rounded-md border border-input bg-background px-2 text-xs"
+              >
+                <option value="above">Above the key points</option>
+                <option value="below">Below the key points</option>
+              </select>
+              {list.length > 1 && (
+                <>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7"
+                    aria-label={`Move visual ${i + 1} up`}
+                    disabled={off || i === 0}
+                    onClick={() => move(i, -1)}
+                  >
+                    <ArrowUp className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7"
+                    aria-label={`Move visual ${i + 1} down`}
+                    disabled={off || i === list.length - 1}
+                    onClick={() => move(i, 1)}
+                  >
+                    <ArrowDown className="h-3.5 w-3.5" />
+                  </Button>
+                </>
               )}
               <div className="ml-auto flex flex-wrap gap-1">
                 <Button
@@ -164,77 +253,144 @@ export function StoryVisuals({
                   variant="outline"
                   className="h-7"
                   disabled={off}
-                  onClick={() => setPicking(slot)}
+                  onClick={() => setPicking({ kind: "replace", index: i })}
                 >
-                  {v ? (
-                    <RefreshCw className="mr-1 h-3.5 w-3.5" />
-                  ) : (
-                    <Plus className="mr-1 h-3.5 w-3.5" />
-                  )}{" "}
-                  {v ? "Rebuild" : "Make visual"}
+                  <RefreshCw className="mr-1 h-3.5 w-3.5" /> Rebuild
                 </Button>
-                {v && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7"
-                    disabled={off}
-                    onClick={() => setEditingSlot(slot)}
-                  >
-                    Edit visual
-                  </Button>
-                )}
-                {v && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7"
-                    disabled={off}
-                    onClick={() => void remove(slot)}
-                  >
-                    Remove
-                  </Button>
-                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7"
+                  disabled={off}
+                  onClick={() => setEditing(i)}
+                >
+                  Edit visual
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7"
+                  aria-label={`Remove visual ${i + 1}`}
+                  disabled={off}
+                  onClick={() =>
+                    void saveList(
+                      list.filter((_, j) => j !== i),
+                      "Visual removed",
+                    )
+                  }
+                >
+                  Remove
+                </Button>
               </div>
             </div>
-            {v && <VisualFrame visual={v} />}
+            <VisualFrame visual={v.visual} />
           </div>
         );
       })}
-      {content.visual && !content.visual2 && (
-        <Button size="sm" variant="ghost" disabled={off} onClick={() => setPicking(2)}>
-          <Plus className="mr-1 h-3.5 w-3.5" /> Add a second visual
+      {list.length < MAX_VISUALS && (
+        <Button
+          size="sm"
+          variant={list.length ? "ghost" : "outline"}
+          disabled={off}
+          onClick={() => setPicking({ kind: "new" })}
+        >
+          <Plus className="mr-1 h-3.5 w-3.5" /> {list.length ? "Add another visual" : "Make visual"}
         </Button>
       )}
+      <p className="text-xs text-muted-foreground">
+        Up to {MAX_VISUALS} visuals. To show particular key points as a visual, tick them on the Key
+        points tab.
+      </p>
       {picking && (
         <VisualPicker
           item={item}
-          slot={picking}
-          current={content[keysOf(picking)[0]] ?? null}
+          slot={picking.kind === "new" ? list.length + 1 : picking.index + 1}
+          current={picking.kind === "replace" ? list[picking.index].visual : null}
           onClose={() => setPicking(null)}
           onKeep={async (visual, covers) => {
-            const [key, coversKey] = keysOf(picking);
-            await onSave({ [key]: visual, [coversKey]: covers });
+            const next =
+              picking.kind === "new"
+                ? [...list, { visual, covers, below: false }]
+                : list.map((x, j) => (j === picking.index ? { ...x, visual, covers } : x));
+            await onSave(visualsPatch(next));
             setPicking(null);
             toast.success("Visual saved");
           }}
         />
       )}
-      {editingSlot && content[keysOf(editingSlot)[0]] && (
+      {editing !== null && list[editing] && (
         <VisualEditor
           item={item}
-          visual={content[keysOf(editingSlot)[0]]!}
-          covers={content[keysOf(editingSlot)[1]] ?? []}
-          onClose={() => setEditingSlot(null)}
+          visual={list[editing].visual}
+          covers={list[editing].covers}
+          onClose={() => setEditing(null)}
           onSave={async (visual, covers) => {
-            const [key, coversKey] = keysOf(editingSlot);
-            await onSave({ [key]: visual, [coversKey]: covers });
-            setEditingSlot(null);
+            await onSave(
+              visualsPatch(list.map((x, j) => (j === editing ? { ...x, visual, covers } : x))),
+            );
+            setEditing(null);
             toast.success("Visual saved");
           }}
         />
       )}
     </div>
+  );
+}
+
+// Makes a visual from the key points the editor ticked: it's added as a new
+// visual (or replaces the one they choose when there are already four), and
+// those points leave the text.
+export function PickedPointsVisual({
+  item,
+  content,
+  facts,
+  onClose,
+  onSave,
+}: {
+  item: CaItem;
+  content: CaContent;
+  facts: number[];
+  onClose: () => void;
+  onSave: (patch: Partial<CaContent>) => Promise<void>;
+}) {
+  const list = storyVisuals(content);
+  const full = list.length >= MAX_VISUALS;
+  const [replace, setReplace] = useState(0);
+  return (
+    <VisualPicker
+      item={item}
+      slot={full ? replace + 1 : list.length + 1}
+      current={null}
+      facts={facts}
+      extra={
+        full ? (
+          <label className="flex items-center gap-2 text-sm">
+            This story has {MAX_VISUALS} visuals. Replace:
+            <select
+              aria-label="Visual to replace"
+              value={replace}
+              onChange={(e) => setReplace(Number(e.target.value))}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+            >
+              {list.map((v, i) => (
+                <option key={i} value={i}>
+                  Visual {i + 1} · {VISUAL_LABELS[v.visual.type]}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null
+      }
+      onClose={onClose}
+      onKeep={async (visual, covers) => {
+        const next = full
+          ? list.map((x, j) => (j === replace ? { ...x, visual, covers } : x))
+          : [...list, { visual, covers, below: false }];
+        await onSave(visualsPatch(next));
+        onClose();
+        toast.success("Visual made; its points are left out of the text");
+      }}
+    />
   );
 }
 
@@ -244,15 +400,21 @@ function VisualPicker({
   item,
   slot,
   current,
+  facts,
+  extra,
   onClose,
   onKeep,
 }: {
   item: CaItem;
-  slot: Slot;
+  slot: number;
   current: Visual | null;
+  // Only these key points (0-based), which leave the text.
+  facts?: number[];
+  extra?: React.ReactNode;
   onClose: () => void;
   onKeep: (visual: Visual, covers: number[]) => Promise<void>;
 }) {
+  const shownFacts = facts ? facts.map((i) => item.facts[i]).filter(Boolean) : item.facts;
   const previewFn = useServerFn(previewCaVisual);
   const [type, setType] = useState<VisualType | "auto">("auto");
   const [note, setNote] = useState("");
@@ -267,6 +429,7 @@ function VisualPicker({
           data: {
             id: item.id,
             slot,
+            ...(facts ? { facts } : {}),
             ...(type === "auto" ? {} : { type }),
             ...(note.trim() ? { note: note.trim() } : {}),
           },
@@ -283,10 +446,18 @@ function VisualPicker({
       <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {current ? "Rebuild the visual" : slot === 2 ? "Add a second visual" : "Make a visual"}
+            {facts
+              ? `Make a visual from ${facts.length} key points`
+              : current
+                ? "Rebuild the visual"
+                : slot > 1
+                  ? "Add another visual"
+                  : "Make a visual"}
           </DialogTitle>
           <DialogDescription>
-            Pick the kind of visual. SAATHI builds it from this story's facts only.
+            {facts
+              ? "Pick the kind of visual. SAATHI builds it from these points only; once you keep it, they leave the text."
+              : "Pick the kind of visual. SAATHI builds it from this story's facts only."}
           </DialogDescription>
         </DialogHeader>
         {!made ? (
@@ -300,7 +471,7 @@ function VisualPicker({
                 hint="The type that suits these facts best"
               />
               {VISUAL_INFO.map((info) => {
-                const why = visualFit(info.type, item.facts);
+                const why = visualFit(info.type, shownFacts);
                 return (
                   <TypeCard
                     key={info.type}
@@ -315,6 +486,17 @@ function VisualPicker({
                 );
               })}
             </div>
+            {facts && (
+              <ul
+                className="list-disc space-y-0.5 rounded-lg bg-muted/40 p-2 pl-6 text-xs"
+                aria-label="Picked points"
+              >
+                {shownFacts.map((f, i) => (
+                  <li key={i}>{f.text}</li>
+                ))}
+              </ul>
+            )}
+            {extra}
             <Textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}

@@ -754,51 +754,6 @@ export type Database = {
           },
         ]
       }
-      ca_events: {
-        Row: {
-          created_at: string
-          embedding: string | null
-          ends_on: string | null
-          id: string
-          kind: string
-          name: string
-          name_hi: string
-          place: string
-          starts_on: string | null
-          status: string
-          summary: Json | null
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          embedding?: string | null
-          ends_on?: string | null
-          id?: string
-          kind?: string
-          name: string
-          name_hi?: string
-          place?: string
-          starts_on?: string | null
-          status?: string
-          summary?: Json | null
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          embedding?: string | null
-          ends_on?: string | null
-          id?: string
-          kind?: string
-          name?: string
-          name_hi?: string
-          place?: string
-          starts_on?: string | null
-          status?: string
-          summary?: Json | null
-          updated_at?: string
-        }
-        Relationships: []
-      }
       ca_items: {
         Row: {
           category: string

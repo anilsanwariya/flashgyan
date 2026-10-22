@@ -6,7 +6,7 @@
 // dates are found here, as the editor works; names (and facts one language
 // leaves out) need SAATHI, one AI request a day.
 // Pure helpers, shared by the server, the admin panel and tests.
-import { normalizeForMatch, type Bi, type CaContent } from "@/lib/current-affairs";
+import { VISUAL_SLOTS, normalizeForMatch, type Bi, type CaContent } from "@/lib/current-affairs";
 import { partName } from "@/lib/ca-style";
 import { hindiIssues, type GlossaryEntry } from "../../supabase/functions/_shared/ca-hindi.ts";
 
@@ -143,9 +143,9 @@ function access(part: string): Access | null {
       set: (c, b) => ({ ...c, dyk: mapAt(c.dyk, i, (x) => ({ ...x, en: b.en, hi: b.hi })) }),
     };
   }
-  const vis = /^visual ([12]) (.+)$/.exec(part);
+  const vis = /^visual ([1-4]) (.+)$/.exec(part);
   if (vis) {
-    const key = vis[1] === "2" ? "visual2" : "visual";
+    const key = VISUAL_SLOTS[Number(vis[1]) - 1][0];
     const path = vis[2].split(".");
     return {
       get: (c) => {
@@ -180,8 +180,9 @@ export function bilingualParts(c: CaContent): { part: string; en: string; hi: st
     "summary",
     ...(c.images ?? []).map((_, i) => `image ${i + 1} caption`),
     ...(c.points ?? []).map((_, i) => `point ${i + 1}`),
-    ...visualBiPaths(c.visual ?? null).map((p) => `visual 1 ${p}`),
-    ...visualBiPaths(c.visual2 ?? null).map((p) => `visual 2 ${p}`),
+    ...VISUAL_SLOTS.flatMap(([key], i) =>
+      visualBiPaths(c[key] ?? null).map((p) => `visual ${i + 1} ${p}`),
+    ),
     "why",
     "background",
     ...(c.statics ?? []).flatMap((_, i) => [`static ${i + 1} term`, `static ${i + 1}`]),
@@ -223,7 +224,7 @@ export function langPartName(part: string): string {
   if (/^static \d+$/.test(part)) return `Static Context ${n}`;
   if (/^did you know \d+$/.test(part)) return `Fact Bite ${n}`;
   if (/^image \d+ caption$/.test(part)) return `Image ${n} caption`;
-  const vis = /^visual ([12]) (.+)$/.exec(part);
+  const vis = /^visual ([1-4]) (.+)$/.exec(part);
   if (vis)
     return `Visual ${vis[1]} · ${vis[2]
       .split(".")

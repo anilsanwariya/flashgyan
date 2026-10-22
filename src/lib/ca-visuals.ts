@@ -246,8 +246,12 @@ export function visualMessages(opts: {
   // The type the editor asked for, and their note ("compare with 2023").
   type?: VisualType;
   note?: string;
-  // The story's other visual: this one must show something else.
-  other?: Visual | null;
+  // The story's other visuals: this one must show something else.
+  others?: Visual[];
+  // The editor pairs the visuals side by side: prefer a compact one.
+  compact?: boolean;
+  // Built from the points the editor picked (the facts given are only those).
+  picked?: boolean;
 }): ChatMessage[] {
   const facts = opts.facts.map((f, i) => `${i + 1}. ${f.text}`).join("\n");
   return [
@@ -283,8 +287,17 @@ Reply with JSON only: {"visual": {...} or null, "covers": [fact numbers], "oneli
           ? `\n\nThe editor asked for a "${opts.type}" visual: make that type (null only if the facts can't make it).`
           : ""
       }${opts.note ? `\nEditor's note: ${opts.note}` : ""}${
-        opts.other
-          ? `\nThe story already has a ${opts.other.type} visual titled "${opts.other.title.en}": show something different.`
+        opts.picked
+          ? "\nThe editor picked these key points to be shown as one visual: show all of them in it."
+          : ""
+      }${(opts.others ?? [])
+        .map(
+          (o) =>
+            `\nThe story already has a ${o.type} visual titled "${o.title.en}": show something different.`,
+        )
+        .join("")}${
+        opts.compact
+          ? "\nIt prints at half the page width beside another visual: keep it compact (no comparison, at most a 2-column table, at most 5 flow steps, 6 timeline events or 6 bars)."
           : ""
       }${opts.problem ? `\n\nYour previous visual was rejected: ${opts.problem} Fix it.` : ""}`,
     },
@@ -570,18 +583,82 @@ export function parseQuick(v: unknown, facts: CaFact[], headline = ""): CaQuick 
 }
 
 // The written points to print: those the visual doesn't already show.
-export function pointsToShow<T>(content: {
-  points: T[];
+type Slotted = {
   visual?: Visual | null;
   visual_covers?: number[];
   visual2?: Visual | null;
   visual2_covers?: number[];
-}): T[] {
-  const hidden = new Set([
-    ...(content.visual ? (content.visual_covers ?? []) : []),
-    ...(content.visual2 ? (content.visual2_covers ?? []) : []),
-  ]);
+  visual3?: Visual | null;
+  visual3_covers?: number[];
+  visual4?: Visual | null;
+  visual4_covers?: number[];
+};
+const SLOT_KEYS = [
+  ["visual", "visual_covers"],
+  ["visual2", "visual2_covers"],
+  ["visual3", "visual3_covers"],
+  ["visual4", "visual4_covers"],
+] as const;
+
+export function pointsToShow<T>(content: { points: T[] } & Slotted): T[] {
+  const hidden = new Set(
+    SLOT_KEYS.flatMap(([key, coversKey]) => (content[key] ? (content[coversKey] ?? []) : [])),
+  );
   return content.points.filter((_, i) => !hidden.has(i));
+}
+
+// Why a visual can't print at half width (beside another), or null when it
+// can. Wide layouts (tables with many columns, comparisons, broad trees)
+// and long ones stay full width.
+export function halfWidthProblem(v: Visual): string | null {
+  switch (v.type) {
+    case "compare":
+      return "A comparison needs the full width";
+    case "table":
+      return v.columns.length > 2
+        ? "A table with more than 2 columns needs the full width"
+        : v.rows.length > 6
+          ? "A table with more than 6 rows is too long"
+          : null;
+    case "hierarchy":
+      return v.children.length > 2
+        ? "A hierarchy with more than 2 branches needs the full width"
+        : null;
+    case "flow":
+      return v.steps.length > 5 ? "A flow chart with more than 5 steps is too long" : null;
+    case "timeline":
+      return v.events.length > 6 ? "A timeline with more than 6 events is too long" : null;
+    case "bar":
+      return v.bars.length > 6 ? "A bar chart with more than 6 bars is too long" : null;
+    case "stats":
+      return v.stats.length > 4 ? "More than 4 numbers need the full width" : null;
+    case "ranking":
+      return v.items.length > 8 ? "A ranking with more than 8 entries is too long" : null;
+    case "change":
+      return v.changes.length > 4 ? "More than 4 changes are too long" : null;
+    case "mindmap":
+      return v.branches.length > 6
+        ? "A mind map with more than 6 branches needs the full width"
+        : null;
+    case "glance":
+      return v.rows.length > 8 ? "More than 8 rows are too long" : null;
+    default:
+      return null;
+  }
+}
+
+// Visuals in print order, grouped into rows: pairs when pairing is on and
+// both fit at half width, otherwise one per row.
+export function visualRows<T extends { visual: Visual }>(list: T[], pair: boolean): T[][] {
+  const rows: T[][] = [];
+  for (let i = 0; i < list.length; i++) {
+    const next = list[i + 1];
+    if (pair && next && !halfWidthProblem(list[i].visual) && !halfWidthProblem(next.visual)) {
+      rows.push([list[i], next]);
+      i++;
+    } else rows.push([list[i]]);
+  }
+  return rows;
 }
 
 // ---------- Rendering ----------
@@ -913,6 +990,18 @@ export const VISUAL_CSS = (accent: string) => `
 .v-caption .vl { flex-direction: row; gap: 2mm; flex-wrap: wrap; }
 .vl { display: inline-flex; flex-direction: column; line-height: 1.3; }
 .ven { color: #64748b; font-size: .9em; }
+.v-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; align-items: start; break-inside: avoid; }
+.v-pair > .visual { margin-top: 0 !important; min-width: 0; }
+.v-pair .v-flow { flex-direction: column; }
+.v-pair .v-arrow { transform: rotate(90deg); }
+.v-pair .v-glance { grid-template-columns: 1fr; }
+.v-pair .v-glance > div { border-right: 0 !important; border-bottom: 1px solid #e2e8f0 !important; }
+.v-pair .v-glance > div:last-child { border-bottom: 0 !important; }
+.v-pair .v-stats { grid-template-columns: repeat(auto-fit, minmax(24mm, 1fr)); }
+.v-pair .v-pie { flex-direction: column; align-items: flex-start; gap: 3mm; }
+.v-pair .v-proscons { grid-template-columns: 1fr; }
+.v-pair .v-chg { grid-template-columns: 1fr; gap: 1mm; }
+.v-pair .v-bar-row { grid-template-columns: 34% 1fr; gap: 2mm; }
 .v-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(32mm, 1fr)); gap: 2.5mm; }
 .v-stat { border-radius: 2.5mm; padding: 2.5mm 3mm; background: #f5f3ff; border-top: 3px solid ${accent}; }
 .v-stat b { display: block; font-size: 14pt; line-height: 1.15; color: ${accent}; margin-bottom: .8mm; }

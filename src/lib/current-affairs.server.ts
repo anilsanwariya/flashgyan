@@ -91,6 +91,9 @@ import {
   enrichMessages,
   extractMessages,
   formatDate,
+  VISUAL_SLOTS,
+  storyVisuals,
+  visualsPatch,
   istDate,
   isCategory,
   normalizeCategory,
@@ -1232,16 +1235,15 @@ export async function enrichItem(
         context_facts: context,
         dyk,
         ...look,
-        // The editor's images survive rewriting the story, and so does a
-        // second visual whose numbers are all still in the facts (its facts
-        // print as points again, as their order may have changed).
+        // The editor's images survive rewriting the story, and so do the
+        // other visuals whose numbers are all still in the facts (their
+        // facts print as points again, as their order may have changed),
+        // with where they print.
         ...(item.content?.images?.length ? { images: item.content.images } : {}),
         // So does leaving out the summary or the Exam Angle.
         ...(item.content?.hide_summary ? { hide_summary: true } : {}),
         ...(item.content?.hide_why ? { hide_why: true } : {}),
-        ...(item.content?.visual2 && !unverifiedNumbers(item.content.visual2, item.facts).length
-          ? { visual2: item.content.visual2, visual2_covers: [] }
-          : {}),
+        ...keptVisuals(item.content, look, item.facts),
       },
       context_sources: staticSources(statics),
       syllabus_topic_id: syllabusId,
@@ -1797,6 +1799,28 @@ export async function writeFeature(
 
 // ---------- Visuals ----------
 
+// Rewriting a story makes its first visual again; the editor's other
+// visuals stay (when their numbers are all still in the facts) in their
+// order and places, the new one taking the first one's place.
+function keptVisuals(
+  content: CaContent | null,
+  look: { visual: Visual | null; visual_covers: number[] },
+  facts: CaFact[],
+): Partial<CaContent> {
+  const old = storyVisuals(content);
+  if (!content || !old.length) return {};
+  const list = [
+    ...(look.visual
+      ? [{ visual: look.visual, covers: look.visual_covers, below: old[0].below }]
+      : []),
+    ...old
+      .slice(1)
+      .filter((v) => !unverifiedNumbers(v.visual, facts).length)
+      .map((v) => ({ ...v, covers: [] })),
+  ];
+  return { ...visualsPatch(list), ...(content.visual_pair ? { visual_pair: true } : {}) };
+}
+
 // Asks SAATHI for the story's visual and revision line. A visual whose numbers
 // aren't all in the facts gets one retry with the reason, then is left out.
 // Never fails the item.
@@ -1844,11 +1868,19 @@ export async function makeVisual(item: Pick<CaItem, "headline" | "category" | "f
 // aren't all in the facts.
 export async function previewVisual(
   itemId: string,
-  opts: { slot: 1 | 2; type?: VisualType; note?: string },
+  opts: { slot: number; type?: VisualType; note?: string; facts?: number[] },
 ): Promise<{ visual: Visual; covers: number[] }> {
   const item = await getItem(itemId);
   if (!item.content) throw new Error("Write the text first");
-  const other = opts.slot === 1 ? item.content.visual2 : item.content.visual;
+  // The other visuals (all of them for a new one).
+  const others = VISUAL_SLOTS.filter((_, i) => i !== opts.slot - 1)
+    .map(([key]) => item.content![key])
+    .filter((v): v is Visual => !!v);
+  // Only the key points the editor picked, when they did: those leave the
+  // text, as the visual shows them.
+  const picked = (opts.facts ?? []).filter((i) => i >= 0 && i < item.facts.length);
+  if (opts.facts && picked.length < 2) throw new Error("Pick at least two key points.");
+  const facts = picked.length ? picked.map((i) => item.facts[i]) : item.facts;
   let problem: string | undefined;
   for (let attempt = 0; attempt < 2; attempt++) {
     const raw = await saathiComplete(
@@ -1857,16 +1889,18 @@ export async function previewVisual(
         glossary: await glossaryNow(),
         headline: item.headline,
         category: item.category,
-        facts: item.facts,
+        facts,
         problem,
         type: opts.type,
         note: opts.note?.trim() || undefined,
-        other: other ?? null,
+        others,
+        compact: !!item.content.visual_pair,
+        picked: picked.length > 0,
       }),
     );
-    const r = parseVisual(raw, item.facts, item.headline);
+    const r = parseVisual(raw, facts, item.headline);
     if (r.visual && (!opts.type || r.visual.type === opts.type))
-      return { visual: r.visual, covers: r.covers };
+      return { visual: r.visual, covers: picked.length ? picked : r.covers };
     problem =
       r.problem ?? (r.visual ? `You made a "${r.visual.type}"; make a "${opts.type}".` : undefined);
     if (!problem) break;

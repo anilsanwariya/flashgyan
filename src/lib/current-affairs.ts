@@ -121,9 +121,19 @@ export type CaContent = {
   visual?: Visual | null;
   // Facts (0-based) the visual shows; their points are not printed with it.
   visual_covers?: number[];
-  // A second visual, printed after the first (the editor adds it).
+  // More visuals, printed after the first in this order (the editor adds
+  // them).
   visual2?: Visual | null;
   visual2_covers?: number[];
+  visual3?: Visual | null;
+  visual3_covers?: number[];
+  visual4?: Visual | null;
+  visual4_covers?: number[];
+  // Which visuals (by slot) print below the key points; the rest print
+  // above them.
+  visual_below?: boolean[];
+  // Visuals placed two to a row, when they fit at half width.
+  visual_pair?: boolean;
   oneliner?: Bi | null;
   // One quick exam question with a short answer, for the revision page
   // (missing on older items, which show the one-liner instead).
@@ -139,11 +149,42 @@ export type CaContent = {
 
 export type CaQuick = { q: Bi; a: Bi };
 
-// A story's two visual slots: the visual and the facts it shows.
+// A story's visual slots, in print order: the visual and the facts it shows.
 export const VISUAL_SLOTS = [
   ["visual", "visual_covers"],
   ["visual2", "visual2_covers"],
+  ["visual3", "visual3_covers"],
+  ["visual4", "visual4_covers"],
 ] as const;
+export const MAX_VISUALS = VISUAL_SLOTS.length;
+
+// One of a story's visuals, as the editor arranges them.
+export type StoryVisual = { visual: Visual; covers: number[]; below: boolean };
+
+// The story's visuals in order (empty slots skipped).
+export function storyVisuals(c: Partial<CaContent> | null | undefined): StoryVisual[] {
+  if (!c) return [];
+  const out: StoryVisual[] = [];
+  VISUAL_SLOTS.forEach(([key, coversKey], i) => {
+    const v = c[key];
+    if (v) out.push({ visual: v, covers: c[coversKey] ?? [], below: !!c.visual_below?.[i] });
+  });
+  return out;
+}
+
+// The content fields for these visuals, in this order (every slot is set,
+// so ones left over are cleared).
+export function visualsPatch(list: StoryVisual[]): Partial<CaContent> {
+  const patch: Partial<CaContent> = {};
+  const below: boolean[] = [];
+  VISUAL_SLOTS.forEach(([key, coversKey], i) => {
+    const v = list[i];
+    Object.assign(patch, { [key]: v?.visual ?? null, [coversKey]: v ? v.covers : [] });
+    below.push(!!v?.below);
+  });
+  patch.visual_below = below;
+  return patch;
+}
 
 export type CaImage = {
   url: string;
@@ -882,8 +923,12 @@ export function removePoint(
     content: {
       ...content,
       points: content.points.filter((_, i) => i !== index),
-      visual_covers: shift(content.visual_covers ?? []),
-      ...(content.visual2 ? { visual2_covers: shift(content.visual2_covers ?? []) } : {}),
+      ...Object.fromEntries(
+        VISUAL_SLOTS.filter(([key], i) => i === 0 || content[key]).map(([, coversKey]) => [
+          coversKey,
+          shift(content[coversKey] ?? []),
+        ]),
+      ),
     },
     visualShowsIt,
   };

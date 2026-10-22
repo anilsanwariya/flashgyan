@@ -13,8 +13,9 @@ import {
   type CaImage,
   type MagazineSettings,
   sourcePublishers,
+  storyVisuals,
 } from "@/lib/current-affairs";
-import { VISUAL_CSS, pointsToShow, visualHtml, type Visual } from "@/lib/ca-visuals";
+import { VISUAL_CSS, pointsToShow, visualHtml, visualRows, type Visual } from "@/lib/ca-visuals";
 import type { CaFeature } from "@/lib/ca-feature";
 import type { EventBlock } from "@/lib/ca-events";
 import {
@@ -330,6 +331,19 @@ function sideImagesHtml(images: CaImage[] | undefined, lang: Lang): string {
     .join("");
 }
 
+// The story's visuals above or below its key points, in order; paired two
+// to a row when the editor chose it and both fit at half width.
+function visualsHtml(c: CaContent, below: boolean, accent: string, lang: Lang): string {
+  const list = storyVisuals(c).filter((v) => v.below === below);
+  return visualRows(list, !!c.visual_pair)
+    .map((row) =>
+      row.length === 2
+        ? `<div class="v-pair">${row.map((v) => visualHtml(v.visual, accent, lang)).join("")}</div>`
+        : visualHtml(row[0].visual, accent, lang),
+    )
+    .join("");
+}
+
 function itemHtml(
   item: MagazineItem,
   number: number,
@@ -389,9 +403,9 @@ function itemHtml(
   ${sideImagesHtml(c.images, lang)}
   ${c.hide_summary ? "" : block(c.summary, lang, "summary")}
   ${imagesHtml(c.images, lang)}
-  ${c.visual ? visualHtml(c.visual, accent, lang) : ""}
-  ${c.visual2 ? visualHtml(c.visual2, accent, lang) : ""}
+  ${visualsHtml(c, false, accent, lang)}
   ${points}
+  ${visualsHtml(c, true, accent, lang)}
   ${why}
   ${background}
   ${dykBox}
@@ -475,8 +489,8 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .toc-row .icon { color: ${accent}; }
 .rev-cat { display: flex; align-items: center; gap: 2mm; font-size: 10pt; color: ${accent}; margin: 4mm 0 2mm; break-after: avoid; text-transform: uppercase; letter-spacing: .06em; }
 .rev { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.visual + .points { margin-top: 2.5mm; }
-.visual + .visual { margin-top: 2.5mm; }
+.visual + .points, .v-pair + .points { margin-top: 2.5mm; }
+.visual + .visual, .visual + .v-pair, .v-pair + .visual, .v-pair + .v-pair, .points + .visual, .points + .v-pair { margin-top: 2.5mm; }
 .rev td { padding: 1.6mm 2.5mm; border-bottom: 1px solid #e5e7eb; vertical-align: top; font-size: 9.2pt; }
 .rev tr { break-inside: avoid; }
 .rev .rn { width: 7mm; font-weight: 700; color: ${accent}; }
@@ -710,10 +724,7 @@ export function renderMagazine(opts: {
     everything.filter((i) => i.content.mcq).length +
     everything.filter((i) => pick(i.content.mains, lang)).length;
   const revisionCount = everything.filter(hasRevision).length;
-  const visuals = everything.reduce(
-    (n, i) => n + (i.content.visual ? 1 : 0) + (i.content.visual2 ? 1 : 0),
-    0,
-  );
+  const visuals = everything.reduce((n, i) => n + storyVisuals(i.content).length, 0);
   const toc = [...groups.entries()]
     .map(
       ([cat, list]) =>
