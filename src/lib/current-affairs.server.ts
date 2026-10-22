@@ -365,6 +365,9 @@ export type CaItem = {
   concept?: string | null;
   // The several-day event the story belongs to (missing before events).
   event_id?: string | null;
+  // Found by a past-date collection, after the day's issue (missing before
+  // that migration).
+  collected_later?: boolean;
 };
 
 export type CaIssue = {
@@ -1356,6 +1359,17 @@ const EVENT_COLS =
   "id,name,name_hi,kind,place,starts_on,ends_on,status,summary,created_at,updated_at";
 export type EventBrief = Pick<CaEvent, "id" | "name" | "name_hi" | "status">;
 
+// The day's stories found by a past-date collection (none before that
+// migration).
+async function collectedLater(date: string): Promise<Set<string>> {
+  const { data, error } = await from("ca_items")
+    .select("id")
+    .eq("issue_date", date)
+    .eq("collected_later", true);
+  if (error) return new Set();
+  return new Set(((data ?? []) as { id: string }[]).map((r) => r.id));
+}
+
 type LinkFilter = { date?: string; from?: string; to?: string; ids?: string[] };
 
 // Which event each story belongs to.
@@ -2320,10 +2334,12 @@ export async function getDay(date: string): Promise<DayData> {
   // Without the events migration, stories have no event_id at all (the
   // editor then hides the event picker).
   const links = await eventLinksOrNull({ date });
+  const later = await collectedLater(date);
   const list = ((items.data ?? []) as unknown as CaItem[]).map((i) => ({
     ...i,
     category: normalizeCategory(i.category),
     ...(links ? { event_id: links.get(i.id) ?? null } : {}),
+    ...(later.has(i.id) ? { collected_later: true } : {}),
   }));
   return {
     sources: (sources.data ?? []) as unknown as CaSource[],

@@ -22,6 +22,16 @@ import {
   type FoundLink,
 } from "@/lib/ca-collect";
 import { formatDate, istDate, type UploadSection } from "@/lib/current-affairs";
+import {
+  MAX_BACKFILL_DAYS,
+  addDays,
+  datesBetween,
+  inSection,
+  parseSitemap,
+  searchHitOn,
+  sitemapLinks,
+  sitemapsFor,
+} from "@/lib/ca-backfill";
 import { rajasthanBalance, rajasthanWarningLine } from "@/lib/ca-report";
 import { checklistText, draftButtons, type TgButton } from "@/lib/ca-checklist";
 import * as CA from "@/lib/current-affairs.server";
@@ -58,6 +68,10 @@ export type CaRun = {
   id: string;
   issue_date: string;
   status: "running" | "done" | "failed";
+  // The evening's collection, or one day of a past-date collection (missing
+  // before that migration: the evening's).
+  mode?: "daily" | "past";
+  backfill_id?: string | null;
   started_by: string;
   discovered: string[];
   // The websites this collection reads (null: every website switched on).
@@ -96,7 +110,12 @@ async function getSites(): Promise<WatchSite[]> {
 
 // `siteIds`: the websites the admin picked for this collection; without
 // them, the websites switched on in Settings.
-export async function startRun(issueDate: string, by: string, siteIds?: string[]): Promise<CaRun> {
+export async function startRun(
+  issueDate: string,
+  by: string,
+  siteIds?: string[],
+  past?: { backfillId: string },
+): Promise<CaRun> {
   const all = await getSites();
   const sites = siteIds
     ? all.filter((s) => siteIds.includes(s.id)).map((s) => s.id)
@@ -114,6 +133,7 @@ export async function startRun(issueDate: string, by: string, siteIds?: string[]
     started_at: now(),
     finished_at: null,
     updated_at: now(),
+    ...(past ? { mode: "past", backfill_id: past.backfillId } : {}),
   };
   const upsert = (r: Record<string, unknown>) =>
     from("ca_runs")
@@ -123,7 +143,7 @@ export async function startRun(issueDate: string, by: string, siteIds?: string[]
   let { data, error } = await upsert(row);
   // A database without the runs' websites column (its migration not run
   // yet): the run reads every website switched on in Settings.
-  if (error && /'sites' column/.test(error.message)) {
+  if (error && /'sites' column/.test(error.message) && !past) {
     console.error(
       "ca_runs.sites is missing: run migration 20261021090000_ca_run_sites.sql. Collecting from every website switched on.",
     );
@@ -131,6 +151,9 @@ export async function startRun(issueDate: string, by: string, siteIds?: string[]
     ({ data, error } = await upsert(rest));
   }
   fail(error);
+  // A day collected again (or a past date) gets its whole-day duplicate
+  // check again.
+  await from("bot_settings").delete().eq("key", `ca_dupcheck:${issueDate}`);
   return data as unknown as CaRun;
 }
 
@@ -156,6 +179,12 @@ export async function tick(origin?: string): Promise<TickResult> {
       .eq("issue_date", today)
       .maybeSingle();
     if (!existing && (await getSites()).some((s) => s.enabled)) await startRun(today, "schedule");
+  }
+
+  try {
+    await advanceBackfill();
+  } catch (e) {
+    console.error("past-date collection:", e);
   }
 
   const { data: claimed, error } = await supabaseAdmin.rpc(
@@ -400,6 +429,15 @@ async function finishRun(
         .eq("id", run.id)
     ).error,
   );
+  // A past date: its new stories are marked as collected later; the day's
+  // review checks and the Telegram message are for the evening's collection.
+  if (run.mode === "past") {
+    await from("ca_items")
+      .update({ collected_later: true } as never)
+      .eq("issue_date", run.issue_date)
+      .gte("created_at", run.started_at);
+    return;
+  }
   // The news the AI left out, ranked by exam value (one AI call), so the
   // review starts with the skipped articles worth a story.
   try {
@@ -474,7 +512,8 @@ async function get(
   return { ok: res.ok, status: res.status, type: res.headers.get("content-type") ?? "", body };
 }
 
-async function tavilySearchSite(site: SiteRef): Promise<FoundLink[]> {
+// The site's news from the last day, or from one past day.
+async function tavilySearchSite(site: SiteRef, date?: string): Promise<FoundLink[]> {
   const key = process.env.TAVILY_API_KEY;
   if (!key) return [];
   const host = new URL(site.url).hostname.replace(/^www\./, "");
@@ -487,8 +526,9 @@ async function tavilySearchSite(site: SiteRef): Promise<FoundLink[]> {
           ? `${site.name} editorial opinion`
           : `${site.name} latest news Rajasthan India government`,
       include_domains: [host],
-      topic: "news",
-      time_range: "day",
+      ...(date
+        ? { topic: "general", start_date: date, end_date: addDays(date, 1) }
+        : { topic: "news", time_range: "day" }),
       max_results: 20,
     }),
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -557,8 +597,73 @@ export async function readSite(
   return { links: links.filter((l) => isRecent(l)).slice(0, 120), method, error };
 }
 
+// What a site published on a past day: its site maps (news maps carry the
+// date; others the date in the address or the last change), then a search
+// of the site limited to that day when the maps give too little.
+export async function readSiteForDate(
+  site: SiteRef,
+  date: string,
+): Promise<{ links: FoundLink[]; method: string; error: string | null }> {
+  let links: FoundLink[] = [];
+  let method = "sitemap";
+  let error: string | null = null;
+  try {
+    const origin = new URL(site.url).origin;
+    const roots = new Set<string>();
+    try {
+      const robots = await get(`${origin}/robots.txt`);
+      if (robots.ok)
+        for (const m of robots.body.matchAll(/^\s*sitemap:\s*(\S+)/gim)) roots.add(m[1].trim());
+    } catch {
+      // no robots.txt
+    }
+    if (!roots.size) for (const p of ["/sitemap.xml", "/sitemap_index.xml"]) roots.add(origin + p);
+    const seen = new Set<string>();
+    const open = async (url: string, depth: number) => {
+      if (seen.has(url) || seen.size >= 12 || links.length >= 300) return;
+      seen.add(url);
+      let page;
+      try {
+        page = await get(url);
+      } catch {
+        return;
+      }
+      if (!page.ok) return;
+      const map = parseSitemap(page.body);
+      links.push(...sitemapLinks(map.urls, date));
+      if (depth < 2)
+        for (const child of sitemapsFor(map.sitemaps, date)) await open(child, depth + 1);
+    };
+    for (const root of [...roots].slice(0, 4)) await open(root, 0);
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+  }
+  links = inSection(links, site.url);
+  if (links.length < 3) {
+    try {
+      const found = (await tavilySearchSite(site, date)).filter((l) => searchHitOn(l, date));
+      if (found.length) {
+        links = found;
+        method = "search";
+      }
+    } catch (e) {
+      error = error ?? (e instanceof Error ? e.message : String(e));
+    }
+  }
+  if (site.section === "editorial") links = editorialLinks(links);
+  const unique = [...new Map(links.map((l) => [l.url, l])).values()];
+  return {
+    links: unique.slice(0, 150),
+    method,
+    error: unique.length ? null : (error ?? "Nothing found for this date"),
+  };
+}
+
 async function discoverSite(site: WatchSite, run: CaRun): Promise<number> {
-  const { links, method, error } = await readSite(site);
+  const past = run.mode === "past";
+  const { links, method, error } = past
+    ? await readSiteForDate(site, run.issue_date)
+    : await readSite(site);
   let added = 0;
   if (links.length) {
     const { data, error: iErr } = await from("ca_articles")
@@ -577,6 +682,8 @@ async function discoverSite(site: WatchSite, run: CaRun): Promise<number> {
     fail(iErr);
     added = (data ?? []).length;
   }
+  // The website's status in Settings describes the evening's collection.
+  if (past) return added;
   await from("ca_watch_sites")
     .update({
       last_method: links.length ? method : null,
@@ -936,4 +1043,208 @@ export async function saveSite(site: Partial<WatchSite> & { url: string; name: s
 
 export async function deleteSite(id: string) {
   fail((await from("ca_watch_sites").delete().eq("id", id)).error);
+}
+
+// ---------- Past-date collections ----------
+
+export type CaBackfill = {
+  id: string;
+  date_from: string;
+  date_to: string;
+  sites: string[];
+  status: "running" | "paused" | "done" | "cancelled";
+  next_date: string;
+  started_by: string;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+};
+
+// A database without the past-date tables (migration not run yet).
+const missingBackfill = (e: { message: string } | null) =>
+  !!e && /ca_backfills|backfill_id|'mode'|collected_later/.test(e.message);
+const NOT_READY =
+  "Past-date collection needs a database update: run the latest migration (ca_past_collection) in Lovable or the SQL editor.";
+
+// Starts collecting a range of past dates from the websites picked (the
+// ones switched on in Settings by default). One at a time.
+export async function startBackfill(
+  dateFrom: string,
+  dateTo: string,
+  siteIds: string[] | undefined,
+  by: string,
+): Promise<CaBackfill> {
+  const today = istDate();
+  if (dateFrom > dateTo) throw new Error("The start date is after the end date.");
+  if (dateTo >= today)
+    throw new Error("Pick dates up to yesterday; today is collected every evening.");
+  if (datesBetween(dateFrom, dateTo).length > MAX_BACKFILL_DAYS)
+    throw new Error(`Pick at most ${MAX_BACKFILL_DAYS} days at a time.`);
+  const all = await getSites();
+  const sites = siteIds
+    ? all.filter((s) => siteIds.includes(s.id)).map((s) => s.id)
+    : all.filter((s) => s.enabled).map((s) => s.id);
+  if (!sites.length) throw new Error("Pick at least one website.");
+  const { data: active, error: aErr } = await from("ca_backfills")
+    .select("id")
+    .in("status", ["running", "paused"])
+    .limit(1);
+  if (missingBackfill(aErr)) throw new Error(NOT_READY);
+  fail(aErr);
+  if ((active ?? []).length)
+    throw new Error("A past-date collection is already going: finish or stop it first.");
+  const { data, error } = await from("ca_backfills")
+    .insert({
+      date_from: dateFrom,
+      date_to: dateTo,
+      sites,
+      status: "running",
+      next_date: dateFrom,
+      started_by: by,
+    } as never)
+    .select("*")
+    .single();
+  fail(error);
+  return data as unknown as CaBackfill;
+}
+
+// Starts the next date when the previous one is finished (called on every
+// tick). A date whose evening collection is still going waits for it.
+export async function advanceBackfill(): Promise<string | null> {
+  const { data, error } = await from("ca_backfills")
+    .select("*")
+    .eq("status", "running")
+    .order("created_at")
+    .limit(1);
+  if (missingBackfill(error)) return null;
+  fail(error);
+  const bf = ((data ?? []) as unknown as CaBackfill[])[0];
+  if (!bf) return null;
+  const { data: going } = await from("ca_runs")
+    .select("id,issue_date")
+    .eq("backfill_id", bf.id)
+    .eq("status", "running")
+    .limit(1);
+  if ((going ?? []).length) return null;
+  if (bf.next_date > bf.date_to) {
+    await from("ca_backfills")
+      .update({ status: "done", finished_at: now(), updated_at: now() } as never)
+      .eq("id", bf.id)
+      .eq("status", "running");
+    return "finished";
+  }
+  const date = bf.next_date;
+  const { data: dayRun } = await from("ca_runs")
+    .select("status,mode")
+    .eq("issue_date", date)
+    .maybeSingle();
+  if ((dayRun as { status?: string } | null)?.status === "running") return null;
+  // Taken by moving the date on, so two ticks never start the same day.
+  const { data: taken } = await from("ca_backfills")
+    .update({ next_date: addDays(date, 1), updated_at: now() } as never)
+    .eq("id", bf.id)
+    .eq("next_date", date)
+    .select("id");
+  if (!(taken ?? []).length) return null;
+  await startRun(date, "past", bf.sites, { backfillId: bf.id });
+  return date;
+}
+
+export type BackfillDay = {
+  date: string;
+  state: "waiting" | "collecting" | "done" | "stopped";
+  found: number;
+  picked: number;
+  fetched: number;
+  stories: number;
+};
+
+// The past-date collection being worked on (or the last one), day by day.
+export async function getBackfill(): Promise<{
+  ready: boolean;
+  backfill: CaBackfill | null;
+  days: BackfillDay[];
+  sites: WatchSite[];
+}> {
+  const sites = await getSites();
+  const { data, error } = await from("ca_backfills")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (missingBackfill(error)) return { ready: false, backfill: null, days: [], sites };
+  fail(error);
+  const bf = ((data ?? []) as unknown as CaBackfill[])[0] ?? null;
+  if (!bf) return { ready: true, backfill: null, days: [], sites };
+  const [runs, articles, items] = await Promise.all([
+    from("ca_runs").select("issue_date,status,error").eq("backfill_id", bf.id),
+    from("ca_articles")
+      .select("issue_date,status,site_id")
+      .gte("issue_date", bf.date_from)
+      .lte("issue_date", bf.date_to)
+      .in("site_id", bf.sites)
+      .limit(20000),
+    from("ca_items")
+      .select("issue_date")
+      .gte("issue_date", bf.date_from)
+      .lte("issue_date", bf.date_to)
+      .eq("collected_later", true)
+      .eq("status", "included")
+      .limit(20000),
+  ]);
+  const runOf = new Map(
+    ((runs.data ?? []) as { issue_date: string; status: string; error: string | null }[]).map(
+      (r) => [r.issue_date, r],
+    ),
+  );
+  const count = new Map<string, { found: number; picked: number; fetched: number }>();
+  for (const a of (articles.data ?? []) as { issue_date: string; status: string }[]) {
+    const c = count.get(a.issue_date) ?? { found: 0, picked: 0, fetched: 0 };
+    c.found++;
+    if (a.status !== "found" && a.status !== "skipped") c.picked++;
+    if (a.status === "fetched") c.fetched++;
+    count.set(a.issue_date, c);
+  }
+  const stories = new Map<string, number>();
+  for (const i of (items.data ?? []) as { issue_date: string }[])
+    stories.set(i.issue_date, (stories.get(i.issue_date) ?? 0) + 1);
+  const days = datesBetween(bf.date_from, bf.date_to).map((date): BackfillDay => {
+    const run = runOf.get(date);
+    const c = count.get(date) ?? { found: 0, picked: 0, fetched: 0 };
+    return {
+      date,
+      state: run
+        ? run.status === "running"
+          ? "collecting"
+          : run.error === "Stopped"
+            ? "stopped"
+            : "done"
+        : bf.status === "cancelled"
+          ? "stopped"
+          : "waiting",
+      ...c,
+      stories: stories.get(date) ?? 0,
+    };
+  });
+  return { ready: true, backfill: bf, days, sites };
+}
+
+// Pause (the day being collected finishes; no new day starts), go on, or
+// stop (the day being collected stops too).
+export async function setBackfillStatus(id: string, action: "pause" | "resume" | "stop") {
+  const status = action === "pause" ? "paused" : action === "resume" ? "running" : "cancelled";
+  const { error } = await from("ca_backfills")
+    .update({
+      status,
+      updated_at: now(),
+      ...(action === "stop" ? { finished_at: now() } : {}),
+    } as never)
+    .eq("id", id)
+    .in("status", action === "resume" ? ["paused"] : ["running", "paused"]);
+  fail(error);
+  if (action === "stop")
+    await from("ca_runs")
+      .update({ status: "done", error: "Stopped", finished_at: now(), updated_at: now() } as never)
+      .eq("backfill_id", id)
+      .eq("status", "running");
 }

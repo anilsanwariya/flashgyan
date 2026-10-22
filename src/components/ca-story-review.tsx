@@ -767,6 +767,11 @@ function StoryCard({
             )}
             {item.related_item_id && <Badge tone="primary">Follow-up</Badge>}
             {eventName && <Badge tone="primary">{eventName}</Badge>}
+            {item.collected_later && (
+              <Badge title="Found by a past-date collection, after the day's issue">
+                Collected later
+              </Badge>
+            )}
             {dropped && <Badge tone="bad">Dropped</Badge>}
             {approved && <Badge tone="good">Approved</Badge>}
             {state === "later" && <Badge tone="warn">Read later</Badge>}

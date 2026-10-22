@@ -3,9 +3,16 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { UPLOAD_SECTIONS } from "@/lib/current-affairs";
-import type { CaArticle, CaRun, TickResult, WatchSite } from "@/lib/ca-collect.server";
+import type {
+  BackfillDay,
+  CaArticle,
+  CaBackfill,
+  CaRun,
+  TickResult,
+  WatchSite,
+} from "@/lib/ca-collect.server";
 
-export type { CaArticle, CaRun, TickResult, WatchSite };
+export type { BackfillDay, CaArticle, CaBackfill, CaRun, TickResult, WatchSite };
 export type Collection = { run: CaRun | null; articles: CaArticle[]; sites: WatchSite[] };
 
 async function server() {
@@ -146,4 +153,40 @@ export const listCaWatchSites = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<WatchSite[]> => {
     await assertAdmin(context.userId);
     return (await server()).getSites();
+  });
+
+// ---------- Past-date collections ----------
+
+export const getCaBackfill = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).getBackfill();
+  });
+
+export const startCaBackfill = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        from: dateSchema,
+        to: dateSchema,
+        sites: z.array(z.string().uuid()).min(1).max(100),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<CaBackfill> => {
+    await assertAdmin(context.userId);
+    return (await server()).startBackfill(data.from, data.to, data.sites, "admin");
+  });
+
+export const setCaBackfillStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), action: z.enum(["pause", "resume", "stop"]) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).setBackfillStatus(data.id, data.action);
+    return { ok: true };
   });

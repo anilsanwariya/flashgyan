@@ -236,12 +236,15 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
         {run?.started_by === "cleared" ? (
           <Pill>Cleared</Pill>
         ) : run ? (
-          <Pill
-            tone={run.status === "done" ? "good" : run.status === "failed" ? "bad" : "warn"}
-            title={run.error ?? ""}
-          >
-            {run.status === "done" ? "Done" : run.status === "failed" ? "Failed" : "Running"}
-          </Pill>
+          <>
+            <Pill
+              tone={run.status === "done" ? "good" : run.status === "failed" ? "bad" : "warn"}
+              title={run.error ?? ""}
+            >
+              {run.status === "done" ? "Done" : run.status === "failed" ? "Failed" : "Running"}
+            </Pill>
+            {run.mode === "past" && <Pill tone="primary">Past-date collection</Pill>}
+          </>
         ) : (
           <Pill>Not run yet</Pill>
         )}
