@@ -38,12 +38,15 @@ import {
 import {
   EXCEL_COLUMNS,
   OPTION_COUNT,
+  keyForSeries,
   keyFromRows,
-  parseKeyText,
+  normSeries,
+  parseKeySheet,
   questionGaps,
   questionsToRows,
   rowsToPapers,
   type ExamPaper,
+  type KeySheet,
   type ExamQuestion,
 } from "@/lib/exam-papers";
 import { formatDate } from "@/lib/current-affairs";
@@ -53,6 +56,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
 const BODIES = ["RPSC", "RSSB", "UPSC", "Other"];
+const SERIES = ["A", "B", "C", "D"];
 const isPdf = (f: File) => /\.pdf$/i.test(f.name) || f.type === "application/pdf";
 const isExcel = (f: File) => /\.(xlsx|xls|csv)$/i.test(f.name);
 const isImage = (f: File) => /^image\//.test(f.type);
@@ -91,22 +95,38 @@ export function ExamPapers() {
   );
 }
 
-// Applies an answer key from a file: a PDF's own text (a table), else its
-// first page as an image for the AI; an Excel sheet; or a photo.
-async function applyKeyFile(
-  paperId: string,
-  file: File,
-  fn: ReturnType<typeof useServerFn<typeof applyExamKey>>,
-) {
+// A key for several series, and the paper's series isn't known (or isn't
+// one of them): the editor picks it.
+class NeedSeries extends Error {
+  constructor(
+    message: string,
+    readonly series: string[],
+  ) {
+    super(message);
+  }
+}
+
+type KeyRead =
+  | { kind: "sheet"; sheet: KeySheet }
+  | { kind: "image"; image: { media_type: "image/jpeg"; data: string } };
+
+// Reads an answer key file: a PDF's own text (a table), else its first page
+// as an image for the AI; an Excel sheet; or a photo.
+async function readKeyFile(file: File): Promise<KeyRead> {
   const lib = await import("@/lib/exam-pdf");
+  const checked = (sheet: KeySheet & { problems: string[] }) => {
+    if (sheet.problems.length)
+      throw new Error(`The key's table doesn't line up: ${sheet.problems.join("; ")}.`);
+    return { kind: "sheet" as const, sheet };
+  };
   if (isExcel(file)) {
     const sheets = await lib.workbookSheets(file);
-    return fn({ data: { id: paperId, entries: keyFromRows(sheets[0]?.rows ?? []) } });
+    return checked(keyFromRows(sheets[0]?.rows ?? []));
   }
-  if (isImage(file)) return fn({ data: { id: paperId, image: await lib.imageFile(file) } });
+  if (isImage(file)) return { kind: "image", image: await lib.imageFile(file) };
   if (!isPdf(file)) throw new Error("Use a PDF, an Excel sheet or a photo of the key.");
-  const entries = parseKeyText(await lib.pdfText(file));
-  if (entries.length >= 10) return fn({ data: { id: paperId, entries } });
+  const sheet = parseKeySheet(await lib.pdfText(file));
+  if (Object.values(sheet.answers).some((a) => a.length >= 10)) return checked(sheet);
   // A scanned key: its first page as an image.
   let image: { media_type: "image/jpeg"; data: string } | null = null;
   await lib.eachPageImage(file, 1, async (_n, _t, img) => {
@@ -114,8 +134,66 @@ async function applyKeyFile(
     return false;
   });
   if (!image) throw new Error("Couldn't read this key.");
-  return fn({ data: { id: paperId, image } });
+  return { kind: "image", image };
 }
+
+// Applies a key read to a paper of this series (a key for several series
+// needs it; a series picked now is saved on the paper).
+async function applyKeyRead(
+  paperId: string,
+  read: KeyRead,
+  series: string,
+  picked: boolean,
+  fn: ReturnType<typeof useServerFn<typeof applyExamKey>>,
+) {
+  const s = normSeries(series);
+  if (read.kind === "sheet") {
+    const { sheet } = read;
+    if (sheet.series.length && !sheet.answers[s])
+      throw new NeedSeries(
+        s
+          ? `This key has series ${sheet.series.join(", ")}, not ${s}. Which series is your paper?`
+          : `This key has answers for series ${sheet.series.join(", ")}. Which series is your paper?`,
+        sheet.series,
+      );
+    const r = await fn({
+      data: {
+        id: paperId,
+        entries: keyForSeries(sheet, s),
+        ...(picked || sheet.series.length ? { series: s } : {}),
+      },
+    });
+    return { ...r, series: sheet.series.length ? s : "" };
+  }
+  try {
+    const r = await fn({
+      data: { id: paperId, image: read.image, ...(picked ? { series: s } : {}) },
+    });
+    return {
+      applied: r.applied,
+      deleted: r.deleted,
+      series: "series" in r ? String(r.series) : "",
+    };
+  } catch (e) {
+    const m = /\[series:([A-H,]+)\]/.exec(errorText(e, ""));
+    if (m)
+      throw new NeedSeries(
+        errorText(e, "")
+          .replace(/\s*\[series:[^\]]*\]/, "")
+          .replace("Choose your paper's series first.", "Which series is your paper?"),
+        m[1].split(","),
+      );
+    throw e;
+  }
+}
+
+const keyToast = (r: { applied: number; deleted: number; series: string }) =>
+  toast.success(
+    `Answer key${r.series ? ` (series ${r.series})` : ""}: ${r.applied} answers${r.deleted ? `, ${r.deleted} deleted` : ""}`,
+  );
+
+// A key waiting for its paper's series (asked on the paper's page).
+const keyWaiting = new Map<string, { read: KeyRead; series: string[]; message: string }>();
 
 // ====================== The list ======================
 
@@ -247,6 +325,9 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
   const [date, setDate] = useState("");
   const [paperFile, setPaperFile] = useState<File | null>(null);
   const [keyFile, setKeyFile] = useState<File | null>(null);
+  const [series, setSeries] = useState("");
+  // The series a key has, when it needs the paper's.
+  const [keySeries, setKeySeries] = useState<string[] | null>(null);
   const [busy, setBusy] = useState("");
 
   async function add(e: React.FormEvent) {
@@ -254,11 +335,27 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
     if (!paperFile) return;
     setBusy("Adding…");
     try {
+      // The key first: one for several series needs the paper's series.
+      let keyRead: KeyRead | null = null;
+      if (keyFile) {
+        setBusy("Reading the answer key…");
+        keyRead = await readKeyFile(keyFile);
+        const sheet = keyRead.kind === "sheet" ? keyRead.sheet : null;
+        if (sheet?.series.length && !sheet.answers[series]) {
+          setKeySeries(sheet.series);
+          throw new Error(
+            series
+              ? `This key has series ${sheet.series.join(", ")}, not ${series}.`
+              : `This key has answers for series ${sheet.series.join(", ")}: choose your paper's series.`,
+          );
+        }
+      }
       const meta = {
         exam: exam.trim(),
         subject: subject.trim(),
         conducted_by: body,
         exam_date: date || null,
+        series,
       };
       let id: string;
       if (isExcel(paperFile)) {
@@ -281,12 +378,16 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
         pending.set(id, paperFile);
         toast.success(`Paper added: reading its ${pages} pages`);
       } else throw new Error("Use the question paper's PDF or an Excel sheet.");
-      if (keyFile) {
-        setBusy("Reading the answer key…");
-        const r = await applyKeyFile(id, keyFile, keyFn);
-        toast.success(
-          `Answer key: ${r.applied} answers${r.deleted ? `, ${r.deleted} deleted` : ""}`,
-        );
+      if (keyRead) {
+        setBusy("Adding the answer key…");
+        try {
+          keyToast(await applyKeyRead(id, keyRead, series, !!series, keyFn));
+        } catch (err) {
+          // Asked on the paper's page.
+          if (err instanceof NeedSeries)
+            keyWaiting.set(id, { read: keyRead, series: err.series, message: err.message });
+          else toast.error(errorText(err, "Couldn't add the answer key"));
+        }
       }
       await qc.invalidateQueries({ queryKey: ["examPapers"] });
       onAdded(id);
@@ -341,6 +442,30 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
             <option key={b}>{b}</option>
           ))}
         </select>
+        <div className="space-y-1">
+          <select
+            aria-label="Series"
+            value={series}
+            onChange={(e) => {
+              setSeries(e.target.value);
+              setKeySeries(null);
+            }}
+            className={`h-10 w-full rounded-md border bg-background px-3 text-sm ${keySeries ? "border-amber-500" : "border-input"}`}
+          >
+            <option value="">Series / set: not given</option>
+            {SERIES.map((x) => (
+              <option key={x} value={x}>
+                Series {x}
+              </option>
+            ))}
+          </select>
+          {keySeries && (
+            <p className="text-xs text-amber-700 dark:text-amber-400" role="alert">
+              The key has answers for series {keySeries.join(", ")}. Choose the series printed on
+              your question paper.
+            </p>
+          )}
+        </div>
         <label className="flex items-center gap-2 text-sm text-muted-foreground">
           Exam date
           <Input
@@ -375,7 +500,8 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
             onChange={(e) => setKeyFile(e.target.files?.[0] ?? null)}
           />
           <span className="block text-xs text-muted-foreground">
-            PDF, Excel or a photo. You can add it later too.
+            PDF, Excel or a photo, also a key for several series (A, B, C, D). You can add it later
+            too.
           </span>
         </label>
       </div>
@@ -411,6 +537,8 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [lang, setLang] = useState<Lang>("both");
   const [editing, setEditing] = useState(false);
+  // A key for several series, waiting for the paper's series.
+  const [askSeries, setAskSeries] = useState(() => keyWaiting.get(id) ?? null);
   const stop = useRef(false);
   useEffect(
     () => () => {
@@ -513,11 +641,20 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
     }
   }
 
-  async function addKey(file: File) {
+  // A key read (from a file, or waiting for the series), for the paper's
+  // series or the one just picked.
+  async function addKey(read: KeyRead | File, picked?: string) {
     setReading("Reading the answer key…");
     try {
-      const r = await applyKeyFile(id, file, keyFn);
-      toast.success(`Answer key: ${r.applied} answers${r.deleted ? `, ${r.deleted} deleted` : ""}`);
+      const kr = read instanceof File ? await readKeyFile(read) : read;
+      setAskSeries(null);
+      keyWaiting.delete(id);
+      try {
+        keyToast(await applyKeyRead(id, kr, picked ?? paper!.series, picked !== undefined, keyFn));
+      } catch (e) {
+        if (!(e instanceof NeedSeries)) throw e;
+        setAskSeries({ read: kr, series: e.series, message: e.message });
+      }
     } catch (e) {
       toast.error(errorText(e, "Couldn't read the key"));
     } finally {
@@ -545,6 +682,7 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
                   paper.conducted_by,
                   paper.exam_date && formatDate(paper.exam_date, "en"),
                   paper.paper_code && `Paper code ${paper.paper_code}`,
+                  paper.series && `Series ${paper.series}`,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
@@ -644,6 +782,36 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
             <span className="text-xs text-muted-foreground">A new key replaces its answers.</span>
           )}
         </label>
+        {askSeries && (
+          <div
+            role="group"
+            aria-label="Which series"
+            className="space-y-2 rounded-xl border border-amber-400/60 bg-amber-500/10 p-3 text-sm"
+          >
+            <p>{askSeries.message}</p>
+            <p className="text-xs text-muted-foreground">
+              The series (set) is printed on the question paper's cover. The answers for it are
+              picked from the key.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {askSeries.series.map((x) => (
+                <Button key={x} size="sm" onClick={() => void addKey(askSeries.read, x)}>
+                  Series {x}
+                </Button>
+              ))}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setAskSeries(null);
+                  keyWaiting.delete(id);
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
       </section>
 
       <MagazineCheck
@@ -735,6 +903,7 @@ function PaperDetails({
     conducted_by: paper.conducted_by,
     exam_date: paper.exam_date ?? "",
     paper_code: paper.paper_code,
+    series: paper.series ?? "",
   });
   const [busy, setBusy] = useState(false);
   return (
@@ -787,7 +956,25 @@ function PaperDetails({
           maxLength={60}
           onChange={(e) => setF({ ...f, paper_code: e.target.value })}
         />
+        <select
+          aria-label="Series"
+          value={f.series}
+          onChange={(e) => setF({ ...f, series: e.target.value })}
+          className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+        >
+          <option value="">Series / set: not given</option>
+          {SERIES.map((x) => (
+            <option key={x} value={x}>
+              Series {x}
+            </option>
+          ))}
+        </select>
       </div>
+      {paper.key_added && f.series !== (paper.series ?? "") && (
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          The answers already added stay as they are: add the key again for this series.
+        </p>
+      )}
       <div className="flex gap-2">
         <Button size="sm" type="submit" disabled={busy || !f.exam.trim()}>
           Save

@@ -13,6 +13,8 @@ export type ExamPaper = {
   conducted_by: string;
   exam_date: string | null;
   paper_code: string;
+  // The booklet series (A, B, C, D), when the key has several.
+  series: string;
   questions_total: number | null;
   source: "pdf" | "excel";
   pages: number;
@@ -214,8 +216,8 @@ export function pageMessages(page: number, pages: number): ChatMessage[] {
     {
       role: "system",
       content: `You read pages of Indian competitive exam question papers (RPSC, RSSB and similar) into data. A paper is usually bilingual: each question appears in Hindi and in English (often Hindi in the left column and English in the right, each with its own question number). For every question on this page, give its number, its question text in English and in Hindi, its other part in each language (statements, List I and List II of a match-the-following, assertion and reason, codes — keep each on its own line), and its four options in each language, in order. Leave out option 5 when it only says "Question not attempted" / "अनुत्तरित प्रश्न". Copy the text exactly as printed (fix only broken line breaks); keep every number, name and symbol. A question cut off at the top or bottom of the page: give the part on this page with "partial": true. Leave out instructions, headers and page numbers.
-On the cover page (instructions, no questions), give the paper's details instead: the exam, subject, paper code and number of questions as printed.
-Reply with JSON only: {"paper": {"exam": "...", "subject": "...", "paper_code": "...", "questions": number} or null, "questions": [{"n": number, "en": {"question": "...", "extra": "...", "options": ["...", "...", "...", "..."]}, "hi": {"question": "...", "extra": "...", "options": ["...", "...", "...", "..."]}, "partial": false}]}`,
+On the cover page (instructions, no questions), give the paper's details instead: the exam, subject, paper code, booklet series (the set letter, e.g. "Series A" / "प्रश्न-पुस्तिका सीरीज A", or "" if none) and number of questions as printed.
+Reply with JSON only: {"paper": {"exam": "...", "subject": "...", "paper_code": "...", "series": "A", "questions": number} or null, "questions": [{"n": number, "en": {"question": "...", "extra": "...", "options": ["...", "...", "...", "..."]}, "hi": {"question": "...", "extra": "...", "options": ["...", "...", "...", "..."]}, "partial": false}]}`,
     },
     {
       role: "user",
@@ -225,7 +227,13 @@ Reply with JSON only: {"paper": {"exam": "...", "subject": "...", "paper_code": 
 }
 
 export type PageRead = {
-  paper: { exam: string; subject: string; paper_code: string; questions: number | null } | null;
+  paper: {
+    exam: string;
+    subject: string;
+    paper_code: string;
+    series: string;
+    questions: number | null;
+  } | null;
   questions: QuestionDraft[];
 };
 
@@ -239,6 +247,9 @@ export function parsePage(raw: string): PageRead {
           exam: str(p.exam, 200),
           subject: str(p.subject, 200),
           paper_code: str(p.paper_code, 60),
+          series: /^[A-H]$/.test(normSeries(str(p.series, 20)))
+            ? normSeries(str(p.series, 20))
+            : "",
           questions:
             Number.isInteger(Number(p.questions)) && Number(p.questions) > 0
               ? Number(p.questions)
@@ -308,47 +319,189 @@ export function questionGaps(q: QuestionDraft): string[] {
 
 export type KeyEntry = { q_no: number; correct: number | null; deleted: boolean };
 
-// A key printed as a table ("Q. No. RES" columns side by side, "*" for a
-// deleted question): each line's numbers in pairs. Lines that aren't pairs
-// (titles, dates) are left out.
-export function parseKeyText(text: string): KeyEntry[] {
-  const out = new Map<number, KeyEntry>();
-  for (const line of text.split(/\n+/)) {
-    if (/[a-z]{3,}/i.test(line.replace(/deleted|delete/gi, ""))) continue;
-    const tokens = line.match(/\d+|\*/g) ?? [];
-    if (tokens.length < 2 || tokens.length % 2) continue;
-    const pairs: KeyEntry[] = [];
-    let ok = true;
-    for (let i = 0; i < tokens.length; i += 2) {
-      const q = Number(tokens[i]);
-      const a = tokens[i + 1];
-      if (!Number.isInteger(q) || q < 1 || q > 1000) ok = false;
-      else if (a === "*") pairs.push({ q_no: q, correct: null, deleted: true });
-      else if (/^[1-4]$/.test(a)) pairs.push({ q_no: q, correct: Number(a), deleted: false });
-      else ok = false;
-    }
-    if (ok) for (const p of pairs) out.set(p.q_no, p);
-  }
-  return [...out.values()].sort((a, b) => a.q_no - b.q_no);
+// A key can cover several booklet series (A, B, C, D: the same questions in
+// another order). Its answers, by each series' question numbers; a plain key
+// has one list under "".
+export type KeySheet = { series: string[]; answers: Record<string, KeyEntry[]> };
+
+// A series as written on a paper or a key: "B", "Series B", "set b" -> "B".
+export function normSeries(v: string): string {
+  const t = v.trim().toUpperCase();
+  return /^(?:SERIES|SET|BOOKLET|सीरीज|सेट)?[\s.:-]*([A-H])$/.exec(t)?.[1] ?? t.slice(0, 10);
 }
 
-// A key that is only an image (a scan or a photo): the AI reads it.
-export function keyImageMessages(): ChatMessage[] {
+type Col = "Q" | "ANS" | string;
+
+// A header line's columns ("Q. No. RES Q. No. RES", "A B C D Ans A B C D Ans",
+// "Q.No A B C D"), or null when the line isn't a header.
+function headerColumns(line: string, single = false): Col[] | null {
+  const t = line
+    .replace(
+      /(?:question|q)\s*\.?\s*(?:no|number)\s*\.?|प्रश्न\s*(?:सं|संख्या)\.?|s\.?\s*no\.?/gi,
+      " Q ",
+    )
+    .replace(
+      /\b(?:answers?|ans|res(?:ult)?|key|correct(?:\s+option)?(?:\s+no\.?)?)\b\.?|उत्तर/gi,
+      " ANS ",
+    )
+    .replace(/\b(?:set|series|booklet)\s*[-:]?\s*([A-H])\b/gi, " $1 ")
+    .trim();
+  const cols = t.split(/\s+/);
+  if (!cols.every((c) => c === "Q" || c === "ANS" || /^[A-H]$/i.test(c))) return null;
+  // A line of a table needs a question or answer column; an Excel column
+  // heading can be a series alone.
+  if (!single && (cols.length < 2 || (!cols.includes("Q") && !cols.includes("ANS")))) return null;
+  return cols.map((c) => (c === "Q" || c === "ANS" ? c : c.toUpperCase()));
+}
+
+// The repeating group of a header ("A B C D Ans" twice -> one group of 5).
+function headerGroup(cols: Col[]): Col[] {
+  for (let n = 1; n <= cols.length; n++)
+    if (cols.length % n === 0 && cols.every((c, i) => c === cols[i % n])) return cols.slice(0, n);
+  return cols;
+}
+
+const answerOf = (a: string): Omit<KeyEntry, "q_no"> | null =>
+  a === "*"
+    ? { correct: null, deleted: true }
+    : /^[1-4]$/.test(a)
+      ? { correct: Number(a), deleted: false }
+      : null;
+const questionNo = (v: string) => {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 1 && n <= 1000 ? n : null;
+};
+
+// A key printed as a table, "*" for a deleted question. The header says how
+// to read the rows:
+// - "Q. No. RES" (side by side): question, answer;
+// - "A B C D Ans": one question's number in each series, then its answer;
+// - "Q.No A B C D": a question, then its answer in each series.
+// Without a header, each line's numbers are read in pairs. Lines that aren't
+// rows (titles, dates) are left out.
+export function parseKeySheet(text: string): KeySheet & { problems: string[] } {
+  const maps = new Map<string, Map<number, KeyEntry>>();
+  const put = (series: string, e: KeyEntry) => {
+    const m = maps.get(series) ?? new Map<number, KeyEntry>();
+    maps.set(series, m);
+    m.set(e.q_no, e);
+  };
+  const problems: string[] = [];
+  const twice = new Set<string>();
+  let group: Col[] = ["Q", "ANS"];
+  let perLine = Infinity;
+  for (const line of text.split(/\n+/)) {
+    const cols = headerColumns(line);
+    if (cols) {
+      group = headerGroup(cols);
+      perLine = cols.length;
+      continue;
+    }
+    if (/[a-z]{3,}|\p{Script=Devanagari}{2,}/iu.test(line.replace(/deleted|delete/gi, "")))
+      continue;
+    const tokens = line.match(/\d+|\*/g) ?? [];
+    const size = group.length;
+    if (tokens.length < size || tokens.length % size || tokens.length > perLine) continue;
+    const rows: [string, KeyEntry][] = [];
+    let ok = true;
+    for (let i = 0; i < tokens.length && ok; i += size) {
+      const g = tokens.slice(i, i + size);
+      const ansAt = group.indexOf("ANS");
+      const qAt = group.indexOf("Q");
+      if (ansAt >= 0) {
+        // One answer: for the question numbered in each series' column (or
+        // in the Q column of a plain key).
+        const a = answerOf(g[ansAt]);
+        if (!a) ok = false;
+        group.forEach((c, j) => {
+          if (c === "ANS" || !a) return;
+          const n = questionNo(g[j]);
+          if (n === null) ok = false;
+          else rows.push([c === "Q" ? "" : c, { q_no: n, ...a }]);
+        });
+      } else if (qAt >= 0) {
+        // A question, then its answer in each series.
+        const n = questionNo(g[qAt]);
+        if (n === null) ok = false;
+        group.forEach((c, j) => {
+          if (c === "Q" || n === null) return;
+          const a = answerOf(g[j]);
+          if (!a) ok = false;
+          else rows.push([c, { q_no: n, ...a }]);
+        });
+      } else ok = false;
+    }
+    if (!ok) continue;
+    for (const [series, e] of rows) {
+      if (maps.get(series)?.has(e.q_no))
+        twice.add(`${series ? `series ${series} ` : ""}Q${e.q_no}`);
+      put(series, e);
+    }
+  }
+  if (twice.size)
+    problems.push(`given twice: ${[...twice].slice(0, 5).join(", ")}${twice.size > 5 ? "…" : ""}`);
+  const series = [...maps.keys()].filter(Boolean).sort();
+  // Every series covers the same questions.
+  const counts = new Set(series.map((x) => maps.get(x)!.size));
+  if (counts.size > 1)
+    problems.push(
+      `the series don't have the same number of answers (${series.map((x) => `${x}: ${maps.get(x)!.size}`).join(", ")})`,
+    );
+  const sorted = (m?: Map<number, KeyEntry>) =>
+    [...(m?.values() ?? [])].sort((a, b) => a.q_no - b.q_no);
+  return {
+    series,
+    answers: series.length
+      ? Object.fromEntries(series.map((x) => [x, sorted(maps.get(x))]))
+      : { "": sorted(maps.get("")) },
+    problems,
+  };
+}
+
+// A plain key's answers (a key for several series gives none).
+export function parseKeyText(text: string): KeyEntry[] {
+  const sheet = parseKeySheet(text);
+  return sheet.series.length ? [] : sheet.answers[""];
+}
+
+// The answers for a paper of this series. A plain key fits any paper; a key
+// for several series needs the paper's series.
+export function keyForSeries(sheet: KeySheet, series: string): KeyEntry[] {
+  if (!sheet.series.length) return sheet.answers[""] ?? [];
+  const s = normSeries(series);
+  if (!s)
+    throw new Error(
+      `This key has answers for series ${sheet.series.join(", ")}. Choose your paper's series first.`,
+    );
+  if (!sheet.answers[s])
+    throw new Error(
+      `This key has series ${sheet.series.join(", ")}, not ${s}. Check the paper's series.`,
+    );
+  return sheet.answers[s];
+}
+
+// A key that is only an image (a scan or a photo): the AI reads it, for the
+// paper's series when the key has several.
+export function keyImageMessages(series = ""): ChatMessage[] {
+  const s = normSeries(series);
   return [
     {
       role: "system",
       content: `This is an exam's answer key. Read every question number and its correct option (1 to 4). A question marked deleted ("*", "Deleted", "विलोपित") has "deleted": true.
-Reply with JSON only: [{"n": question number, "answer": 1-4 or null, "deleted": false}]`,
+A key can cover several booklet series (sets A, B, C, D: the same questions in another order). Then list them in "series", and ${
+        s
+          ? `give the answers by series ${s}'s question numbers: in a table where each row gives one question's number in every series and then its answer, use the number in the ${s} column; in a table with an answer column for each series, use the ${s} column.`
+          : `give no answers ("answers": []): the paper's series is needed first.`
+      }
+Reply with JSON only: {"series": [] or ["A", "B", ...], "answers": [{"n": question number, "answer": 1-4 or null, "deleted": false}]}`,
     },
     { role: "user", content: "Read the answer key." },
   ];
 }
 
-export function parseKeyJson(raw: string): KeyEntry[] {
-  const list = parseJson<unknown[]>(raw);
-  if (!Array.isArray(list)) return [];
+const entriesFrom = (list: unknown): KeyEntry[] => {
   const out = new Map<number, KeyEntry>();
-  for (const x of list) {
+  for (const x of Array.isArray(list) ? list : []) {
     const o = (x ?? {}) as Record<string, unknown>;
     const n = Number(o.n);
     if (!Number.isInteger(n) || n < 1 || n > 1000) continue;
@@ -358,23 +511,39 @@ export function parseKeyJson(raw: string): KeyEntry[] {
       out.set(n, { q_no: n, correct: a, deleted: false });
   }
   return [...out.values()].sort((a, b) => a.q_no - b.q_no);
+};
+
+export function parseKeyJson(raw: string): { series: string[]; entries: KeyEntry[] } {
+  const o = parseJson<unknown>(raw);
+  if (Array.isArray(o)) return { series: [], entries: entriesFrom(o) };
+  const r = (o ?? {}) as Record<string, unknown>;
+  const series = (Array.isArray(r.series) ? r.series : [])
+    .map((x) => normSeries(String(x)))
+    .filter((x) => /^[A-H]$/.test(x));
+  return { series: [...new Set(series)], entries: entriesFrom(r.answers) };
 }
 
-// A key that is an Excel sheet ("Question No." and "Correct Option No."
-// columns, or the first two columns).
-export function keyFromRows(rows: Record<string, unknown>[]): KeyEntry[] {
-  const text = rows
-    .map((r) => {
-      const entries = Object.entries(r);
-      const find = (col: string) =>
-        entries.find(([h]) => COLUMN_KEYS[key(h)] === col)?.[1] ?? undefined;
-      const q = find("Question No.") ?? entries[0]?.[1];
-      const a = find("Correct Option No.") ?? entries[1]?.[1];
-      const ans = String(a ?? "").trim();
-      return `${String(q ?? "").trim()} ${/^(deleted|delete|विलोपित)$/i.test(ans) ? "*" : ans}`;
-    })
-    .join("\n");
-  return parseKeyText(text);
+// A key that is an Excel sheet: the same tables as a printed key, by their
+// column headings ("Question No." and "Correct Option No.", "A B C D Ans"…),
+// else the first two columns as question and answer.
+export function keyFromRows(rows: Record<string, unknown>[]): KeySheet & { problems: string[] } {
+  const heads = Object.keys(rows[0] ?? {});
+  const cols = heads.map((h) =>
+    COLUMN_KEYS[key(h)] === "Question No."
+      ? "Q"
+      : COLUMN_KEYS[key(h)] === "Correct Option No."
+        ? "ANS"
+        : (headerColumns(h, true)?.join(" ") ?? null),
+  );
+  const known = cols.every((c) => c && !c.includes(" "));
+  const cell = (v: unknown) => {
+    const a = String(v ?? "").trim();
+    return /^(deleted|delete|विलोपित)$/i.test(a) ? "*" : a;
+  };
+  const lines = known
+    ? [cols.join(" "), ...rows.map((r) => heads.map((h) => cell(r[h])).join(" "))]
+    : ["Q ANS", ...rows.map((r) => Object.values(r).slice(0, 2).map(cell).join(" "))];
+  return parseKeySheet(lines.join("\n"));
 }
 
 // ---------- Checking a paper against the magazine ----------

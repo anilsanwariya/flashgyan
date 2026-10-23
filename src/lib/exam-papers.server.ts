@@ -15,6 +15,7 @@ import {
   mergeQuestion,
   pageMessages,
   parseKeyJson,
+  normSeries,
   parsePage,
   type ExamPaper,
   type ExamQuestion,
@@ -130,6 +131,7 @@ export type PaperMeta = {
   conducted_by: string;
   exam_date: string | null;
   paper_code?: string;
+  series?: string;
 };
 
 const cleanMeta = (m: Partial<PaperMeta>) => ({
@@ -140,6 +142,7 @@ const cleanMeta = (m: Partial<PaperMeta>) => ({
   ...(m.conducted_by !== undefined ? { conducted_by: m.conducted_by.trim().slice(0, 100) } : {}),
   ...(m.exam_date !== undefined ? { exam_date: m.exam_date || null } : {}),
   ...(m.paper_code !== undefined ? { paper_code: m.paper_code.trim().slice(0, 60) } : {}),
+  ...(m.series !== undefined ? { series: normSeries(m.series) } : {}),
 });
 
 export async function createPaper(
@@ -238,10 +241,13 @@ export async function readPaperPage(
   );
   await saveQuestions(paperId, read.questions);
   const { data } = await from("exam_papers")
-    .select("pages_done,paper_code,questions_total")
+    .select("pages_done,paper_code,questions_total,series")
     .eq("id", paperId)
     .single();
-  const p = data as unknown as Pick<ExamPaper, "pages_done" | "paper_code" | "questions_total">;
+  const p = data as unknown as Pick<
+    ExamPaper,
+    "pages_done" | "paper_code" | "questions_total" | "series"
+  >;
   fail(
     (
       await from("exam_papers")
@@ -249,6 +255,7 @@ export async function readPaperPage(
           pages,
           pages_done: Math.max(p.pages_done, page),
           ...(read.paper?.paper_code && !p.paper_code ? { paper_code: read.paper.paper_code } : {}),
+          ...(read.paper?.series && !p.series ? { series: read.paper.series } : {}),
           ...(read.paper?.questions && !p.questions_total
             ? { questions_total: read.paper.questions }
             : {}),
@@ -268,8 +275,11 @@ export async function readPaperPage(
 export async function applyKey(
   paperId: string,
   entries: KeyEntry[],
+  series?: string,
 ): Promise<{ applied: number; deleted: number }> {
   if (!entries.length) throw new Error("No answers found in this key.");
+  // The series the answers were picked for, kept on the paper.
+  if (series !== undefined) await updatePaper(paperId, { series });
   const rows = entries.map((e) => ({
     paper_id: paperId,
     q_no: e.q_no,
@@ -295,12 +305,30 @@ export async function applyKey(
   return { applied: entries.length, deleted: entries.filter((e) => e.deleted).length };
 }
 
-// A key that is only an image: the AI reads it.
-export async function keyFromImage(paperId: string, image: SaathiImage) {
-  return applyKey(
-    paperId,
-    parseKeyJson(await saathiComplete(apiKey(), keyImageMessages(), undefined, [image])),
+// A key that is only an image: the AI reads it, for the paper's series when
+// the key has several.
+export async function keyFromImage(paperId: string, image: SaathiImage, series?: string) {
+  if (series !== undefined) await updatePaper(paperId, { series });
+  const { data } = await from("exam_papers").select("series").eq("id", paperId).single();
+  const own = normSeries((data as { series?: string } | null)?.series ?? "");
+  const read = parseKeyJson(
+    await saathiComplete(apiKey(), keyImageMessages(own), undefined, [image]),
   );
+  if (read.series.length > 1 && !read.series.includes(own))
+    throw new SeriesNeeded(read.series, own);
+  return { ...(await applyKey(paperId, read.entries)), series: read.series.length > 1 ? own : "" };
+}
+
+// A key for several series, and the paper's series isn't one of them (or
+// isn't set): the editor picks it.
+export class SeriesNeeded extends Error {
+  constructor(series: string[], own: string) {
+    super(
+      own
+        ? `This key has series ${series.join(", ")}, not ${own}. Check the paper's series. [series:${series.join(",")}]`
+        : `This key has answers for series ${series.join(", ")}. Choose your paper's series first. [series:${series.join(",")}]`,
+    );
+  }
 }
 
 // ---------- Excel ----------
