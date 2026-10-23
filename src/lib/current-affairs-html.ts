@@ -3,6 +3,7 @@
 // browser rendering turns it into the PDF; the admin panel shows the same
 // HTML as a preview.
 import { ASKED_SHOWN, askedLine, type AskedQ } from "@/lib/ca-asked";
+import { HISTORY_LABEL, type StoryHistory } from "@/lib/ca-history";
 import {
   CATEGORIES,
   DEFAULT_MAGAZINE_SETTINGS,
@@ -71,6 +72,8 @@ export type MagazineItem = {
   earlier?: Earlier[];
   // Past exam questions on its topic ("Asked before").
   asked?: AskedQ[];
+  // A report's earlier editions or an appointment's predecessors.
+  history?: StoryHistory;
   // A custom magazine's subsection (its section is the category).
   sub?: string | null;
   // The several-day event it belongs to (monthly issue only).
@@ -508,6 +511,13 @@ function itemHtml(
       ? `<div class="earlier"><b>${t.earlier}:</b> ${item.earlier
           .map((e) => `${esc(formatDate(e.date, lang))} — ${esc(pick(e.headline, lang))}`)
           .join("; ")}</div>`
+      : ""
+  }
+  ${
+    item.history && (item.history.en || item.history.hi)
+      ? `<div class="earlier"><b>${esc(HISTORY_LABEL[item.history.kind][lang])}:</b> ${esc(
+          lang === "hi" ? item.history.hi || item.history.en : item.history.en || item.history.hi,
+        )}</div>`
       : ""
   }
   ${

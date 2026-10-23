@@ -69,6 +69,7 @@ import { SourceReader } from "@/components/ca-source-reader";
 import { StoryHistory } from "@/components/ca-story-history";
 import { StoryImages } from "@/components/ca-story-images";
 import { AskedChip } from "@/components/ca-asked-panel";
+import { HistoryChip } from "@/components/ca-history-panel";
 import { PickedPointsVisual, StoryVisuals } from "@/components/ca-story-visuals";
 import { MaterialPanel } from "@/components/ca-story-material";
 import { BiLine, IconButton, Part, StaticConnect, type Lang } from "@/components/ca-story-review";
@@ -472,6 +473,7 @@ export function StoryEditor({
             {item.related_item_id && <Badge tone="primary">Follow-up</Badge>}
             <EventChip item={item} events={events} disabled={busy} onChanged={onChanged} />
             <AskedChip itemId={item.id} disabled={busy} />
+            <HistoryChip itemId={item.id} disabled={busy} />
             {unverified > 0 && (
               <Badge tone="warn">
                 <AlertTriangle className="h-3 w-3" /> {unverified} to check

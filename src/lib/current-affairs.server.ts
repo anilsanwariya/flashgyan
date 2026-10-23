@@ -1,6 +1,7 @@
 // Server-only current affairs magazine: sources → news items → bilingual
 // issues → PDF (Cloudflare browser rendering) → scheduled Telegram post.
 import type { AskedQ } from "@/lib/ca-asked";
+import type { StoryHistory } from "@/lib/ca-history";
 import {
   EVENT_POINTS_MAX,
   eventNameKey,
@@ -1293,6 +1294,8 @@ export async function enrichItem(
     if (item.related_item_id) await checkForCorrections(item.related_item_id, itemId);
     // Past exam questions on its topic ("Asked before").
     await (await import("@/lib/ca-asked.server")).linkAskedFor(itemId);
+    // A report's earlier editions, an appointment's predecessors.
+    await (await import("@/lib/ca-history.server")).makeHistorySafe(itemId);
     await clearWriteProgress(itemId);
     return saved as unknown as CaItem;
   } catch (e) {
@@ -4431,12 +4434,17 @@ export async function toMagazineItems(rows: CaItem[]): Promise<MagazineItem[]> {
   const asked = await (await import("@/lib/ca-asked.server"))
     .askedForItems(items as (CaItem & { origin_id?: string | null })[])
     .catch(() => new Map<string, AskedQ[]>());
+  // Reports' earlier editions and appointments' predecessors.
+  const history = await (await import("@/lib/ca-history.server"))
+    .historyForItems(items as (CaItem & { origin_id?: string | null })[])
+    .catch(() => new Map<string, StoryHistory>());
   return items.map((i) => ({
     id: i.id,
     issue_date: i.issue_date,
     category: normalizeCategory(i.category),
     earlier: earlier.get(i.id),
     asked: asked.get(i.id),
+    history: history.get(i.id),
     importance: i.importance,
     rajasthan: i.rajasthan,
     content: i.content!,
