@@ -10,6 +10,7 @@ import { uploadCaImage } from "@/lib/current-affairs.functions";
 import { MAX_IMAGES, type CaContent, type CaImage, type ImageLayout } from "@/lib/current-affairs";
 import { imageRows, isSideImage } from "@/lib/current-affairs-html";
 import { ImageEditor } from "@/components/ca-image-editor";
+import { ClipImageButton } from "@/components/ca-clippings";
 import { Input } from "@/components/ui/input";
 import { errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
@@ -25,12 +26,15 @@ const LAYOUTS: { value: ImageLayout; label: string }[] = [
 
 export function StoryImages({
   itemId,
+  sourceIds = [],
   content,
   lang,
   editing,
   onSave,
 }: {
   itemId: string;
+  // The story's sources: a newspaper clipping among them gives images too.
+  sourceIds?: string[];
   content: CaContent;
   lang: Lang;
   editing: boolean;
@@ -77,7 +81,7 @@ export function StoryImages({
       }
     : {};
 
-  async function add(files: File[]) {
+  async function add(files: File[], credit?: string) {
     const picked = files.filter((f) => /^image\//.test(f.type));
     if (!picked.length) return;
     if (picked.length > room) {
@@ -101,7 +105,7 @@ export function StoryImages({
             base64: await toBase64(img.bytes),
           },
         });
-        added.push({ url, path, w: img.w, h: img.h });
+        added.push({ url, path, w: img.w, h: img.h, ...(credit ? { credit } : {}) });
         setUploading((n) => n - 1);
       }
     } catch (e) {
@@ -160,6 +164,11 @@ export function StoryImages({
         <ImagePlus className="mr-1 h-3.5 w-3.5" />
         {uploading > 0 ? `Uploading ${uploading}…` : images.length ? "Add more" : "Add images"}
       </Button>
+      <ClipImageButton
+        sourceIds={sourceIds}
+        disabled={uploading > 0 || busy || room <= 0}
+        onPick={(file, credit) => add([file], credit)}
+      />
     </>
   );
 

@@ -542,7 +542,14 @@ export function StoryEditor({
                     title="Images"
                     hint="Photos, maps or diagrams for this story. Crop, turn, caption and place each one."
                   >
-                    <StoryImages itemId={item.id} content={c!} lang={lang} editing onSave={save} />
+                    <StoryImages
+                      itemId={item.id}
+                      sourceIds={item.source_ids}
+                      content={c!}
+                      lang={lang}
+                      editing
+                      onSave={save}
+                    />
                   </Section>
                 ) : tab === "visuals" ? (
                   <Section
