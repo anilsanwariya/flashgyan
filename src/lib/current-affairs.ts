@@ -438,6 +438,8 @@ export function extractMessages(opts: {
   sourceName: string;
   date: string;
   text: string;
+  // An instruction after the text (an official document's part to read).
+  extra?: string;
 }): ChatMessage[] {
   if (opts.section === "editorial") return editorialExtractMessages(opts);
   return [
@@ -452,7 +454,7 @@ Every fact must fill one slot of its story's type; leave a slot out if the sourc
     },
     {
       role: "user",
-      content: `Source: ${opts.sourceName || SECTION_TEXT[opts.section]} (${SECTION_TEXT[opts.section]}), dated ${opts.date}.\n\n${opts.text}`,
+      content: `Source: ${opts.sourceName || SECTION_TEXT[opts.section]} (${SECTION_TEXT[opts.section]}), dated ${opts.date}.\n\n${opts.text}${opts.extra ?? ""}`,
     },
   ];
 }

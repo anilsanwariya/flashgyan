@@ -368,6 +368,8 @@ export type CaItem = {
   // Found by a past-date collection, after the day's issue (missing before
   // that migration).
   collected_later?: boolean;
+  // Made from an official document (Monthly page → Documents).
+  from_document?: boolean;
 };
 
 export type CaIssue = {
@@ -416,6 +418,8 @@ export async function addSource(input: {
   content: string;
   // The web page it came from (automatic collection).
   url?: string | null;
+  // From a government website.
+  official?: boolean;
 }): Promise<CaSource> {
   const chunks = splitSource(input.content).length;
   const { data, error } = await from("ca_sources")
@@ -429,6 +433,13 @@ export async function addSource(input: {
 async function embedOne(text: string) {
   return saathiEmbed(apiKey(), text);
 }
+
+// For official documents (ca-docs.server): a story's embedding, the month's
+// closest stories to it, and saving a new one.
+export const embedText = (text: string) => embedOne(text);
+export const similarInRange = (embedding: number[], fromDate: string, toDate: string) =>
+  similarItems(embedding, fromDate, toDate, false);
+export const insertStory = (row: Record<string, unknown>) => insertItem(row);
 
 type Similar = { id: string; issue_date: string; headline: string; similarity: number };
 
@@ -1360,14 +1371,19 @@ const EVENT_COLS =
 export type EventBrief = Pick<CaEvent, "id" | "name" | "name_hi" | "status">;
 
 // The day's stories found by a past-date collection (none before that
-// migration).
-async function collectedLater(date: string): Promise<Set<string>> {
-  const { data, error } = await from("ca_items")
-    .select("id")
-    .eq("issue_date", date)
-    .eq("collected_later", true);
-  if (error) return new Set();
-  return new Set(((data ?? []) as { id: string }[]).map((r) => r.id));
+// migration), and those of them made from an official document (none before
+// the documents migration).
+async function collectedLater(date: string): Promise<{ later: Set<string>; docs: Set<string> }> {
+  const q = (cols: string) =>
+    from("ca_items").select(cols).eq("issue_date", date).eq("collected_later", true);
+  let { data, error } = await q("id,from_document");
+  if (error) ({ data, error } = await q("id"));
+  if (error) return { later: new Set(), docs: new Set() };
+  const rows = (data ?? []) as unknown as { id: string; from_document?: boolean }[];
+  return {
+    later: new Set(rows.map((r) => r.id)),
+    docs: new Set(rows.filter((r) => r.from_document).map((r) => r.id)),
+  };
 }
 
 type LinkFilter = { date?: string; from?: string; to?: string; ids?: string[] };
@@ -2351,12 +2367,13 @@ export async function getDay(date: string): Promise<DayData> {
   // Without the events migration, stories have no event_id at all (the
   // editor then hides the event picker).
   const links = await eventLinksOrNull({ date });
-  const later = await collectedLater(date);
+  const { later, docs } = await collectedLater(date);
   const list = ((items.data ?? []) as unknown as CaItem[]).map((i) => ({
     ...i,
     category: normalizeCategory(i.category),
     ...(links ? { event_id: links.get(i.id) ?? null } : {}),
     ...(later.has(i.id) ? { collected_later: true } : {}),
+    ...(docs.has(i.id) ? { from_document: true } : {}),
   }));
   return {
     sources: (sources.data ?? []) as unknown as CaSource[],
@@ -3128,6 +3145,106 @@ export async function addPointsFromHighlights(
   fail(error);
   if (before) await saveVersion(id, before, "points");
   return withKeywords(data as unknown as CaItem, keywords);
+}
+
+// Facts from another source (an official document) added to a story as new
+// key points, without rewriting it. A story not written yet just takes the
+// facts (its writing uses them).
+export async function addFactsAsPoints(id: string, facts: CaFact[]): Promise<CaItem> {
+  const item = await loadItem(id);
+  const c = item.content;
+  await assertDayEditable([item.issue_date]);
+  const have = new Set(item.facts.map((f) => normalizeForMatch(f.quote)));
+  const fresh = facts
+    .filter((f) => !have.has(normalizeForMatch(f.quote)))
+    .slice(0, Math.max(0, STORY_POINTS_MAX - item.facts.length));
+  if (!fresh.length) throw new Error(`This story already has ${STORY_POINTS_MAX} key points.`);
+  const sourceIds = uniq([...item.source_ids, ...fresh.map((f) => f.source_id)]);
+  if (!c) {
+    const { data, error } = await from("ca_items")
+      .update({
+        facts: [...item.facts, ...fresh],
+        source_ids: sourceIds,
+        needs_enrich: true,
+        updated_at: new Date().toISOString(),
+      } as never)
+      .eq("id", id)
+      .select(ITEM_COLS)
+      .single();
+    fail(error);
+    return data as unknown as CaItem;
+  }
+  const points = parsePoints(
+    await saathiComplete(
+      apiKey(),
+      pointsMessages({
+        glossary: await glossaryNow(),
+        headline: c.headline.en || c.headline.hi || item.headline,
+        summary: c.summary.en || c.summary.hi,
+        points: c.points.map((p) => p.en || p.hi),
+        facts: fresh,
+        style: (await getMagazineSettings()).style_rules,
+      }),
+    ),
+    fresh.length,
+  );
+  if (!points) throw new Error("The AI's reply could not be read. Try again.");
+  const before = snapshotOf(item);
+  const { data, error } = await from("ca_items")
+    .update({
+      facts: [...item.facts, ...fresh],
+      source_ids: sourceIds,
+      content: { ...c, points: [...c.points, ...points] },
+      updated_at: new Date().toISOString(),
+    } as never)
+    .eq("id", id)
+    .select(ITEM_COLS)
+    .single();
+  fail(error);
+  if (before) await saveVersion(id, before, "points");
+  return data as unknown as CaItem;
+}
+
+// Facts an official document states differently from a story: recorded as
+// a correction for the editor (once per story and document). True when one
+// was recorded.
+export async function documentCorrection(
+  itemId: string,
+  doc: { name: string; date: string; facts: CaFact[] },
+): Promise<boolean> {
+  // Once per story and document (a story found in two of its parts).
+  const { data: had } = await from("ca_corrections")
+    .select("id")
+    .eq("item_id", itemId)
+    .is("from_item_id", null)
+    .like("summary_en", `%(per ${doc.name.replace(/[%_]/g, "")})`)
+    .limit(1);
+  if ((had ?? []).length) return false;
+  const { data } = await from("ca_items").select(ITEM_COLS).eq("id", itemId).maybeSingle();
+  const item = data as unknown as CaItem | null;
+  if (!item || item.status === "dropped" || !item.facts.length) return false;
+  const changes = parseChanges(
+    await saathiComplete(
+      apiKey(),
+      changeCheckMessages({
+        glossary: await glossaryNow(),
+        earlier: { date: item.issue_date, facts: item.facts, points: item.content?.points ?? [] },
+        later: { date: doc.date, facts: doc.facts },
+      }),
+    ),
+    item.facts.length,
+  );
+  if (!changes.length) return false;
+  const headline = item.content?.headline ?? { en: item.headline, hi: item.headline };
+  const { error } = await from("ca_corrections").insert({
+    item_id: itemId,
+    from_item_id: null,
+    changes,
+    summary_en: `${headline.en}: ${changes.map((c) => c.new_en).join("; ")} (per ${doc.name})`,
+    summary_hi: `${headline.hi}: ${changes.map((c) => c.new_hi || c.new_en).join("; ")} (${doc.name} के अनुसार)`,
+  } as never);
+  fail(error);
+  return true;
 }
 
 // A new story from highlights in another story's sources, or in a source no
@@ -4162,15 +4279,21 @@ async function magazineItems(fromDate: string, toDate: string): Promise<Magazine
 export async function toMagazineItems(rows: CaItem[]): Promise<MagazineItem[]> {
   const items = rows.filter((i) => i.content);
   const sourceIds = [...new Set(items.flatMap((i) => i.source_ids))];
-  const { data: srcs } = sourceIds.length
-    ? await from("ca_sources").select("id,source_name,section").in("id", sourceIds)
-    : { data: [] };
-  const names = new Map(
-    ((srcs ?? []) as { id: string; source_name: string; section: string }[]).map((s) => [
-      s.id,
-      s.source_name || s.section.toUpperCase(),
-    ]),
-  );
+  type Src = { id: string; source_name: string; section: string; official?: boolean };
+  let srcs: Src[] = [];
+  if (sourceIds.length) {
+    const got = await from("ca_sources")
+      .select("id,source_name,section,official")
+      .in("id", sourceIds);
+    // Before the documents migration: no official sources.
+    srcs = (
+      got.error
+        ? (await from("ca_sources").select("id,source_name,section").in("id", sourceIds)).data
+        : got.data
+    ) as Src[];
+  }
+  const names = new Map((srcs ?? []).map((s) => [s.id, s.source_name || s.section.toUpperCase()]));
+  const official = new Set((srcs ?? []).filter((s) => s.official).map((s) => s.id));
   return items.map((i) => ({
     id: i.id,
     issue_date: i.issue_date,
@@ -4181,6 +4304,14 @@ export async function toMagazineItems(rows: CaItem[]): Promise<MagazineItem[]> {
     facts: i.facts,
     context_sources: i.context_sources,
     source_names: [...new Set(i.source_ids.map((s) => names.get(s)).filter(Boolean) as string[])],
+    official_names: [
+      ...new Set(
+        i.source_ids
+          .filter((s) => official.has(s))
+          .map((s) => names.get(s))
+          .filter(Boolean) as string[],
+      ),
+    ],
   }));
 }
 
@@ -4230,6 +4361,12 @@ export async function issueHtml(
       }));
   }
   const feature = kind === "monthly" ? await getFeature(range.from) : null;
+  const reports =
+    kind === "monthly"
+      ? (await (await import("@/lib/ca-docs.server")).getReports(range.from)).filter(
+          (r) => r.included,
+        )
+      : [];
   const design = kind === "monthly" ? (opts.design ?? (await getIssueDesign(range.from))) : null;
   return {
     html: renderMagazine({
@@ -4240,6 +4377,7 @@ export async function issueHtml(
       items,
       corrections,
       feature: feature?.included ? feature : null,
+      reports,
       design,
       fillers: opts.fillers,
       coverOnly: opts.coverOnly,

@@ -767,10 +767,19 @@ function StoryCard({
             )}
             {item.related_item_id && <Badge tone="primary">Follow-up</Badge>}
             {eventName && <Badge tone="primary">{eventName}</Badge>}
-            {item.collected_later && (
-              <Badge title="Found by a past-date collection, after the day's issue">
-                Collected later
+            {item.from_document ? (
+              <Badge
+                tone="primary"
+                title="Made from an official document added on the Monthly page, after the day's issue"
+              >
+                From official documents
               </Badge>
+            ) : (
+              item.collected_later && (
+                <Badge title="Found by a past-date collection, after the day's issue">
+                  Collected later
+                </Badge>
+              )
             )}
             {dropped && <Badge tone="bad">Dropped</Badge>}
             {approved && <Badge tone="good">Approved</Badge>}

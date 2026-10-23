@@ -76,6 +76,7 @@ import { dayChecklist, type CheckAction } from "@/lib/ca-checklist";
 import { styleStatus } from "@/lib/ca-style";
 import { langStatus } from "@/lib/ca-bilingual";
 import { FeatureBox } from "@/components/ca-feature-box";
+import { MonthDocuments, useMonthDocs } from "@/components/ca-month-docs";
 import {
   DailyCoverSettings,
   DesignSaveBar,
@@ -1151,6 +1152,7 @@ const MONTHLY_TABS = [
   { id: "cover", label: "Cover" },
   { id: "ads", label: "Ads & printing" },
   { id: "events", label: "Events" },
+  { id: "documents", label: "Documents" },
 ] as const;
 type MonthlyTab = (typeof MONTHLY_TABS)[number]["id"];
 const MONTHLY_TAB_IDS = MONTHLY_TABS.map((t) => t.id);
@@ -1162,6 +1164,8 @@ function MonthlyPanel() {
   const monthFn = useServerFn(getCaMonth);
   const q = useQuery({ queryKey: ["caMonth", month], queryFn: () => monthFn({ data: { month } }) });
   const design = useIssueDesign(month);
+  const docs = useMonthDocs(month);
+  const waiting = docs.data?.additions.length ?? 0;
   const refresh = () => qc.invalidateQueries({ queryKey: ["caMonth"] });
   const data = q.data;
   const pending = (data?.corrections ?? []).filter((c) => c.status === "pending");
@@ -1211,7 +1215,11 @@ function MonthlyPanel() {
         tabs={MONTHLY_TABS.map((t) => ({
           ...t,
           dot:
-            t.id === "events" ? !!data?.events_missing?.length : t.id !== "issue" && design.changed,
+            t.id === "events"
+              ? !!data?.events_missing?.length
+              : t.id === "documents"
+                ? waiting > 0
+                : t.id !== "issue" && design.changed,
         }))}
         value={tab}
         onChange={setTab}
@@ -1239,10 +1247,17 @@ function MonthlyPanel() {
                 ? "The cover or ads have changes that aren't saved: the PDFs use the saved ones."
                 : null
             }
-            warnings={(data?.events_missing ?? []).map(
-              (n) =>
-                `“${n}” concluded this month but its complete summary isn't written (Events tab); its daily stories print instead.`,
-            )}
+            warnings={[
+              ...(data?.events_missing ?? []).map(
+                (n) =>
+                  `“${n}” concluded this month but its complete summary isn't written (Events tab); its daily stories print instead.`,
+              ),
+              ...(waiting
+                ? [
+                    `${waiting} ${waiting === 1 ? "story has" : "stories have"} new facts from official documents waiting for you (Documents tab).`,
+                  ]
+                : []),
+            ]}
             onChanged={refresh}
           />
           {(data?.events_missing ?? []).length > 0 && (
@@ -1254,6 +1269,17 @@ function MonthlyPanel() {
                 Write it on the Events tab
               </button>
               ; until then their daily stories print instead.
+            </p>
+          )}
+
+          {waiting > 0 && (
+            <p className="rounded-xl border border-amber-400/60 bg-amber-500/10 p-3 text-sm">
+              {waiting === 1 ? "1 story has" : `${waiting} stories have`} new facts from official
+              documents waiting for you.{" "}
+              <button type="button" className="underline" onClick={() => setTab("documents")}>
+                Review them on the Documents tab
+              </button>
+              .
             </p>
           )}
 
@@ -1294,6 +1320,11 @@ function MonthlyPanel() {
       {tab === "events" && (
         <div role="tabpanel" aria-label="Events">
           <EventsPanel month={month} />
+        </div>
+      )}
+      {tab === "documents" && (
+        <div role="tabpanel" aria-label="Documents">
+          <MonthDocuments month={month} />
         </div>
       )}
       <DesignSaveBar state={design} />

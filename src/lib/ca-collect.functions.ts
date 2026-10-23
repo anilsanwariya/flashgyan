@@ -108,6 +108,7 @@ export const saveCaWatchSite = createServerFn({ method: "POST" })
         language: z.enum(["Hindi", "English", "Bilingual"]),
         max_articles: z.number().int().min(1).max(50),
         enabled: z.boolean(),
+        official: z.boolean().optional(),
       })
       .parse(d),
   )

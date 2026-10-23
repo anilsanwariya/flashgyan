@@ -541,6 +541,8 @@ type SiteForm = {
   language: WatchSite["language"];
   max_articles: number;
   enabled: boolean;
+  // A government website: its stories' source prints as official.
+  official: boolean;
 };
 
 const EMPTY_SITE: SiteForm = {
@@ -550,6 +552,7 @@ const EMPTY_SITE: SiteForm = {
   language: "Hindi",
   max_articles: 10,
   enabled: true,
+  official: false,
 };
 
 const METHOD_TEXT: Record<string, string> = {
@@ -645,7 +648,7 @@ function SiteRow({ site, onChanged }: { site: WatchSite; onChanged: () => void }
   if (editing) {
     return (
       <SiteEditor
-        initial={{ ...site }}
+        initial={{ ...site, official: !!site.official }}
         onDone={() => {
           setEditing(false);
           onChanged();
@@ -673,6 +676,7 @@ function SiteRow({ site, onChanged }: { site: WatchSite; onChanged: () => void }
         <div className="font-medium">
           {site.name} <Pill>{section}</Pill> <Pill>{site.language}</Pill>{" "}
           <Pill>up to {site.max_articles}</Pill>
+          {site.official && <Pill>Official</Pill>}
         </div>
         <a
           href={site.url}
@@ -748,6 +752,7 @@ function SiteEditor({
           language: f.language,
           max_articles: f.max_articles,
           enabled: f.enabled,
+          official: f.official,
         },
       });
       toast.success("Saved");
@@ -840,6 +845,20 @@ function SiteEditor({
           </div>
         </div>
       </div>
+      <label className="flex items-start gap-2 text-sm">
+        <Checkbox
+          className="mt-0.5"
+          aria-label="Official government website"
+          checked={f.official}
+          onCheckedChange={(v) => set("official", v === true)}
+        />
+        <span>
+          Official government website
+          <span className="block text-xs text-muted-foreground">
+            PIB, DIPR, ministries, RBI, NITI Aayog… Its stories print the source as “(official)”.
+          </span>
+        </span>
+      </label>
       <div className="flex flex-wrap gap-2">
         <Button
           size="sm"
