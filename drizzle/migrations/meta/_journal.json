@@ -169,6 +169,13 @@
       "when": 1792758391161,
       "tag": "0023_exam_paper_series",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792771404386,
+      "tag": "0024_ca_newspapers_clips",
+      "breakpoints": true
     }
   ]
 }
