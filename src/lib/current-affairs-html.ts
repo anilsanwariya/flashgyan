@@ -26,6 +26,7 @@ import {
   type Visual,
 } from "@/lib/ca-visuals";
 import type { CaFeature } from "@/lib/ca-feature";
+import type { CaReport } from "@/lib/ca-docs";
 import type { EventBlock } from "@/lib/ca-events";
 import {
   COVER_CSS,
@@ -54,6 +55,9 @@ export type MagazineItem = {
   facts: CaFact[];
   context_sources: { title: string }[];
   source_names: string[];
+  // Those of its sources that are official (government documents and
+  // websites), marked so in print.
+  official_names?: string[];
   // A custom magazine's subsection (its section is the category).
   sub?: string | null;
   // The several-day event it belongs to (monthly issue only).
@@ -128,6 +132,13 @@ const T = {
     oneLine: "One line per story",
     article: "Background Article",
     articleSub: "Static topic behind this month's news",
+    official: "official",
+    reports: "Reports &amp; Documents of the Month",
+    reportsSub: "Official reports, indices and surveys",
+    reportsToc: "Reports &amp; documents",
+    releasedBy: "Released by",
+    findings: "Key findings",
+    answer: "Answer",
     events: "Events of the month",
     eventsSub: (n: number) => `${n} ${n === 1 ? "event" : "events"}`,
     concluded: "Concluded",
@@ -165,6 +176,13 @@ const T = {
     oneLine: "हर खबर एक पंक्ति में",
     article: "पृष्ठभूमि लेख",
     articleSub: "इस महीने की खबरों के पीछे का स्थैतिक विषय",
+    official: "आधिकारिक",
+    reports: "इस माह की रिपोर्टें व दस्तावेज़",
+    reportsSub: "आधिकारिक रिपोर्टें, सूचकांक और सर्वेक्षण",
+    reportsToc: "रिपोर्टें व दस्तावेज़",
+    releasedBy: "जारीकर्ता",
+    findings: "मुख्य निष्कर्ष",
+    answer: "उत्तर",
     events: "इस माह के आयोजन",
     eventsSub: (n: number) => `${n} आयोजन`,
     concluded: "संपन्न",
@@ -195,6 +213,8 @@ const ICON_PATHS: Record<string, string> = {
   misc: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>',
   editorial: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   revision: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
+  reports:
+    '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/>',
   events:
     '<rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/><path d="m9 16 2 2 4-4"/>',
   practice:
@@ -407,7 +427,11 @@ function itemHtml(
       : "",
     showDate ? `<span class="tag">${esc(formatDate(item.issue_date, lang))}</span>` : "",
     item.source_names.length
-      ? `<span class="tag src-tag">${t.source}: ${esc(item.source_names.join(", "))}</span>`
+      ? `<span class="tag src-tag">${t.source}: ${esc(
+          item.source_names
+            .map((n) => (item.official_names?.includes(n) ? `${n} (${t.official})` : n))
+            .join(", "),
+        )}</span>`
       : "",
   ].join("");
   // Static Connect: textbook facts on the concepts the news links to, each
@@ -553,6 +577,12 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .feat-sec { break-inside: avoid; margin-top: 4mm; }
 .feat-h { font-size: 11pt; color: ${accent}; margin: 0 0 1mm; }
 .feat-src { margin-top: 4mm; font-size: 8.5pt; color: #64748b; }
+.report { break-inside: avoid-page; margin-bottom: 6mm; padding-bottom: 4mm; border-bottom: 1px solid #e2e8f0; }
+.report:last-child { border-bottom: 0; }
+.rep-meta { margin: 0 0 2mm; font-size: 8.5pt; color: #64748b; }
+.rep-raj { margin-top: 2mm; padding: 2mm 3mm; border-left: 3px solid ${accent}; background: #f8fafc; font-size: 9.5pt; }
+.rep-qs { margin-top: 3mm; }
+.rep-ans { margin: 0 0 2mm 6mm; font-size: 8.5pt; color: #475569; }
 .rev .ans { font-weight: 700; color: ${accent}; }
 .images { margin-top: 2.5mm; }
 .img-row { display: flex; gap: ${GAP_MM}mm; align-items: flex-start; margin: 0 auto 2mm; break-inside: avoid; }
@@ -636,6 +666,38 @@ function featurePage(f: CaFeature, lang: Lang): string {
   return `<section class="section new-page feature"><div class="section-title"><h2>${icon("background")} ${t.article}</h2><span>${t.articleSub}</span></div><h2 class="feat-title">${esc(pick(f.title, lang))}</h2><div class="bi feat-intro"><p>${esc(pick(f.intro, lang))}</p></div>${sections}${sources}</section>`;
 }
 
+// "Reports & documents of the month": a page part for each official report,
+// with its findings, Rajasthan's place and a few questions (answers below).
+function reportsPage(reports: CaReport[], lang: Lang): string {
+  const t = T[lang];
+  if (!reports.length) return "";
+  const body = reports
+    .map((r) => {
+      const by = pick(r.released_by, lang);
+      const meta = [by ? `${t.releasedBy}: ${esc(by)}` : "", esc(formatDate(r.date, lang))]
+        .filter(Boolean)
+        .join(" · ");
+      const raj = r.rajasthan
+        ? `<div class="rep-raj"><b>${t.rajasthan}:</b> ${esc(pick(r.rajasthan, lang))}</div>`
+        : "";
+      const qs = r.mcqs
+        .map(
+          (m, i) =>
+            `<div class="mcq"><span class="qn">${i + 1}.</span><div class="pair">${mcqSide(
+              pick(m.question, lang),
+              m.options.map((o) => pick(o, lang)),
+              t.letters,
+            )}</div></div><p class="rep-ans">${t.answer}: (${t.letters[m.answer] ?? m.answer + 1}) ${esc(pick(m.explanation, lang))}</p>`,
+        )
+        .join("");
+      return `<article class="report"><h3 class="feat-title">${esc(pick(r.name, lang))}</h3><p class="rep-meta">${meta}</p><div class="bi feat-intro"><p>${esc(pick(r.what, lang))}</p></div><h4 class="feat-h">${t.findings}</h4><div class="bi"><ul>${r.findings
+        .map((f) => `<li>${esc(pick(f, lang))}</li>`)
+        .join("")}</ul></div>${raj}${qs ? `<div class="rep-qs">${qs}</div>` : ""}</article>`;
+    })
+    .join("");
+  return `<section class="section new-page reports"><div class="section-title"><h2>${icon("reports")} ${t.reports}</h2><span>${t.reportsSub}</span></div>${body}</section>`;
+}
+
 function mcqSide(question: string, options: string[], letters: string[]): string {
   return `<div class="side"><div class="stmt">${esc(question)}</div><ol>${options
     .map((o, i) => `<li><span class="opt">(${letters[i] ?? i + 1})</span> ${esc(o)}</li>`)
@@ -687,6 +749,8 @@ export function renderMagazine(opts: {
   corrections?: MagazineCorrection[];
   // Monthly only: the background article, when included.
   feature?: CaFeature | null;
+  // Monthly only: "Reports & documents of the month" (those included).
+  reports?: CaReport[];
   // Monthly only: the issue's cover, ads and back cover.
   design?: IssueDesign | null;
   // Ruled notes pages before the back cover, so a printed issue's back
@@ -910,7 +974,7 @@ export function renderMagazine(opts: {
         .join("")}</ol></section>`
     : "";
 
-  const tocHtml = `${blocks.length ? `<div class="toc-row"><span>${icon("events")} ${t.events}</span><b>${blocks.length}</b></div>` : ""}${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}`;
+  const tocHtml = `${blocks.length ? `<div class="toc-row"><span>${icon("events")} ${t.events}</span><b>${blocks.length}</b></div>` : ""}${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.reports?.length ? `<div class="toc-row"><span>${icon("reports")} ${t.reportsToc}</span><b>${opts.reports.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}`;
   const parts: CoverParts = {
     lang,
     period: opts.period,
@@ -977,6 +1041,7 @@ ${sections}
 ${
   !part || part.tail
     ? `${corrections}
+${reportsPage(opts.reports ?? [], lang)}
 ${opts.feature ? featurePage(opts.feature, lang) : ""}
 ${revisionPage(allGroups, lang, label)}
 ${practicePage(everything, lang)}

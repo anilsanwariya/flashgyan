@@ -58,6 +58,8 @@ export type WatchSite = {
   language: "Hindi" | "English" | "Bilingual";
   max_articles: number;
   enabled: boolean;
+  // A government website: its stories' source prints as official.
+  official?: boolean;
   last_method: string | null;
   last_found: number | null;
   last_error: string | null;
@@ -191,6 +193,12 @@ export async function tick(origin?: string): Promise<TickResult> {
     await (await import("@/lib/ca-mags.server")).magStep();
   } catch (e) {
     console.error("custom magazines:", e);
+  }
+  // The monthly magazine's official documents, one part at a time.
+  try {
+    await (await import("@/lib/ca-docs.server")).docStep();
+  } catch (e) {
+    console.error("official documents:", e);
   }
 
   const { data: claimed, error } = await supabaseAdmin.rpc(
@@ -870,6 +878,7 @@ async function saveArticle(article: CaArticle, site: WatchSite | undefined, text
     title: article.title.slice(0, 300),
     content,
     url: article.url,
+    ...(site?.official ? { official: true } : {}),
   });
   fail(
     (
@@ -1038,13 +1047,21 @@ export async function saveSite(site: Partial<WatchSite> & { url: string; name: s
     language: site.language ?? "Hindi",
     max_articles: site.max_articles ?? 10,
     enabled: site.enabled ?? true,
+    ...(site.official !== undefined ? { official: site.official } : {}),
   };
-  const q = site.id
-    ? from("ca_watch_sites")
-        .update(row as never)
-        .eq("id", site.id)
-    : from("ca_watch_sites").insert(row as never);
-  fail((await q).error);
+  const save = (r: Record<string, unknown>) =>
+    site.id
+      ? from("ca_watch_sites")
+          .update(r as never)
+          .eq("id", site.id)
+      : from("ca_watch_sites").insert(r as never);
+  let { error } = await save(row);
+  // Before the documents migration there is no official column.
+  if (error && /official/.test(error.message) && !site.official) {
+    const { official: _o, ...rest } = row as typeof row & { official?: boolean };
+    ({ error } = await save(rest));
+  }
+  fail(error);
 }
 
 export async function deleteSite(id: string) {
