@@ -611,6 +611,7 @@ export async function extractSourceChunk(sourceId: string, index: number) {
     .eq("id", sourceId);
 
   try {
+    const settingsNow = await getMagazineSettings();
     const raw = await saathiComplete(
       apiKey(),
       extractMessages({
@@ -618,10 +619,11 @@ export async function extractSourceChunk(sourceId: string, index: number) {
         sourceName: src.source_name,
         date: src.issue_date,
         text,
+        lessons: settingsNow.exam_lessons ?? [],
       }),
     );
     const found = parseExtracted(raw, text, src.id);
-    const { daily_stories } = await getMagazineSettings();
+    const { daily_stories } = settingsNow;
     // The day's stories, kept up to date as this part adds to them.
     const day = found.length ? await dayStoryRows({ date: src.issue_date }) : [];
     const eventIds = new Map<string, string | null>();

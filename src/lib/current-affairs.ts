@@ -507,8 +507,11 @@ export function extractMessages(opts: {
   text: string;
   // An instruction after the text (an official document's part to read).
   extra?: string;
+  // Lessons from real exam papers: kinds of news that were asked.
+  lessons?: string[];
 }): ChatMessage[] {
   if (opts.section === "editorial") return editorialExtractMessages(opts);
+  const lessons = (opts.lessons ?? []).filter(Boolean).slice(0, 12);
   return [
     {
       role: "system",
@@ -517,7 +520,11 @@ ${blueprintText()}
 ${CATEGORY_TEXT}
 Skip: advertisements, crime and accidents, purely local incidents, opinion without facts, market tips, entertainment.
 Reply with JSON only: [{"type": one story type id, "headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 as described above, "rajasthan": true if it concerns Rajasthan, ${KEY_FIELD}, ${EVENT_FIELD}, ${CONCEPT_FIELD}, "facts": [{"slot": the slot id this fact fills, "text": one short fact in English, "quote": the exact words from the source that state this fact, copied character for character (5 to 30 words, in the source's language)}]}].
-Every fact must fill one slot of its story's type; leave a slot out if the source doesn't state it, and drop any fact that fits no slot. Use only facts stated in the source and keep every number, name and date exactly. Reply [] if nothing is exam-relevant.`,
+Every fact must fill one slot of its story's type; leave a slot out if the source doesn't state it, and drop any fact that fits no slot. Use only facts stated in the source and keep every number, name and date exactly. Reply [] if nothing is exam-relevant.${
+        lessons.length
+          ? `\nLessons from recent RPSC and RSSB papers (news like this was asked, so keep it):\n${lessons.map((l) => `- ${l}`).join("\n")}`
+          : ""
+      }`,
     },
     {
       role: "user",
@@ -1150,6 +1157,9 @@ export type MagazineSettings = {
   post_corrections: boolean;
   // House style: the editor's writing rules, added to SAATHI's instructions.
   style_rules: string[];
+  // Lessons from real exam papers (Exam papers → Check against the
+  // magazine): kinds of news that were asked, added to how stories are picked.
+  exam_lessons?: string[];
   // The daily issue's cover layout.
   daily_cover: DailyLayout;
   // An ad from the library printed as the daily issue's last page ("": none).

@@ -22,6 +22,7 @@ import {
   MessageSquareText,
   NotebookPen,
   PlugZap,
+  ScrollText,
   Settings2,
   Sparkles,
   SquarePen,
@@ -44,6 +45,7 @@ export type AdminSectionId =
   | "ca.monthly"
   | "ca.custom"
   | "ca.schemes"
+  | "ca.papers"
   | "ca.settings"
   | "bot.broadcast"
   | "bot.commands"
@@ -140,6 +142,13 @@ export const ADMIN_GROUPS: { label: string; sections: SectionDef[] }[] = [
         icon: ClipboardList,
         description:
           "Every government scheme in the news, with all its stories in order. New stories print what came before.",
+      },
+      {
+        id: "ca.papers",
+        label: "Exam papers",
+        icon: ScrollText,
+        description:
+          "RPSC and RSSB papers with their answer keys, read from PDF or Excel, exported to Excel, and checked against the magazine.",
       },
       {
         id: "ca.settings",

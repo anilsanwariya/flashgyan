@@ -109,6 +109,7 @@ export const Route = createFileRoute("/_authenticated/admin")({
     open?: "facts" | "style" | "lang";
     tab?: string;
     mag?: string;
+    paper?: string;
   } => ({
     ...(isAdminSection(search.section) ? { section: search.section } : {}),
     ...(typeof search.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(search.date)
@@ -124,6 +125,10 @@ export const Route = createFileRoute("/_authenticated/admin")({
     // The custom magazine open (Custom magazines).
     ...(typeof search.mag === "string" && /^[0-9a-f-]{36}$/.test(search.mag)
       ? { mag: search.mag }
+      : {}),
+    // The exam paper open (Exam papers).
+    ...(typeof search.paper === "string" && /^[0-9a-f-]{36}$/.test(search.paper)
+      ? { paper: search.paper }
       : {}),
   }),
   component: Admin,
