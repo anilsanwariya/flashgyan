@@ -1369,6 +1369,135 @@ export type Database = {
         }
         Relationships: []
       }
+      exam_papers: {
+        Row: {
+          checked_at: string | null
+          conducted_by: string
+          created_at: string
+          error: string | null
+          exam: string
+          exam_date: string | null
+          id: string
+          key_added: boolean
+          lessons: Json
+          pages: number
+          pages_done: number
+          paper_code: string
+          questions_total: number | null
+          source: string
+          subject: string
+          updated_at: string
+        }
+        Insert: {
+          checked_at?: string | null
+          conducted_by?: string
+          created_at?: string
+          error?: string | null
+          exam: string
+          exam_date?: string | null
+          id?: string
+          key_added?: boolean
+          lessons?: Json
+          pages?: number
+          pages_done?: number
+          paper_code?: string
+          questions_total?: number | null
+          source?: string
+          subject?: string
+          updated_at?: string
+        }
+        Update: {
+          checked_at?: string | null
+          conducted_by?: string
+          created_at?: string
+          error?: string | null
+          exam?: string
+          exam_date?: string | null
+          id?: string
+          key_added?: boolean
+          lessons?: Json
+          pages?: number
+          pages_done?: number
+          paper_code?: string
+          questions_total?: number | null
+          source?: string
+          subject?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      exam_questions: {
+        Row: {
+          ca: boolean | null
+          correct: number | null
+          created_at: string
+          deleted: boolean
+          extra_en: string
+          extra_hi: string
+          id: string
+          match: string | null
+          match_note: string | null
+          matched_item: string | null
+          options: Json
+          paper_id: string
+          q_no: number
+          question_en: string
+          question_hi: string
+          updated_at: string
+        }
+        Insert: {
+          ca?: boolean | null
+          correct?: number | null
+          created_at?: string
+          deleted?: boolean
+          extra_en?: string
+          extra_hi?: string
+          id?: string
+          match?: string | null
+          match_note?: string | null
+          matched_item?: string | null
+          options?: Json
+          paper_id: string
+          q_no: number
+          question_en?: string
+          question_hi?: string
+          updated_at?: string
+        }
+        Update: {
+          ca?: boolean | null
+          correct?: number | null
+          created_at?: string
+          deleted?: boolean
+          extra_en?: string
+          extra_hi?: string
+          id?: string
+          match?: string | null
+          match_note?: string | null
+          matched_item?: string | null
+          options?: Json
+          paper_id?: string
+          q_no?: number
+          question_en?: string
+          question_hi?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "exam_questions_matched_item_fkey"
+            columns: ["matched_item"]
+            isOneToOne: false
+            referencedRelation: "ca_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "exam_questions_paper_id_fkey"
+            columns: ["paper_id"]
+            isOneToOne: false
+            referencedRelation: "exam_papers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       flashcard_decks: {
         Row: {
           created_at: string
@@ -2399,6 +2528,18 @@ export type Database = {
           headline: string
           id: string
           issue_date: string
+          similarity: number
+        }[]
+      }
+      exam_similar_items: {
+        Args: {
+          p_count?: number
+          p_embedding: string
+          p_from: string
+          p_to: string
+        }
+        Returns: {
+          id: string
           similarity: number
         }[]
       }
