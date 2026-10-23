@@ -166,6 +166,7 @@ import {
 import { bestArticle, cosine, meaningText, type CompareMatch } from "@/lib/ca-compare";
 import { ADD_POINTS_MAX, STORY_POINTS_MAX, parsePoints, pointsMessages } from "@/lib/ca-points";
 import type { Geo } from "@/lib/ca-map";
+import type { Earlier } from "@/lib/ca-schemes";
 import { dayChecklist, type Check } from "@/lib/ca-checklist";
 import {
   LANG_CHECK_STORIES,
@@ -4416,10 +4417,15 @@ export async function toMagazineItems(rows: CaItem[]): Promise<MagazineItem[]> {
       if (r.geo) geos.set(r.id, r.geo);
     }
   }
+  // The stories before each on the same scheme (the scheme register).
+  const earlier = await (await import("@/lib/ca-schemes.server"))
+    .earlierFor(items as (CaItem & { origin_id?: string | null })[])
+    .catch(() => new Map<string, Earlier[]>());
   return items.map((i) => ({
     id: i.id,
     issue_date: i.issue_date,
     category: normalizeCategory(i.category),
+    earlier: earlier.get(i.id),
     importance: i.importance,
     rajasthan: i.rajasthan,
     content: i.content!,
