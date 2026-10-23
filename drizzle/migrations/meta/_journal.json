@@ -162,6 +162,13 @@
       "when": 1792754143020,
       "tag": "0022_exam_papers",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792758391161,
+      "tag": "0023_exam_paper_series",
+      "breakpoints": true
     }
   ]
 }
