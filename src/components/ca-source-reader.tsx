@@ -29,6 +29,7 @@ import {
 } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { ClippingButton } from "@/components/ca-clippings";
 import { toast } from "sonner";
 import {
   ArrowDown,
@@ -2125,6 +2126,7 @@ export function SourceReader({
               <>
                 <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   <span>{source.source_name || source.section.toUpperCase()}</span>
+                  <ClippingButton sourceId={source.id} />
                   {source.url && (
                     <a
                       href={source.url}

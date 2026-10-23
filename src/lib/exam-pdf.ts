@@ -175,3 +175,101 @@ export async function saveWorkbook(
   }
   XLSX.writeFile(wb, fileName);
 }
+
+// A PDF kept open, for clipping a newspaper: page images to show, and a box
+// of a page rendered sharp for the AI (from the PDF itself, not the screen).
+export type OpenPdf = {
+  pages: number;
+  // A page as an image (a blob: link), this many pixels wide.
+  pageImage: (page: number, width: number) => Promise<{ url: string; w: number; h: number }>;
+  // A box of a page (parts of the page, 0-1) as a JPEG, its longer side
+  // about `side` pixels.
+  crop: (
+    page: number,
+    box: { x: number; y: number; w: number; h: number },
+    side?: number,
+  ) => Promise<PageImage & { w: number; h: number }>;
+  close: () => Promise<void>;
+};
+
+export async function openPdf(src: File | string): Promise<OpenPdf> {
+  const lib = await pdfjs();
+  const bytes =
+    typeof src === "string"
+      ? await fetch(src).then((r) => {
+          if (!r.ok) throw new Error("Couldn't download the newspaper");
+          return r.arrayBuffer();
+        })
+      : await src.arrayBuffer();
+  const doc = await lib.getDocument({
+    data: new Uint8Array(bytes),
+    BinaryDataFactory: BinaryData,
+  } as Parameters<typeof lib.getDocument>[0]).promise;
+  const draw = async (
+    page: number,
+    scale: number,
+    w: number,
+    h: number,
+    dx = 0,
+    dy = 0,
+  ): Promise<HTMLCanvasElement> => {
+    const p = await doc.getPage(page);
+    const viewport = p.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(w));
+    canvas.height = Math.max(1, Math.round(h));
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await p.render({
+      canvasContext: ctx,
+      viewport,
+      canvas,
+      transform: [1, 0, 0, 1, -dx, -dy],
+    } as Parameters<typeof p.render>[0]).promise;
+    return canvas;
+  };
+  const jpeg = (canvas: HTMLCanvasElement, quality: number) =>
+    new Promise<Blob>((ok, no) =>
+      canvas.toBlob(
+        (b) => (b ? ok(b) : no(new Error("Couldn't draw the page"))),
+        "image/jpeg",
+        quality,
+      ),
+    );
+  return {
+    pages: doc.numPages,
+    async pageImage(page, width) {
+      const base = (await doc.getPage(page)).getViewport({ scale: 1 });
+      const scale = width / base.width;
+      const canvas = await draw(page, scale, base.width * scale, base.height * scale);
+      return {
+        url: URL.createObjectURL(await jpeg(canvas, 0.82)),
+        w: canvas.width,
+        h: canvas.height,
+      };
+    },
+    async crop(page, box, side = 2000) {
+      const base = (await doc.getPage(page)).getViewport({ scale: 1 });
+      const bw = box.w * base.width;
+      const bh = box.h * base.height;
+      // Sharp enough for small print, within what phones can draw.
+      const scale = Math.min(8, side / Math.max(bw, bh, 1));
+      const canvas = await draw(
+        page,
+        scale,
+        bw * scale,
+        bh * scale,
+        box.x * base.width * scale,
+        box.y * base.height * scale,
+      );
+      return {
+        media_type: "image/jpeg",
+        data: await toBase64(await jpeg(canvas, 0.86)),
+        w: canvas.width,
+        h: canvas.height,
+      };
+    },
+    close: () => doc.loadingTask.destroy(),
+  };
+}

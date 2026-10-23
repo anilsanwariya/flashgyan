@@ -4,6 +4,7 @@
 import { CustomMagazines } from "@/components/ca-custom-panel";
 import { SchemeRegister } from "@/components/ca-scheme-register";
 import { ExamPapers } from "@/components/exam-papers-panel";
+import { NewspaperClipping } from "@/components/ca-clipper";
 import { PastCollection } from "@/components/ca-past-collection";
 import { EventsPanel } from "@/components/ca-events-panel";
 import { useEffect, useRef, useState } from "react";
@@ -880,6 +881,8 @@ function DailyPanel() {
         <div className={showSources ? "space-y-5 px-2 pb-2 sm:px-3 sm:pb-3" : "hidden"}>
           <CollectionBox date={date} onChanged={refresh} />
           <PastCollection />
+
+          <NewspaperClipping date={date} onChanged={refresh} />
 
           {/* Upload */}
           <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
