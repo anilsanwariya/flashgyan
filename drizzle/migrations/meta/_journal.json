@@ -134,6 +134,13 @@
       "when": 1792724889529,
       "tag": "0018_ca_month_documents",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792728863313,
+      "tag": "0019_ca_story_types_magazine_additions",
+      "breakpoints": true
     }
   ]
 }
