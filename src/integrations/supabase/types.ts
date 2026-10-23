@@ -900,6 +900,8 @@ export type Database = {
           position: number
           rajasthan: boolean
           related_item_id: string | null
+          scheme_checked: boolean
+          scheme_id: string | null
           source_ids: string[]
           status: string
           story_key: string | null
@@ -941,6 +943,8 @@ export type Database = {
           position?: number
           rajasthan?: boolean
           related_item_id?: string | null
+          scheme_checked?: boolean
+          scheme_id?: string | null
           source_ids?: string[]
           status?: string
           story_key?: string | null
@@ -982,6 +986,8 @@ export type Database = {
           position?: number
           rajasthan?: boolean
           related_item_id?: string | null
+          scheme_checked?: boolean
+          scheme_id?: string | null
           source_ids?: string[]
           status?: string
           story_key?: string | null
@@ -1024,6 +1030,13 @@ export type Database = {
             columns: ["related_item_id"]
             isOneToOne: false
             referencedRelation: "ca_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ca_items_scheme_id_fkey"
+            columns: ["scheme_id"]
+            isOneToOne: false
+            referencedRelation: "ca_schemes"
             referencedColumns: ["id"]
           },
         ]
@@ -1194,6 +1207,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      ca_schemes: {
+        Row: {
+          aliases: string[]
+          created_at: string
+          embedding: string | null
+          id: string
+          level: string
+          name: string
+          name_hi: string
+          updated_at: string
+        }
+        Insert: {
+          aliases?: string[]
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          level?: string
+          name: string
+          name_hi?: string
+          updated_at?: string
+        }
+        Update: {
+          aliases?: string[]
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          level?: string
+          name?: string
+          name_hi?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       ca_sources: {
         Row: {
