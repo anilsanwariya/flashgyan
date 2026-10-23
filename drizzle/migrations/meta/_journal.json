@@ -176,6 +176,13 @@
       "when": 1792771404386,
       "tag": "0024_ca_newspapers_clips",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1792771434570,
+      "tag": "0025_ca_clips_storage_policy",
+      "breakpoints": true
     }
   ]
 }
