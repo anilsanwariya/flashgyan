@@ -59,6 +59,7 @@ import {
   PostButtons,
   SectionFeature,
   useMagMaterials,
+  useMagSuggestions,
 } from "@/components/ca-mag-finishing";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -330,6 +331,7 @@ function MagazineView({ id, onBack }: { id: string; onBack: () => void }) {
   const updateFn = useServerFn(updateCaItem);
   const enrichFn = useServerFn(enrichCaItem);
   const materials = useMagMaterials(id);
+  const suggestions = useMagSuggestions(id);
   const readingRef = useRef(0);
   readingRef.current = materials.reading;
   const q = useQuery({
@@ -667,7 +669,9 @@ function MagazineView({ id, onBack }: { id: string; onBack: () => void }) {
         label="Custom magazine"
         tabs={MAG_TABS.map((t) => ({
           ...t,
-          dot: (t.id === "cover" || t.id === "ads") && design.changed,
+          dot:
+            ((t.id === "cover" || t.id === "ads") && design.changed) ||
+            (t.id === "material" && !!suggestions.data?.length),
         }))}
         value={tab}
         onChange={setTab}

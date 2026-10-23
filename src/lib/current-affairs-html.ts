@@ -27,6 +27,7 @@ import {
 } from "@/lib/ca-visuals";
 import type { CaFeature } from "@/lib/ca-feature";
 import type { CaReport } from "@/lib/ca-docs";
+import { CARD_LABELS, SCHEME_GROUPS, schemeGroup } from "@/lib/ca-blueprint";
 import type { EventBlock } from "@/lib/ca-events";
 import {
   COVER_CSS,
@@ -58,6 +59,9 @@ export type MagazineItem = {
   // Those of its sources that are official (government documents and
   // websites), marked so in print.
   official_names?: string[];
+  // Its blueprint type (scheme, person…): its part of the "Schemes, Policies
+  // & Reports" section and, for some, a fact card.
+  story_type?: string | null;
   // A custom magazine's subsection (its section is the category).
   sub?: string | null;
   // The several-day event it belongs to (monthly issue only).
@@ -133,9 +137,6 @@ const T = {
     article: "Background Article",
     articleSub: "Static topic behind this month's news",
     official: "official",
-    reports: "Reports &amp; Documents of the Month",
-    reportsSub: "Official reports, indices and surveys",
-    reportsToc: "Reports &amp; documents",
     releasedBy: "Released by",
     findings: "Key findings",
     answer: "Answer",
@@ -177,9 +178,6 @@ const T = {
     article: "पृष्ठभूमि लेख",
     articleSub: "इस महीने की खबरों के पीछे का स्थैतिक विषय",
     official: "आधिकारिक",
-    reports: "इस माह की रिपोर्टें व दस्तावेज़",
-    reportsSub: "आधिकारिक रिपोर्टें, सूचकांक और सर्वेक्षण",
-    reportsToc: "रिपोर्टें व दस्तावेज़",
     releasedBy: "जारीकर्ता",
     findings: "मुख्य निष्कर्ष",
     answer: "उत्तर",
@@ -211,6 +209,10 @@ const ICON_PATHS: Record<string, string> = {
   sports:
     '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.7V17c0 .6-.5 1-1 1.2C7.9 18.8 7 20.2 7 22"/><path d="M14 14.7V17c0 .6.5 1 1 1.2 1.1.6 2 2 2 3.8"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>',
   misc: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>',
+  schemes:
+    '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="m9 15 2 2 4-4"/>',
+  persons: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  places: '<path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15M15 6v15"/>',
   editorial: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   revision: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
   reports:
@@ -401,6 +403,8 @@ function visualsHtml(
     .join("");
 }
 
+const CARD_SECTIONS = new Set(["schemes", "persons", "places"]);
+
 function itemHtml(
   item: MagazineItem,
   number: number,
@@ -415,9 +419,27 @@ function itemHtml(
   const shown = pointsToShow(c)
     .map((p) => pick(p, lang))
     .filter(Boolean);
-  const points = shown.length
-    ? `<div class="bi points"><ul>${shown.map((p) => `<li>${esc(p)}</li>`).join("")}</ul></div>`
-    : "";
+  // A scheme, policy, law, person or place in its own section prints its
+  // points as a fact card (each beside what it is), while its points still
+  // match its facts.
+  const labels =
+    item.story_type && CARD_SECTIONS.has(item.category) ? CARD_LABELS[item.story_type] : undefined;
+  const cardRows =
+    labels && c.points.length === item.facts.length
+      ? pointsToShow({ ...c, points: c.points.map((_, i) => i) })
+          .map((i) => ({ label: labels[item.facts[i]?.slot ?? ""], text: pick(c.points[i], lang) }))
+          .filter((r) => r.text)
+      : null;
+  const points = !shown.length
+    ? ""
+    : cardRows && cardRows.some((r) => r.label)
+      ? `<div class="bi points"><table class="card">${cardRows
+          .map(
+            (r) =>
+              `<tr><th>${r.label ? esc(pick(r.label, lang)) : ""}</th><td>${esc(r.text)}</td></tr>`,
+          )
+          .join("")}</table></div>`
+      : `<div class="bi points"><ul>${shown.map((p) => `<li>${esc(p)}</li>`).join("")}</ul></div>`;
   // Visuals beside the key points sit in a column to their right.
   const placed = printedPlaces(c, shown.length > 0);
   const besideHtml = visualsHtml(placed, "beside", false, accent, lang);
@@ -579,6 +601,10 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .feat-src { margin-top: 4mm; font-size: 8.5pt; color: #64748b; }
 .report { break-inside: avoid-page; margin-bottom: 6mm; padding-bottom: 4mm; border-bottom: 1px solid #e2e8f0; }
 .report:last-child { border-bottom: 0; }
+.card { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+.card th { width: 28%; text-align: left; vertical-align: top; padding: 1mm 2mm 1mm 0; color: ${accent}; font-weight: 600; border-bottom: 1px solid #e2e8f0; }
+.card td { vertical-align: top; padding: 1mm 0; border-bottom: 1px solid #e2e8f0; }
+.card tr:last-child th, .card tr:last-child td { border-bottom: 0; }
 .rep-meta { margin: 0 0 2mm; font-size: 8.5pt; color: #64748b; }
 .rep-raj { margin-top: 2mm; padding: 2mm 3mm; border-left: 3px solid ${accent}; background: #f8fafc; font-size: 9.5pt; }
 .rep-qs { margin-top: 3mm; }
@@ -666,12 +692,12 @@ function featurePage(f: CaFeature, lang: Lang): string {
   return `<section class="section new-page feature"><div class="section-title"><h2>${icon("background")} ${t.article}</h2><span>${t.articleSub}</span></div><h2 class="feat-title">${esc(pick(f.title, lang))}</h2><div class="bi feat-intro"><p>${esc(pick(f.intro, lang))}</p></div>${sections}${sources}</section>`;
 }
 
-// "Reports & documents of the month": a page part for each official report,
-// with its findings, Rajasthan's place and a few questions (answers below).
-function reportsPage(reports: CaReport[], lang: Lang): string {
+// The month's official reports (in "Schemes, Policies & Reports" → Reports
+// & indices): each with its findings, Rajasthan's place and a few questions
+// (answers below).
+function reportArticles(reports: CaReport[], lang: Lang): string {
   const t = T[lang];
-  if (!reports.length) return "";
-  const body = reports
+  return reports
     .map((r) => {
       const by = pick(r.released_by, lang);
       const meta = [by ? `${t.releasedBy}: ${esc(by)}` : "", esc(formatDate(r.date, lang))]
@@ -695,7 +721,6 @@ function reportsPage(reports: CaReport[], lang: Lang): string {
         .join("")}</ul></div>${raj}${qs ? `<div class="rep-qs">${qs}</div>` : ""}</article>`;
     })
     .join("");
-  return `<section class="section new-page reports"><div class="section-title"><h2>${icon("reports")} ${t.reports}</h2><span>${t.reportsSub}</span></div>${body}</section>`;
 }
 
 function mcqSide(question: string, options: string[], letters: string[]): string {
@@ -749,7 +774,8 @@ export function renderMagazine(opts: {
   corrections?: MagazineCorrection[];
   // Monthly only: the background article, when included.
   feature?: CaFeature | null;
-  // Monthly only: "Reports & documents of the month" (those included).
+  // Monthly only: the month's report pages (those included), printed in
+  // "Schemes, Policies & Reports".
   reports?: CaReport[];
   // Monthly only: the issue's cover, ads and back cover.
   design?: IssueDesign | null;
@@ -804,10 +830,20 @@ export function renderMagazine(opts: {
       b.importance - a.importance,
   );
   const groups = new Map<string, MagazineItem[]>();
+  // The month's report pages print in "Schemes, Policies & Reports", even
+  // without a story there.
+  const reports = !custom && monthly ? (opts.reports ?? []) : [];
   for (const it of items) {
     const list = groups.get(it.category) ?? [];
     list.push(it);
     groups.set(it.category, list);
+  }
+  if (reports.length && !groups.has("schemes")) {
+    const all = [...groups.entries(), ["schemes", []] as [string, MagazineItem[]]].sort(
+      (a, b) => (order.get(a[0]) ?? 99) - (order.get(b[0]) ?? 99),
+    );
+    groups.clear();
+    for (const [k, v] of all) groups.set(k, v);
   }
   // A concluded event's complete summary prints as one story of the section
   // most of its daily stories were in.
@@ -882,7 +918,7 @@ export function renderMagazine(opts: {
                 `<div class="toc-row toc-sub"><span>${esc(pick(subLabel(id), lang))}</span><b>${list.filter((i) => i.sub === id).length}</b></div>`,
             )
             .join("")}</div>`
-        : `<div class="toc-row"><span>${icon(cat)} ${esc(label(cat)[lang])}</span><b>${list.length}</b></div>`,
+        : `<div class="toc-row"><span>${icon(cat)} ${esc(label(cat)[lang])}</span><b>${list.length + (cat === "schemes" ? reports.length : 0)}</b></div>`,
     )
     .join("");
 
@@ -926,8 +962,21 @@ export function renderMagazine(opts: {
   if (part) n = part.start;
   const sections = [...groups.entries()]
     .map(([cat, all]) => [cat, inPart ? all.filter((i) => inPart.has(i.id)) : all] as const)
-    .filter(([, list]) => list.length)
-    .map(([cat, list]) => {
+    .filter(([cat, list]) => list.length || (cat === "schemes" && reports.length && !inPart))
+    .map(([cat, list0]) => {
+      // "Schemes, Policies & Reports" in its parts: Rajasthan schemes,
+      // central schemes, policies and laws, reports and indices (with the
+      // month's report pages).
+      const parted = cat === "schemes" && !custom;
+      const groupIdx = new Map<string, number>(SCHEME_GROUPS.map((g, i) => [g.id, i]));
+      const list = parted
+        ? [...list0].sort(
+            (a, b) =>
+              (groupIdx.get(schemeGroup(a)) ?? 9) - (groupIdx.get(schemeGroup(b)) ?? 9) ||
+              a.issue_date.localeCompare(b.issue_date) ||
+              b.importance - a.importance,
+          )
+        : list0;
       // A monthly issue can print an ad page after any section.
       const ad = adById(design?.section_ads[cat]);
       // A custom magazine's section ends with its background article, once
@@ -937,19 +986,30 @@ export function renderMagazine(opts: {
         custom?.features?.[cat] && (!inPart || (last && inPart.has(last.id)))
           ? featurePage(custom.features[cat], lang)
           : "";
-      // A custom magazine's subsections get a heading of their own.
+      // A custom magazine's subsections, and this section's parts, get a
+      // heading of their own.
       let sub: string | null | undefined;
-      const body = list
-        .map((it) => {
-          const head =
-            custom && it.sub && it.sub !== sub
-              ? `<h3 class="sub-title">${esc(pick(subLabel(it.sub), lang))}</h3>`
-              : "";
-          sub = it.sub;
-          return head + itemHtml(it, ++n, monthly, accent, lang, boxes);
-        })
-        .join("");
-      return `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>${icon(cat)} ${esc(label(cat)[lang])}</h2><span>${list.length} ${t.stories(list.length)}</span></div>${body}</section>${feature}${ad ? adPageHtml(ad, lang, cat) : ""}`;
+      const partTitle = (id: string) =>
+        `<h3 class="sub-title">${esc(pick(SCHEME_GROUPS.find((g) => g.id === id)!.title, lang))}</h3>`;
+      const body =
+        list
+          .map((it) => {
+            const key = parted ? schemeGroup(it) : it.sub;
+            const head =
+              parted && key !== sub
+                ? partTitle(key!)
+                : custom && it.sub && it.sub !== sub
+                  ? `<h3 class="sub-title">${esc(pick(subLabel(it.sub), lang))}</h3>`
+                  : "";
+            sub = key;
+            return head + itemHtml(it, ++n, monthly, accent, lang, boxes);
+          })
+          .join("") +
+        (parted && reports.length
+          ? `${sub === "reports" ? "" : partTitle("reports")}${reportArticles(reports, lang)}`
+          : "");
+      const count = list.length + (parted ? reports.length : 0);
+      return `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>${icon(cat)} ${esc(label(cat)[lang])}</h2><span>${count} ${t.stories(count)}</span></div>${body}</section>${feature}${ad ? adPageHtml(ad, lang, cat) : ""}`;
     })
     .join("");
 
@@ -974,7 +1034,7 @@ export function renderMagazine(opts: {
         .join("")}</ol></section>`
     : "";
 
-  const tocHtml = `${blocks.length ? `<div class="toc-row"><span>${icon("events")} ${t.events}</span><b>${blocks.length}</b></div>` : ""}${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.reports?.length ? `<div class="toc-row"><span>${icon("reports")} ${t.reportsToc}</span><b>${opts.reports.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}`;
+  const tocHtml = `${blocks.length ? `<div class="toc-row"><span>${icon("events")} ${t.events}</span><b>${blocks.length}</b></div>` : ""}${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}`;
   const parts: CoverParts = {
     lang,
     period: opts.period,
@@ -1041,7 +1101,6 @@ ${sections}
 ${
   !part || part.tail
     ? `${corrections}
-${reportsPage(opts.reports ?? [], lang)}
 ${opts.feature ? featurePage(opts.feature, lang) : ""}
 ${revisionPage(allGroups, lang, label)}
 ${practicePage(everything, lang)}

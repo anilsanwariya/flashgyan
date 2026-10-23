@@ -83,11 +83,24 @@ export const deleteCaDocument = createServerFn({ method: "POST" })
 
 export const decideCaDocAddition = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ id, approve: z.boolean() }).parse(d))
+  .inputValidator((d: unknown) =>
+    z.object({ id, approve: z.boolean(), also_daily: z.boolean().optional() }).parse(d),
+  )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    await (await server()).decideAddition(data.id, data.approve);
+    await (await server()).decideAddition(data.id, data.approve, data.also_daily ?? false);
     return { ok: true };
+  });
+
+// A custom magazine's suggestions from its material (new facts, corrections).
+export const listCaMagSuggestions = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await (await server()).listSuggestions({ magazine: data.id })).filter(
+      (a) => a.status === "pending",
+    );
   });
 
 export const writeCaReport = createServerFn({ method: "POST" })

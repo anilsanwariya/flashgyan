@@ -37,11 +37,13 @@ import {
   mergeFacts,
   parseExtracted,
   splitSource,
+  storyText,
   type Bi,
   type CaFact,
   type UploadSection,
 } from "@/lib/current-affairs";
 import { cosine, parseVector } from "@/lib/ca-duplicates";
+import { newFacts } from "@/lib/ca-docs";
 import * as CA from "@/lib/current-affairs.server";
 import type { CaItem } from "@/lib/current-affairs.server";
 
@@ -922,6 +924,8 @@ export async function materialStep(magId: string): Promise<string | null> {
   const parts = splitSource(src.content);
   const text = parts[src.chunks_done];
   let added = 0;
+  let offered = 0;
+  let fixes = 0;
   if (text) {
     try {
       const found = parseExtracted(
@@ -940,25 +944,97 @@ export async function materialStep(magId: string): Promise<string | null> {
       const { count: had } = await from("ca_items")
         .select("id", { count: "exact", head: true })
         .eq("magazine_id", magId);
-      const rows = found.map((x, i) => ({
-        magazine_id: magId,
-        issue_date: null,
-        mag_date: src.mag_date,
-        category: x.category,
-        headline: x.headline,
-        facts: x.facts,
-        source_ids: [src.id],
-        importance: x.importance,
-        rajasthan: x.rajasthan,
-        concept: x.concept,
-        content: null,
-        context_sources: [],
-        status: "included",
-        needs_enrich: true,
-        position: (had ?? 0) + i,
-        mag_section: null,
-      }));
-      if (rows.length) fail((await from("ca_items").insert(rows as never)).error);
+      // The magazine's stories, to find the ones this material adds to.
+      const { data: mine } = await from("ca_items")
+        .select("id,facts,source_ids,mag_parent,content,embedding")
+        .eq("magazine_id", magId);
+      const pool = (
+        (mine ?? []) as unknown as {
+          id: string;
+          facts: CaFact[];
+          source_ids: string[];
+          mag_parent?: string | null;
+          content: unknown;
+          embedding: unknown;
+        }[]
+      ).map((r) => ({ ...r, vec: parseVector(r.embedding) }));
+      const { offerSuggestion } = await import("@/lib/ca-docs.server");
+      const rows: Record<string, unknown>[] = [];
+      for (const x of found) {
+        const vec = await CA.embedText(storyText(x));
+        let best: (typeof pool)[number] | null = null;
+        let score = 0;
+        for (const r of pool) {
+          if (!r.vec) continue;
+          const c = cosine(vec, r.vec);
+          if (c > score) [best, score] = [r, c];
+        }
+        if (best && score >= CA.FOLLOW_UP_SIMILARITY) {
+          // A story joined into a combined article: the article takes it.
+          const target = (best.mag_parent && pool.find((r) => r.id === best!.mag_parent)) || best;
+          if (target.source_ids.includes(src.id)) {
+            // Made from this material: its facts join directly.
+            await from("ca_items")
+              .update({
+                facts: mergeFacts(target.facts, x.facts),
+                ...(target.content ? {} : { needs_enrich: true }),
+                updated_at: now(),
+              } as never)
+              .eq("id", target.id);
+            continue;
+          }
+          const fresh = newFacts(target.facts, x.facts);
+          if (fresh.length) {
+            await offerSuggestion({ magazine: magId }, src.id, target.id, "facts", fresh);
+            offered++;
+          }
+          const changes = await CA.factChanges(target.id, {
+            date: src.mag_date,
+            facts: x.facts,
+          }).catch(() => []);
+          if (changes.length) {
+            await offerSuggestion(
+              { magazine: magId },
+              src.id,
+              target.id,
+              "correction",
+              x.facts,
+              changes,
+            );
+            fixes++;
+          }
+          continue;
+        }
+        rows.push({
+          magazine_id: magId,
+          issue_date: null,
+          mag_date: src.mag_date,
+          category: x.category,
+          headline: x.headline,
+          facts: x.facts,
+          source_ids: [src.id],
+          importance: x.importance,
+          rajasthan: x.rajasthan,
+          concept: x.concept,
+          content: null,
+          context_sources: [],
+          status: "included",
+          needs_enrich: true,
+          position: (had ?? 0) + rows.length,
+          mag_section: null,
+          embedding: vec as unknown as string,
+          story_type: x.type,
+        });
+      }
+      if (rows.length) {
+        let { error: iErr } = await from("ca_items").insert(rows as never);
+        // Before the new sections migration: no story type.
+        if (iErr && /story_type/.test(iErr.message))
+          ({ error: iErr } = await from("ca_items").insert(
+            rows.map(({ story_type: _t, ...r }) => r) as never,
+          ));
+        fail(iErr);
+      }
       added = rows.length;
     } catch (e) {
       await from("ca_sources")
@@ -982,7 +1058,11 @@ export async function materialStep(magId: string): Promise<string | null> {
         .eq("id", src.id)
     ).error,
   );
-  return `read part ${src.chunks_done + 1} of “${src.title.slice(0, 50)}”: ${added} stories`;
+  const more = [
+    offered ? `new facts for ${offered} ${offered === 1 ? "story" : "stories"}` : "",
+    fixes ? `${fixes} ${fixes === 1 ? "correction" : "corrections"}` : "",
+  ].filter(Boolean);
+  return `read part ${src.chunks_done + 1} of “${src.title.slice(0, 50)}”: ${added} stories${more.length ? `, ${more.join(", ")}` : ""}`;
 }
 
 // Puts stories read from material into sections (those off the theme are

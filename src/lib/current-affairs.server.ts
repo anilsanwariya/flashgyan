@@ -108,6 +108,9 @@ import {
   mergeStatics,
   newStoryMessages,
   parseNewStory,
+  parseResort,
+  resortMessages,
+  RESORT_BATCH,
   parseStaticFacts,
   staticFactsMessages,
   staticSources,
@@ -530,6 +533,12 @@ async function dayStoryRows(filter: { date?: string; ids?: string[] }): Promise<
 // Saves a new story; on a database without the event-key columns, without them.
 async function insertItem(row: Record<string, unknown>) {
   let { error } = await from("ca_items").insert(row as never);
+  // Before the new sections migration: no story type.
+  if (error && /story_type/.test(error.message)) {
+    const { story_type: _t, ...rest } = row;
+    row = rest;
+    ({ error } = await from("ca_items").insert(row as never));
+  }
   if (missingKeyColumns(error)) {
     const { story_key: _k, key_embedding: _e, event_id: _v, ...rest } = row;
     ({ error } = await from("ca_items").insert(rest as never));
@@ -722,6 +731,7 @@ export async function extractSourceChunk(sourceId: string, index: number) {
         story_key: item.key,
         key_embedding: keyEmbedding as unknown as string,
         ...(eventId ? { event_id: eventId } : {}),
+        story_type: item.type,
         related_item_id: earlier?.id ?? null,
         position: 1000 + created,
       });
@@ -3147,6 +3157,61 @@ export async function addPointsFromHighlights(
   return withKeywords(data as unknown as CaItem, keywords);
 }
 
+// Re-sorts a month's stories into the newer sections (Schemes, Policies &
+// Reports; Persons in News; Places in News), a batch at a time after the
+// story `after` (by id). `next` is where to go on, null at the end.
+export async function resortMonth(
+  month: string,
+  after: string | null,
+): Promise<{ checked: number; moved: number; next: string | null }> {
+  const range = monthRange(month);
+  let q = from("ca_items")
+    .select("id,headline,category,facts,content")
+    .gte("issue_date", range.from)
+    .lte("issue_date", range.to)
+    .not("category", "in", "(editorial,schemes,persons,places)")
+    .order("id")
+    .limit(RESORT_BATCH);
+  if (after) q = q.gt("id", after);
+  const { data, error } = await q;
+  fail(error);
+  const rows = (data ?? []) as unknown as Pick<
+    CaItem,
+    "id" | "headline" | "category" | "facts" | "content"
+  >[];
+  if (!rows.length) return { checked: 0, moved: 0, next: null };
+  const moves = parseResort(
+    await saathiComplete(
+      apiKey(),
+      resortMessages(
+        rows.map((r) => ({
+          headline: r.content?.headline.en || r.headline,
+          category: normalizeCategory(r.category),
+          facts: r.facts.map((f) => f.text),
+        })),
+      ),
+    ),
+    rows.length,
+  );
+  for (const m of moves) {
+    const id = rows[m.index].id;
+    let { error: uErr } = await from("ca_items")
+      .update({ category: m.section, ...(m.type ? { story_type: m.type } : {}) } as never)
+      .eq("id", id);
+    // Before the new sections migration: the section only.
+    if (uErr && /story_type/.test(uErr.message))
+      ({ error: uErr } = await from("ca_items")
+        .update({ category: m.section } as never)
+        .eq("id", id));
+    fail(uErr);
+  }
+  return {
+    checked: rows.length,
+    moved: moves.length,
+    next: rows.length < RESORT_BATCH ? null : rows[rows.length - 1].id,
+  };
+}
+
 // Facts from another source (an official document) added to a story as new
 // key points, without rewriting it. A story not written yet just takes the
 // facts (its writing uses them).
@@ -3205,25 +3270,15 @@ export async function addFactsAsPoints(id: string, facts: CaFact[]): Promise<CaI
   return data as unknown as CaItem;
 }
 
-// Facts an official document states differently from a story: recorded as
-// a correction for the editor (once per story and document). True when one
-// was recorded.
-export async function documentCorrection(
+// The facts a source states differently from a story (AI), as changes to
+// its facts and points; none for a story left out or without facts.
+export async function factChanges(
   itemId: string,
-  doc: { name: string; date: string; facts: CaFact[] },
-): Promise<boolean> {
-  // Once per story and document (a story found in two of its parts).
-  const { data: had } = await from("ca_corrections")
-    .select("id")
-    .eq("item_id", itemId)
-    .is("from_item_id", null)
-    .like("summary_en", `%(per ${doc.name.replace(/[%_]/g, "")})`)
-    .limit(1);
-  if ((had ?? []).length) return false;
-  const { data } = await from("ca_items").select(ITEM_COLS).eq("id", itemId).maybeSingle();
-  const item = data as unknown as CaItem | null;
-  if (!item || item.status === "dropped" || !item.facts.length) return false;
-  const changes = parseChanges(
+  doc: { date: string; facts: CaFact[] },
+): Promise<CaChange[]> {
+  const item = await loadItem(itemId).catch(() => null);
+  if (!item || item.status === "dropped" || !item.facts.length) return [];
+  return parseChanges(
     await saathiComplete(
       apiKey(),
       changeCheckMessages({
@@ -3234,17 +3289,60 @@ export async function documentCorrection(
     ),
     item.facts.length,
   );
-  if (!changes.length) return false;
-  const headline = item.content?.headline ?? { en: item.headline, hi: item.headline };
-  const { error } = await from("ca_corrections").insert({
-    item_id: itemId,
-    from_item_id: null,
-    changes,
-    summary_en: `${headline.en}: ${changes.map((c) => c.new_en).join("; ")} (per ${doc.name})`,
-    summary_hi: `${headline.hi}: ${changes.map((c) => c.new_hi || c.new_en).join("; ")} (${doc.name} के अनुसार)`,
-  } as never);
+}
+
+// Applies changes to a story's facts and points at once (a custom magazine's
+// copy), keeping its earlier version.
+export async function applyStoryChanges(itemId: string, changes: CaChange[]): Promise<CaItem> {
+  const item = await loadItem(itemId);
+  const next = applyChanges(item.facts, item.content, changes);
+  const before = snapshotOf(item);
+  if (before) await saveVersion(itemId, before, "correction");
+  const { data, error } = await from("ca_items")
+    .update({
+      facts: next.facts,
+      content: next.content,
+      updated_at: new Date().toISOString(),
+    } as never)
+    .eq("id", itemId)
+    .select(ITEM_COLS)
+    .single();
   fail(error);
-  return true;
+  return data as unknown as CaItem;
+}
+
+// Facts an official document states differently from a story: recorded as
+// a correction for the editor (once per story and document). Its id when one
+// was recorded.
+export async function documentCorrection(
+  itemId: string,
+  doc: { name: string; date: string; facts: CaFact[] },
+): Promise<string | null> {
+  // Once per story and document (a story found in two of its parts).
+  const { data: had } = await from("ca_corrections")
+    .select("id")
+    .eq("item_id", itemId)
+    .is("from_item_id", null)
+    .like("summary_en", `%(per ${doc.name.replace(/[%_]/g, "")})`)
+    .limit(1);
+  if ((had ?? []).length) return null;
+  const item = await loadItem(itemId).catch(() => null);
+  if (!item) return null;
+  const changes = await factChanges(itemId, doc);
+  if (!changes.length) return null;
+  const headline = item.content?.headline ?? { en: item.headline, hi: item.headline };
+  const { data, error } = await from("ca_corrections")
+    .insert({
+      item_id: itemId,
+      from_item_id: null,
+      changes,
+      summary_en: `${headline.en}: ${changes.map((c) => c.new_en).join("; ")} (per ${doc.name})`,
+      summary_hi: `${headline.hi}: ${changes.map((c) => c.new_hi || c.new_en).join("; ")} (${doc.name} के अनुसार)`,
+    } as never)
+    .select("id")
+    .single();
+  fail(error);
+  return (data as unknown as { id: string }).id;
 }
 
 // A new story from highlights in another story's sources, or in a source no
@@ -4294,6 +4392,21 @@ export async function toMagazineItems(rows: CaItem[]): Promise<MagazineItem[]> {
   }
   const names = new Map((srcs ?? []).map((s) => [s.id, s.source_name || s.section.toUpperCase()]));
   const official = new Set((srcs ?? []).filter((s) => s.official).map((s) => s.id));
+  // Story types (none before the new sections migration).
+  const types = new Map<string, string>();
+  // In batches: a month's ids are too many for one request's address.
+  for (let i = 0; i < items.length; i += 150) {
+    const { data: typed, error: tErr } = await from("ca_items")
+      .select("id,story_type")
+      .in(
+        "id",
+        items.slice(i, i + 150).map((x) => x.id),
+      )
+      .not("story_type", "is", null);
+    if (tErr) break;
+    for (const r of (typed ?? []) as { id: string; story_type: string }[])
+      types.set(r.id, r.story_type);
+  }
   return items.map((i) => ({
     id: i.id,
     issue_date: i.issue_date,
@@ -4304,6 +4417,7 @@ export async function toMagazineItems(rows: CaItem[]): Promise<MagazineItem[]> {
     facts: i.facts,
     context_sources: i.context_sources,
     source_names: [...new Set(i.source_ids.map((s) => names.get(s)).filter(Boolean) as string[])],
+    story_type: types.get(i.id) ?? null,
     official_names: [
       ...new Set(
         i.source_ids

@@ -558,3 +558,98 @@ export function startsIncluded(
   // Rajasthan upload can't flood the day.
   return includedSoFar < (rajasthan ? limit * 2 : limit);
 }
+
+// ---------- Fact cards ----------
+
+type Bi = { en: string; hi: string };
+const bi = (en: string, hi: string): Bi => ({ en, hi });
+
+// Story types that print their key points as a fact card (each point beside
+// what its fact is), with the labels of their slots.
+export const CARD_LABELS: Record<string, Record<string, Bi>> = {
+  scheme: {
+    name: bi("Name", "नाम"),
+    fullform: bi("Full form", "पूर्ण रूप"),
+    by: bi("Run by", "संचालक"),
+    funded: bi("Funded by", "वित्तपोषक"),
+    launched: bi("Launched", "शुभारंभ"),
+    period: bi("Period", "अवधि"),
+    aim: bi("Aim", "उद्देश्य"),
+    who: bi("Beneficiaries", "लाभार्थी"),
+    helpline: bi("Helpline / portal", "हेल्पलाइन / पोर्टल"),
+    reach: bi("Coverage", "कवरेज"),
+    money: bi("Funds / benefit", "राशि / लाभ"),
+    target: bi("Target", "लक्ष्य"),
+    districts: bi("Districts", "ज़िले"),
+    impact: bi("Progress", "प्रगति"),
+    rajasthan: bi("Rajasthan", "राजस्थान"),
+    feature: bi("Feature", "विशेषता"),
+  },
+  policy: {
+    name: bi("Policy", "नीति"),
+    by: bi("Issued by", "जारीकर्ता"),
+    date: bi("Announced", "घोषणा"),
+    valid: bi("Valid till", "वैधता"),
+    target: bi("Target", "लक्ष्य"),
+    districts: bi("Hubs / districts", "केंद्र / ज़िले"),
+    feature: bi("Provision", "प्रावधान"),
+  },
+  law: {
+    name: bi("Law", "क़ानून"),
+    by: bi("Passed by", "पारित"),
+    date: bi("Date", "तिथि"),
+    provision: bi("Provision", "प्रावधान"),
+    article: bi("Article", "अनुच्छेद"),
+    applies: bi("Applies to", "लागू"),
+    rajasthan: bi("Rajasthan", "राजस्थान"),
+    last: bi("Earlier", "पूर्व में"),
+  },
+  person: {
+    person: bi("Who", "कौन"),
+    known: bi("Known for", "पहचान"),
+    feat: bi("Achievement", "उपलब्धि"),
+    from: bi("From", "मूल निवास"),
+  },
+  appointment: {
+    person: bi("Who", "कौन"),
+    post: bi("Post", "पद"),
+    nth: bi("Number", "क्रम"),
+    date: bi("Took office", "पदभार"),
+  },
+  place: {
+    name: bi("Place", "स्थान"),
+    where: bi("Where", "कहाँ"),
+    why: bi("In news for", "चर्चा में क्यों"),
+    feature: bi("Feature", "विशेषता"),
+  },
+};
+
+// The parts of the "Schemes, Policies & Reports" section, in print order.
+export const SCHEME_GROUPS = [
+  { id: "raj", title: bi("Rajasthan schemes", "राजस्थान की योजनाएँ") },
+  { id: "central", title: bi("Central schemes", "केंद्र की योजनाएँ") },
+  { id: "policy", title: bi("Policies & laws", "नीतियाँ एवं क़ानून") },
+  { id: "reports", title: bi("Reports & indices", "रिपोर्टें एवं सूचकांक") },
+] as const;
+export type SchemeGroup = (typeof SCHEME_GROUPS)[number]["id"];
+
+// Which part a story of the section goes in: by its type, or (an older story
+// without one) by the slots its facts fill.
+export function schemeGroup(item: {
+  story_type?: string | null;
+  rajasthan: boolean;
+  facts: { slot?: string }[];
+}): SchemeGroup {
+  const type = item.story_type;
+  const slots = new Set(item.facts.map((f) => f.slot).filter(Boolean));
+  const has = (...ids: string[]) => ids.some((id) => slots.has(id));
+  if (type === "index" || (!type && has("india", "top", "edition", "scope"))) return "reports";
+  if (
+    type === "policy" ||
+    type === "law" ||
+    type === "budget" ||
+    (!type && has("provision", "valid", "article"))
+  )
+    return "policy";
+  return item.rajasthan ? "raj" : "central";
+}
