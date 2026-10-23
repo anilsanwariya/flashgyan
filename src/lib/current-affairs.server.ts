@@ -165,6 +165,7 @@ import {
 } from "@/lib/ca-glossary";
 import { bestArticle, cosine, meaningText, type CompareMatch } from "@/lib/ca-compare";
 import { ADD_POINTS_MAX, STORY_POINTS_MAX, parsePoints, pointsMessages } from "@/lib/ca-points";
+import type { Geo } from "@/lib/ca-map";
 import { dayChecklist, type Check } from "@/lib/ca-checklist";
 import {
   LANG_CHECK_STORIES,
@@ -4392,20 +4393,28 @@ export async function toMagazineItems(rows: CaItem[]): Promise<MagazineItem[]> {
   }
   const names = new Map((srcs ?? []).map((s) => [s.id, s.source_name || s.section.toUpperCase()]));
   const official = new Set((srcs ?? []).filter((s) => s.official).map((s) => s.id));
-  // Story types (none before the new sections migration).
+  // Story types and places' locations (none before their migrations).
   const types = new Map<string, string>();
+  const geos = new Map<string, Geo>();
+  let geoReady = true;
   // In batches: a month's ids are too many for one request's address.
   for (let i = 0; i < items.length; i += 150) {
-    const { data: typed, error: tErr } = await from("ca_items")
-      .select("id,story_type")
-      .in(
-        "id",
-        items.slice(i, i + 150).map((x) => x.id),
-      )
-      .not("story_type", "is", null);
+    const ids = items.slice(i, i + 150).map((x) => x.id);
+    let { data: typed, error: tErr } = await from("ca_items")
+      .select("id,story_type,geo")
+      .in("id", ids);
+    if (tErr && /geo/.test(tErr.message)) geoReady = false;
+    if (!geoReady)
+      ({ data: typed, error: tErr } = await from("ca_items").select("id,story_type").in("id", ids));
     if (tErr) break;
-    for (const r of (typed ?? []) as { id: string; story_type: string }[])
-      types.set(r.id, r.story_type);
+    for (const r of (typed ?? []) as {
+      id: string;
+      story_type: string | null;
+      geo?: Geo | null;
+    }[]) {
+      if (r.story_type) types.set(r.id, r.story_type);
+      if (r.geo) geos.set(r.id, r.geo);
+    }
   }
   return items.map((i) => ({
     id: i.id,
@@ -4418,6 +4427,8 @@ export async function toMagazineItems(rows: CaItem[]): Promise<MagazineItem[]> {
     context_sources: i.context_sources,
     source_names: [...new Set(i.source_ids.map((s) => names.get(s)).filter(Boolean) as string[])],
     story_type: types.get(i.id) ?? null,
+    // null: not located yet; undefined: no locations before the migration.
+    geo: geoReady ? (geos.get(i.id) ?? null) : undefined,
     official_names: [
       ...new Set(
         i.source_ids
@@ -4427,6 +4438,37 @@ export async function toMagazineItems(rows: CaItem[]): Promise<MagazineItem[]> {
       ),
     ],
   }));
+}
+
+// Finds where the month's "Places in News" stories are (one AI call for
+// those not located yet), keeps it on the stories, and fills it in on the
+// items. Without the migration, or when the AI fails, the maps are left out.
+async function locatePlaces(items: MagazineItem[], maps: typeof import("@/lib/ca-map")) {
+  const todo = items.filter((i) => i.category === "places" && i.geo === null).slice(0, 60);
+  if (!todo.length) return;
+  try {
+    const found = maps.parseGeo(
+      await saathiComplete(
+        apiKey(),
+        maps.geoMessages(
+          todo.map((i) => ({
+            headline: i.content.headline.en || i.content.headline.hi,
+            facts: i.facts.map((f) => f.text),
+          })),
+        ),
+      ),
+      todo.length,
+    );
+    for (const [k, geo] of found) {
+      todo[k].geo = geo;
+      const { error } = await from("ca_items")
+        .update({ geo } as never)
+        .eq("id", todo[k].id);
+      if (error) break;
+    }
+  } catch (e) {
+    console.error("places map:", e);
+  }
 }
 
 export async function issueHtml(
@@ -4482,6 +4524,9 @@ export async function issueHtml(
         )
       : [];
   const design = kind === "monthly" ? (opts.design ?? (await getIssueDesign(range.from))) : null;
+  // "Places in News" maps: the places located once, then drawn.
+  const maps = kind === "monthly" && !opts.coverOnly ? await import("@/lib/ca-map") : null;
+  if (maps) await locatePlaces(items, maps);
   return {
     html: renderMagazine({
       kind,
@@ -4492,6 +4537,7 @@ export async function issueHtml(
       corrections,
       feature: feature?.included ? feature : null,
       reports,
+      placeMaps: maps?.placeMaps,
       design,
       fillers: opts.fillers,
       coverOnly: opts.coverOnly,

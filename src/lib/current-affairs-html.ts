@@ -28,6 +28,7 @@ import {
 import type { CaFeature } from "@/lib/ca-feature";
 import type { CaReport } from "@/lib/ca-docs";
 import { CARD_LABELS, SCHEME_GROUPS, schemeGroup } from "@/lib/ca-blueprint";
+import type { Geo } from "@/lib/ca-map";
 import type { EventBlock } from "@/lib/ca-events";
 import {
   COVER_CSS,
@@ -62,6 +63,8 @@ export type MagazineItem = {
   // Its blueprint type (scheme, person…): its part of the "Schemes, Policies
   // & Reports" section and, for some, a fact card.
   story_type?: string | null;
+  // Where a "Places in News" story's place is (for the monthly maps).
+  geo?: Geo | null;
   // A custom magazine's subsection (its section is the category).
   sub?: string | null;
   // The several-day event it belongs to (monthly issue only).
@@ -122,6 +125,8 @@ const T = {
     corrections: "Corrections",
     background: "Background",
     revision: "60-Second Revision",
+    numbers: "Numbers of the Month",
+    numbersSub: "Figures, targets and ranks to remember",
     practice: "Practice Questions",
     ctaText: "Free current affairs every morning.",
     edition: "English edition",
@@ -163,6 +168,8 @@ const T = {
     corrections: "सुधार",
     background: "पृष्ठभूमि",
     revision: "60 सेकंड रिवीजन",
+    numbers: "इस माह के आँकड़े",
+    numbersSub: "याद रखने योग्य आँकड़े, लक्ष्य और रैंक",
     practice: "अभ्यास प्रश्न",
     ctaText: "हर सुबह निःशुल्क करेंट अफेयर्स।",
     edition: "हिंदी संस्करण",
@@ -605,6 +612,15 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .card th { width: 28%; text-align: left; vertical-align: top; padding: 1mm 2mm 1mm 0; color: ${accent}; font-weight: 600; border-bottom: 1px solid #e2e8f0; }
 .card td { vertical-align: top; padding: 1mm 0; border-bottom: 1px solid #e2e8f0; }
 .card tr:last-child th, .card tr:last-child td { border-bottom: 0; }
+.nums { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin-bottom: 3mm; }
+.nums td { padding: 1.2mm 2mm; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+.nums tr:nth-child(even) td { background: #f8fafc; }
+.nums .nums-story { width: 38%; color: #64748b; font-size: 8.5pt; }
+.pmaps { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; margin-top: 4mm; break-inside: avoid; }
+.pmap { margin: 0; border: 1px solid #e2e8f0; border-radius: 3mm; padding: 2mm; }
+.pmap figcaption { font-size: 9pt; font-weight: 600; color: ${accent}; margin-bottom: 1mm; }
+.pmap svg { width: 100%; height: auto; display: block; }
+.pmap-credit { font-size: 7pt; color: #94a3b8; margin: 1mm 0 0; }
 .rep-meta { margin: 0 0 2mm; font-size: 8.5pt; color: #64748b; }
 .rep-raj { margin-top: 2mm; padding: 2mm 3mm; border-left: 3px solid ${accent}; background: #f8fafc; font-size: 9.5pt; }
 .rep-qs { margin-top: 3mm; }
@@ -723,6 +739,60 @@ function reportArticles(reports: CaReport[], lang: Lang): string {
     .join("");
 }
 
+// The fact slots that hold a figure worth remembering: amounts, targets,
+// ranks, records, coverage and results.
+const NUMBER_SLOTS = new Set([
+  "money",
+  "target",
+  "india",
+  "rajasthan",
+  "figure",
+  "reach",
+  "impact",
+  "record",
+  "top",
+  "total",
+  "compare",
+  "districts",
+]);
+const NUMBERS_PER_SECTION = 15;
+
+// "Numbers of the Month": every figure of the month's stories in one table,
+// section by section (each the story's own key point, beside its headline).
+function numbersPage(
+  groups: Map<string, MagazineItem[]>,
+  lang: Lang,
+  label: (cat: string) => Bi,
+): string {
+  const t = T[lang];
+  const parts = [...groups.entries()]
+    .map(([cat, list]) => {
+      const rows = list
+        .flatMap((it) => {
+          const c = it.content;
+          if (!c || c.points.length !== it.facts.length) return [];
+          return it.facts
+            .map((f, i) => ({ f, i }))
+            .filter(({ f }) => f.slot && NUMBER_SLOTS.has(f.slot) && /\d/.test(f.text))
+            .map(({ i }) => ({ fig: pick(c.points[i], lang), story: pick(c.headline, lang) }))
+            .filter((r) => r.fig);
+        })
+        .slice(0, NUMBERS_PER_SECTION);
+      return rows.length
+        ? `<h3 class="rev-cat">${icon(cat)} ${esc(label(cat)[lang])}</h3><table class="nums">${rows
+            .map(
+              (r) => `<tr><td>${esc(r.fig)}</td><td class="nums-story">${esc(r.story)}</td></tr>`,
+            )
+            .join("")}</table>`
+        : "";
+    })
+    .filter(Boolean)
+    .join("");
+  return parts
+    ? `<section class="section new-page numbers"><div class="section-title"><h2>${icon("revision")} ${t.numbers}</h2><span>${t.numbersSub}</span></div>${parts}</section>`
+    : "";
+}
+
 function mcqSide(question: string, options: string[], letters: string[]): string {
   return `<div class="side"><div class="stmt">${esc(question)}</div><ol>${options
     .map((o, i) => `<li><span class="opt">(${letters[i] ?? i + 1})</span> ${esc(o)}</li>`)
@@ -774,6 +844,9 @@ export function renderMagazine(opts: {
   corrections?: MagazineCorrection[];
   // Monthly only: the background article, when included.
   feature?: CaFeature | null;
+  // Monthly only: draws the "Places in News" maps from its stories' numbers
+  // and locations (the server has the outlines).
+  placeMaps?: (dots: { n: number; geo: Geo }[], lang: Lang, accent: string) => string;
   // Monthly only: the month's report pages (those included), printed in
   // "Schemes, Policies & Reports".
   reports?: CaReport[];
@@ -989,6 +1062,7 @@ export function renderMagazine(opts: {
       // A custom magazine's subsections, and this section's parts, get a
       // heading of their own.
       let sub: string | null | undefined;
+      const dots: { n: number; geo: Geo }[] = [];
       const partTitle = (id: string) =>
         `<h3 class="sub-title">${esc(pick(SCHEME_GROUPS.find((g) => g.id === id)!.title, lang))}</h3>`;
       const body =
@@ -1002,11 +1076,17 @@ export function renderMagazine(opts: {
                   ? `<h3 class="sub-title">${esc(pick(subLabel(it.sub), lang))}</h3>`
                   : "";
             sub = key;
-            return head + itemHtml(it, ++n, monthly, accent, lang, boxes);
+            const num = ++n;
+            if (it.geo) dots.push({ n: num, geo: it.geo });
+            return head + itemHtml(it, num, monthly, accent, lang, boxes);
           })
           .join("") +
         (parted && reports.length
           ? `${sub === "reports" ? "" : partTitle("reports")}${reportArticles(reports, lang)}`
+          : "") +
+        // "Places in News" ends with its places on a Rajasthan and an India map.
+        (cat === "places" && !custom && opts.placeMaps && dots.length
+          ? opts.placeMaps(dots, lang, accent)
           : "");
       const count = list.length + (parted ? reports.length : 0);
       return `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>${icon(cat)} ${esc(label(cat)[lang])}</h2><span>${count} ${t.stories(count)}</span></div>${body}</section>${feature}${ad ? adPageHtml(ad, lang, cat) : ""}`;
@@ -1034,7 +1114,8 @@ export function renderMagazine(opts: {
         .join("")}</ol></section>`
     : "";
 
-  const tocHtml = `${blocks.length ? `<div class="toc-row"><span>${icon("events")} ${t.events}</span><b>${blocks.length}</b></div>` : ""}${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}`;
+  const numbersHtml = monthly && !opts.coverOnly ? numbersPage(allGroups, lang, label) : "";
+  const tocHtml = `${blocks.length ? `<div class="toc-row"><span>${icon("events")} ${t.events}</span><b>${blocks.length}</b></div>` : ""}${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${numbersHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.numbers}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}`;
   const parts: CoverParts = {
     lang,
     period: opts.period,
@@ -1102,6 +1183,7 @@ ${
   !part || part.tail
     ? `${corrections}
 ${opts.feature ? featurePage(opts.feature, lang) : ""}
+${numbersHtml}
 ${revisionPage(allGroups, lang, label)}
 ${practicePage(everything, lang)}
 ${notes}
