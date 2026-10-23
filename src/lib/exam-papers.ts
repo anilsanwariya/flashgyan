@@ -548,6 +548,49 @@ export function keyFromRows(rows: Record<string, unknown>[]): KeySheet & { probl
 
 // ---------- Checking a paper against the magazine ----------
 
+// The magazine sections a current affairs question can be about (for the
+// coverage meter: how often each section is asked).
+export const QUESTION_SECTION_IDS = [
+  "rajasthan",
+  "national",
+  "schemes",
+  "international",
+  "science",
+  "economy",
+  "sports",
+  "persons",
+  "places",
+  "misc",
+] as const;
+const QUESTION_SECTIONS = `"rajasthan" (other Rajasthan news), "national" (India's polity, governance, laws, judgments), "schemes" (a government scheme, policy, or an official report, index or survey), "international", "science" (science, technology, defence, space, health, environment), "economy", "sports", "persons" (an appointment, award or person in the news, outside sports), "places" (a place in the news) or "misc" (days, books, conferences, other)`;
+export const questionSection = (v: unknown): string | null =>
+  typeof v === "string" && (QUESTION_SECTION_IDS as readonly string[]).includes(v) ? v : null;
+
+// The sections of current affairs questions sorted before sections were
+// asked for.
+export function sectionMessages(questions: { n: number; text: string }[]): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: `These are current affairs questions from Indian competitive exam papers (RPSC, RSSB). For each, say which magazine section the news it asks about belongs to: ${QUESTION_SECTIONS}.
+Reply with JSON only: [{"n": question number, "section": "..."}]`,
+    },
+    { role: "user", content: questions.map((q) => `${q.n}. ${q.text}`).join("\n\n") },
+  ];
+}
+
+export function parseSections(raw: string, nums: number[]): Map<number, string> {
+  const list = parseJson<unknown[]>(raw);
+  const out = new Map<number, string>();
+  for (const x of Array.isArray(list) ? list : []) {
+    const o = (x ?? {}) as Record<string, unknown>;
+    const n = Number(o.n);
+    const sec = questionSection(o.section);
+    if (nums.includes(n) && sec) out.set(n, sec);
+  }
+  return out;
+}
+
 // Which questions are on current affairs (news of the 18 months before the
 // exam) rather than static syllabus, with words to find the story by.
 export function classifyMessages(
@@ -558,8 +601,8 @@ export function classifyMessages(
     {
       role: "system",
       content: `You sort the questions of an Indian competitive exam paper (RPSC/RSSB pattern) for a current affairs magazine. A question is current affairs when it asks about news of the 18 months before the exam${examDate ? ` (held on ${examDate})` : ""}: a scheme launched or changed, an appointment, award, report or index, an event, a sports result, a new policy or law, a place or person in the news, recent data. Static syllabus (history, geography, polity basics, science concepts) is not, even if a recent event mentions it.
-For each current affairs question, give English search words naming the news it is about (5 to 15 words).
-Reply with JSON only: [{"n": question number, "ca": true or false, "search": "..." (current affairs only)}]`,
+For each current affairs question, give English search words naming the news it is about (5 to 15 words), and the magazine section the news belongs to: ${QUESTION_SECTIONS}.
+Reply with JSON only: [{"n": question number, "ca": true or false, "search": "..." (current affairs only), "section": "..." (current affairs only)}]`,
     },
     {
       role: "user",
@@ -571,16 +614,20 @@ Reply with JSON only: [{"n": question number, "ca": true or false, "search": "..
 export function parseClassify(
   raw: string,
   nums: number[],
-): Map<number, { ca: boolean; search: string }> {
+): Map<number, { ca: boolean; search: string; section: string | null }> {
   const list = parseJson<unknown[]>(raw);
-  const out = new Map<number, { ca: boolean; search: string }>();
+  const out = new Map<number, { ca: boolean; search: string; section: string | null }>();
   if (!Array.isArray(list)) return out;
   for (const x of list) {
     const o = (x ?? {}) as Record<string, unknown>;
     const n = Number(o.n);
     if (!nums.includes(n)) continue;
     const ca = o.ca === true;
-    out.set(n, { ca, search: ca ? str(o.search, 300) : "" });
+    out.set(n, {
+      ca,
+      search: ca ? str(o.search, 300) : "",
+      section: ca ? questionSection(o.section) : null,
+    });
   }
   return out;
 }

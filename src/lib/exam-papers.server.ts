@@ -465,20 +465,26 @@ export async function checkStep(paperId: string): Promise<CheckProgress> {
       unsorted.map((q) => q.q_no),
     );
     for (const q of unsorted) {
-      const r = sorted.get(q.q_no) ?? { ca: false, search: "" };
-      fail(
-        (
-          await from("exam_questions")
-            .update({
-              ca: r.ca,
-              // The words to find its story by, until it's matched.
-              match_note: r.ca ? `search: ${r.search}` : null,
-              match: null,
-              matched_item: null,
-            } as never)
-            .eq("id", q.id)
-        ).error,
-      );
+      const r = sorted.get(q.q_no) ?? { ca: false, search: "", section: null };
+      const row = {
+        ca: r.ca,
+        // The words to find its story by, until it's matched.
+        match_note: r.ca ? `search: ${r.search}` : null,
+        section: r.section,
+        match: null,
+        matched_item: null,
+      };
+      let { error } = await from("exam_questions")
+        .update(row as never)
+        .eq("id", q.id);
+      // Before the "Asked before" migration: no section.
+      if (error && /section/.test(error.message)) {
+        const { section: _s, ...rest } = row;
+        ({ error } = await from("exam_questions")
+          .update(rest as never)
+          .eq("id", q.id));
+      }
+      fail(error);
       q.ca = r.ca;
     }
     return progress(`sorted questions ${unsorted[0].q_no}–${unsorted.at(-1)!.q_no}`);
