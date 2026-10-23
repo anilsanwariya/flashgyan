@@ -1234,6 +1234,7 @@ export async function enrichItem(
           ? { type: VISUAL_LABELS[look.visual.type].toLowerCase(), covers: look.visual_covers }
           : null,
         event: event?.name ?? null,
+        eventKind: event?.kind ?? null,
       }),
     );
     const parsed = parseContent(
@@ -3170,10 +3171,10 @@ export async function resortMonth(
 ): Promise<{ checked: number; moved: number; next: string | null }> {
   const range = monthRange(month);
   let q = from("ca_items")
-    .select("id,headline,category,facts,content")
+    .select("id,headline,category,facts,content,rajasthan")
     .gte("issue_date", range.from)
     .lte("issue_date", range.to)
-    .not("category", "in", "(editorial,schemes,persons,places)")
+    .neq("category", "editorial")
     .order("id")
     .limit(RESORT_BATCH);
   if (after) q = q.gt("id", after);
@@ -3181,7 +3182,7 @@ export async function resortMonth(
   fail(error);
   const rows = (data ?? []) as unknown as Pick<
     CaItem,
-    "id" | "headline" | "category" | "facts" | "content"
+    "id" | "headline" | "category" | "facts" | "content" | "rajasthan"
   >[];
   if (!rows.length) return { checked: 0, moved: 0, next: null };
   const moves = parseResort(
@@ -3195,7 +3196,7 @@ export async function resortMonth(
         })),
       ),
     ),
-    rows.length,
+    rows,
   );
   for (const m of moves) {
     const id = rows[m.index].id;

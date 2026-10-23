@@ -186,7 +186,7 @@ export const STORY_TYPES: StoryType[] = [
   {
     id: "appointment",
     label:
-      "Appointment to a constitutional, statutory, national or Rajasthan state post, Chief Minister, Governor, head of a sports body or association, Indian-origin person appointed abroad, or government brand ambassador (state or district)",
+      "Appointment to an important constitutional, statutory, national or Rajasthan state post (Chief Justice, judge, Governor, CEC, CAG, a commission's chair or member, RBI, SEBI, ISRO, armed forces chiefs, Chief Secretary, DGP…), Chief Minister, Indian-origin person appointed abroad, or government brand ambassador (state or district); a routine transfer or posting is least likely to be asked (importance 1)",
     maxFacts: 4,
     slots: [
       slot("person", "who was appointed"),
@@ -218,7 +218,8 @@ export const STORY_TYPES: StoryType[] = [
   },
   {
     id: "award",
-    label: "Award or honour (including Padma lists and major film, music and literature awards)",
+    label:
+      "Award or honour outside sports (Bharat Ratna, Padma lists, Nobel, Booker, Jnanpith, gallantry awards, major film, music and literature awards); a sports award is sports",
     maxFacts: 6,
     slots: [
       slot("award", "name of the award and edition"),
@@ -247,7 +248,8 @@ export const STORY_TYPES: StoryType[] = [
   },
   {
     id: "sports",
-    label: "Sports or olympiad result, championship, host, medal tally or tournament award",
+    label:
+      "Sports news of any kind, even about one player: result, medal, record, team selection or captain, championship, host, medal tally, sports body, tournament or sports award (Khel Ratna, Arjuna, Dronacharya…); an olympiad result",
     maxFacts: 6,
     slots: [
       slot("event", "event and edition"),
@@ -404,7 +406,8 @@ export const STORY_TYPES: StoryType[] = [
   },
   {
     id: "person",
-    label: "Person in news, achievement or obituary",
+    label:
+      "Person in news outside sports: a notable achievement, first or record, or the death of an eminent person (a player's result or selection is sports)",
     maxFacts: 4,
     slots: [
       slot("person", "who"),
@@ -628,7 +631,7 @@ export const CARD_LABELS: Record<string, Record<string, Bi>> = {
 export const SCHEME_GROUPS = [
   { id: "raj", title: bi("Rajasthan schemes", "राजस्थान की योजनाएँ") },
   { id: "central", title: bi("Central schemes", "केंद्र की योजनाएँ") },
-  { id: "policy", title: bi("Policies & laws", "नीतियाँ एवं क़ानून") },
+  { id: "policy", title: bi("Policies", "नीतियाँ") },
   { id: "reports", title: bi("Reports & indices", "रिपोर्टें एवं सूचकांक") },
 ] as const;
 export type SchemeGroup = (typeof SCHEME_GROUPS)[number]["id"];

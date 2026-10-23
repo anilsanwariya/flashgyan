@@ -106,6 +106,9 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
   });
   const [work, setWork] = useState<string | null>(null);
   const [show, setShow] = useState<"picked" | "other">("picked");
+  // One website's articles only ("all": every website).
+  const [site, setSite] = useState<string>("all");
+  useEffect(() => setSite("all"), [date]);
   // The websites picked for the next collection (null: picker closed).
   const [pick, setPick] = useState<Set<string> | null>(null);
   const stop = useRef(false);
@@ -218,7 +221,17 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
   const picked = articles.filter((a) => a.status !== "found" && a.status !== "skipped");
   const other = articles.filter((a) => a.status === "found" || a.status === "skipped");
   const count = (st: CaArticle["status"]) => articles.filter((a) => a.status === st).length;
-  const list = show === "picked" ? picked : other;
+  const shown = show === "picked" ? picked : other;
+  // The websites with articles this day, with how many are in the list shown.
+  const siteKey = (a: CaArticle) => a.site_id ?? "none";
+  const siteChips = [...new Set(articles.map(siteKey))]
+    .map((k) => ({
+      key: k,
+      name: k === "none" ? "Other" : (siteName.get(k) ?? "Website"),
+      count: shown.filter((a) => siteKey(a) === k).length,
+    }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  const list = site === "all" ? shown : shown.filter((a) => siteKey(a) === site);
   // Articles already fetched are managed as sources below.
   const canChoose = (a: CaArticle) => a.status !== "fetched" && a.status !== "parsing";
   const selectable = list.filter(canChoose);
@@ -334,6 +347,29 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
               ))}
             </div>
           </div>
+          {siteChips.length > 1 && (
+            <div
+              role="radiogroup"
+              aria-label="Website"
+              className="flex gap-1.5 overflow-x-auto pb-1 text-xs"
+            >
+              {[{ key: "all", name: "All", count: shown.length }, ...siteChips].map((c) => (
+                <button
+                  key={c.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={site === c.key}
+                  onClick={() => {
+                    setSite(c.key);
+                    setChosen(new Set());
+                  }}
+                  className={`shrink-0 rounded-full border px-2.5 py-1 ${site === c.key ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:bg-muted"} ${c.count === 0 && site !== c.key ? "opacity-50" : ""}`}
+                >
+                  {c.name} ({c.count})
+                </button>
+              ))}
+            </div>
+          )}
           {selectable.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <label className="inline-flex items-center gap-2">

@@ -65,15 +65,46 @@ const LEGACY_CATEGORIES: Record<string, Category> = {
   days: "misc",
 };
 
-// The sections, for the AI (shared by the prompts that classify stories).
-const CATEGORY_TEXT = `Categories: "schemes" for a story mainly about a government scheme, mission, programme, campaign, policy, act, bill or rules, or an official report, index, ranking or survey (central or Rajasthan; court judgments are not schemes); "persons" for a story mainly about a person: an appointment, an award or honour to a person, an obituary, a person's record or selection; "places" for a story mainly about a place in the news (a town, lake, pass, sanctuary, heritage site, island, region); "rajasthan" for other news about Rajasthan; "national" for India-wide polity, governance and court judgments; "international"; "science" for science, technology, defence, space, health and environment; "economy"; "sports" for results and medals; "misc" for important days, books, conferences and anything that fits nowhere else; "editorial" only for editorials. A Rajasthan scheme, person or place goes to its section with "rajasthan": true.`;
+// The sections, for the AI: one definition shared by every prompt that
+// files stories (reading sources, documents, clippings, re-sorting).
+export const SECTION_GUIDE = `Sections ("category"):
+- "schemes" (Schemes, Policies & Reports) takes only these three, of India or Rajasthan:
+  • a scheme: a named, ongoing government programme that gives people a benefit or service, including missions, abhiyans and yojanas (e.g. Ayushman Bharat PM-JAY, PM Fasal Bima Yojana, Mukhyamantri Chiranjeevi / MAA Yojana, PM-KISAN, Jal Jeevan Mission, PM Awas Yojana, Lado Protsahan Yojana, Swachh Bharat Mission, Khelo India): its launch, change, extension, outlay or progress;
+  • a policy: a government policy that sets the direction for a sector (e.g. Green Hydrogen Policy, Rajasthan Tourism Policy, Mineral Policy, Industrial or MSME Policy, Sports Policy, Solar Energy Policy, National Education Policy);
+  • a report: an official or well-recognised report, index, ranking or survey (e.g. National Family Health Survey, India State of Forest Report, World Happiness Report, Henley Passport Index, UNDP Human Development Index, Global Hunger Index, SDG India Index, PLFS, Economic Survey, Rajasthan Economic Review, QS World University Rankings): its findings and India's or Rajasthan's rank.
+  Not here: acts, bills, ordinances, rules and constitutional amendments ("national", or "rajasthan" for a Rajasthan law); a one-time announcement, grant or single project such as a road, dam or hospital; private polls, company reports and little-known one-off studies; court judgments.
+- "persons" (Persons in News) takes only:
+  • an appointment to an important post: Chief Justice of India or of a High Court, a Supreme Court judge, Governor, Lieutenant Governor, Chief Election Commissioner, CAG, Attorney General; chair or member of a commission or constitutional or statutory body (Finance Commission, Law Commission, NHRC, UPSC, RPSC, RSSB, Women's Commission…); RBI Governor or Deputy Governor, heads of SEBI, ISRO, DRDO; chiefs of the armed forces; an Indian heading an international body; in Rajasthan the Chief Secretary, DGP, Lokayukta, State Election Commissioner;
+  • an important award or honour to a person: Bharat Ratna, Padma awards, Nobel, Booker, Jnanpith, Sahitya Akademi, Dadasaheb Phalke, Ramon Magsaysay, gallantry awards, Rajasthan Ratna, major international honours;
+  • the death of an eminent person;
+  • a notable achievement of a person outside sports (a first, a record, scaling Everest, winning a global competition).
+  Not here: anything about sports ("sports"); routine transfers and postings of officers; politicians' statements; a person only mentioned in a bigger story.
+- "sports" takes all sports news, even about one player: results, matches, medals, records, team selections and captains, hosting, medal tallies, tournaments, sports bodies and sports awards (Khel Ratna, Arjuna, Dronacharya…). Sports schemes and sports policies go to "schemes".
+- "places" (Places in News): a place mainly in the news (a town, lake, pass, sanctuary, heritage site, island, region).
+- "rajasthan" for other news about Rajasthan, including Rajasthan acts and bills; "national" for India-wide polity and governance, acts, bills, constitutional amendments and court judgments; "international"; "science" for science, technology, defence, space, health and environment; "economy"; "misc" for important days, books, conferences and anything that fits nowhere else; "editorial" only for editorials.
+A Rajasthan scheme, policy, report, person or place goes to its section with "rajasthan": true.`;
+const CATEGORY_TEXT = SECTION_GUIDE;
 
-// A story's section from its blueprint type: schemes, policies and reports,
-// persons and places have sections of their own (an editorial stays one).
-export function sectionFor(type: string | null | undefined, category: Category): Category {
+// A story's section from its blueprint type, whatever the AI's category:
+// schemes and policies go to their section (sports ones too); anything about
+// sports to Sports (never Persons); reports to Schemes, Policies & Reports;
+// a law never there (it is polity); people and places to their sections; an
+// appointment rated least likely to be asked (a routine posting) stays news.
+export function sectionFor(
+  type: string | null | undefined,
+  category: Category,
+  opts: { rajasthan?: boolean; importance?: number; eventKind?: string | null } = {},
+): Category {
   if (category === "editorial") return category;
-  if (type === "scheme" || type === "policy" || type === "index") return "schemes";
-  if (type === "person" || type === "appointment") return "persons";
+  const polity: Category = opts.rajasthan ? "rajasthan" : "national";
+  if (type === "scheme" || type === "policy") return "schemes";
+  // Part of a games, championship or tournament: sports, whoever it is about.
+  if (type === "sports" || category === "sports" || opts.eventKind === "sports") return "sports";
+  if (type === "index") return "schemes";
+  if (type === "law") return category === "schemes" || category === "persons" ? polity : category;
+  if (type === "person") return "persons";
+  if (type === "appointment")
+    return (opts.importance ?? 2) >= 2 ? "persons" : category === "persons" ? polity : category;
   if (type === "place") return "places";
   return category;
 }
@@ -412,7 +443,21 @@ export function parseNewStory(
 // ---------- Re-sorting older stories into the newer sections ----------
 
 export const RESORT_BATCH = 40;
-const RESORT_TYPES = ["scheme", "policy", "law", "index", "person", "appointment", "place"];
+const RESORT_TYPES = [
+  "scheme",
+  "policy",
+  "law",
+  "index",
+  "person",
+  "appointment",
+  "award",
+  "sports",
+  "place",
+];
+// The sections re-sorting looks after: a story moves into or out of one of
+// these (a law out of Schemes to polity, a medal out of Persons to Sports).
+export const RESORT_SECTIONS: Category[] = ["schemes", "persons", "places", "sports"];
+const RESORT_TO: Category[] = [...RESORT_SECTIONS, "national", "rajasthan"];
 
 export function resortMessages(
   stories: { headline: string; category: string; facts: string[] }[],
@@ -420,10 +465,11 @@ export function resortMessages(
   return [
     {
       role: "system",
-      content: `You file stories of a current affairs magazine for Rajasthan competitive exam aspirants into its newer sections. For each numbered story (its current section in brackets), say whether its main subject belongs in one of them:
-"schemes": a government scheme, mission, programme, campaign, policy, act, bill or rules, or an official report, index, ranking or survey (not a court judgment); "persons": a person (an appointment, an award or honour to a person, an obituary, a record or selection); "places": a place in the news (a town, lake, pass, sanctuary, heritage site, island, region). Leave out a story that only mentions one of these.
-Its kind: "scheme", "policy", "law" (an act, bill or rules), "index" (a report, index, ranking or survey), "person", "appointment" or "place".
-Reply with JSON only: [{"n": story number, "section": "schemes" | "persons" | "places", "kind": "..."}] for the stories that move; [] if none.`,
+      content: `You check the sections of a current affairs magazine's stories for Rajasthan competitive exam aspirants, by these rules:
+${SECTION_GUIDE}
+For each numbered story (its current section in brackets), say whether it is in the wrong section by these rules: a story that belongs in "schemes", "persons", "places" or "sports" but is elsewhere, or one in those sections that belongs elsewhere (a law in "schemes" goes to "national", or "rajasthan" for a Rajasthan law; a player's medal in "persons" goes to "sports"; a routine posting in "persons" goes to "rajasthan" or "national"). Leave out a story that only mentions one of these, and every story already in its right section.
+Its kind: "scheme", "policy", "law" (an act, bill, rules or amendment), "index" (a report, index, ranking or survey), "person", "appointment", "award", "sports" or "place".
+Reply with JSON only: [{"n": story number, "section": its right section, "kind": "..."}] for the stories that move; [] if none.`,
     },
     {
       role: "user",
@@ -437,10 +483,11 @@ Reply with JSON only: [{"n": story number, "section": "schemes" | "persons" | "p
   ];
 }
 
-// The stories that move, by their place in the list.
+// The stories that move, by their place in the list. A move always involves
+// one of the sections looked after; the kind decides where it can.
 export function parseResort(
   raw: string,
-  count: number,
+  stories: { category: string; rajasthan?: boolean }[],
 ): { index: number; section: Category; type: string }[] {
   const list = parseJson<unknown[]>(raw);
   if (!Array.isArray(list)) return [];
@@ -450,14 +497,16 @@ export function parseResort(
     const o = (x ?? {}) as Record<string, unknown>;
     const index = Number(o.n) - 1;
     const type = typeof o.kind === "string" && RESORT_TYPES.includes(o.kind) ? o.kind : "";
-    const section = o.section;
-    if (!Number.isInteger(index) || index < 0 || index >= count || seen.has(index)) continue;
-    if (section !== "schemes" && section !== "persons" && section !== "places") continue;
-    // The kind decides the section when it names one (a law stays where the
-    // AI put it).
-    const by = sectionFor(type, section);
+    const asked = o.section;
+    if (!Number.isInteger(index) || index < 0 || index >= stories.length || seen.has(index))
+      continue;
+    if (!isCategory(asked) || !RESORT_TO.includes(asked)) continue;
+    const from = normalizeCategory(stories[index].category);
+    const section = sectionFor(type, asked, { rajasthan: stories[index].rajasthan });
+    if (section === from || from === "editorial") continue;
+    if (!RESORT_SECTIONS.includes(section) && !RESORT_SECTIONS.includes(from)) continue;
     seen.add(index);
-    out.push({ index, section: by, type });
+    out.push({ index, section, type });
   }
   return out;
 }
@@ -584,7 +633,11 @@ export function parseExtracted(raw: string, source: string, sourceId: string): R
       return {
         headline: str(o.headline, 300),
         type: type.id,
-        category: sectionFor(type.id, normalizeCategory(o.category)),
+        category: sectionFor(type.id, normalizeCategory(o.category), {
+          rajasthan: o.rajasthan === true,
+          importance,
+          eventKind: parseRawEvent(o.event)?.kind,
+        }),
         importance: (importance >= 1 && importance <= 3 ? importance : 2) as 1 | 2 | 3,
         rajasthan: o.rajasthan === true,
         facts,
@@ -665,6 +718,8 @@ export function enrichMessages(opts: {
   summaryWords?: number;
   // The several-day event the story belongs to: the day's roundup of it.
   event?: string | null;
+  // Its kind (a sports event's roundup is a medal list).
+  eventKind?: string | null;
 }): ChatMessage[] {
   const words = clampSummaryWords(opts.summaryWords);
   const facts = opts.facts
@@ -687,7 +742,7 @@ export function enrichMessages(opts: {
       role: "system",
       content: `You write a bilingual (Hindi and English) current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). Write one news item from the numbered facts.
 RULES: Use only the facts given (numbered facts and any Context). Never add a number, name, date or claim that is not in them. Follow the editor's instruction when one is given, and an [Editor's note] on a fact (for example: put it in the headline, build the MCQ or the Mains question on it, keep it word for word), within these rules.
-BE BRIEF: students revise from this, so less theory, more memorable facts. ${summaryRule(words)} Nothing is repeated between the points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}${opts.event ? roundupNote(opts.event) : ""}${styleBlock(opts.style)}
+BE BRIEF: students revise from this, so less theory, more memorable facts. ${summaryRule(words)} Nothing is repeated between the points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}${opts.event ? roundupNote(opts.event, opts.eventKind) : ""}${styleBlock(opts.style)}
 STATIC CONNECT links the news to the static syllabus. "keywords" lists up to ${MAX_KEYWORDS} static concepts the news links to that RPSC could ask about (constitutional articles, acts, institutions, technologies, schemes, places, conventions, terms), most important first (the "Static concept" in the message, when given), whether or not the passages explain them; each is a short name of at most 5 words. "statics" explains the first 1 or 2 keywords the way a textbook does: what it is, what it says, how it works, in 1-2 sentences of at most 40 words each, without retelling the news. Base each on the knowledge-base passages [K…] that explain it, even if they never mention the news, and list them in "from"; when no passage explains it, write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. Use [] for both when the news has no static concept worth explaining.${hindiGuide(opts.glossary)}
 Reply with JSON only:
 {"headline": {"en": "...", "hi": "..."},

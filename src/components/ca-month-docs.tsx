@@ -795,14 +795,15 @@ export function ResortMonth({ month }: { month: string }) {
   }
   return (
     <section
-      aria-label="New sections"
+      aria-label="Check the sections"
       className="space-y-2 rounded-2xl border border-border bg-card p-4"
     >
-      <h3 className="font-semibold">New sections</h3>
+      <h3 className="font-semibold">Check the sections</h3>
       <p className="text-sm text-muted-foreground">
-        “Schemes, Policies &amp; Reports”, “Persons in News” and “Places in News” get new stories by
-        themselves. This moves the month's earlier stories into them; daily issues already posted
-        don't change.
+        Files the month's stories by the section rules: schemes, policies and official reports in
+        “Schemes, Policies &amp; Reports” (acts and bills go to National or Rajasthan); important
+        appointments, awards and obituaries in “Persons in News”; all sports news, medals and sports
+        awards in “Sports”; places in “Places in News”. Daily issues already posted don't change.
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" variant="outline" disabled={busy} onClick={() => void run()}>
