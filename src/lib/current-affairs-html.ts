@@ -29,6 +29,7 @@ import type { CaFeature } from "@/lib/ca-feature";
 import type { CaReport } from "@/lib/ca-docs";
 import { CARD_LABELS, SCHEME_GROUPS, schemeGroup } from "@/lib/ca-blueprint";
 import type { Geo } from "@/lib/ca-map";
+import type { Earlier } from "@/lib/ca-schemes";
 import type { EventBlock } from "@/lib/ca-events";
 import {
   COVER_CSS,
@@ -65,6 +66,8 @@ export type MagazineItem = {
   story_type?: string | null;
   // Where a "Places in News" story's place is (for the monthly maps).
   geo?: Geo | null;
+  // The stories before it on the same scheme (the scheme register).
+  earlier?: Earlier[];
   // A custom magazine's subsection (its section is the category).
   sub?: string | null;
   // The several-day event it belongs to (monthly issue only).
@@ -126,6 +129,7 @@ const T = {
     background: "Background",
     revision: "60-Second Revision",
     numbers: "Numbers of the Month",
+    earlier: "Earlier",
     numbersSub: "Figures, targets and ranks to remember",
     practice: "Practice Questions",
     ctaText: "Free current affairs every morning.",
@@ -169,6 +173,7 @@ const T = {
     background: "पृष्ठभूमि",
     revision: "60 सेकंड रिवीजन",
     numbers: "इस माह के आँकड़े",
+    earlier: "पूर्व में",
     numbersSub: "याद रखने योग्य आँकड़े, लक्ष्य और रैंक",
     practice: "अभ्यास प्रश्न",
     ctaText: "हर सुबह निःशुल्क करेंट अफेयर्स।",
@@ -493,6 +498,13 @@ function itemHtml(
   return `<article class="item">
   <div class="item-head"><span class="num">${number}</span><div class="heads"><h3>${esc(pick(c.headline, lang))}</h3></div></div>
   ${tags ? `<div class="tags">${tags}</div>` : ""}
+  ${
+    item.earlier?.length
+      ? `<div class="earlier"><b>${t.earlier}:</b> ${item.earlier
+          .map((e) => `${esc(formatDate(e.date, lang))} — ${esc(pick(e.headline, lang))}`)
+          .join("; ")}</div>`
+      : ""
+  }
   ${sideImagesHtml(c.images, lang)}
   ${c.hide_summary ? "" : block(c.summary, lang, "summary")}
   ${imagesHtml(c.images, lang)}
@@ -612,6 +624,8 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .card th { width: 28%; text-align: left; vertical-align: top; padding: 1mm 2mm 1mm 0; color: ${accent}; font-weight: 600; border-bottom: 1px solid #e2e8f0; }
 .card td { vertical-align: top; padding: 1mm 0; border-bottom: 1px solid #e2e8f0; }
 .card tr:last-child th, .card tr:last-child td { border-bottom: 0; }
+.earlier { margin: 1mm 0 2mm; padding: 1.2mm 2.5mm; border-left: 2px solid ${accent}; background: #f8fafc; font-size: 8.5pt; color: #475569; }
+.earlier b { color: ${accent}; }
 .nums { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin-bottom: 3mm; }
 .nums td { padding: 1.2mm 2mm; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
 .nums tr:nth-child(even) td { background: #f8fafc; }

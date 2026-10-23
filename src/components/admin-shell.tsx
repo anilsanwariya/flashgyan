@@ -6,6 +6,7 @@ import {
   BarChart3,
   BookOpenCheck,
   CalendarRange,
+  ClipboardList,
   Bot,
   ExternalLink,
   FileQuestion,
@@ -42,6 +43,7 @@ export type AdminSectionId =
   | "ca.daily"
   | "ca.monthly"
   | "ca.custom"
+  | "ca.schemes"
   | "ca.settings"
   | "bot.broadcast"
   | "bot.commands"
@@ -131,6 +133,13 @@ export const ADMIN_GROUPS: { label: string; sections: SectionDef[] }[] = [
         icon: Library,
         description:
           "Special magazines on a theme over any dates, sorted into sections and subsections by the AI.",
+      },
+      {
+        id: "ca.schemes",
+        label: "Scheme register",
+        icon: ClipboardList,
+        description:
+          "Every government scheme in the news, with all its stories in order. New stories print what came before.",
       },
       {
         id: "ca.settings",

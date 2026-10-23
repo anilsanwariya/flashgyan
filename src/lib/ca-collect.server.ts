@@ -200,6 +200,12 @@ export async function tick(origin?: string): Promise<TickResult> {
   } catch (e) {
     console.error("official documents:", e);
   }
+  // The scheme register links the next scheme stories.
+  try {
+    await (await import("@/lib/ca-schemes.server")).schemeStep();
+  } catch (e) {
+    console.error("scheme register:", e);
+  }
 
   const { data: claimed, error } = await supabaseAdmin.rpc(
     "ca_claim_run" as never,
