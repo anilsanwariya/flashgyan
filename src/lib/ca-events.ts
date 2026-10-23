@@ -36,7 +36,7 @@ export type CaEvent = {
 // What the extraction prompt asks for, and what it gives back.
 export type RawEvent = { name: string; kind: EventKind; ended: boolean };
 
-export const EVENT_FIELD = `"event": when the story is part of an event that runs over several days (a sports games or championship, a summit, conference or COP, an international fair or exhibition, an election), {"name": the event's full official English name with its year and place as commonly written (e.g. "Paris Olympics 2024", "COP29 Baku 2024", "Khelo India Youth Games 2025", "ICC Champions Trophy 2025"), "kind": one of "sports", "summit", "conference", "exhibition", "election", "other", "ended": true only if the story reports that the whole event has concluded (closing ceremony, final day, the final match decided)}; otherwise null. A one-day event, a scheme or a policy is not an event`;
+export const EVENT_FIELD = `"event": when the story is part of an event that runs over several days (a sports games or championship, a summit, conference or COP, an international fair or exhibition, an election), {"name": the event's full official English name with its year and place as commonly written (e.g. "Paris Olympics 2024", "COP29 Baku 2024", "Khelo India Youth Games 2025", "ICC Champions Trophy 2025"), "kind": one of "sports", "summit", "conference", "exhibition", "election", "other", "ended": true only if the story reports that the whole event has concluded (closing ceremony, final day, the final match decided)}; otherwise null. Every result, medal, record or team news of a multi-sport games (Olympics, Paralympics, Asian Games, Para Asian Games, Commonwealth Games, National Games, Khelo India Games…) or a tournament is part of that event, even when the story is about one player. A one-day event, a scheme or a policy is not an event`;
 
 export function parseRawEvent(v: unknown): RawEvent | null {
   const o = (v ?? null) as Record<string, unknown> | null;
@@ -114,8 +114,12 @@ type ChatMessage = { role: "system" | "user"; content: string };
 
 // The story of the day for one event, as a roundup: the writing prompt gets
 // this note.
-export function roundupNote(eventName: string): string {
-  return `\nTHIS IS THE DAY'S ROUNDUP OF "${eventName}": the facts may be several separate results or developments of the same event (different players' medals, different matches, different decisions). The headline names the event and the day's main highlights; each fact stays its own point (never merge two results into one); the summary links them as the day's progress of the event.`;
+export function roundupNote(eventName: string, kind?: string | null): string {
+  const base = `\nTHIS IS THE DAY'S ROUNDUP OF "${eventName}": the facts may be several separate results or developments of the same event (different players' medals, different matches, different decisions). The headline names the event and the day's main highlights; each fact stays its own point (never merge two results into one); the summary links them as the day's progress of the event.`;
+  if (kind !== "sports") return base;
+  // A games' day for India: its medals as a table students can revise from.
+  return `${base}
+For this sports event: the headline gives India's medals of the day (e.g. "Para Asian Games 2026: India wins 3 gold, 2 silver on Day 4"); each medal is one point written as "Player (state) – sport, event – medal", gold first, with Rajasthan's players marked "(Rajasthan)"; then India's medal tally so far and rank if the facts give them, and any record. When a visual is asked for, make it a table of the day's medals with the columns Player, State, Sport / event, Medal.`;
 }
 
 export const EVENT_POINTS_MAX = 14;
