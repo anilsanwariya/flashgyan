@@ -30,6 +30,7 @@ const meta = z.object({
   conducted_by: z.string().trim().max(100),
   exam_date: dateSchema.nullable(),
   paper_code: z.string().trim().max(60).optional(),
+  series: z.string().trim().max(20).optional(),
 });
 const bi = z.object({ en: z.string().max(4000), hi: z.string().max(4000) });
 const draft = z.object({
@@ -126,14 +127,20 @@ export const applyExamKey = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
     z
-      .object({ id, entries: z.array(keyEntry).max(1000).optional(), image: image.optional() })
+      .object({
+        id,
+        entries: z.array(keyEntry).max(1000).optional(),
+        image: image.optional(),
+        // The paper's series, when the editor just picked it.
+        series: z.string().trim().max(20).optional(),
+      })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     const s = await server();
-    if (data.image) return s.keyFromImage(data.id, data.image);
-    return s.applyKey(data.id, data.entries ?? []);
+    if (data.image) return s.keyFromImage(data.id, data.image, data.series);
+    return s.applyKey(data.id, data.entries ?? [], data.series);
   });
 
 export const importExamPapers = createServerFn({ method: "POST" })
