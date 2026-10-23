@@ -647,6 +647,57 @@ export type Database = {
           },
         ]
       }
+      ca_doc_additions: {
+        Row: {
+          created_at: string
+          decided_at: string | null
+          error: string | null
+          facts: Json
+          id: string
+          item_id: string
+          month: string
+          source_id: string
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          decided_at?: string | null
+          error?: string | null
+          facts?: Json
+          id?: string
+          item_id: string
+          month: string
+          source_id: string
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          decided_at?: string | null
+          error?: string | null
+          facts?: Json
+          id?: string
+          item_id?: string
+          month?: string
+          source_id?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ca_doc_additions_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "ca_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ca_doc_additions_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "ca_sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ca_events: {
         Row: {
           created_at: string
@@ -808,6 +859,7 @@ export type Database = {
           enrich_error: string | null
           event_id: string | null
           facts: Json
+          from_document: boolean
           headline: string
           id: string
           importance: number
@@ -846,6 +898,7 @@ export type Database = {
           enrich_error?: string | null
           event_id?: string | null
           facts?: Json
+          from_document?: boolean
           headline: string
           id?: string
           importance?: number
@@ -884,6 +937,7 @@ export type Database = {
           enrich_error?: string | null
           event_id?: string | null
           facts?: Json
+          from_document?: boolean
           headline?: string
           id?: string
           importance?: number
@@ -1122,11 +1176,17 @@ export type Database = {
           chunks_done: number
           content: string
           created_at: string
+          doc_date: string | null
+          doc_focus: string | null
+          doc_lock: string | null
+          doc_month: string | null
+          doc_notes: Json
           error: string | null
           id: string
           issue_date: string | null
           mag_date: string | null
           magazine_id: string | null
+          official: boolean
           section: string
           source_name: string
           status: string
@@ -1139,11 +1199,17 @@ export type Database = {
           chunks_done?: number
           content: string
           created_at?: string
+          doc_date?: string | null
+          doc_focus?: string | null
+          doc_lock?: string | null
+          doc_month?: string | null
+          doc_notes?: Json
           error?: string | null
           id?: string
           issue_date?: string | null
           mag_date?: string | null
           magazine_id?: string | null
+          official?: boolean
           section: string
           source_name?: string
           status?: string
@@ -1156,11 +1222,17 @@ export type Database = {
           chunks_done?: number
           content?: string
           created_at?: string
+          doc_date?: string | null
+          doc_focus?: string | null
+          doc_lock?: string | null
+          doc_month?: string | null
+          doc_notes?: Json
           error?: string | null
           id?: string
           issue_date?: string | null
           mag_date?: string | null
           magazine_id?: string | null
+          official?: boolean
           section?: string
           source_name?: string
           status?: string
@@ -1190,6 +1262,7 @@ export type Database = {
           last_run_at: string | null
           max_articles: number
           name: string
+          official: boolean
           section: string
           url: string
         }
@@ -1204,6 +1277,7 @@ export type Database = {
           last_run_at?: string | null
           max_articles?: number
           name: string
+          official?: boolean
           section?: string
           url: string
         }
@@ -1218,6 +1292,7 @@ export type Database = {
           last_run_at?: string | null
           max_articles?: number
           name?: string
+          official?: boolean
           section?: string
           url?: string
         }
