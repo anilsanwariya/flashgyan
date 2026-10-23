@@ -879,6 +879,7 @@ export type Database = {
           event_id: string | null
           facts: Json
           from_document: boolean
+          geo: Json | null
           headline: string
           id: string
           importance: number
@@ -919,6 +920,7 @@ export type Database = {
           event_id?: string | null
           facts?: Json
           from_document?: boolean
+          geo?: Json | null
           headline: string
           id?: string
           importance?: number
@@ -959,6 +961,7 @@ export type Database = {
           event_id?: string | null
           facts?: Json
           from_document?: boolean
+          geo?: Json | null
           headline?: string
           id?: string
           importance?: number

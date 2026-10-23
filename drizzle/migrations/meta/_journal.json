@@ -141,6 +141,13 @@
       "when": 1792728863313,
       "tag": "0019_ca_story_types_magazine_additions",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792748013241,
+      "tag": "0020_ca_item_geo",
+      "breakpoints": true
     }
   ]
 }
