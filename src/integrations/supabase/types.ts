@@ -596,6 +596,57 @@ export type Database = {
         }
         Relationships: []
       }
+      ca_clips: {
+        Row: {
+          created_at: string
+          error: string | null
+          headline: string
+          id: string
+          newspaper_id: string
+          parts: Json
+          source_id: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          headline?: string
+          id?: string
+          newspaper_id: string
+          parts?: Json
+          source_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          headline?: string
+          id?: string
+          newspaper_id?: string
+          parts?: Json
+          source_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ca_clips_newspaper_id_fkey"
+            columns: ["newspaper_id"]
+            isOneToOne: false
+            referencedRelation: "ca_newspapers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ca_clips_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "ca_sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ca_corrections: {
         Row: {
           changes: Json
@@ -1146,6 +1197,42 @@ export type Database = {
           title_en?: string
           title_hi?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      ca_newspapers: {
+        Row: {
+          created_at: string
+          file_deleted_at: string | null
+          file_path: string
+          file_size: number
+          id: string
+          issue_date: string
+          official: boolean
+          pages: number
+          source_name: string
+        }
+        Insert: {
+          created_at?: string
+          file_deleted_at?: string | null
+          file_path: string
+          file_size?: number
+          id?: string
+          issue_date: string
+          official?: boolean
+          pages?: number
+          source_name: string
+        }
+        Update: {
+          created_at?: string
+          file_deleted_at?: string | null
+          file_path?: string
+          file_size?: number
+          id?: string
+          issue_date?: string
+          official?: boolean
+          pages?: number
+          source_name?: string
         }
         Relationships: []
       }
