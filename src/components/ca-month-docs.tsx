@@ -2,7 +2,7 @@
 // Documents). Government reports, gazettes and surveys are read into new
 // stories under the date they are about, additions to the month's stories
 // (approved here), corrections (on the Daily page's list) and, for a report,
-// a page in "Reports & documents of the month".
+// a page in "Schemes, Policies & Reports" → Reports & indices.
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -31,9 +31,11 @@ import {
   type MonthDoc,
 } from "@/lib/ca-docs.functions";
 import { monthEnd } from "@/lib/ca-docs";
+import { resortCaMonth } from "@/lib/current-affairs.functions";
 import type { CaReport } from "@/lib/ca-docs";
 import { formatDate } from "@/lib/current-affairs";
 import { Badge, errorText } from "@/components/ca-ui";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -124,7 +126,7 @@ export function MonthDocuments({ month }: { month: string }) {
           )}
         </div>
       )}
-      <Additions additions={data.additions} onChanged={refresh} />
+      <Suggestions additions={data.additions} onChanged={refresh} />
       <Reports month={month} reports={data.reports} docs={data.docs} onChanged={refresh} />
       <DocList docs={data.docs} reports={data.reports} onChanged={refresh} />
     </div>
@@ -219,7 +221,7 @@ function AddDocument({
           Government reports, gazettes, surveys and releases. The AI files their new stories under
           the date you give (marked “From official documents”), offers new facts for the month's
           stories below for you to approve, sends changed figures to the corrections list, and gives
-          a report its own page in “Reports &amp; documents of the month”.
+          a report its own page in “Schemes, Policies &amp; Reports” → Reports &amp; indices.
         </p>
       </div>
       <div role="radiogroup" aria-label="Document kind" className="flex flex-wrap gap-1.5">
@@ -326,30 +328,42 @@ function AddDocument({
 
 // ---------- Additions waiting for the editor ----------
 
-function Additions({
+// New facts and corrections that material offers for stories already
+// written: approved one by one (or all), added as key points or applied
+// without rewriting the story. A custom magazine's copy can update the daily
+// story it came from too.
+export function Suggestions({
   additions,
   onChanged,
+  title = "New facts for the month's stories",
 }: {
   additions: DocAddition[];
   onChanged: () => Promise<unknown>;
+  title?: string;
 }) {
   const fn = useServerFn(decideCaDocAddition);
   const [busy, setBusy] = useState<string | null>(null);
+  const [daily, setDaily] = useState<Set<string>>(new Set());
   async function decide(list: DocAddition[], approve: boolean) {
     setBusy(list.length === 1 ? list[0].id : "all");
     let done = 0;
     try {
       for (const a of list) {
-        await fn({ data: { id: a.id, approve } });
+        await fn({ data: { id: a.id, approve, also_daily: approve && daily.has(a.id) } });
         done++;
       }
+      const fixes = list.filter((a) => a.kind === "correction").length;
       toast.success(
-        approve
-          ? `${done === 1 ? "Facts added" : `Facts added to ${done} stories`} as key points`
-          : "Left as it was",
+        !approve
+          ? "Left as it was"
+          : list.length === 1
+            ? fixes
+              ? "Correction applied"
+              : "Facts added as key points"
+            : `${done} ${done === 1 ? "suggestion" : "suggestions"} applied`,
       );
     } catch (e) {
-      toast.error(errorText(e, "Couldn't add them"));
+      toast.error(errorText(e, "Couldn't apply it"));
     } finally {
       setBusy(null);
       await onChanged();
@@ -358,21 +372,22 @@ function Additions({
   if (!additions.length) return null;
   return (
     <section
-      aria-label="New facts for the month's stories"
+      aria-label={title}
       className="space-y-3 rounded-2xl border border-primary/40 bg-card p-4"
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="font-semibold">
-            New facts for the month's stories <Badge tone="warn">{additions.length}</Badge>
+            {title} <Badge tone="warn">{additions.length}</Badge>
           </h3>
           <p className="text-sm text-muted-foreground">
-            Added as key points, without rewriting the story (its earlier version is kept).
+            New facts are added as key points and corrections change the figures, without rewriting
+            the story (its earlier version is kept).
           </p>
         </div>
         {additions.length > 1 && (
           <Button size="sm" disabled={!!busy} onClick={() => void decide(additions, true)}>
-            <Check className="mr-1 h-4 w-4" /> {busy === "all" ? "Adding…" : "Add all"}
+            <Check className="mr-1 h-4 w-4" /> {busy === "all" ? "Applying…" : "Apply all"}
           </Button>
         )}
       </div>
@@ -381,26 +396,67 @@ function Additions({
           <li
             key={a.id}
             data-addition={a.headline}
+            data-kind={a.kind}
             className="space-y-2 rounded-xl border border-border p-3 text-sm"
           >
             <div>
-              <div className="break-words font-medium">{a.headline}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="break-words font-medium">{a.headline}</span>
+                <Badge tone={a.kind === "correction" ? "warn" : "primary"}>
+                  {a.kind === "correction" ? "Correction" : "New facts"}
+                </Badge>
+              </div>
               <div className="text-xs text-muted-foreground">
                 {a.issue_date ? formatDate(a.issue_date, "en") : ""} · from {a.doc}
               </div>
             </div>
-            <ul className="list-disc space-y-0.5 pl-5">
-              {a.facts.map((f, i) => (
-                <li key={i} className="break-words">
-                  {f.text}
-                </li>
-              ))}
-            </ul>
+            {a.kind === "correction" ? (
+              <ul className="space-y-0.5">
+                {a.changes.map((c, i) => (
+                  <li key={i} className="break-words">
+                    {c.old_value || c.new_value ? (
+                      <>
+                        <s className="text-muted-foreground">{c.old_value}</s> →{" "}
+                        <b>{c.new_value}</b>
+                      </>
+                    ) : null}
+                    <span className="block text-xs text-muted-foreground">{c.new_en}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <ul className="list-disc space-y-0.5 pl-5">
+                {a.facts.map((f, i) => (
+                  <li key={i} className="break-words">
+                    {f.text}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {a.has_daily && (
+              <label className="flex items-center gap-2 text-xs">
+                <Checkbox
+                  aria-label={`Update the daily story too: ${a.headline}`}
+                  checked={daily.has(a.id)}
+                  onCheckedChange={(v) => {
+                    const next = new Set(daily);
+                    if (v === true) next.add(a.id);
+                    else next.delete(a.id);
+                    setDaily(next);
+                  }}
+                />
+                Update the daily story too
+              </label>
+            )}
             {a.error && <p className="text-xs text-destructive">{a.error}</p>}
             <div className="flex flex-wrap gap-2">
               <Button size="sm" disabled={!!busy} onClick={() => void decide([a], true)}>
                 <Check className="mr-1 h-4 w-4" />
-                {busy === a.id ? "Adding…" : "Add as key points"}
+                {busy === a.id
+                  ? "Applying…"
+                  : a.kind === "correction"
+                    ? "Apply correction"
+                    : "Add as key points"}
               </Button>
               <Button
                 size="sm"
@@ -456,14 +512,14 @@ function Reports({
   if (!reports.length && !without.length) return null;
   return (
     <section
-      aria-label="Reports & documents of the month"
+      aria-label="Report pages"
       className="space-y-3 rounded-2xl border border-border bg-card p-4"
     >
       <div>
-        <h3 className="font-semibold">Reports &amp; documents of the month</h3>
+        <h3 className="font-semibold">Report pages</h3>
         <p className="text-sm text-muted-foreground">
-          Printed above the background article, in this order: what each report is, its key
-          findings, Rajasthan's place and practice questions.
+          Printed in “Schemes, Policies &amp; Reports” under Reports &amp; indices, in this order:
+          what each report is, its key findings, Rajasthan's place and practice questions.
         </p>
       </div>
       <ul className="space-y-2" data-testid="doc-reports">
@@ -695,6 +751,70 @@ function DocList({
       ) : (
         <p className="text-sm text-muted-foreground">No documents for this month yet.</p>
       )}
+    </section>
+  );
+}
+
+// Moves the month's earlier stories into the newer sections (Schemes,
+// Policies & Reports; Persons in News; Places in News).
+export function ResortMonth({ month }: { month: string }) {
+  const qc = useQueryClient();
+  const fn = useServerFn(resortCaMonth);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ checked: number; moved: number } | null>(null);
+  async function run() {
+    setBusy(true);
+    let checked = 0;
+    let moved = 0;
+    let after: string | null = null;
+    try {
+      for (let i = 0; i < 100; i++) {
+        const r: { checked: number; moved: number; next: string | null } = await fn({
+          data: { month, after },
+        });
+        checked += r.checked;
+        moved += r.moved;
+        setProgress({ checked, moved });
+        if (!r.next) break;
+        after = r.next;
+      }
+      toast.success(
+        moved
+          ? `${moved} ${moved === 1 ? "story" : "stories"} moved to the new sections`
+          : "No stories needed moving",
+      );
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["caMonth"] }),
+        qc.invalidateQueries({ queryKey: ["caDay"] }),
+      ]);
+    } catch (e) {
+      toast.error(errorText(e, "Re-sorting stopped"));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section
+      aria-label="New sections"
+      className="space-y-2 rounded-2xl border border-border bg-card p-4"
+    >
+      <h3 className="font-semibold">New sections</h3>
+      <p className="text-sm text-muted-foreground">
+        “Schemes, Policies &amp; Reports”, “Persons in News” and “Places in News” get new stories by
+        themselves. This moves the month's earlier stories into them; daily issues already posted
+        don't change.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => void run()}>
+          <RefreshCw className={`mr-1 h-4 w-4 ${busy ? "animate-spin" : ""}`} />
+          {busy ? "Re-sorting…" : "Re-sort this month"}
+        </Button>
+        {progress && (
+          <span className="text-xs text-muted-foreground" role="status">
+            {progress.checked} checked · {progress.moved} moved
+          </span>
+        )}
+      </div>
     </section>
   );
 }

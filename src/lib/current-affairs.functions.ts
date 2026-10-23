@@ -1538,3 +1538,14 @@ export const writeCaEventSummary = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await server()).writeEventSummary(data.id);
   });
+
+// Re-sorts a month's stories into the newer sections, a batch at a time.
+export const resortCaMonth = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ month: dateSchema, after: z.string().uuid().nullable() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).resortMonth(data.month, data.after);
+  });

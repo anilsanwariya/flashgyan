@@ -27,6 +27,7 @@ import {
   parseExtracted,
   splitSource,
   storyText,
+  type CaChange,
   type CaFact,
 } from "@/lib/current-affairs";
 import * as CA from "@/lib/current-affairs.server";
@@ -75,11 +76,16 @@ export type MonthDoc = {
   additions: number;
 };
 
+// A suggestion from material for a story already written: new facts (key
+// points) or a correction (figures the material states differently).
 export type DocAddition = {
   id: string;
   source_id: string;
   item_id: string;
+  kind: "facts" | "correction";
+  // New facts; for a correction, what the material says.
   facts: CaFact[];
+  changes: CaChange[];
   status: "pending" | "approved" | "rejected";
   error: string | null;
   created_at: string;
@@ -87,6 +93,8 @@ export type DocAddition = {
   headline: string;
   issue_date: string;
   doc: string;
+  // A custom magazine's copy of a daily story (which can be updated too).
+  has_daily: boolean;
 };
 
 const DOC_COLS =
@@ -177,18 +185,38 @@ export async function listDocuments(month: string): Promise<{
   };
 }
 
-async function listAdditions(month: string): Promise<DocAddition[]> {
-  const { data, error } = await from("ca_doc_additions")
-    .select("id,source_id,item_id,facts,status,error,created_at")
-    .eq("month", month)
-    .order("created_at");
+const listAdditions = (month: string) => listSuggestions({ month });
+
+// The suggestions for a month's stories (official documents) or a custom
+// magazine's (its material).
+export async function listSuggestions(
+  by: { month: string } | { magazine: string },
+): Promise<DocAddition[]> {
+  const query = (cols: string) => {
+    const q = from("ca_doc_additions").select(cols);
+    return ("month" in by ? q.eq("month", by.month) : q.eq("magazine_id", by.magazine)).order(
+      "created_at",
+    );
+  };
+  let { data, error } = await query(
+    "id,source_id,item_id,kind,facts,changes,status,error,created_at",
+  );
+  // Before the new sections migration: new facts only, for a month.
+  if (error && /kind|changes|magazine_id/.test(error.message)) {
+    if (!("month" in by)) return [];
+    ({ data, error } = await query("id,source_id,item_id,facts,status,error,created_at"));
+  }
   if (missingDocs(error)) return [];
   fail(error);
-  const rows = (data ?? []) as unknown as Omit<DocAddition, "headline" | "issue_date" | "doc">[];
+  const rows = ((data ?? []) as unknown as Partial<DocAddition>[]).map((r) => ({
+    ...r,
+    kind: r.kind ?? "facts",
+    changes: r.changes ?? [],
+  })) as Omit<DocAddition, "headline" | "issue_date" | "doc" | "has_daily">[];
   if (!rows.length) return [];
   const [items, docs] = await Promise.all([
     from("ca_items")
-      .select("id,headline,issue_date,content")
+      .select("id,headline,issue_date,mag_date,origin_id,content")
       .in("id", [...new Set(rows.map((r) => r.item_id))]),
     from("ca_sources")
       .select("id,title")
@@ -199,7 +227,9 @@ async function listAdditions(month: string): Promise<DocAddition[]> {
       (items.data ?? []) as {
         id: string;
         headline: string;
-        issue_date: string;
+        issue_date: string | null;
+        mag_date?: string | null;
+        origin_id?: string | null;
         content: { headline?: { en?: string } } | null;
       }[]
     ).map((i) => [i.id, i]),
@@ -212,8 +242,9 @@ async function listAdditions(month: string): Promise<DocAddition[]> {
     return {
       ...r,
       headline: it?.content?.headline?.en || it?.headline || "",
-      issue_date: it?.issue_date ?? "",
+      issue_date: it?.issue_date ?? it?.mag_date ?? "",
       doc: names.get(r.source_id) ?? "",
+      has_daily: !!it?.origin_id,
     };
   });
 }
@@ -352,6 +383,7 @@ export async function readStep(): Promise<string | null> {
           concept: story.concept,
           embedding: embedding as unknown as string,
           story_key: story.key,
+          story_type: story.type,
           needs_enrich: true,
           from_document: true,
           collected_later: true,
@@ -405,16 +437,34 @@ async function storyRow(id: string): Promise<StoryRow | null> {
   return (data as StoryRow | null) ?? null;
 }
 
-// One addition per story and document: facts found in a later part join it.
-async function offerAddition(month: string, sourceId: string, itemId: string, facts: CaFact[]) {
-  const { data } = await from("ca_doc_additions")
-    .select("id,facts,status")
-    .eq("source_id", sourceId)
-    .eq("item_id", itemId)
-    .maybeSingle();
-  const had = data as { id: string; facts: CaFact[]; status: string } | null;
+// One suggestion of each kind per story and document: facts found in a later
+// part join it. A month's (official documents) or a magazine's (material).
+export async function offerSuggestion(
+  owner: { month: string } | { magazine: string },
+  sourceId: string,
+  itemId: string,
+  kind: "facts" | "correction",
+  facts: CaFact[],
+  changes: CaChange[] = [],
+) {
+  const find = (withKind: boolean) => {
+    const q = from("ca_doc_additions")
+      .select("id,facts,status")
+      .eq("source_id", sourceId)
+      .eq("item_id", itemId);
+    return (withKind ? q.eq("kind", kind) : q).maybeSingle();
+  };
+  let found = await find(true);
+  // Before the new sections migration: new facts only.
+  const old = !!found.error && /kind/.test(found.error.message);
+  if (old) {
+    if (kind !== "facts") return;
+    found = await find(false);
+  }
+  fail(found.error);
+  const had = found.data as { id: string; facts: CaFact[]; status: string } | null;
   if (had) {
-    if (had.status !== "pending") return;
+    if (had.status !== "pending" || kind !== "facts") return;
     fail(
       (
         await from("ca_doc_additions")
@@ -424,29 +474,50 @@ async function offerAddition(month: string, sourceId: string, itemId: string, fa
     );
     return;
   }
-  fail(
-    (
-      await from("ca_doc_additions").insert({
-        month,
-        source_id: sourceId,
-        item_id: itemId,
-        facts,
-      } as never)
-    ).error,
-  );
+  const row = {
+    month: "month" in owner ? owner.month : null,
+    source_id: sourceId,
+    item_id: itemId,
+    facts,
+    ...(old
+      ? {}
+      : {
+          kind,
+          changes,
+          magazine_id: "magazine" in owner ? owner.magazine : null,
+        }),
+  };
+  fail((await from("ca_doc_additions").insert(row as never)).error);
 }
+
+const offerAddition = (month: string, sourceId: string, itemId: string, facts: CaFact[]) =>
+  offerSuggestion({ month }, sourceId, itemId, "facts", facts);
 
 // ---------- Additions ----------
 
-// Adds the document's facts to the story as key points (or leaves them out).
-export async function decideAddition(id: string, approve: boolean) {
+// Adds the material's facts to the story as key points, or applies its
+// correction (or leaves it). `alsoDaily`: a custom magazine's copy updates
+// the daily story it was copied from too (its facts checked again, since
+// the copy may differ; a correction is approved on the daily list, which
+// keeps SAATHI's copy and the channel note as usual).
+export async function decideAddition(id: string, approve: boolean, alsoDaily = false) {
   const { data, error } = await from("ca_doc_additions").select("*").eq("id", id).single();
   fail(error);
-  const a = data as unknown as { id: string; item_id: string; facts: CaFact[]; status: string };
+  const a = data as unknown as {
+    id: string;
+    item_id: string;
+    source_id: string;
+    kind?: "facts" | "correction";
+    facts: CaFact[];
+    changes?: CaChange[];
+    status: string;
+  };
   if (a.status !== "pending") return;
   if (approve) {
     try {
-      await CA.addFactsAsPoints(a.item_id, a.facts);
+      if (a.kind === "correction") await CA.applyStoryChanges(a.item_id, a.changes ?? []);
+      else await CA.addFactsAsPoints(a.item_id, a.facts);
+      if (alsoDaily) await updateDaily(a);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       await from("ca_doc_additions")
@@ -462,10 +533,41 @@ export async function decideAddition(id: string, approve: boolean) {
           status: approve ? "approved" : "rejected",
           error: null,
           decided_at: now(),
+          ...(approve && alsoDaily ? { also_daily: true } : {}),
         } as never)
         .eq("id", id)
     ).error,
   );
+}
+
+// The daily story a custom magazine's copy came from, updated with what the
+// material adds or corrects.
+async function updateDaily(a: {
+  item_id: string;
+  source_id: string;
+  kind?: "facts" | "correction";
+  facts: CaFact[];
+}) {
+  const { data } = await from("ca_items").select("origin_id").eq("id", a.item_id).maybeSingle();
+  const origin = (data as { origin_id: string | null } | null)?.origin_id;
+  if (!origin) return;
+  if (a.kind !== "correction") {
+    const { data: o } = await from("ca_items").select("facts").eq("id", origin).maybeSingle();
+    const fresh = newFacts(((o as { facts: CaFact[] } | null)?.facts ?? []) as CaFact[], a.facts);
+    if (fresh.length) await CA.addFactsAsPoints(origin, fresh);
+    return;
+  }
+  const { data: src } = await from("ca_sources")
+    .select("title,mag_date")
+    .eq("id", a.source_id)
+    .maybeSingle();
+  const s = src as { title: string; mag_date: string | null } | null;
+  const corr = await CA.documentCorrection(origin, {
+    name: s?.title ?? "material",
+    date: s?.mag_date ?? new Date().toISOString().slice(0, 10),
+    facts: a.facts,
+  });
+  if (corr) await CA.decideCorrection(corr, true);
 }
 
 // ---------- Reports ----------

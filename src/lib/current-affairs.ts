@@ -46,10 +46,13 @@ export type UploadSection = (typeof UPLOAD_SECTIONS)[number]["id"];
 export const CATEGORIES = [
   { id: "rajasthan", en: "Rajasthan", hi: "राजस्थान" },
   { id: "national", en: "National", hi: "राष्ट्रीय" },
+  { id: "schemes", en: "Schemes, Policies & Reports", hi: "योजनाएँ, नीतियाँ एवं रिपोर्टें" },
   { id: "international", en: "International", hi: "अंतरराष्ट्रीय" },
   { id: "science", en: "Science & Technology", hi: "विज्ञान एवं प्रौद्योगिकी" },
   { id: "economy", en: "Economics", hi: "अर्थव्यवस्था" },
   { id: "sports", en: "Sports", hi: "खेल" },
+  { id: "persons", en: "Persons in News", hi: "चर्चित व्यक्ति" },
+  { id: "places", en: "Places in News", hi: "चर्चित स्थल" },
   { id: "misc", en: "Miscellaneous Topics", hi: "विविध" },
   { id: "editorial", en: "Editorials", hi: "संपादकीय" },
 ] as const;
@@ -58,11 +61,22 @@ const CATEGORY_IDS = CATEGORIES.map((c) => c.id) as string[];
 
 // Earlier section names, mapped to the current ones.
 const LEGACY_CATEGORIES: Record<string, Category> = {
-  schemes: "national",
   environment: "science",
-  persons: "misc",
   days: "misc",
 };
+
+// The sections, for the AI (shared by the prompts that classify stories).
+const CATEGORY_TEXT = `Categories: "schemes" for a story mainly about a government scheme, mission, programme, campaign, policy, act, bill or rules, or an official report, index, ranking or survey (central or Rajasthan; court judgments are not schemes); "persons" for a story mainly about a person: an appointment, an award or honour to a person, an obituary, a person's record or selection; "places" for a story mainly about a place in the news (a town, lake, pass, sanctuary, heritage site, island, region); "rajasthan" for other news about Rajasthan; "national" for India-wide polity, governance and court judgments; "international"; "science" for science, technology, defence, space, health and environment; "economy"; "sports" for results and medals; "misc" for important days, books, conferences and anything that fits nowhere else; "editorial" only for editorials. A Rajasthan scheme, person or place goes to its section with "rajasthan": true.`;
+
+// A story's section from its blueprint type: schemes, policies and reports,
+// persons and places have sections of their own (an editorial stays one).
+export function sectionFor(type: string | null | undefined, category: Category): Category {
+  if (category === "editorial") return category;
+  if (type === "scheme" || type === "policy" || type === "index") return "schemes";
+  if (type === "person" || type === "appointment") return "persons";
+  if (type === "place") return "places";
+  return category;
+}
 
 export const isCategory = (v: unknown): v is Category =>
   typeof v === "string" && CATEGORY_IDS.includes(v);
@@ -370,7 +384,7 @@ export function newStoryMessages(facts: string[], note?: string | null): ChatMes
     {
       role: "system",
       content: `You are the current affairs editor of a magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). The editor highlighted these facts in a news source as one new story. Classify it.
-Categories: "rajasthan" for anything about Rajasthan; "national" for India-wide polity, governance, schemes and judgments; "international"; "science" for science, technology, defence, space, health and environment; "economy"; "sports"; "misc" for awards, appointments, persons in news, important days, reports and indices; "editorial" only for an editorial's arguments.
+${CATEGORY_TEXT}
 Reply with JSON only: {"headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 (3 = very likely in RPSC or RSSB exams, above all RAS), "rajasthan": true if it concerns Rajasthan, ${CONCEPT_FIELD}}`,
     },
     {
@@ -393,6 +407,59 @@ export function parseNewStory(
     rajasthan: o.rajasthan === true,
     concept: str(o.concept, 300) || null,
   };
+}
+
+// ---------- Re-sorting older stories into the newer sections ----------
+
+export const RESORT_BATCH = 40;
+const RESORT_TYPES = ["scheme", "policy", "law", "index", "person", "appointment", "place"];
+
+export function resortMessages(
+  stories: { headline: string; category: string; facts: string[] }[],
+): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: `You file stories of a current affairs magazine for Rajasthan competitive exam aspirants into its newer sections. For each numbered story (its current section in brackets), say whether its main subject belongs in one of them:
+"schemes": a government scheme, mission, programme, campaign, policy, act, bill or rules, or an official report, index, ranking or survey (not a court judgment); "persons": a person (an appointment, an award or honour to a person, an obituary, a record or selection); "places": a place in the news (a town, lake, pass, sanctuary, heritage site, island, region). Leave out a story that only mentions one of these.
+Its kind: "scheme", "policy", "law" (an act, bill or rules), "index" (a report, index, ranking or survey), "person", "appointment" or "place".
+Reply with JSON only: [{"n": story number, "section": "schemes" | "persons" | "places", "kind": "..."}] for the stories that move; [] if none.`,
+    },
+    {
+      role: "user",
+      content: stories
+        .map(
+          (s, i) =>
+            `${i + 1}. [${s.category}] ${s.headline}${s.facts.length ? ` — ${s.facts.slice(0, 3).join("; ")}` : ""}`,
+        )
+        .join("\n"),
+    },
+  ];
+}
+
+// The stories that move, by their place in the list.
+export function parseResort(
+  raw: string,
+  count: number,
+): { index: number; section: Category; type: string }[] {
+  const list = parseJson<unknown[]>(raw);
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<number>();
+  const out: { index: number; section: Category; type: string }[] = [];
+  for (const x of list) {
+    const o = (x ?? {}) as Record<string, unknown>;
+    const index = Number(o.n) - 1;
+    const type = typeof o.kind === "string" && RESORT_TYPES.includes(o.kind) ? o.kind : "";
+    const section = o.section;
+    if (!Number.isInteger(index) || index < 0 || index >= count || seen.has(index)) continue;
+    if (section !== "schemes" && section !== "persons" && section !== "places") continue;
+    // The kind decides the section when it names one (a law stays where the
+    // AI put it).
+    const by = sectionFor(type, section);
+    seen.add(index);
+    out.push({ index, section: by, type });
+  }
+  return out;
 }
 
 // ---------- Verifying facts against the source ----------
@@ -447,7 +514,7 @@ export function extractMessages(opts: {
       role: "system",
       content: `You are the current affairs editor of a magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). From the source text, extract only the news items RPSC or RSSB is likely to ask about in its exams (RAS Prelims and Mains above all). Be strict: students lose time on news that is never asked, so leave out anything that does not clearly fit a story type below or would not give at least two exam facts.
 ${blueprintText()}
-Categories: "rajasthan" for anything about Rajasthan; "national" for India-wide polity, governance, schemes and judgments; "international"; "science" for science, technology, defence, space, health and environment; "economy"; "sports"; "misc" for awards, appointments, persons in news, important days, reports and indices that fit nowhere else; "editorial" only for editorials.
+${CATEGORY_TEXT}
 Skip: advertisements, crime and accidents, purely local incidents, opinion without facts, market tips, entertainment.
 Reply with JSON only: [{"type": one story type id, "headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 as described above, "rajasthan": true if it concerns Rajasthan, ${KEY_FIELD}, ${EVENT_FIELD}, ${CONCEPT_FIELD}, "facts": [{"slot": the slot id this fact fills, "text": one short fact in English, "quote": the exact words from the source that state this fact, copied character for character (5 to 30 words, in the source's language)}]}].
 Every fact must fill one slot of its story's type; leave a slot out if the source doesn't state it, and drop any fact that fits no slot. Use only facts stated in the source and keep every number, name and date exactly. Reply [] if nothing is exam-relevant.`,
@@ -510,7 +577,7 @@ export function parseExtracted(raw: string, source: string, sourceId: string): R
       return {
         headline: str(o.headline, 300),
         type: type.id,
-        category: normalizeCategory(o.category),
+        category: sectionFor(type.id, normalizeCategory(o.category)),
         importance: (importance >= 1 && importance <= 3 ? importance : 2) as 1 | 2 | 3,
         rajasthan: o.rajasthan === true,
         facts,

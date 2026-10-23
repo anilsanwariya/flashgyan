@@ -76,7 +76,7 @@ import { dayChecklist, type CheckAction } from "@/lib/ca-checklist";
 import { styleStatus } from "@/lib/ca-style";
 import { langStatus } from "@/lib/ca-bilingual";
 import { FeatureBox } from "@/components/ca-feature-box";
-import { MonthDocuments, useMonthDocs } from "@/components/ca-month-docs";
+import { MonthDocuments, ResortMonth, useMonthDocs } from "@/components/ca-month-docs";
 import {
   DailyCoverSettings,
   DesignSaveBar,
@@ -1303,6 +1303,8 @@ function MonthlyPanel() {
               )}
             </section>
           )}
+
+          {items > 0 && <ResortMonth month={month} />}
 
           <PastCollection month={month} />
         </div>

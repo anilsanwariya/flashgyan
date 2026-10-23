@@ -28,6 +28,8 @@ import {
   writeCaMagFeature,
 } from "@/lib/ca-mags.functions";
 import { getCaBackfill, saveCaWatchSite } from "@/lib/ca-collect.functions";
+import { listCaMagSuggestions } from "@/lib/ca-docs.functions";
+import { Suggestions } from "@/components/ca-month-docs";
 import type { CustomMag, MagSection } from "@/lib/ca-mags";
 import { formatDate } from "@/lib/current-affairs";
 import { PastCollection } from "@/components/ca-past-collection";
@@ -229,9 +231,29 @@ export function SectionFeature({
 
 type Kind = "file" | "link" | "text";
 
+// New facts and corrections the magazine's material offers for its stories.
+export function useMagSuggestions(id: string) {
+  const fn = useServerFn(listCaMagSuggestions);
+  return useQuery({
+    queryKey: ["caMagSuggestions", id],
+    queryFn: () => fn({ data: { id } }),
+    refetchInterval: 30_000,
+  });
+}
+
 export function MaterialTab({ mag, onChanged }: { mag: CustomMag; onChanged: () => unknown }) {
+  const qc = useQueryClient();
+  const sq = useMagSuggestions(mag.id);
   return (
     <div className="space-y-4">
+      <Suggestions
+        title="New facts and corrections"
+        additions={sq.data ?? []}
+        onChanged={async () => {
+          await qc.invalidateQueries({ queryKey: ["caMagSuggestions", mag.id] });
+          await onChanged();
+        }}
+      />
       <MaterialBox mag={mag} onChanged={onChanged} />
       <SitesBox mag={mag} onChanged={onChanged} />
     </div>
