@@ -649,35 +649,47 @@ export type Database = {
       }
       ca_doc_additions: {
         Row: {
+          also_daily: boolean
+          changes: Json
           created_at: string
           decided_at: string | null
           error: string | null
           facts: Json
           id: string
           item_id: string
-          month: string
+          kind: string
+          magazine_id: string | null
+          month: string | null
           source_id: string
           status: string
         }
         Insert: {
+          also_daily?: boolean
+          changes?: Json
           created_at?: string
           decided_at?: string | null
           error?: string | null
           facts?: Json
           id?: string
           item_id: string
-          month: string
+          kind?: string
+          magazine_id?: string | null
+          month?: string | null
           source_id: string
           status?: string
         }
         Update: {
+          also_daily?: boolean
+          changes?: Json
           created_at?: string
           decided_at?: string | null
           error?: string | null
           facts?: Json
           id?: string
           item_id?: string
-          month?: string
+          kind?: string
+          magazine_id?: string | null
+          month?: string | null
           source_id?: string
           status?: string
         }
@@ -687,6 +699,13 @@ export type Database = {
             columns: ["item_id"]
             isOneToOne: false
             referencedRelation: "ca_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ca_doc_additions_magazine_id_fkey"
+            columns: ["magazine_id"]
+            isOneToOne: false
+            referencedRelation: "ca_mags"
             referencedColumns: ["id"]
           },
           {
@@ -883,6 +902,7 @@ export type Database = {
           source_ids: string[]
           status: string
           story_key: string | null
+          story_type: string | null
           syllabus_topic_id: string | null
           unit: string | null
           updated_at: string
@@ -922,6 +942,7 @@ export type Database = {
           source_ids?: string[]
           status?: string
           story_key?: string | null
+          story_type?: string | null
           syllabus_topic_id?: string | null
           unit?: string | null
           updated_at?: string
@@ -961,6 +982,7 @@ export type Database = {
           source_ids?: string[]
           status?: string
           story_key?: string | null
+          story_type?: string | null
           syllabus_topic_id?: string | null
           unit?: string | null
           updated_at?: string
