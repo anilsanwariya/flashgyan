@@ -1384,6 +1384,7 @@ export type Database = {
           pages_done: number
           paper_code: string
           questions_total: number | null
+          series: string
           source: string
           subject: string
           updated_at: string
@@ -1402,6 +1403,7 @@ export type Database = {
           pages_done?: number
           paper_code?: string
           questions_total?: number | null
+          series?: string
           source?: string
           subject?: string
           updated_at?: string
@@ -1420,6 +1422,7 @@ export type Database = {
           pages_done?: number
           paper_code?: string
           questions_total?: number | null
+          series?: string
           source?: string
           subject?: string
           updated_at?: string
