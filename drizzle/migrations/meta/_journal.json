@@ -218,6 +218,13 @@
       "when": 1792835878007,
       "tag": "0030_bot_revision",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792846644432,
+      "tag": "0031_paper_check_subjects",
+      "breakpoints": true
     }
   ]
 }

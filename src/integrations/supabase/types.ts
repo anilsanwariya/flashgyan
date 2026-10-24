@@ -1592,6 +1592,7 @@ export type Database = {
       }
       exam_questions: {
         Row: {
+          ai_check: Json | null
           ca: boolean | null
           correct: number | null
           created_at: string
@@ -1614,10 +1615,14 @@ export type Database = {
           question_en: string
           question_hi: string
           section: string | null
+          subject_section: string
+          topic_en: string
+          topic_hi: string
           updated_at: string
           verified: boolean
         }
         Insert: {
+          ai_check?: Json | null
           ca?: boolean | null
           correct?: number | null
           created_at?: string
@@ -1640,10 +1645,14 @@ export type Database = {
           question_en?: string
           question_hi?: string
           section?: string | null
+          subject_section?: string
+          topic_en?: string
+          topic_hi?: string
           updated_at?: string
           verified?: boolean
         }
         Update: {
+          ai_check?: Json | null
           ca?: boolean | null
           correct?: number | null
           created_at?: string
@@ -1666,6 +1675,9 @@ export type Database = {
           question_en?: string
           question_hi?: string
           section?: string | null
+          subject_section?: string
+          topic_en?: string
+          topic_hi?: string
           updated_at?: string
           verified?: boolean
         }
