@@ -4,6 +4,7 @@
 import { CustomMagazines } from "@/components/ca-custom-panel";
 import { SchemeRegister } from "@/components/ca-scheme-register";
 import { ExamPapers } from "@/components/exam-papers-panel";
+import { SyllabusPanel } from "@/components/syllabus-panel";
 import { NewspaperClipping } from "@/components/ca-clipper";
 import { CoverageMeter } from "@/components/ca-asked-panel";
 import { PracticeBox } from "@/components/ca-practice-panel";
@@ -121,7 +122,14 @@ import {
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-export type CaSection = "daily" | "monthly" | "custom" | "schemes" | "papers" | "settings";
+export type CaSection =
+  | "daily"
+  | "monthly"
+  | "custom"
+  | "schemes"
+  | "syllabus"
+  | "papers"
+  | "settings";
 
 const shiftDate = (date: string, days: number) => {
   const d = new Date(`${date}T00:00:00Z`);
@@ -140,6 +148,7 @@ export function CurrentAffairsPanel({ section }: { section: CaSection }) {
   if (section === "monthly") return <MonthlyPanel />;
   if (section === "custom") return <CustomMagazines />;
   if (section === "schemes") return <SchemeRegister />;
+  if (section === "syllabus") return <SyllabusPanel />;
   if (section === "papers") return <ExamPapers />;
   if (section === "settings") return <SettingsPanel />;
   return <DailyPanel />;

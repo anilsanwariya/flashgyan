@@ -96,10 +96,16 @@ export async function eachPageImage(
 // A PDF's own text, line by line as printed (pieces on one line, left to
 // right). Empty for a scan.
 export async function pdfText(file: File): Promise<string> {
+  return (await pdfPageTexts(file)).join("\n");
+}
+
+// The same, page by page.
+export async function pdfPageTexts(file: File): Promise<string[]> {
   const doc = await open(file);
   try {
-    const lines: string[] = [];
+    const pages: string[] = [];
     for (let n = 1; n <= doc.numPages; n++) {
+      const lines: string[] = [];
       const page = await doc.getPage(n);
       const content = await page.getTextContent();
       const rows = new Map<number, { x: number; s: string }[]>();
@@ -122,8 +128,9 @@ export async function pdfText(file: File): Promise<string> {
             .map((r) => r.s)
             .join(" "),
         );
+      pages.push(lines.join("\n"));
     }
-    return lines.join("\n");
+    return pages;
   } finally {
     await doc.loadingTask.destroy();
   }

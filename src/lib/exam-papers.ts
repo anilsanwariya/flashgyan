@@ -69,7 +69,8 @@ export type ExamQuestion = {
 
 // ---------- Subjects and the AI check ----------
 
-// The subject sections of the RPSC / RSSB syllabus a question is sorted into.
+// The subject sections of the RPSC / RSSB syllabus (Prelims and Mains) a
+// question, a syllabus line and the notes are sorted into.
 export const SUBJECT_SECTIONS = [
   { en: "Rajasthan History", hi: "राजस्थान का इतिहास" },
   { en: "Rajasthan Art & Culture", hi: "राजस्थान की कला एवं संस्कृति" },
@@ -78,10 +79,15 @@ export const SUBJECT_SECTIONS = [
   { en: "Rajasthan Economy", hi: "राजस्थान की अर्थव्यवस्था" },
   { en: "Indian History", hi: "भारत का इतिहास" },
   { en: "Indian Art & Culture", hi: "भारतीय कला एवं संस्कृति" },
+  { en: "World History", hi: "विश्व का इतिहास" },
   { en: "Indian Geography", hi: "भारत का भूगोल" },
   { en: "World Geography", hi: "विश्व का भूगोल" },
   { en: "Indian Polity", hi: "भारतीय राजव्यवस्था" },
+  { en: "Public Administration", hi: "लोक प्रशासन" },
+  { en: "International Affairs", hi: "अंतरराष्ट्रीय संबंध" },
+  { en: "Law", hi: "विधि" },
   { en: "Indian Economy", hi: "भारतीय अर्थव्यवस्था" },
+  { en: "World Economy", hi: "विश्व अर्थव्यवस्था" },
   { en: "General Science", hi: "सामान्य विज्ञान" },
   { en: "Science & Technology", hi: "विज्ञान एवं प्रौद्योगिकी" },
   { en: "Environment & Ecology", hi: "पर्यावरण एवं पारिस्थितिकी" },
@@ -92,6 +98,11 @@ export const SUBJECT_SECTIONS = [
   { en: "English", hi: "अंग्रेज़ी" },
   { en: "Computer", hi: "कंप्यूटर" },
   { en: "Ethics", hi: "नीतिशास्त्र" },
+  { en: "Behaviour", hi: "व्यवहार" },
+  { en: "Sociology", hi: "समाजशास्त्र" },
+  { en: "Management", hi: "प्रबंधन" },
+  { en: "Accounting & Auditing", hi: "लेखांकन एवं अंकेक्षण" },
+  { en: "Essay", hi: "निबंध" },
   { en: "Other", hi: "अन्य" },
 ] as const;
 

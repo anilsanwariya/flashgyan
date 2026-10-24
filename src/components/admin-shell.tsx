@@ -45,6 +45,7 @@ export type AdminSectionId =
   | "ca.monthly"
   | "ca.custom"
   | "ca.schemes"
+  | "ca.syllabus"
   | "ca.papers"
   | "ca.settings"
   | "bot.broadcast"
@@ -142,6 +143,13 @@ export const ADMIN_GROUPS: { label: string; sections: SectionDef[] }[] = [
         icon: ClipboardList,
         description:
           "Every government scheme in the news, with all its stories in order. New stories print what came before.",
+      },
+      {
+        id: "ca.syllabus",
+        label: "Syllabus",
+        icon: BookOpenCheck,
+        description:
+          "Exams' official syllabi in Hindi and English, read from their PDFs, with each point in a subject section and the scheme of examination.",
       },
       {
         id: "ca.papers",
