@@ -33,9 +33,11 @@ import {
   getCaClipSuggestions,
   getCaNewspaper,
   listCaNewspapers,
+  finishCaNewspaper,
   readCaClip,
   saveCaClip,
   startCaNewspaper,
+  stepCaNewspaper,
   suggestCaClips,
   type NewspaperSummary,
 } from "@/lib/ca-clips.functions";
@@ -51,6 +53,7 @@ import {
   cleanBox,
   clipPages,
   covered,
+  workText,
   type Clip,
   type ClipBox,
   type SuggestedClip,
@@ -76,6 +79,38 @@ export function NewspaperClipping({ date, onChanged }: { date: string; onChanged
     queryFn: () => listFn({ data: { date } }),
     refetchOnMount: true,
   });
+  // A newspaper finishing in the background: this open page helps it along
+  // (a step at a time; the server's schedule goes on without it), and the
+  // day's stories show as they are made.
+  const stepFn = useServerFn(stepCaNewspaper);
+  const working = (q.data?.newspapers ?? []).find((n) => n.work && n.work.state !== "done");
+  const workingId = working?.id ?? null;
+  useEffect(() => {
+    if (!workingId) return;
+    let gone = false;
+    void (async () => {
+      let steps = 0;
+      while (!gone) {
+        const r = await stepFn({ data: { id: workingId } }).catch(() => ({ step: null }));
+        if (gone) return;
+        steps++;
+        if (steps % 2 === 0 || !r.step) {
+          await qc.invalidateQueries({ queryKey: ["caNewspapers", date] });
+          onChanged();
+        }
+        // Locked by the server's own step, or nothing left: look again soon.
+        if (!r.step) {
+          await new Promise((res) => setTimeout(res, 5000));
+          await qc.invalidateQueries({ queryKey: ["caNewspapers", date] });
+          return;
+        }
+      }
+    })();
+    return () => {
+      gone = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workingId, q.dataUpdatedAt]);
   const [name, setName] = useState("");
   const [official, setOfficial] = useState(false);
   const [busy, setBusy] = useState("");
@@ -242,7 +277,22 @@ function NewspaperRow({
       <Badge tone="primary">
         {n.clips} article{n.clips === 1 ? "" : "s"}
       </Badge>
-      {n.waiting > 0 && <Badge tone="warn">{n.waiting} to read</Badge>}
+      {n.work && n.work.state !== "done" ? (
+        <span
+          role="status"
+          className="inline-flex items-center gap-1 text-xs text-primary"
+          data-testid="clip-work"
+        >
+          <RefreshCw className="h-3.5 w-3.5 animate-spin" /> {workText(n.work, n.waiting)}
+        </span>
+      ) : (
+        n.waiting > 0 && <Badge tone="warn">{n.waiting} to read</Badge>
+      )}
+      {n.work?.state === "done" && !n.waiting && (
+        <span className="text-xs text-muted-foreground" data-testid="clip-work">
+          {workText(n.work, 0)}
+        </span>
+      )}
       {n.failed > 0 && <Badge tone="bad">{n.failed} failed</Badge>}
       {n.file_deleted_at && <Badge tone="muted">PDF removed after 30 days</Badge>}
       <Button size="sm" onClick={onOpen}>
@@ -267,7 +317,14 @@ type Gesture =
       start: { x: number; y: number };
       box: ClipBox;
     }
-  | { kind: "pan"; x: number; y: number; sl: number; st: number }
+  | {
+      kind: "pending";
+      corner: "nw" | "ne" | "sw" | "se" | null;
+      start: { x: number; y: number };
+      box: ClipBox;
+    }
+  | { kind: "pan"; x: number; y: number; sl: number; st: number; px: { x: number; y: number } }
+  | { kind: "tap"; px: { x: number; y: number } }
   | { kind: "pinch"; dist: number; zoom: number }
   | null;
 
@@ -281,10 +338,27 @@ type Undo =
 const PAGE_WIDTH = 2000;
 const THUMB_WIDTH = 150;
 const ZOOMS = [1, 1.5, 2, 3, 4, 6];
-// A clipping still being drawn on (selected) is read after this long.
-const SETTLE_MS = 15000;
 
 const boxOf = ({ page, x, y, w, h }: ClipBox): ClipBox => ({ page, x, y, w, h });
+// A box moved (no corner) or resized by a corner, kept on the page.
+function moveBox(
+  b: ClipBox,
+  corner: "nw" | "ne" | "sw" | "se" | null,
+  dx: number,
+  dy: number,
+): ClipBox {
+  if (!corner)
+    return {
+      ...b,
+      x: Math.min(1 - b.w, Math.max(0, b.x + dx)),
+      y: Math.min(1 - b.h, Math.max(0, b.y + dy)),
+    };
+  const l = corner.includes("w") ? b.x + dx : b.x;
+  const r = corner.includes("e") ? b.x + b.w + dx : b.x + b.w;
+  const t = corner.includes("n") ? b.y + dy : b.y;
+  const bt = corner.includes("s") ? b.y + b.h + dy : b.y + b.h;
+  return { ...b, x: l, y: t, w: r - l, h: bt - t };
+}
 const inside = (b: ClipBox, p: { x: number; y: number }) =>
   p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h;
 
@@ -418,6 +492,8 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
   const [saving, setSaving] = useState<ClipBox[]>([]);
   const [undo, setUndo] = useState<Undo[]>([]);
   const [panel, setPanel] = useState(false);
+  // Wide screens: the articles beside the page (can be hidden).
+  const [sideOpen, setSideOpen] = useState(true);
   const number = useMemo(() => new Map(clips.map((c, i) => [c.id, i + 1])), [clips]);
   const sel = clips.find((c) => c.id === selected) ?? null;
 
@@ -519,10 +595,6 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
       data: { newspaper_id: id, page: s.box.page, headline: s.headline },
     }).catch(() => undefined);
   }
-  async function clipSuggested(s: SuggestedClip) {
-    await addBox(s.box, null);
-    await dropSuggested(s);
-  }
 
   async function setParts(clip: Clip, next: ClipBox[], remember = true) {
     const same = (a: ClipBox, b: ClipBox) =>
@@ -591,15 +663,10 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
     }
   }
 
-  // ---------- Reading, in the background ----------
+  // ---------- Reading one now (the rest after Done, in the background) ----------
   const [readingId, setReadingId] = useState<string | null>(null);
   const [made, setMade] = useState<Record<string, number>>({});
   const readingRef = useRef(false);
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setTick((n) => n + 1), 4000);
-    return () => clearInterval(t);
-  }, []);
 
   async function readOne(clip: Clip) {
     setReadingId(clip.id);
@@ -620,55 +687,27 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
     }
   }
   const waiting = (c: Clip) => c.status === "new" || c.status === "changed";
-  useEffect(() => {
-    if (readingRef.current || finishing) return;
-    const next = clips.find(
-      (c) =>
-        waiting(c) &&
-        c.id !== adding &&
-        (c.id !== selected || Date.now() - Date.parse(c.updated_at) > SETTLE_MS),
-    );
-    if (!next) return;
-    readingRef.current = true;
-    void readOne(next).finally(() => {
-      readingRef.current = false;
-      setTick((n) => n + 1);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clips, selected, adding, tick]);
 
-  // Done: every clipping read, the day's duplicates merged and the new
-  // stories written.
+  // Done: the newspaper is read and its stories written in the background
+  // (on the server); the page closes at once.
+  const finishFn = useServerFn(finishCaNewspaper);
   const [finishing, setFinishing] = useState<string | null>(null);
   async function finish() {
     setSelected(null);
     setAdding(null);
-    setFinishing("Reading the last articles…");
+    setPending(null);
+    setFinishing("Starting…");
     try {
-      while (readingRef.current) await new Promise((r) => setTimeout(r, 300));
-      readingRef.current = true;
-      for (const c of clips.filter(waiting)) {
-        setFinishing(`Reading article ${number.get(c.id)}…`);
-        await readOne(c);
-      }
-      if (clips.some((c) => made[c.id] || c.status === "read")) {
-        setFinishing("Looking for stories that are the same news…");
-        await mergeFn({ data: { date } }).catch(() => undefined);
-        const fresh = await dayFn({ data: { date } });
-        const todo = fresh.items.filter((i) => i.needs_enrich && i.status === "included");
-        for (const [n, item] of todo.entries()) {
-          setFinishing(`Writing the stories ${n + 1} of ${todo.length}…`);
-          await enrichFn({ data: { id: item.id } }).catch((e) =>
-            toast.error(`${item.headline.slice(0, 50)}: ${errorText(e, "failed")}`),
-          );
-        }
-      }
-      toast.success("Clipping done");
+      await finishFn({ data: { id } });
+      toast.success(
+        clips.some(waiting)
+          ? "The articles are read and their stories written in the background"
+          : "Clipping saved",
+      );
       onClose();
     } catch (e) {
       toast.error(errorText(e, "Couldn't finish"));
     } finally {
-      readingRef.current = false;
       setFinishing(null);
     }
   }
@@ -677,7 +716,24 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
   const scroller = useRef<HTMLDivElement>(null);
   const sheet = useRef<HTMLDivElement>(null);
   const [zoom, setZoomState] = useState(1);
-  const [mode, setMode] = useState<"draw" | "move">("draw");
+  // The how-to tip, until hidden once (on this device).
+  const [showTip, setShowTip] = useState(() => {
+    try {
+      return localStorage.getItem("clipper-tip") !== "hidden";
+    } catch {
+      return true;
+    }
+  });
+  const hideTip = () => {
+    setShowTip(false);
+    try {
+      localStorage.setItem("clipper-tip", "hidden");
+    } catch {
+      // A private window: hidden for now.
+    }
+  };
+  // Move (pan and zoom) unless clipping; back to it after each capture.
+  const [mode, setMode] = useState<"draw" | "move">("move");
   const anchor = useRef<{ fx: number; fy: number; ox: number; oy: number } | null>(null);
   const zoomAt = (z: number, clientX?: number, clientY?: number) => {
     const s = scroller.current;
@@ -700,11 +756,48 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
     const s = scroller.current;
     const el = sheet.current;
     const a = anchor.current;
+    // The on-screen scale gives way to the real zoom in the same frame.
+    clearPreview();
     if (!s || !el || !a) return;
     s.scrollLeft = a.fx * el.offsetWidth - a.ox;
     s.scrollTop = a.fy * el.offsetHeight - a.oy;
     anchor.current = null;
   }, [zoom]);
+  // While a pinch or a wheel zooms, the page is only scaled on screen (no
+  // new layout); the zoom is set when the gesture stops.
+  const preview = useRef<{ cx: number; cy: number; z: number } | null>(null);
+  const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startPreview = (cx: number, cy: number) => {
+    const el = sheet.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    el.style.transformOrigin = `${cx - r.left}px ${cy - r.top}px`;
+    el.style.willChange = "transform";
+    preview.current = { cx, cy, z: zoomRef.current };
+  };
+  const previewZoom = (z: number) => {
+    const el = sheet.current;
+    const pv = preview.current;
+    if (!el || !pv) return;
+    pv.z = Math.min(6, Math.max(1, z));
+    el.style.transform = `scale(${pv.z / zoomRef.current})`;
+  };
+  const commitPreview = () => {
+    const pv = preview.current;
+    preview.current = null;
+    if (!pv) return;
+    if (Math.abs(pv.z - zoomRef.current) < 0.01) {
+      clearPreview();
+      return;
+    }
+    zoomAt(pv.z, pv.cx, pv.cy);
+  };
+  const clearPreview = () => {
+    const el = sheet.current;
+    if (!el) return;
+    el.style.transform = "";
+    el.style.willChange = "";
+  };
   // Ctrl + wheel (and a touchpad pinch) zooms the page, not the browser.
   useEffect(() => {
     const s = scroller.current;
@@ -712,7 +805,10 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return;
       e.preventDefault();
-      zoomAt(zoomRef.current * Math.exp(-e.deltaY / 300), e.clientX, e.clientY);
+      if (!preview.current) startPreview(e.clientX, e.clientY);
+      previewZoom(preview.current!.z * Math.exp(-e.deltaY / 300));
+      if (settle.current) clearTimeout(settle.current);
+      settle.current = setTimeout(commitPreview, 140);
     };
     s.addEventListener("wheel", onWheel, { passive: false });
     return () => s.removeEventListener("wheel", onWheel);
@@ -724,6 +820,27 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
   const gesture = useRef<Gesture>(null);
   const [draft, setDraft] = useState<ClipBox | null>(null);
   const [live, setLive] = useState<{ clipId: string; part: number; box: ClipBox } | null>(null);
+  // A box drawn (or a suggestion taken) waiting to be adjusted and captured.
+  const [pending, setPending] = useState<ClipBox | null>(null);
+  const [pendingFrom, setPendingFrom] = useState<SuggestedClip | null>(null);
+  const capture = async () => {
+    const box = pending && cleanBox(pending, pages);
+    if (!box) {
+      toast.error("That box is too small: drag around the whole article");
+      return;
+    }
+    const from = pendingFrom;
+    setPending(null);
+    setPendingFrom(null);
+    setMode("move");
+    await addBox(box, adding);
+    if (from) await dropSuggested(from);
+  };
+  const cancelPending = () => {
+    setPending(null);
+    setPendingFrom(null);
+    setMode("move");
+  };
   const at = (e: { clientX: number; clientY: number }) => {
     const r = sheet.current!.getBoundingClientRect();
     return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
@@ -744,12 +861,24 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
       setDraft(null);
       setLive(null);
       gesture.current = { kind: "pinch", dist: pinchState().dist, zoom };
+      startPreview(pinchState().mid.x, pinchState().mid.y);
       return;
     }
     if (pointers.current.size > 2) return;
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-    if (mode === "move") {
+    const p = at(e);
+    const t = e.target as HTMLElement;
+    const corner = t.dataset.corner as "nw" | "ne" | "sw" | "se" | undefined;
+    // The box waiting to be captured: moved or resized, in either tool.
+    if (pending && t.closest("[data-pending]")) {
+      gesture.current = { kind: "pending", corner: corner ?? null, start: p, box: pending };
+      return;
+    }
+    const partAttr = t.closest<HTMLElement>("[data-part]")?.dataset.part;
+    const onSelected = !!sel && partAttr !== undefined && !!t.closest(`[data-clip="${sel.id}"]`);
+    if (mode === "move" && !onSelected) {
       // A finger moves the page by itself (touch-action); a mouse drags it.
+      // A tap picks the article under it.
       if (e.pointerType === "mouse" && scroller.current)
         gesture.current = {
           kind: "pan",
@@ -757,15 +886,13 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
           y: e.clientY,
           sl: scroller.current.scrollLeft,
           st: scroller.current.scrollTop,
+          px: { x: e.clientX, y: e.clientY },
         };
+      else gesture.current = { kind: "tap", px: { x: e.clientX, y: e.clientY } };
       return;
     }
     if (!canDraw) return;
-    const p = at(e);
-    const t = e.target as HTMLElement;
-    const corner = t.dataset.corner as "nw" | "ne" | "sw" | "se" | undefined;
-    const partAttr = t.closest<HTMLElement>("[data-part]")?.dataset.part;
-    if (sel && partAttr !== undefined && t.closest(`[data-clip="${sel.id}"]`)) {
+    if (onSelected && sel) {
       const part = Number(partAttr);
       gesture.current = {
         kind: "edit",
@@ -786,8 +913,11 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
     const g = gesture.current;
     if (!g) return;
     if (g.kind === "pinch" && pointers.current.size === 2) {
-      const { dist, mid } = pinchState();
-      zoomAt((g.zoom * dist) / Math.max(1, g.dist), mid.x, mid.y);
+      const { dist } = pinchState();
+      previewZoom((g.zoom * dist) / Math.max(1, g.dist));
+    } else if (g.kind === "pending") {
+      const p = at(e);
+      setPending(moveBox(g.box, g.corner, p.x - g.start.x, p.y - g.start.y));
     } else if (g.kind === "pan" && scroller.current) {
       scroller.current.scrollLeft = g.sl - (e.clientX - g.x);
       scroller.current.scrollTop = g.st - (e.clientY - g.y);
@@ -796,23 +926,11 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
       setDraft({ page, x: g.start.x, y: g.start.y, w: p.x - g.start.x, h: p.y - g.start.y });
     } else if (g.kind === "edit") {
       const p = at(e);
-      const dx = p.x - g.start.x;
-      const dy = p.y - g.start.y;
-      const b = g.box;
-      let box: ClipBox;
-      if (!g.corner) box = { ...b, x: b.x + dx, y: b.y + dy };
-      else {
-        const l = g.corner.includes("w") ? b.x + dx : b.x;
-        const r = g.corner.includes("e") ? b.x + b.w + dx : b.x + b.w;
-        const t = g.corner.includes("n") ? b.y + dy : b.y;
-        const bt = g.corner.includes("s") ? b.y + b.h + dy : b.y + b.h;
-        box = { ...b, x: l, y: t, w: r - l, h: bt - t };
-      }
-      if (!g.corner) {
-        box.x = Math.min(1 - box.w, Math.max(0, box.x));
-        box.y = Math.min(1 - box.h, Math.max(0, box.y));
-      }
-      setLive({ clipId: g.clipId, part: g.part, box });
+      setLive({
+        clipId: g.clipId,
+        part: g.part,
+        box: moveBox(g.box, g.corner, p.x - g.start.x, p.y - g.start.y),
+      });
     }
   }
 
@@ -821,22 +939,33 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
     const g = gesture.current;
     if (pointers.current.size > 0) {
       // One finger of a pinch lifted: nothing more until both are off.
-      if (g?.kind === "pinch") gesture.current = null;
+      if (g?.kind === "pinch") {
+        gesture.current = null;
+        commitPreview();
+      }
       return;
     }
     gesture.current = null;
     if (!g) return;
-    if (g.kind === "draw") {
+    if (g.kind === "pinch") commitPreview();
+    const pickAt = (p: { x: number; y: number }) => {
+      // A tap: picks the clipping under it (or none).
+      const hit = clips
+        .flatMap((c) => c.parts.map((part) => ({ c, part })))
+        .filter(({ part }) => part.page === page && inside(part, p))
+        .sort((a, b) => a.part.w * a.part.h - b.part.w * b.part.h)[0];
+      if (!adding) setSelected(hit?.c.id ?? null);
+    };
+    if (g.kind === "tap" || g.kind === "pan") {
+      if (Math.hypot(e.clientX - g.px.x, e.clientY - g.px.y) < 8) pickAt(at(e));
+    } else if (g.kind === "pending") {
+      setPending((b) => (b ? (cleanBox(b, pages) ?? b) : b));
+    } else if (g.kind === "draw") {
       setDraft(null);
       const moved = Math.hypot(e.clientX - g.px.x, e.clientY - g.px.y);
       const p = at(e);
       if (moved < 8) {
-        // A tap: picks the clipping under it (or none).
-        const hit = clips
-          .flatMap((c) => c.parts.map((part) => ({ c, part })))
-          .filter(({ part }) => part.page === page && inside(part, p))
-          .sort((a, b) => a.part.w * a.part.h - b.part.w * b.part.h)[0];
-        if (!adding) setSelected(hit?.c.id ?? null);
+        pickAt(p);
         return;
       }
       const box = cleanBox(
@@ -847,7 +976,9 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
         toast.error("That box is too small: drag around the whole article");
         return;
       }
-      void addBox(box, adding);
+      // Waits for its Capture: adjust it first.
+      setPending(box);
+      setPendingFrom(null);
     } else if (g.kind === "edit") {
       const l = live;
       setLive(null);
@@ -872,10 +1003,16 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
       } else if (e.key === "ArrowRight" || e.key === "PageDown")
         setPage((p) => Math.min(pages, p + 1));
       else if (e.key === "ArrowLeft" || e.key === "PageUp") setPage((p) => Math.max(1, p - 1));
-      else if (e.key === "Escape") {
-        if (adding) setAdding(null);
+      else if (e.key === "Enter" && pending) {
+        e.preventDefault();
+        void capture();
+      } else if (e.key === "Escape") {
+        if (pending) cancelPending();
+        else if (adding) setAdding(null);
         else setSelected(null);
-      } else if ((e.key === "Delete" || e.key === "Backspace") && sel) void remove(sel);
+      } else if (e.key === "c" || e.key === "C") setMode("draw");
+      else if (e.key === "m" || e.key === "M") setMode("move");
+      else if ((e.key === "Delete" || e.key === "Backspace") && sel) void remove(sel);
       else if (e.key === "+" || e.key === "=") zoomAt(zoom * 1.25);
       else if (e.key === "-") zoomAt(zoom / 1.25);
     };
@@ -884,7 +1021,34 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
   });
 
   // ---------- Showing it ----------
-  const img = images[page];
+  const img0 = images[page];
+  // Zoomed in: the page drawn again sharper, once the zoom settles.
+  const [hires, setHires] = useState<{ page: number; width: number; url: string } | null>(null);
+  useEffect(() => {
+    const el = sheet.current;
+    if (!pdf || !el) return;
+    const want = Math.min(4000, Math.round(el.offsetWidth * (window.devicePixelRatio || 1)));
+    if (want <= PAGE_WIDTH * 1.15 || (hires && hires.page === page && hires.width >= want * 0.9))
+      return;
+    let gone = false;
+    const t = setTimeout(() => {
+      void pdf
+        .pageImage(page, want)
+        .then((im) => {
+          if (gone) return URL.revokeObjectURL(im.url);
+          setHires((old) => {
+            if (old) URL.revokeObjectURL(old.url);
+            return { page, width: want, url: im.url };
+          });
+        })
+        .catch(() => undefined);
+    }, 300);
+    return () => {
+      gone = true;
+      clearTimeout(t);
+    };
+  }, [pdf, page, zoom, hires]);
+  const img = img0 && hires?.page === page ? { ...img0, url: hires.url } : img0;
   const onPage = clips
     .flatMap((c) =>
       c.parts.map((p, i) => ({
@@ -929,6 +1093,7 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
       }}
       onAddPart={(c) => {
         setAdding(c.id);
+        setMode("draw");
         setPanel(false);
       }}
       onCancelAdd={() => setAdding(null)}
@@ -1032,8 +1197,8 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
         >
           {(
             [
-              ["draw", SquareDashed, "Clip"],
               ["move", Hand, "Move"],
+              ["draw", SquareDashed, "Clip"],
             ] as const
           ).map(([m, Icon, label]) => (
             <button
@@ -1041,6 +1206,8 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
               type="button"
               role="radio"
               aria-checked={mode === m}
+              aria-label={label}
+              title={m === "draw" ? "Clip (C)" : "Move (M)"}
               onClick={() => setMode(m)}
               className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs ${mode === m ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
             >
@@ -1049,6 +1216,21 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
             </button>
           ))}
         </div>
+        <Button
+          size="sm"
+          variant="outline"
+          aria-label={`Articles (${clips.length})`}
+          onClick={() =>
+            window.matchMedia("(min-width: 1280px)").matches
+              ? setSideOpen((v) => !v)
+              : setPanel(true)
+          }
+        >
+          <ListChecks className="h-4 w-4 sm:mr-1" />
+          <span className="hidden sm:inline">
+            {sel ? `Article ${number.get(sel.id)}` : `Articles (${clips.length})`}
+          </span>
+        </Button>
         <Button
           size="sm"
           variant="outline"
@@ -1116,7 +1298,7 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
         {/* Page thumbnails (laptops) */}
         <nav
           aria-label="Pages"
-          className="hidden w-28 shrink-0 overflow-y-auto border-r border-border p-2 md:block"
+          className="hidden w-24 shrink-0 overflow-y-auto border-r border-border p-2 xl:block"
         >
           <PageThumbs pages={pages} page={page} thumbs={thumbs} perPage={perPage} onGo={go} />
         </nav>
@@ -1125,7 +1307,7 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
           {/* Page strip (phones) */}
           <nav
             aria-label="Pages strip"
-            className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-border p-1.5 md:hidden"
+            className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-border p-1.5 xl:hidden"
           >
             <PageThumbs
               pages={pages}
@@ -1141,11 +1323,23 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
             data-testid="clip-scroller"
             className="relative min-h-0 flex-1 overflow-auto bg-muted/50"
           >
-            {clips.length === 0 && !finishing && pdf && !suggestedOn(page).length && (
-              <p className="pointer-events-none absolute left-1/2 top-3 z-10 w-[min(92%,30rem)] -translate-x-1/2 rounded-xl bg-background/95 p-3 text-center text-sm shadow">
-                Drag a box around an article to clip it. Zoom with + / −, Ctrl + wheel or two
-                fingers; two fingers (or the Move tool) move the page.
-              </p>
+            {showTip && !finishing && pdf && !pending && (
+              <div className="sticky left-0 top-0 z-10 flex justify-center">
+                <p className="m-2 flex max-w-[30rem] items-start gap-2 rounded-xl bg-background/95 p-2.5 text-sm shadow">
+                  <span className="flex-1">
+                    Tap <b>Clip</b>, drag a box around an article, adjust it and press{" "}
+                    <b>Capture</b>. Pinch or Ctrl + wheel zooms; drag moves the page.
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Hide the tip"
+                    onClick={hideTip}
+                    className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </p>
+              </div>
             )}
             <div
               ref={sheet}
@@ -1185,12 +1379,14 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
                     data-clip={c.id}
                     data-part={i}
                     aria-label={`Article ${number.get(c.id)}${c.parts.length > 1 ? `, part ${i + 1}` : ""}`}
-                    className={`absolute border-2 ${isSel || isAdd ? "border-primary bg-primary/15" : c.status === "failed" ? "border-red-500 bg-red-500/10" : c.status === "skipped" ? "border-muted-foreground/60 bg-muted-foreground/10" : "border-emerald-600/80 bg-emerald-500/10"} ${isSel && mode === "draw" ? "cursor-move" : ""}`}
+                    className={`absolute border-2 ${isSel || isAdd ? "border-primary bg-primary/15" : c.status === "failed" ? "border-red-500 bg-red-500/10" : c.status === "skipped" ? "border-muted-foreground/60 bg-muted-foreground/10" : "border-emerald-600/80 bg-emerald-500/10"} ${isSel ? "cursor-move" : ""}`}
                     style={{
                       left: `${p.x * 100}%`,
                       top: `${p.y * 100}%`,
                       width: `${p.w * 100}%`,
                       height: `${p.h * 100}%`,
+                      // The selected box moves with a finger, not the page.
+                      touchAction: isSel ? "none" : undefined,
                     }}
                   >
                     <span className="pointer-events-none absolute left-0 top-0 rounded-br bg-black/70 px-1.5 text-xs font-semibold text-white">
@@ -1199,7 +1395,6 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
                       {readingId === c.id ? " …" : ""}
                     </span>
                     {isSel &&
-                      mode === "draw" &&
                       (["nw", "ne", "sw", "se"] as const).map((k) => (
                         <span
                           key={k}
@@ -1210,6 +1405,44 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
                   </div>
                 );
               })}
+              {pending && pending.page === page && (
+                <div
+                  data-pending
+                  className="absolute cursor-move border-2 border-dashed border-primary bg-primary/10"
+                  style={{
+                    left: `${pending.x * 100}%`,
+                    top: `${pending.y * 100}%`,
+                    width: `${pending.w * 100}%`,
+                    height: `${pending.h * 100}%`,
+                    touchAction: "none",
+                  }}
+                >
+                  {(["nw", "ne", "sw", "se"] as const).map((k) => (
+                    <span
+                      key={k}
+                      data-corner={k}
+                      className={`absolute h-5 w-5 rounded-full border-2 border-white bg-primary shadow ${k.includes("n") ? "-top-2.5" : "-bottom-2.5"} ${k.includes("w") ? "-left-2.5" : "-right-2.5"} ${k === "nw" || k === "se" ? "cursor-nwse-resize" : "cursor-nesw-resize"}`}
+                    />
+                  ))}
+                  <div
+                    className={`absolute left-1/2 flex -translate-x-1/2 gap-1 ${pending.y + pending.h > 0.93 ? "top-1" : "-bottom-11"}`}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <Button size="sm" className="h-8 shadow" onClick={() => void capture()}>
+                      <Scissors className="mr-1 h-4 w-4" />
+                      {adding ? `Capture part` : "Capture"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 bg-background shadow"
+                      onClick={cancelPending}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
               {suggestedOn(page).map((s) => (
                 <div
                   key={`s-${s.headline}`}
@@ -1234,7 +1467,10 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
                       type="button"
                       aria-label={`Clip ${s.headline}`}
                       disabled={!canDraw}
-                      onClick={() => void clipSuggested(s)}
+                      onClick={() => {
+                        setPending(s.box);
+                        setPendingFrom(s);
+                      }}
                       className="shrink-0 rounded bg-white/90 px-1.5 font-semibold text-amber-700"
                     >
                       Clip
@@ -1279,21 +1515,12 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
               })}
             </div>
           </div>
-          {/* Phones: the clippings in a sheet */}
-          <div className="border-t border-border p-2 md:hidden">
-            <Button size="sm" variant="outline" className="w-full" onClick={() => setPanel(true)}>
-              <ListChecks className="mr-1 h-4 w-4" />
-              {sel
-                ? `Article ${number.get(sel.id)}: ${STATUS[sel.status].text}`
-                : `Articles (${clips.length})`}
-            </Button>
-          </div>
         </div>
 
         {/* Laptops: the clippings beside the page */}
         <aside
           aria-label="Articles"
-          className="hidden w-80 shrink-0 overflow-y-auto border-l border-border p-3 md:block"
+          className={`hidden w-80 shrink-0 overflow-y-auto border-l border-border p-3 ${sideOpen ? "xl:block" : ""}`}
         >
           {sidePanel}
         </aside>
@@ -1301,13 +1528,13 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
 
       {panel && (
         <div
-          className="fixed inset-0 z-[60] flex flex-col justify-end bg-black/40 md:hidden"
+          className="fixed inset-0 z-[60] flex flex-col justify-end bg-black/40 sm:flex-row xl:hidden"
           onClick={() => setPanel(false)}
         >
           <div
             role="dialog"
             aria-label="Articles list"
-            className="max-h-[75vh] overflow-y-auto rounded-t-2xl bg-background p-3"
+            className="max-h-[75vh] overflow-y-auto rounded-t-2xl bg-background p-3 sm:h-full sm:max-h-none sm:w-96 sm:rounded-none sm:rounded-l-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-2 flex items-center justify-between">

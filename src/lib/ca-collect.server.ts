@@ -206,6 +206,16 @@ export async function tick(origin?: string): Promise<TickResult> {
   } catch (e) {
     console.error("scheme register:", e);
   }
+  // Clipped newspapers finish in the background after "Done".
+  try {
+    const clips = await import("@/lib/ca-clips.server");
+    const t0 = Date.now();
+    while (Date.now() - t0 < 40_000 && (await clips.clipStep())) {
+      // one step at a time, within the tick's time
+    }
+  } catch (e) {
+    console.error("newspaper clipping:", e);
+  }
 
   const { data: claimed, error } = await supabaseAdmin.rpc(
     "ca_claim_run" as never,

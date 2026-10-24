@@ -28,8 +28,32 @@ export type Newspaper = {
   file_size: number;
   pages: number;
   file_deleted_at: string | null;
+  // Finishing in the background after "Done" (null: nothing to do).
+  work?: NewspaperWork | null;
   created_at: string;
 };
+
+// The background work after "Done": read the clippings, merge the day's
+// duplicates, write the new stories.
+export type NewspaperWork = {
+  state: "reading" | "merging" | "writing" | "done";
+  read: number;
+  failed: number;
+  write_ids: string[];
+  written: number;
+  error: string | null;
+  at: string;
+};
+
+// What the newspaper's row says about it.
+export function workText(w: NewspaperWork | null | undefined, waiting: number): string {
+  if (!w) return "";
+  if (w.state === "reading") return `Reading articles… ${w.read} read, ${waiting} to go`;
+  if (w.state === "merging") return "Looking for stories that are the same news…";
+  if (w.state === "writing") return `Writing stories ${w.written} of ${w.write_ids.length}…`;
+  const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
+  return `Done: ${n(w.read, "article", "articles")} read, ${n(w.written, "story", "stories")} written${w.failed ? `, ${w.failed} couldn't be read` : ""}`;
+}
 
 // A clipping's parts: at most this many boxes (an article continued on
 // other pages).

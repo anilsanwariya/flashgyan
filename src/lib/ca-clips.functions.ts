@@ -176,3 +176,22 @@ export const dropCaClipSuggestion = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await server()).dropSuggestion(data.newspaper_id, data.page, data.headline);
   });
+
+// "Done": the rest happens in the background.
+export const finishCaNewspaper = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).finishNewspaper(data.id);
+  });
+
+// One step of a newspaper's background work, from the open Daily page (the
+// collection tick does the same without it).
+export const stepCaNewspaper = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return { step: await (await server()).clipStep(data.id) };
+  });
