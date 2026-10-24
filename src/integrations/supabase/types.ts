@@ -919,6 +919,9 @@ export type Database = {
       }
       ca_items: {
         Row: {
+          asked: Json | null
+          asked_checked: boolean
+          asked_hidden: string[]
           category: string
           collected_later: boolean
           concept: string | null
@@ -932,6 +935,7 @@ export type Database = {
           from_document: boolean
           geo: Json | null
           headline: string
+          history: Json | null
           id: string
           importance: number
           issue_date: string | null
@@ -962,6 +966,9 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          asked?: Json | null
+          asked_checked?: boolean
+          asked_hidden?: string[]
           category?: string
           collected_later?: boolean
           concept?: string | null
@@ -975,6 +982,7 @@ export type Database = {
           from_document?: boolean
           geo?: Json | null
           headline: string
+          history?: Json | null
           id?: string
           importance?: number
           issue_date?: string | null
@@ -1005,6 +1013,9 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          asked?: Json | null
+          asked_checked?: boolean
+          asked_hidden?: string[]
           category?: string
           collected_later?: boolean
           concept?: string | null
@@ -1018,6 +1029,7 @@ export type Database = {
           from_document?: boolean
           geo?: Json | null
           headline?: string
+          history?: Json | null
           id?: string
           importance?: number
           issue_date?: string | null
@@ -1522,6 +1534,7 @@ export type Database = {
           correct: number | null
           created_at: string
           deleted: boolean
+          embedding: string | null
           extra_en: string
           extra_hi: string
           id: string
@@ -1533,6 +1546,7 @@ export type Database = {
           q_no: number
           question_en: string
           question_hi: string
+          section: string | null
           updated_at: string
         }
         Insert: {
@@ -1540,6 +1554,7 @@ export type Database = {
           correct?: number | null
           created_at?: string
           deleted?: boolean
+          embedding?: string | null
           extra_en?: string
           extra_hi?: string
           id?: string
@@ -1551,6 +1566,7 @@ export type Database = {
           q_no: number
           question_en?: string
           question_hi?: string
+          section?: string | null
           updated_at?: string
         }
         Update: {
@@ -1558,6 +1574,7 @@ export type Database = {
           correct?: number | null
           created_at?: string
           deleted?: boolean
+          embedding?: string | null
           extra_en?: string
           extra_hi?: string
           id?: string
@@ -1569,6 +1586,7 @@ export type Database = {
           q_no?: number
           question_en?: string
           question_hi?: string
+          section?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -2618,6 +2636,13 @@ export type Database = {
           headline: string
           id: string
           issue_date: string
+          similarity: number
+        }[]
+      }
+      exam_questions_near: {
+        Args: { p_count?: number; p_embedding: string }
+        Returns: {
+          id: string
           similarity: number
         }[]
       }
