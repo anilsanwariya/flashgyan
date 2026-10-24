@@ -528,14 +528,17 @@ async function claimNewspaper(id?: string): Promise<Newspaper | null> {
     fail(error);
   }
   for (const r of (data ?? []) as { id: string }[]) {
+    // A lock time of its own, read back: the row is ours if it holds it
+    // (the update returns no rows when it filters on the column it sets).
     const nowIso = now();
-    const { data: got } = await from("ca_newspapers")
-      .update({ locked_until: new Date(Date.now() + 90_000).toISOString() } as never)
+    const mine = new Date(Date.now() + 90_000 + Math.floor(Math.random() * 1000)).toISOString();
+    await from("ca_newspapers")
+      .update({ locked_until: mine } as never)
       .eq("id", r.id)
-      .or(`locked_until.is.null,locked_until.lt.${nowIso}`)
-      .select("*");
-    const row = ((got ?? []) as unknown as Newspaper[])[0];
-    if (row) return row;
+      .or(`locked_until.is.null,locked_until.lt.${nowIso}`);
+    const { data: row } = await from("ca_newspapers").select("*").eq("id", r.id).maybeSingle();
+    const got = row as unknown as (Newspaper & { locked_until: string | null }) | null;
+    if (got?.locked_until && Date.parse(got.locked_until) === Date.parse(mine)) return got;
   }
   return null;
 }

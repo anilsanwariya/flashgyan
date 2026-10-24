@@ -1206,6 +1206,8 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
               type="button"
               role="radio"
               aria-checked={mode === m}
+              aria-label={label}
+              title={m === "draw" ? "Clip (C)" : "Move (M)"}
               onClick={() => setMode(m)}
               className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs ${mode === m ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
             >

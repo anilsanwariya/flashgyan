@@ -51,7 +51,8 @@ export function workText(w: NewspaperWork | null | undefined, waiting: number): 
   if (w.state === "reading") return `Reading articles… ${w.read} read, ${waiting} to go`;
   if (w.state === "merging") return "Looking for stories that are the same news…";
   if (w.state === "writing") return `Writing stories ${w.written} of ${w.write_ids.length}…`;
-  return `Done: ${w.read} articles read, ${w.written} stories written${w.failed ? `, ${w.failed} couldn't be read` : ""}`;
+  const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
+  return `Done: ${n(w.read, "article", "articles")} read, ${n(w.written, "story", "stories")} written${w.failed ? `, ${w.failed} couldn't be read` : ""}`;
 }
 
 // A clipping's parts: at most this many boxes (an article continued on
