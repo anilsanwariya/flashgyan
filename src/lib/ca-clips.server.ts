@@ -18,6 +18,7 @@ import {
   type ClipBox,
   type ClipPart,
   type Newspaper,
+  type NewspaperWork,
   type PageTextLine,
   type SuggestedClip,
 } from "@/lib/ca-clips";
@@ -490,4 +491,134 @@ export async function dropSuggestion(newspaperId: string, page: number, headline
   p.items = p.items.filter((s) => s.headline !== headline);
   await putSuggestions(newspaperId, all);
   return all;
+}
+
+// ---------- Finishing in the background ----------
+
+// "Done": the newspaper's clippings are read, the day's duplicates merged
+// and the new stories written in the background. Done again while it runs
+// (more articles clipped) just goes on.
+export async function finishNewspaper(id: string): Promise<NewspaperWork> {
+  const { newspaper } = await getNewspaper(id);
+  const had = newspaper.work;
+  const work: NewspaperWork =
+    had && had.state !== "done"
+      ? { ...had, state: had.state === "writing" ? "writing" : "reading" }
+      : { state: "reading", read: 0, failed: 0, write_ids: [], written: 0, error: null, at: now() };
+  // Writing already: newly clipped articles are read after it.
+  if (had?.state === "writing") work.state = "reading";
+  fail(
+    (
+      await from("ca_newspapers")
+        .update({ work } as never)
+        .eq("id", id)
+    ).error,
+  );
+  return work;
+}
+
+// One newspaper with work to do, locked for this step (by the tick or the
+// open page); a lock older than its time is free again.
+async function claimNewspaper(id?: string): Promise<Newspaper | null> {
+  let q = from("ca_newspapers").select("id").not("work", "is", null).neq("work->>state", "done");
+  if (id) q = q.eq("id", id);
+  const { data, error } = await q.order("created_at").limit(5);
+  if (error) {
+    if (missing(error) || /work|locked_until/.test(error.message)) return null;
+    fail(error);
+  }
+  for (const r of (data ?? []) as { id: string }[]) {
+    const nowIso = now();
+    const { data: got } = await from("ca_newspapers")
+      .update({ locked_until: new Date(Date.now() + 90_000).toISOString() } as never)
+      .eq("id", r.id)
+      .or(`locked_until.is.null,locked_until.lt.${nowIso}`)
+      .select("*");
+    const row = ((got ?? []) as unknown as Newspaper[])[0];
+    if (row) return row;
+  }
+  return null;
+}
+
+async function saveWork(id: string, work: NewspaperWork, unlock = false) {
+  fail(
+    (
+      await from("ca_newspapers")
+        .update({ work, ...(unlock ? { locked_until: null } : {}) } as never)
+        .eq("id", id)
+    ).error,
+  );
+}
+
+// One step of a newspaper's background work: one article read (with its
+// stories), the duplicates merged, or one story written. Returns what it
+// did, or null when there is nothing to do.
+export async function clipStep(id?: string): Promise<string | null> {
+  const paper = await claimNewspaper(id);
+  if (!paper?.work) return null;
+  const work: NewspaperWork = { ...paper.work, write_ids: paper.work.write_ids ?? [] };
+  try {
+    if (work.state === "reading") {
+      const { data } = await from("ca_clips")
+        .select("*")
+        .eq("newspaper_id", paper.id)
+        .in("status", ["new", "changed"])
+        .order("created_at")
+        .limit(1);
+      const clip = ((data ?? []) as unknown[]).map(readClipRow)[0];
+      if (!clip) {
+        work.state = "merging";
+        await saveWork(paper.id, work, true);
+        return "read every article";
+      }
+      try {
+        const r = await readClip(clip.id);
+        if (r.source)
+          for (let part = 0; part < r.source.chunks; part++)
+            await CA.extractSourceChunk(r.source.id, part);
+        work.read++;
+      } catch (e) {
+        console.error("clip read:", e);
+        work.failed++;
+      }
+      await saveWork(paper.id, work, true);
+      return `read article ${clip.id}`;
+    }
+    if (work.state === "merging") {
+      await CA.mergeDayDuplicates(paper.issue_date).catch((e) => console.error("merge:", e));
+      const day = await CA.getDay(paper.issue_date);
+      const ids = day.items
+        .filter((i) => i.needs_enrich && i.status === "included" && !i.enrich_error)
+        .map((i) => i.id);
+      work.write_ids = [...new Set([...work.write_ids, ...ids])];
+      work.state = "writing";
+      await saveWork(paper.id, work, true);
+      return `${ids.length} stories to write`;
+    }
+    if (work.state === "writing") {
+      const next = work.write_ids[work.written];
+      if (!next) {
+        work.state = "done";
+        work.at = now();
+        await saveWork(paper.id, work, true);
+        return "done";
+      }
+      // A story written meanwhile (or dropped) is skipped.
+      const { data } = await from("ca_items")
+        .select("needs_enrich,status")
+        .eq("id", next)
+        .maybeSingle();
+      const row = data as { needs_enrich: boolean; status: string } | null;
+      if (row?.needs_enrich && row.status === "included")
+        await CA.enrichItem(next).catch((e) => console.error("write:", e));
+      work.written++;
+      await saveWork(paper.id, work, true);
+      return `wrote story ${next}`;
+    }
+  } catch (e) {
+    work.error = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+    await saveWork(paper.id, work, true);
+    throw e;
+  }
+  return null;
 }
