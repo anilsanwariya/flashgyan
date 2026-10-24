@@ -1482,12 +1482,15 @@ export type Database = {
           id: string
           key_added: boolean
           lessons: Json
+          mcq_test_id: string | null
           pages: number
           pages_done: number
           paper_code: string
+          published_at: string | null
           questions_total: number | null
           series: string
           source: string
+          status: string
           subject: string
           updated_at: string
         }
@@ -1501,12 +1504,15 @@ export type Database = {
           id?: string
           key_added?: boolean
           lessons?: Json
+          mcq_test_id?: string | null
           pages?: number
           pages_done?: number
           paper_code?: string
+          published_at?: string | null
           questions_total?: number | null
           series?: string
           source?: string
+          status?: string
           subject?: string
           updated_at?: string
         }
@@ -1520,16 +1526,27 @@ export type Database = {
           id?: string
           key_added?: boolean
           lessons?: Json
+          mcq_test_id?: string | null
           pages?: number
           pages_done?: number
           paper_code?: string
+          published_at?: string | null
           questions_total?: number | null
           series?: string
           source?: string
+          status?: string
           subject?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "exam_papers_mcq_test_id_fkey"
+            columns: ["mcq_test_id"]
+            isOneToOne: false
+            referencedRelation: "mcq_tests"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       exam_questions: {
         Row: {
@@ -1538,9 +1555,14 @@ export type Database = {
           created_at: string
           deleted: boolean
           embedding: string | null
+          explanation_en: string
+          explanation_general: boolean
+          explanation_hi: string
+          explanation_source: string
           extra_en: string
           extra_hi: string
           id: string
+          key_note: string
           match: string | null
           match_note: string | null
           matched_item: string | null
@@ -1551,6 +1573,7 @@ export type Database = {
           question_hi: string
           section: string | null
           updated_at: string
+          verified: boolean
         }
         Insert: {
           ca?: boolean | null
@@ -1558,9 +1581,14 @@ export type Database = {
           created_at?: string
           deleted?: boolean
           embedding?: string | null
+          explanation_en?: string
+          explanation_general?: boolean
+          explanation_hi?: string
+          explanation_source?: string
           extra_en?: string
           extra_hi?: string
           id?: string
+          key_note?: string
           match?: string | null
           match_note?: string | null
           matched_item?: string | null
@@ -1571,6 +1599,7 @@ export type Database = {
           question_hi?: string
           section?: string | null
           updated_at?: string
+          verified?: boolean
         }
         Update: {
           ca?: boolean | null
@@ -1578,9 +1607,14 @@ export type Database = {
           created_at?: string
           deleted?: boolean
           embedding?: string | null
+          explanation_en?: string
+          explanation_general?: boolean
+          explanation_hi?: string
+          explanation_source?: string
           extra_en?: string
           extra_hi?: string
           id?: string
+          key_note?: string
           match?: string | null
           match_note?: string | null
           matched_item?: string | null
@@ -1591,6 +1625,7 @@ export type Database = {
           question_hi?: string
           section?: string | null
           updated_at?: string
+          verified?: boolean
         }
         Relationships: [
           {
