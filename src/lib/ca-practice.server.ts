@@ -101,8 +101,12 @@ export async function monthStories(
 
 // How the saved papers write each style: a couple of their questions.
 async function styleExamples(): Promise<{ style: PracticeStyle; text: string }[]> {
+  // Published papers only (proofread and verified).
+  const ids = await (await import("@/lib/exam-papers.server")).publishedPaperIds();
+  if (!ids.length) return [];
   const { data, error } = await from("exam_questions")
     .select("question_en,extra_en")
+    .in("paper_id", ids.slice(0, 200))
     .eq("deleted", false)
     .neq("extra_en", "")
     .limit(400);

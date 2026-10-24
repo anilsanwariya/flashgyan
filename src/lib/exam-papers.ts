@@ -23,6 +23,12 @@ export type ExamPaper = {
   checked_at: string | null;
   lessons: string[];
   error: string | null;
+  // Draft until every question is proofread and verified; a published paper
+  // is used by the other features and is a test for students.
+  status: "draft" | "published";
+  published_at: string | null;
+  // The students' test made from it when published.
+  mcq_test_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -42,6 +48,16 @@ export type ExamQuestion = {
   matched_item: string | null;
   match: "covered" | "low" | "missed" | null;
   match_note: string | null;
+  // The explanation (AI-written from SAATHI's books, then proofread), the
+  // book it came from, and whether it came from general knowledge instead.
+  explanation_en: string;
+  explanation_hi: string;
+  explanation_source: string;
+  explanation_general: boolean;
+  // Proofread and verified by the editor.
+  verified: boolean;
+  // The sheet's "Correct Answer" text didn't match the option numbered.
+  key_note: string;
 };
 
 // A question as read (from a page, or a row of Excel), before it is saved.
@@ -54,6 +70,11 @@ export type QuestionDraft = {
   options: Bi[];
   correct?: number | null;
   deleted?: boolean;
+  explanation_en?: string;
+  explanation_hi?: string;
+  explanation_source?: string;
+  explanation_general?: boolean;
+  key_note?: string;
 };
 
 export const OPTION_COUNT = 4;
@@ -125,6 +146,155 @@ export function questionsToRows(
     });
 }
 
+// Two texts the same but for case, spaces and punctuation.
+const sameText = (a: string, b: string) => {
+  const n = (s: string) => s.toLowerCase().replace(/[\s.,;:()'"“”‘’\-–—।]/g, "");
+  return n(a) === n(b);
+};
+
+// The paper as one bilingual sheet, the way papers are uploaded: an English
+// row ("E-1") and a Hindi row ("H-1") per question, with the answer's text,
+// the explanation and its source.
+export const SHEET_COLUMNS = [
+  "S. No.",
+  "Exam name",
+  "Subject",
+  "Question",
+  "Other part of question",
+  "Option 1",
+  "Option 2",
+  "Option 3",
+  "Option 4",
+  "Correct Option No.",
+  "Correct Answer",
+  "Explanation",
+  "Source",
+] as const;
+
+export function paperSheetRows(
+  paper: Pick<ExamPaper, "exam" | "subject">,
+  questions: Pick<
+    ExamQuestion,
+    | "q_no"
+    | "question_en"
+    | "question_hi"
+    | "extra_en"
+    | "extra_hi"
+    | "options"
+    | "correct"
+    | "deleted"
+    | "explanation_en"
+    | "explanation_hi"
+    | "explanation_source"
+    | "explanation_general"
+  >[],
+): Record<(typeof SHEET_COLUMNS)[number], string | number>[] {
+  return [...questions]
+    .sort((a, b) => a.q_no - b.q_no)
+    .flatMap((q) =>
+      (["en", "hi"] as const).map((lang) => {
+        const opt = (i: number) => q.options[i]?.[lang] ?? "";
+        const hi = lang === "hi";
+        return {
+          "S. No.": `${hi ? "H" : "E"}-${q.q_no}`,
+          "Exam name": paper.exam,
+          Subject: paper.subject,
+          Question: hi ? q.question_hi : q.question_en,
+          "Other part of question": hi ? q.extra_hi : q.extra_en,
+          "Option 1": opt(0),
+          "Option 2": opt(1),
+          "Option 3": opt(2),
+          "Option 4": opt(3),
+          "Correct Option No.": q.deleted ? (hi ? "विलोपित" : "Deleted") : (q.correct ?? ""),
+          "Correct Answer": q.deleted
+            ? hi
+              ? "विलोपित"
+              : "Deleted"
+            : q.correct
+              ? opt(q.correct - 1)
+              : "",
+          Explanation: hi ? q.explanation_hi : q.explanation_en,
+          Source: q.explanation_general
+            ? hi
+              ? "सामान्य ज्ञान"
+              : "General knowledge"
+            : q.explanation_source,
+        };
+      }),
+    );
+}
+
+// ---------- Explanations (AI, from SAATHI's books) ----------
+
+// Questions explained per AI call.
+export const EXPLAIN_BATCH = 4;
+
+export function explainMessages(
+  qs: {
+    n: number;
+    question: string;
+    extra: string;
+    options: string[];
+    correct: number | null;
+    deleted: boolean;
+    passages: { k: number; title: string; content: string }[];
+  }[],
+  glossary?: string,
+): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: `You write the explanations of a solved previous-year paper of Rajasthan competitive exams (RPSC, RSSB) for students, in English and in Hindi.
+For each question, a detailed explanation:
+- First why the correct option is right, with the key fact.
+- Statement questions: each statement on its own line ("Statement A: correct — …" / "कथन A: सही — …").
+- Match the following: each pair on its own line.
+- Assertion and reason, chronology and odd one out: each part in turn.
+- Direct questions: why each other option is wrong, in a line each where useful.
+- End with one related fact worth revising ("Also remember: …" / "यह भी याद रखें: …").
+Base it on the book passages given for the question [K…] and list the ones you used in "from". When no passage explains it, write from well-established knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. A question the key deleted: explain briefly why it was likely deleted (two answers right, none right, or an error), if you can tell. Never change the correct option given. Plain text, no markdown headings; at most about 180 words in each language.${glossary ?? ""}
+Reply with JSON only: [{"n": question number, "en": "...", "hi": "...", "from": [passage numbers]}]`,
+    },
+    {
+      role: "user",
+      content: qs
+        .map(
+          (q) =>
+            `Question ${q.n}: ${q.question}${q.extra ? `\n${q.extra}` : ""}\n${q.options
+              .map((o, i) => `(${i + 1}) ${o}`)
+              .join(
+                "\n",
+              )}\n${q.deleted ? "Deleted by the answer key." : `Correct option: ${q.correct ?? "not given"}`}${
+              q.passages.length
+                ? `\nBook passages:\n${q.passages.map((p) => `[K${p.k}] ${p.title}\n${p.content}`).join("\n")}`
+                : "\nBook passages: none"
+            }`,
+        )
+        .join("\n\n---\n\n"),
+    },
+  ];
+}
+
+export function parseExplanations(
+  raw: string,
+): Map<number, { en: string; hi: string; from: number[] }> {
+  const out = new Map<number, { en: string; hi: string; from: number[] }>();
+  const list = parseJson<unknown>(raw.slice(Math.max(0, raw.indexOf("["))));
+  for (const x of Array.isArray(list) ? list : []) {
+    const o = (x ?? {}) as Record<string, unknown>;
+    const n = Number(o.n);
+    const en = str(o.en, 4000);
+    const hi = str(o.hi, 4000);
+    if (!Number.isInteger(n) || (!en && !hi) || out.has(n)) continue;
+    out.set(n, {
+      en: en || hi,
+      hi: hi || en,
+      from: (Array.isArray(o.from) ? o.from : []).map(Number).filter((k) => Number.isInteger(k)),
+    });
+  }
+  return out;
+}
+
 // A header's column, ignoring case, spaces, dots and brackets.
 const key = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const COLUMN_KEYS: Record<string, (typeof EXCEL_COLUMNS)[number]> = Object.fromEntries(
@@ -143,9 +313,17 @@ Object.assign(COLUMN_KEYS, {
   correctoption: "Correct Option No.",
   correctoptionno: "Correct Option No.",
   answer: "Correct Option No.",
-  correctanswer: "Correct Option No.",
   key: "Correct Option No.",
 });
+// Columns read besides the layout above: the answer's text (a check on the
+// key) and an exported paper's explanations.
+const EXTRA_KEYS: Record<string, "answer" | "explanation" | "source"> = {
+  correctanswer: "answer",
+  answertext: "answer",
+  explanation: "explanation",
+  explanations: "explanation",
+  source: "source",
+};
 
 export type ImportedPaper = { exam: string; subject: string; questions: QuestionDraft[] };
 
@@ -166,9 +344,12 @@ export function rowsToPapers(
         : null;
     for (const raw of sheet.rows) {
       const row: Partial<Record<(typeof EXCEL_COLUMNS)[number], string>> = {};
+      const extra: Partial<Record<"answer" | "explanation" | "source", string>> = {};
       for (const [h, v] of Object.entries(raw)) {
         const col = COLUMN_KEYS[key(h)];
         if (col) row[col] = String(v ?? "").trim();
+        const x = EXTRA_KEYS[key(h)];
+        if (x) extra[x] = String(v ?? "").trim();
       }
       const qNo = Number(String(row["Question No."] ?? "").replace(/[^\d]/g, ""));
       const question = row.Question ?? "";
@@ -176,7 +357,13 @@ export function rowsToPapers(
       const exam = row["Exam name"] || fallback.exam;
       const subject = row.Subject || fallback.subject;
       if (!exam) continue;
-      const lang = sheetLang ?? (hasDevanagari(question) ? "hi" : "en");
+      // "E-12" / "H-12": the row's language; else the sheet's, else its script.
+      const tag = /^\s*([EH])\s*[-–.]/i.exec(String(row["Question No."] ?? ""))?.[1]?.toUpperCase();
+      const lang = tag
+        ? tag === "H"
+          ? "hi"
+          : "en"
+        : (sheetLang ?? (hasDevanagari(question) ? "hi" : "en"));
       const id = `${exam}\u0000${subject}`;
       const paper = papers.get(id) ?? { exam, subject, questions: [] };
       papers.set(id, paper);
@@ -200,7 +387,22 @@ export function rowsToPapers(
       }
       const ans = (row["Correct Option No."] ?? "").trim();
       if (/^(deleted|delete|\*|विलोपित)$/i.test(ans)) q.deleted = true;
-      else if (/^[1-4]$/.test(ans)) q.correct = Number(ans);
+      else if (/^[1-4](\.0+)?$/.test(ans)) q.correct = Number(ans);
+      if (extra.explanation)
+        q[lang === "hi" ? "explanation_hi" : "explanation_en"] = extra.explanation;
+      if (extra.source) {
+        const general = /^(general knowledge|सामान्य ज्ञान)$/i.test(extra.source);
+        q.explanation_general = general;
+        if (!general) q.explanation_source = extra.source;
+      }
+      // The answer's text should be the option numbered.
+      const said = extra.answer ?? "";
+      if (said && q.correct && !q.deleted && !/^(deleted|विलोपित)$/i.test(said)) {
+        const opt = q.options[q.correct - 1]?.[lang] ?? "";
+        if (opt && sameText(opt, said)) q.key_note = q.key_note ?? "";
+        else if (opt)
+          q.key_note = `The sheet's answer “${said.slice(0, 120)}” isn't option ${q.correct} (“${opt.slice(0, 120)}”).`;
+      }
     }
   }
   return [...papers.values()].map((p) => ({
