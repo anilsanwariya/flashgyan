@@ -557,6 +557,14 @@ async function insertItem(row: Record<string, unknown>) {
   fail(error);
 }
 
+// The exams the magazine prepares for, from the saved exam profile ("" until
+// the editor weighs them).
+async function examFocus(): Promise<string> {
+  const W = await import("@/lib/ca-exam-weights.server");
+  const { focusText } = await import("@/lib/ca-exam-weights");
+  return focusText(await W.savedProfile().catch(() => null));
+}
+
 // The AI's first decision kept with a story (null before the migration or
 // for older stories).
 async function aiPickOf(id: string): Promise<AiPick | null> {
@@ -638,6 +646,7 @@ export async function extractSourceChunk(sourceId: string, index: number) {
         text,
         lessons: settingsNow.exam_lessons ?? [],
         pickRules: settingsNow.pick_rules ?? [],
+        focus: await examFocus(),
       }),
     );
     const found = parseExtracted(raw, text, src.id);

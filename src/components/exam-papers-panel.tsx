@@ -51,6 +51,7 @@ import {
 } from "@/lib/exam-papers";
 import { formatDate } from "@/lib/current-affairs";
 import { Badge, errorText } from "@/components/ca-ui";
+import { ExamWeights } from "@/components/exam-weights";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -226,6 +227,7 @@ function PaperList({ onOpen }: { onOpen: (id: string) => void }) {
   return (
     <div className="space-y-4">
       <AddPaper onAdded={onOpen} />
+      <ExamWeights />
       {data.lessons.length > 0 && (
         <section className="space-y-1 rounded-2xl border border-border bg-card p-4 text-sm">
           <h3 className="font-semibold">Lessons in use for picking stories</h3>

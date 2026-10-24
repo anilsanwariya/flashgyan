@@ -168,6 +168,7 @@ export function CoverageMeter({ month }: { month: string }) {
             className="h-9 rounded-md border border-input bg-background px-2 text-sm"
           >
             <option value="">All exams</option>
+            <option value="__weighted">Weighted by your exams</option>
             {data.bodies.map((b) => (
               <option key={b} value={b}>
                 {b}

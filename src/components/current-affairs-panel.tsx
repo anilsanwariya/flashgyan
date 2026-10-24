@@ -1608,6 +1608,8 @@ function SettingsPanel() {
         exam_lessons: _lessons,
         // Picking rules: saved on their own (Collection tab).
         pick_rules: _pickRules,
+        // Exam weights: saved on the Exam papers page.
+        exam_weights: _examWeights,
         ...rest
       } = q.data;
       const loaded = {
