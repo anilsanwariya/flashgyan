@@ -4595,6 +4595,9 @@ export async function issueHtml(
     kind === "monthly" && !opts.coverOnly ? await import("@/lib/ca-practice.server") : null;
   const practiceSet = practice ? await practice.getPractice(range.from).catch(() => null) : null;
   const oneliners = practice ? await practice.getOneliners(range.from).catch(() => null) : null;
+  const topicIndex = practice
+    ? await (await import("@/lib/ca-index.server")).getIndex(range.from).catch(() => null)
+    : null;
   // The sports events' medal tallies, when made.
   const sports = events.filter((b) => b.event.kind === "sports").map((b) => b.event.id);
   const medals = sports.length
@@ -4621,6 +4624,7 @@ export async function issueHtml(
       feature: feature?.included ? feature : null,
       practiceSet,
       oneliners,
+      topicIndex,
       reports,
       placeMaps: maps?.placeMaps,
       design,

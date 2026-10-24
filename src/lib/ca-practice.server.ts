@@ -50,7 +50,9 @@ async function writeSetting(key: string, value: unknown | null) {
 }
 
 // The month's stories, most important first (Rajasthan before others).
-async function monthStories(month: string): Promise<(PracticeStory & { importance: number })[]> {
+export async function monthStories(
+  month: string,
+): Promise<(PracticeStory & { importance: number })[]> {
   const range = monthRange(month);
   const rows: {
     id: string;
