@@ -6,6 +6,7 @@ import { rajasthanBalance } from "@/lib/ca-report";
 import type { StyleStatus } from "@/lib/ca-style";
 import type { LangStatus } from "@/lib/ca-bilingual";
 import { TRIAGE } from "../../supabase/functions/_shared/ca-triage.ts";
+import { officialCounts, type OfficialCheck } from "@/lib/ca-official";
 import { STYLE_TG } from "../../supabase/functions/_shared/ca-style-check.ts";
 
 export type CheckAction =
@@ -15,7 +16,8 @@ export type CheckAction =
   | { kind: "corrections" }
   | { kind: "facts" }
   | { kind: "style" }
-  | { kind: "lang" };
+  | { kind: "lang" }
+  | { kind: "official" };
 
 // "todo": should be done before scheduling; "note": worth a look; "done".
 export type Check = {
@@ -33,7 +35,7 @@ type DayItem = {
   needs_enrich: boolean;
   enrich_error: string | null;
   position: number;
-  facts: { verified: boolean }[];
+  facts: { verified: boolean; text: string; slot?: string; official?: OfficialCheck }[];
   content: { statics?: unknown[]; background?: unknown } | null;
 };
 
@@ -117,6 +119,33 @@ export function dayChecklist(o: {
         }
       : { key: "facts", state: "done", text: "No facts left to check" },
   );
+
+  // The official source check (only stories with names, amounts, dates or
+  // posts to check).
+  const official = included
+    .map((i) => officialCounts(i.facts))
+    .filter((n) => n.confirmed + n.differs + n.not_found + n.unchecked);
+  if (official.length) {
+    const differs = official.reduce((a, n) => a + n.differs, 0);
+    const unchecked = official.filter((n) => n.unchecked).length;
+    out.push(
+      differs
+        ? {
+            key: "official",
+            state: "todo",
+            text: `${plural(differs, "fact")} differ${differs === 1 ? "s" : ""} from official sources`,
+            action: { kind: "official", label: "Show" },
+          }
+        : unchecked
+          ? {
+              key: "official",
+              state: "note",
+              text: `${plural(unchecked, "story", "stories")} not checked with official sources`,
+              action: { kind: "official", label: "Check" },
+            }
+          : { key: "official", state: "done", text: "Facts match official sources" },
+    );
+  }
 
   const style = o.style;
   if (style) {
@@ -304,6 +333,9 @@ export function draftButtons(checks: Check[], date: string, origin?: string): Tg
     const page = `${origin}/admin?section=ca.daily&date=${date}`;
     if (todo.some((c) => c.key === "facts")) {
       rows.push([{ text: "🔍 Check facts", url: `${page}&open=facts` }]);
+    }
+    if (todo.some((c) => c.key === "official")) {
+      rows.push([{ text: "🏛️ Official differences", url: `${page}&open=official` }]);
     }
     rows.push([{ text: "📝 Open review", url: page }]);
   }

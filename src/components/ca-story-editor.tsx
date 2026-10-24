@@ -70,6 +70,7 @@ import { StoryHistory } from "@/components/ca-story-history";
 import { StoryImages } from "@/components/ca-story-images";
 import { AskedChip } from "@/components/ca-asked-panel";
 import { HistoryChip } from "@/components/ca-history-panel";
+import { OfficialChip } from "@/components/ca-official-panel";
 import { PickedPointsVisual, StoryVisuals } from "@/components/ca-story-visuals";
 import { MaterialPanel } from "@/components/ca-story-material";
 import { BiLine, IconButton, Part, StaticConnect, type Lang } from "@/components/ca-story-review";
@@ -474,6 +475,7 @@ export function StoryEditor({
             <EventChip item={item} events={events} disabled={busy} onChanged={onChanged} />
             <AskedChip itemId={item.id} disabled={busy} />
             <HistoryChip itemId={item.id} disabled={busy} />
+            <OfficialChip item={item} disabled={busy} onChanged={onChanged} />
             {unverified > 0 && (
               <Badge tone="warn">
                 <AlertTriangle className="h-3 w-3" /> {unverified} to check
