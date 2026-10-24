@@ -29,6 +29,14 @@ import {
   type CustomMag,
   type MagSection,
 } from "@/lib/ca-mags";
+import {
+  familyShares,
+  pickSpecial,
+  specialSections,
+  specialTheme,
+  specialTitle,
+  type SpecialStory,
+} from "@/lib/ca-specials";
 import { renderMagazine, type CustomLayout, type Lang } from "@/lib/current-affairs-html";
 import type { CaFeature } from "@/lib/ca-feature";
 import { fillerPages, normalizeIssueDesign, type IssueDesign } from "@/lib/ca-covers";
@@ -278,11 +286,30 @@ export async function fillMag(magId: string): Promise<{ checked: number; added: 
     mag.sections,
   );
   if (!sorted) throw new Error("SAATHI's sorting couldn't be read; it will try again.");
-  // Copies of the stories that fit, after the magazine's other stories.
+  await copyIntoMag(mag.id, rows, sorted.placed);
+  const fits = new Set(sorted.placed.map((p) => rows[p.index].id as string));
+  await markSeen(mag.id, rows, fits);
+  fail(
+    (
+      await from("ca_mags")
+        .update({ sections: sorted.sections, error: null, updated_at: now() } as never)
+        .eq("id", mag.id)
+    ).error,
+  );
+  return { checked: rows.length, added: sorted.placed.length };
+}
+
+// Copies of daily stories into a magazine's sections, after its other
+// stories.
+async function copyIntoMag(
+  magId: string,
+  rows: Record<string, unknown>[],
+  placed: { index: number; section: string; sub: string | null }[],
+) {
   const { count: had } = await from("ca_items")
     .select("id", { count: "exact", head: true })
-    .eq("magazine_id", mag.id);
-  const copies = sorted.placed.map((p, i) => {
+    .eq("magazine_id", magId);
+  const copies = placed.map((p, i) => {
     const {
       id: _id,
       created_at: _c,
@@ -296,7 +323,7 @@ export async function fillMag(magId: string): Promise<{ checked: number; added: 
       ...rest,
       content: fixShortFormsDeep(rest.content),
       issue_date: null,
-      magazine_id: mag.id,
+      magazine_id: magId,
       mag_date: rows[p.index].issue_date,
       origin_id: rows[p.index].id,
       mag_section: p.section,
@@ -316,27 +343,109 @@ export async function fillMag(magId: string): Promise<{ checked: number; added: 
     if (missingTopics(iErr)) ({ error: iErr } = await from("ca_items").insert(copies as never));
     fail(iErr);
   }
-  const fits = new Set(sorted.placed.map((p) => rows[p.index].id as string));
-  fail(
-    (
-      await from("ca_mag_seen").upsert(
-        rows.map((r) => ({
-          mag_id: mag.id,
-          item_id: r.id,
-          fits: fits.has(r.id as string),
-        })) as never,
-        { onConflict: "mag_id,item_id", ignoreDuplicates: true },
-      )
-    ).error,
-  );
-  fail(
-    (
-      await from("ca_mags")
-        .update({ sections: sorted.sections, error: null, updated_at: now() } as never)
-        .eq("id", mag.id)
-    ).error,
-  );
-  return { checked: rows.length, added: copies.length };
+}
+
+// Daily stories a magazine has looked at (and which it took).
+async function markSeen(magId: string, rows: { id?: unknown }[], fits: Set<string>) {
+  for (let i = 0; i < rows.length; i += 500)
+    fail(
+      (
+        await from("ca_mag_seen").upsert(
+          rows.slice(i, i + 500).map((r) => ({
+            mag_id: magId,
+            item_id: r.id,
+            fits: fits.has(r.id as string),
+          })) as never,
+          { onConflict: "mag_id,item_id", ignoreDuplicates: true },
+        )
+      ).error,
+    );
+}
+
+// ---------- Exam specials ----------
+
+// A magazine for one exam: its sections in the order the exam's papers ask
+// them, filled at once with the period's best stories for it in proportion
+// (no AI call). Every story of the period counts as looked at, so only
+// stories collected later are sorted in by the theme.
+export async function createExamSpecial(input: {
+  exam: string;
+  date_from: string;
+  date_to: string;
+  size: number;
+}): Promise<CustomMag> {
+  if (input.date_from > input.date_to) throw new Error("The start date is after the end date.");
+  if (days(input.date_from, input.date_to) > MAX_DAYS)
+    throw new Error("A magazine covers at most two years.");
+  const probe = await from("ca_mags").select("id").limit(1);
+  if (missing(probe.error)) throw new Error(NOT_READY);
+  const W = await import("@/lib/ca-exam-weights.server");
+  const profile = await W.makeProfile();
+  const family = profile.families.find((f) => f.family === input.exam);
+  if (!family) throw new Error(`No published papers of ${input.exam}.`);
+  const shares = familyShares(family);
+  // The period's stories, with what scores them for the exam.
+  type Row = SpecialStory & { id: string };
+  const stories: Row[] = [];
+  let cols = "id,issue_date,category,importance,rajasthan,story_type,asked";
+  for (let page = 0; page < 20; page++) {
+    const r = await from("ca_items")
+      .select(cols)
+      .gte("issue_date", input.date_from)
+      .lte("issue_date", input.date_to)
+      .eq("status", "included")
+      .not("content", "is", null)
+      .order("issue_date")
+      .order("id")
+      .range(page * 1000, page * 1000 + 999);
+    if (r.error && cols.includes("story_type") && /story_type|asked/.test(r.error.message)) {
+      // Before those columns: importance, Rajasthan and section only.
+      cols = "id,issue_date,category,importance,rajasthan";
+      page--;
+      continue;
+    }
+    fail(r.error);
+    const got = (r.data ?? []) as unknown as Row[];
+    stories.push(...got);
+    if (got.length < 1000) break;
+  }
+  if (!stories.length) throw new Error("There are no written stories in those dates.");
+  const picked = pickSpecial(stories, shares, input.size);
+  const title = specialTitle(input.exam, input.date_from, input.date_to);
+  const { data, error } = await from("ca_mags")
+    .insert({
+      title_en: title.en,
+      title_hi: title.hi,
+      theme: specialTheme(input.exam, shares),
+      date_from: input.date_from,
+      date_to: input.date_to,
+      sections: specialSections(shares),
+    } as never)
+    .select("*")
+    .single();
+  fail(error);
+  const mag = readMag(data);
+  const ids = picked.map((p) => p.story.id as string);
+  const full = new Map<string, Record<string, unknown>>();
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data: rows, error: rErr } = await from("ca_items")
+      .select("*")
+      .in("id", ids.slice(i, i + 100));
+    fail(rErr);
+    for (const r of (rows ?? []) as Record<string, unknown>[]) full.set(r.id as string, r);
+  }
+  const rows = ids.map((id) => full.get(id)).filter(Boolean) as Record<string, unknown>[];
+  const sectionOf = new Map(picked.map((p) => [p.story.id as string, p.section]));
+  for (let i = 0; i < rows.length; i += 100) {
+    const part = rows.slice(i, i + 100);
+    await copyIntoMag(
+      mag.id,
+      part,
+      part.map((r, index) => ({ index, section: sectionOf.get(r.id as string)!, sub: null })),
+    );
+  }
+  await markSeen(mag.id, stories, new Set(ids));
+  return mag;
 }
 
 // One batch for the magazine that has the most waiting (called on every
