@@ -2,6 +2,8 @@
 // issue and the English issue are made from the same stories. Cloudflare's
 // browser rendering turns it into the PDF; the admin panel shows the same
 // HTML as a preview.
+import { ASKED_SHOWN, askedLine, type AskedQ } from "@/lib/ca-asked";
+import { HISTORY_LABEL, type StoryHistory } from "@/lib/ca-history";
 import {
   CATEGORIES,
   DEFAULT_MAGAZINE_SETTINGS,
@@ -68,6 +70,10 @@ export type MagazineItem = {
   geo?: Geo | null;
   // The stories before it on the same scheme (the scheme register).
   earlier?: Earlier[];
+  // Past exam questions on its topic ("Asked before").
+  asked?: AskedQ[];
+  // A report's earlier editions or an appointment's predecessors.
+  history?: StoryHistory;
   // A custom magazine's subsection (its section is the category).
   sub?: string | null;
   // The several-day event it belongs to (monthly issue only).
@@ -130,6 +136,7 @@ const T = {
     revision: "60-Second Revision",
     numbers: "Numbers of the Month",
     earlier: "Earlier",
+    asked: "Asked before",
     numbersSub: "Figures, targets and ranks to remember",
     practice: "Practice Questions",
     ctaText: "Free current affairs every morning.",
@@ -174,6 +181,7 @@ const T = {
     revision: "60 सेकंड रिवीजन",
     numbers: "इस माह के आँकड़े",
     earlier: "पूर्व में",
+    asked: "पहले पूछा गया",
     numbersSub: "याद रखने योग्य आँकड़े, लक्ष्य और रैंक",
     practice: "अभ्यास प्रश्न",
     ctaText: "हर सुबह निःशुल्क करेंट अफेयर्स।",
@@ -505,6 +513,21 @@ function itemHtml(
           .join("; ")}</div>`
       : ""
   }
+  ${
+    item.history && (item.history.en || item.history.hi)
+      ? `<div class="earlier"><b>${esc(HISTORY_LABEL[item.history.kind][lang])}:</b> ${esc(
+          lang === "hi" ? item.history.hi || item.history.en : item.history.en || item.history.hi,
+        )}</div>`
+      : ""
+  }
+  ${
+    item.asked?.length
+      ? `<div class="asked"><b>${t.asked}:</b> ${item.asked
+          .slice(0, ASKED_SHOWN)
+          .map((q) => esc(askedLine(q, lang)))
+          .join("<br>")}</div>`
+      : ""
+  }
   ${sideImagesHtml(c.images, lang)}
   ${c.hide_summary ? "" : block(c.summary, lang, "summary")}
   ${imagesHtml(c.images, lang)}
@@ -626,6 +649,8 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .card tr:last-child th, .card tr:last-child td { border-bottom: 0; }
 .earlier { margin: 1mm 0 2mm; padding: 1.2mm 2.5mm; border-left: 2px solid ${accent}; background: #f8fafc; font-size: 8.5pt; color: #475569; }
 .earlier b { color: ${accent}; }
+.asked { margin: 1mm 0 2mm; padding: 1.2mm 2.5mm; border-left: 2px solid #b45309; background: #fffbeb; font-size: 8.5pt; color: #57534e; }
+.asked b { color: #b45309; }
 .nums { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin-bottom: 3mm; }
 .nums td { padding: 1.2mm 2mm; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
 .nums tr:nth-child(even) td { background: #f8fafc; }
