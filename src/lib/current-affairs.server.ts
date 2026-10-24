@@ -1690,6 +1690,8 @@ export async function writeEventSummary(id: string): Promise<CaEvent> {
   );
   const parsed = parseContent(raw, EVENT_POINTS_MAX);
   if (!parsed) throw new Error("The AI's reply could not be read. Try again.");
+  // A sports event's medal tally, made from the same stories.
+  if (e.kind === "sports") await (await import("@/lib/ca-medals.server")).makeMedalsSafe(id);
   return updateEvent(id, { summary: fixShortFormsDeep(parsed.content) });
 }
 
@@ -4542,6 +4544,16 @@ export async function issueHtml(
       }));
   }
   const feature = kind === "monthly" ? await getFeature(range.from) : null;
+  // The month's practice set and one-liners, when made.
+  const practice =
+    kind === "monthly" && !opts.coverOnly ? await import("@/lib/ca-practice.server") : null;
+  const practiceSet = practice ? await practice.getPractice(range.from).catch(() => null) : null;
+  const oneliners = practice ? await practice.getOneliners(range.from).catch(() => null) : null;
+  // The sports events' medal tallies, when made.
+  const sports = events.filter((b) => b.event.kind === "sports").map((b) => b.event.id);
+  const medals = sports.length
+    ? await (await import("@/lib/ca-medals.server")).medalsFor(sports).catch(() => ({}))
+    : {};
   const reports =
     kind === "monthly"
       ? (await (await import("@/lib/ca-docs.server")).getReports(range.from)).filter(
@@ -4561,12 +4573,15 @@ export async function issueHtml(
       items,
       corrections,
       feature: feature?.included ? feature : null,
+      practiceSet,
+      oneliners,
       reports,
       placeMaps: maps?.placeMaps,
       design,
       fillers: opts.fillers,
       coverOnly: opts.coverOnly,
       events,
+      medals,
     }),
     // A monthly cover's own colour, when it is the whole issue's, also
     // colours the Telegram link on every page.

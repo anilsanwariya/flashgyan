@@ -78,6 +78,17 @@ const factSchema = z.object({
   corrected: z.boolean().optional(),
   slot: z.string().max(80).optional(),
   note: z.string().max(200).optional(),
+  official: z
+    .object({
+      status: z.enum(["confirmed", "differs", "not_found"]),
+      text: z.string().max(4000),
+      value: z.string().max(300).optional(),
+      source: z.string().max(200).optional(),
+      url: z.string().max(1000).optional(),
+      kept: z.boolean().optional(),
+      at: z.string().max(40),
+    })
+    .optional(),
 });
 // Exported for tests: every story the server writes must pass it, or the
 // editor's next save is refused.

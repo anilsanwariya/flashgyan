@@ -6,6 +6,7 @@ import { SchemeRegister } from "@/components/ca-scheme-register";
 import { ExamPapers } from "@/components/exam-papers-panel";
 import { NewspaperClipping } from "@/components/ca-clipper";
 import { CoverageMeter } from "@/components/ca-asked-panel";
+import { PracticeBox } from "@/components/ca-practice-panel";
 import { PastCollection } from "@/components/ca-past-collection";
 import { EventsPanel } from "@/components/ca-events-panel";
 import { useEffect, useRef, useState } from "react";
@@ -71,6 +72,7 @@ import { CollectionBox, WatchSitesSettings } from "@/components/ca-collect-panel
 import { StoryList } from "@/components/ca-story-review";
 import { SkippedNews } from "@/components/ca-skipped-news";
 import { DayChecklist } from "@/components/ca-day-checklist";
+import { OfficialDayDialog } from "@/components/ca-official-panel";
 import { FactCheckDialog } from "@/components/ca-fact-check";
 import { StyleCheckDialog } from "@/components/ca-style-check";
 import { LangCheckDialog } from "@/components/ca-lang-check";
@@ -491,6 +493,7 @@ function DailyPanel() {
   const [factsOpen, setFactsOpen] = useState(false);
   const [styleOpen, setStyleOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
+  const [officialOpen, setOfficialOpen] = useState(false);
   // Sources & collection: open on its own while the day has no stories or
   // work is going on, until opened or closed by hand.
   const [sourcesOpen, setSourcesOpen] = useState<boolean | null>(null);
@@ -504,6 +507,7 @@ function DailyPanel() {
     if (p.get("open") === "facts") setFactsOpen(true);
     if (p.get("open") === "style") setStyleOpen(true);
     if (p.get("open") === "lang") setLangOpen(true);
+    if (p.get("open") === "official") setOfficialOpen(true);
   }, []);
   // Until the skipped news list is opened, its last saved counts (kept up to
   // date by the evening collection's ranking).
@@ -750,6 +754,7 @@ function DailyPanel() {
     else if (a.kind === "facts") setFactsOpen(true);
     else if (a.kind === "style") setStyleOpen(true);
     else if (a.kind === "lang") setLangOpen(true);
+    else if (a.kind === "official") setOfficialOpen(true);
     else document.getElementById("ca-corrections")?.scrollIntoView({ behavior: "smooth" });
   }
 
@@ -819,6 +824,16 @@ function DailyPanel() {
         items={included}
         onChanged={refresh}
         onOpenStory={(id) => setStoryJump({ id, n: Date.now() })}
+      />
+      <OfficialDayDialog
+        open={officialOpen}
+        onOpenChange={setOfficialOpen}
+        items={included}
+        onChanged={refresh}
+        onOpenStory={(id) => {
+          setOfficialOpen(false);
+          setStoryJump({ id, n: Date.now() });
+        }}
       />
 
       {day && day.corrections.length > 0 && (
@@ -1314,6 +1329,7 @@ function MonthlyPanel() {
 
           {items > 0 && <ResortMonth month={month} />}
           {items > 0 && <CoverageMeter month={month} />}
+          {items > 0 && <PracticeBox month={month} />}
 
           <PastCollection month={month} />
         </div>

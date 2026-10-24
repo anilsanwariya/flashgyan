@@ -6,6 +6,7 @@ import { EVENT_FIELD, parseRawEvent, roundupNote, type RawEvent } from "@/lib/ca
 import type { Binding, CoverPreset, DailyLayout, MagazineAd } from "@/lib/ca-covers";
 import { unverifiedNumbers, type Visual } from "@/lib/ca-visuals";
 import { DEFAULT_MIN_RAJASTHAN } from "@/lib/ca-report";
+import type { OfficialCheck } from "@/lib/ca-official";
 import { hindiGuide, type GlossaryEntry } from "../../supabase/functions/_shared/ca-hindi.ts";
 import {
   DEFAULT_DAILY_STORIES,
@@ -136,6 +137,8 @@ export type CaFact = {
   slot?: string;
   // The editor's margin note on how to use it ("use in the headline").
   note?: string;
+  // Compared with official sources (ca-official.ts).
+  official?: OfficialCheck;
 };
 
 export type CaMcq = { question: Bi; options: Bi[]; answer: number; explanation: Bi };
