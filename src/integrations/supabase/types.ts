@@ -919,6 +919,7 @@ export type Database = {
       }
       ca_items: {
         Row: {
+          ai_pick: Json | null
           asked: Json | null
           asked_checked: boolean
           asked_hidden: string[]
@@ -966,6 +967,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          ai_pick?: Json | null
           asked?: Json | null
           asked_checked?: boolean
           asked_hidden?: string[]
@@ -1013,6 +1015,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          ai_pick?: Json | null
           asked?: Json | null
           asked_checked?: boolean
           asked_hidden?: string[]
