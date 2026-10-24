@@ -73,6 +73,7 @@ export type QuestionDraft = {
   explanation_en?: string;
   explanation_hi?: string;
   explanation_source?: string;
+  explanation_general?: boolean;
   key_note?: string;
 };
 
@@ -389,7 +390,11 @@ export function rowsToPapers(
       else if (/^[1-4](\.0+)?$/.test(ans)) q.correct = Number(ans);
       if (extra.explanation)
         q[lang === "hi" ? "explanation_hi" : "explanation_en"] = extra.explanation;
-      if (extra.source) q.explanation_source = extra.source;
+      if (extra.source) {
+        const general = /^(general knowledge|सामान्य ज्ञान)$/i.test(extra.source);
+        q.explanation_general = general;
+        if (!general) q.explanation_source = extra.source;
+      }
       // The answer's text should be the option numbered.
       const said = extra.answer ?? "";
       if (said && q.correct && !q.deleted && !/^(deleted|विलोपित)$/i.test(said)) {

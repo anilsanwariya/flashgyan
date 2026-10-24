@@ -243,6 +243,7 @@ export async function saveQuestions(paperId: string, drafts: QuestionDraft[], re
       explanation_en: d.explanation_en ?? old?.explanation_en ?? "",
       explanation_hi: d.explanation_hi ?? old?.explanation_hi ?? "",
       explanation_source: d.explanation_source ?? old?.explanation_source ?? "",
+      explanation_general: d.explanation_general ?? old?.explanation_general ?? false,
       key_note: d.key_note ?? old?.key_note ?? "",
       updated_at: now(),
     };
