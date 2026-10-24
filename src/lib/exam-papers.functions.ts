@@ -187,6 +187,9 @@ export const updateExamQuestion = createServerFn({ method: "POST" })
           explanation_en: z.string().max(6000).optional(),
           explanation_hi: z.string().max(6000).optional(),
           verified: z.boolean().optional(),
+          subject_section: z.string().max(80).optional(),
+          topic_en: z.string().max(80).optional(),
+          topic_hi: z.string().max(80).optional(),
         }),
       })
       .parse(d),
@@ -235,6 +238,15 @@ export const explainExamPaper = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return (await server()).explainStep(data.id, data.redo ?? []);
+  });
+
+// Subjects, topics and the AI check, a batch at a time.
+export const reviewExamPaper = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id, redo: z.array(id).max(50).optional() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).reviewStep(data.id, data.redo ?? []);
   });
 
 // Publishing (every question verified): a test for students too.

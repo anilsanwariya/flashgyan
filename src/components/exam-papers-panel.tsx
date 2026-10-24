@@ -27,6 +27,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  ShieldAlert,
   Trash2,
 } from "lucide-react";
 import {
@@ -42,12 +43,17 @@ import {
   importExamPapers,
   listExamPapers,
   readExamPaperPage,
+  reviewExamPaper,
   setExamLesson,
   updateExamPaper,
   updateExamQuestion,
   type PaperSummary,
 } from "@/lib/exam-papers.functions";
 import {
+  CHECK_LABEL,
+  SUBJECT_SECTIONS,
+  checkedNow,
+  flagged,
   EXCEL_COLUMNS,
   OPTION_COUNT,
   SHEET_COLUMNS,
@@ -557,7 +563,8 @@ type Filter =
   | "unverified"
   | "verified"
   | "noexpl"
-  | "key";
+  | "key"
+  | "flagged";
 type Lang = "both" | "hi" | "en";
 
 function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
@@ -573,6 +580,8 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
   });
   const [reading, setReading] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
+  // The subject section shown ("" for all).
+  const [subject, setSubject] = useState("");
   // A question jumped to: scrolled to and lit up once it's in the list.
   const jumpTo = useRef<number | null>(null);
   const [jumped, setJumped] = useState<number | null>(null);
@@ -669,25 +678,38 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
   const answered = questions.filter((x) => x.correct).length;
   const deleted = questions.filter((x) => x.deleted).length;
   const toCheck = questions.filter((x) => questionGaps(x).length);
-  const shown = questions.filter((x) =>
-    filter === "answer"
-      ? !x.correct && !x.deleted
-      : filter === "deleted"
-        ? x.deleted
-        : filter === "check"
-          ? questionGaps(x).length > 0
-          : filter === "ca"
-            ? x.ca
-            : filter === "unverified"
-              ? !x.verified
-              : filter === "verified"
-                ? x.verified
-                : filter === "noexpl"
-                  ? !x.explanation_en && !x.explanation_hi
-                  : filter === "key"
-                    ? !!x.key_note
-                    : true,
-  );
+  const shown = questions
+    .filter((x) =>
+      filter === "answer"
+        ? !x.correct && !x.deleted
+        : filter === "deleted"
+          ? x.deleted
+          : filter === "check"
+            ? questionGaps(x).length > 0
+            : filter === "ca"
+              ? x.ca
+              : filter === "unverified"
+                ? !x.verified
+                : filter === "verified"
+                  ? x.verified
+                  : filter === "noexpl"
+                    ? !x.explanation_en && !x.explanation_hi
+                    : filter === "key"
+                      ? !!x.key_note
+                      : filter === "flagged"
+                        ? flagged(x)
+                        : true,
+    )
+    .filter((x) => !subject || (x.subject_section || "—") === subject);
+  // The subject sections in this paper, with their counts.
+  const subjects = [
+    ...questions
+      .reduce(
+        (m, x) => m.set(x.subject_section || "—", (m.get(x.subject_section || "—") ?? 0) + 1),
+        new Map<string, number>(),
+      )
+      .entries(),
+  ].sort((a, b) => b[1] - a[1]);
   const published = paper.status === "published";
 
   async function exportExcel() {
@@ -892,7 +914,10 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
           questions={questions}
           onJump={(x) => {
             // Any question: one the filter hides shows the full list.
-            if (!shown.some((y) => y.id === x.id)) setFilter("all");
+            if (!shown.some((y) => y.id === x.id)) {
+              setFilter("all");
+              setSubject("");
+            }
             jumpTo.current = x.q_no;
             // A new value each time, so the same question can be jumped to again.
             setJumped(Date.now());
@@ -917,6 +942,9 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
               ...(questions.some((x) => x.key_note)
                 ? [["key", `Check the key (${questions.filter((x) => x.key_note).length})`]]
                 : []),
+              ...(questions.some(flagged)
+                ? [["flagged", `AI flagged (${questions.filter(flagged).length})`]]
+                : []),
             ] as [Filter, string][]
           ).map(([k, label]) => (
             <button
@@ -931,6 +959,21 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
             </button>
           ))}
         </div>
+        {subjects.length > 1 || (subjects[0] && subjects[0][0] !== "—") ? (
+          <select
+            aria-label="Subject section"
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            className="h-7 rounded-md border border-input bg-background px-2 text-xs"
+          >
+            <option value="">All subjects</option>
+            {subjects.map(([name, n]) => (
+              <option key={name} value={name}>
+                {name === "—" ? "No subject yet" : name} ({n})
+              </option>
+            ))}
+          </select>
+        ) : null}
         <div className="ml-auto inline-flex rounded-lg border border-border p-0.5 text-xs">
           {(["both", "hi", "en"] as const).map((l) => (
             <button
@@ -1084,12 +1127,15 @@ function QuestionCard({
   lang,
   story,
   locked,
+  flagsLocked = locked,
   onChanged,
 }: {
   q: ExamQuestion;
   lang: Lang;
   story?: { date: string; headline: string; status: string };
   locked?: boolean;
+  // The AI check's suggested option can be used (the cards' own buttons).
+  flagsLocked?: boolean;
   onChanged: () => Promise<unknown>;
 }) {
   const [editing, setEditing] = useState(false);
@@ -1131,6 +1177,19 @@ function QuestionCard({
           </Badge>
         )}
         {q.key_note && <Badge tone="warn">Check the key</Badge>}
+        {flagged(q) && (
+          <Badge tone="bad">
+            <ShieldAlert className="h-3 w-3" /> AI flagged
+          </Badge>
+        )}
+        {q.subject_section && (
+          <span className="text-xs text-muted-foreground" data-subject>
+            {q.subject_section}
+            {q.topic_en || q.topic_hi
+              ? ` · ${lang === "hi" ? q.topic_hi || q.topic_en : q.topic_en || q.topic_hi}`
+              : ""}
+          </span>
+        )}
         {!locked && (
           <span className="ml-auto flex items-center gap-1">
             <Button
@@ -1194,6 +1253,7 @@ function QuestionCard({
             );
           })}
           <Explanation q={q} lang={lang} />
+          <AiFlags q={q} locked={flagsLocked} onChanged={onChanged} />
           {q.match && (
             <p className="text-xs text-muted-foreground">
               {story ? (
@@ -1236,8 +1296,16 @@ function QuestionEditor({
     answer: q.deleted ? "deleted" : q.correct ? String(q.correct) : "",
     explanation_en: q.explanation_en,
     explanation_hi: q.explanation_hi,
+    subject_section: q.subject_section ?? "",
+    topic_en: q.topic_en ?? "",
+    topic_hi: q.topic_hi ?? "",
   });
   const [busy, setBusy] = useState(false);
+  // Saved only when changed (and only after the migration).
+  const subjectChanged =
+    f.subject_section !== (q.subject_section ?? "") ||
+    f.topic_en !== (q.topic_en ?? "") ||
+    f.topic_hi !== (q.topic_hi ?? "");
   const setOption = (i: number, l: "en" | "hi", v: string) =>
     setF({ ...f, options: f.options.map((o, k) => (k === i ? { ...o, [l]: v } : o)) });
   return (
@@ -1260,6 +1328,9 @@ function QuestionEditor({
               correct: /^[1-4]$/.test(f.answer) ? Number(f.answer) : null,
               explanation_en: f.explanation_en,
               explanation_hi: f.explanation_hi,
+              ...(subjectChanged
+                ? { subject_section: f.subject_section, topic_en: f.topic_en, topic_hi: f.topic_hi }
+                : {}),
             },
           },
         })
@@ -1347,6 +1418,39 @@ function QuestionEditor({
           ))}
           <option value="deleted">Deleted</option>
         </select>
+        <select
+          aria-label="Subject section"
+          value={f.subject_section}
+          onChange={(e) => setF({ ...f, subject_section: e.target.value })}
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+        >
+          <option value="">No subject</option>
+          {SUBJECT_SECTIONS.map((x) => (
+            <option key={x.en} value={x.en}>
+              {x.en}
+            </option>
+          ))}
+          {f.subject_section && !SUBJECT_SECTIONS.some((x) => x.en === f.subject_section) && (
+            <option value={f.subject_section}>{f.subject_section}</option>
+          )}
+        </select>
+        <Input
+          aria-label="Topic (English)"
+          placeholder="Topic"
+          value={f.topic_en}
+          maxLength={80}
+          onChange={(e) => setF({ ...f, topic_en: e.target.value })}
+          className="h-9 w-40"
+        />
+        <Input
+          aria-label="Topic (Hindi)"
+          placeholder="टॉपिक"
+          lang="hi"
+          value={f.topic_hi}
+          maxLength={80}
+          onChange={(e) => setF({ ...f, topic_hi: e.target.value })}
+          className="h-9 w-40"
+        />
         <Button size="sm" type="submit" disabled={busy}>
           Save
         </Button>
@@ -1359,6 +1463,55 @@ function QuestionEditor({
 }
 
 // ====================== Explanations and proofreading ======================
+
+// The AI check's problems with a question, and its suggested option.
+function AiFlags({
+  q,
+  locked,
+  onChanged,
+}: {
+  q: ExamQuestion;
+  locked?: boolean;
+  onChanged: () => Promise<unknown>;
+}) {
+  const updateFn = useServerFn(updateExamQuestion);
+  if (!flagged(q)) return null;
+  const c = q.ai_check!;
+  return (
+    <div
+      className="space-y-1 rounded-xl border border-red-300/70 bg-red-500/5 p-2.5 text-sm dark:border-red-500/40"
+      data-ai-flags
+    >
+      <p className="flex items-center gap-1.5 text-xs font-semibold text-red-700 dark:text-red-300">
+        <ShieldAlert className="h-3.5 w-3.5" /> The AI check found
+      </p>
+      <ul className="space-y-0.5">
+        {c.issues.map((i, k) => (
+          <li key={k}>
+            <span className="font-medium">{CHECK_LABEL[i.kind]}:</span> {i.note}
+          </li>
+        ))}
+      </ul>
+      {c.suggest && c.suggest !== q.correct && !locked && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7"
+          onClick={() =>
+            void updateFn({ data: { id: q.id, patch: { correct: c.suggest!, deleted: false } } })
+              .then(async () => {
+                toast.success(`Question ${q.q_no}: option ${c.suggest} set as correct`);
+                await onChanged();
+              })
+              .catch((e) => toast.error(errorText(e, "Couldn't save")))
+          }
+        >
+          Use option {c.suggest}
+        </Button>
+      )}
+    </div>
+  );
+}
 
 function Explanation({ q, lang }: { q: ExamQuestion; lang: Lang }) {
   if (!q.explanation_en && !q.explanation_hi) return null;
@@ -1402,6 +1555,7 @@ function Proofread({
   onChanged: () => Promise<unknown>;
 }) {
   const explainFn = useServerFn(explainExamPaper);
+  const reviewFn = useServerFn(reviewExamPaper);
   const publishFn = useServerFn(publishExamPaper);
   const unpublishFn = useServerFn(unpublishExamPaper);
   const [busy, setBusy] = useState<string | null>(null);
@@ -1413,6 +1567,36 @@ function Proofread({
   const toExplain = questions.length - explained;
   const general = questions.filter((q) => q.explanation_general).length;
   const usable = questions.filter((q) => !q.deleted && q.correct).length;
+  // The AI check: questions not checked (or changed since), and flagged.
+  const toReview = questions.filter((q) => !checkedNow(q)).length;
+  const flaggedCount = questions.filter(flagged).length;
+  const reviewed = questions.length - toReview;
+
+  async function review(redo: string[] = []) {
+    stop.current = false;
+    let done = 0;
+    try {
+      for (;;) {
+        setBusy(
+          redo.length
+            ? "Checking it again…"
+            : `Checking and sorting by subject… ${reviewed + done} of ${questions.length}`,
+        );
+        const r: Awaited<ReturnType<typeof reviewFn>> = await reviewFn({
+          data: { id: paper.id, redo },
+        });
+        done += r.done;
+        await onChanged();
+        if (redo.length || r.left === 0 || stop.current || !r.done) break;
+      }
+      toast.success(redo.length ? "Checked again" : `${done} questions checked`);
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't check"));
+    } finally {
+      setBusy(null);
+      await onChanged();
+    }
+  }
 
   async function explain(redo: string[] = []) {
     stop.current = false;
@@ -1490,6 +1674,7 @@ function Proofread({
         <span className="text-sm text-muted-foreground" data-testid="proof-counts">
           {verified} of {questions.length} verified · {explained} explained
           {general ? ` · ${general} from general knowledge` : ""}
+          {reviewed ? ` · ${flaggedCount} flagged by the AI check` : ""}
         </span>
       </div>
       {published ? (
@@ -1499,14 +1684,16 @@ function Proofread({
         </p>
       ) : (
         <p className="text-sm text-muted-foreground">
-          Fill the explanations, then check every question and its explanation: edit, delete or
-          verify. When all are verified, publish it for students and the other features.
+          Fill the explanations, then run the AI check: it sorts the questions into subject sections
+          and topics and flags likely mistakes (a wrong key, an explanation that disagrees, Hindi
+          and English that differ) to proofread first. Then check every question: edit, delete or
+          verify. When all are verified, publish it.
         </p>
       )}
       {busy && (
         <p role="status" className="flex items-center gap-2 text-sm text-primary">
           <RefreshCw className="h-4 w-4 animate-spin" /> {busy}
-          {busy.startsWith("Writing explanations") && (
+          {(busy.startsWith("Writing explanations") || busy.startsWith("Checking and")) && (
             <Button size="sm" variant="ghost" onClick={() => (stop.current = true)}>
               Stop
             </Button>
@@ -1523,6 +1710,18 @@ function Proofread({
           >
             <Sparkles className="mr-1 h-4 w-4" />
             {toExplain ? `Fill explanations (${toExplain})` : "All explained"}
+          </Button>
+        )}
+        {!published && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!!busy || !toReview}
+            title="Subjects, topics and likely mistakes (an AI request per 8 questions)"
+            onClick={() => void review()}
+          >
+            <ShieldAlert className="mr-1 h-4 w-4" />
+            {toReview ? `AI check & subjects (${toReview})` : "All checked"}
           </Button>
         )}
         <Button
@@ -1555,6 +1754,7 @@ function Proofread({
           locked={published}
           busy={!!busy}
           onRedo={(id) => explain([id])}
+          onRecheck={(id) => review([id])}
           onClose={() => setCards(false)}
           onChanged={onChanged}
         />
@@ -1648,20 +1848,24 @@ function QuestionJump({
                 title={
                   x.deleted
                     ? "Deleted"
-                    : x.verified
-                      ? "Verified"
-                      : !x.explanation_en && !x.explanation_hi
-                        ? "Not verified · no explanation"
-                        : "Not verified"
+                    : flagged(x) && !x.verified
+                      ? "Flagged by the AI check"
+                      : x.verified
+                        ? "Verified"
+                        : !x.explanation_en && !x.explanation_hi
+                          ? "Not verified · no explanation"
+                          : "Not verified"
                 }
                 className={`h-7 rounded text-xs tabular-nums ${
                   x.deleted
                     ? "text-muted-foreground line-through"
-                    : x.verified
-                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-                      : !x.explanation_en && !x.explanation_hi
-                        ? "bg-amber-500/15 text-amber-800 dark:text-amber-300"
-                        : "bg-muted"
+                    : flagged(x) && !x.verified
+                      ? "bg-red-500/15 font-semibold text-red-700 dark:text-red-300"
+                      : x.verified
+                        ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                        : !x.explanation_en && !x.explanation_hi
+                          ? "bg-amber-500/15 text-amber-800 dark:text-amber-300"
+                          : "bg-muted"
                 } ${x.q_no === current ? "ring-2 ring-primary" : ""}`}
               >
                 {x.q_no}
@@ -1681,6 +1885,10 @@ function QuestionJump({
               <span className="mr-1 inline-block h-2 w-2 rounded-sm bg-amber-500/60" />
               No explanation
             </span>
+            <span>
+              <span className="mr-1 inline-block h-2 w-2 rounded-sm bg-red-500/60" />
+              AI flagged
+            </span>
           </p>
         </div>
       )}
@@ -1694,6 +1902,7 @@ function ProofCards({
   locked,
   busy,
   onRedo,
+  onRecheck,
   onClose,
   onChanged,
 }: {
@@ -1702,16 +1911,18 @@ function ProofCards({
   locked: boolean;
   busy: boolean;
   onRedo: (id: string) => Promise<void>;
+  onRecheck: (id: string) => Promise<void>;
   onClose: () => void;
   onChanged: () => Promise<unknown>;
 }) {
   const updateFn = useServerFn(updateExamQuestion);
   const removeFn = useServerFn(deleteExamQuestion);
   const [onlyOpen, setOnlyOpen] = useState(!locked);
+  const [onlyFlagged, setOnlyFlagged] = useState(false);
   const [lang, setLang] = useState<Lang>(lang0);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const list = onlyOpen ? questions.filter((q) => !q.verified) : questions;
+  const list = questions.filter((q) => (!onlyOpen || !q.verified) && (!onlyFlagged || flagged(q)));
   const [at, setAt] = useState(0);
   const i = Math.min(at, Math.max(0, list.length - 1));
   const q = list[i];
@@ -1786,6 +1997,7 @@ function ProofCards({
             if (inList >= 0) setAt(inList);
             else {
               setOnlyOpen(false);
+              setOnlyFlagged(false);
               setAt(
                 Math.max(
                   0,
@@ -1806,6 +2018,19 @@ function ProofCards({
           />
           Only not verified
         </label>
+        {questions.some(flagged) && (
+          <label className="flex items-center gap-1.5 text-xs">
+            <input
+              type="checkbox"
+              checked={onlyFlagged}
+              onChange={(e) => {
+                setOnlyFlagged(e.target.checked);
+                setAt(0);
+              }}
+            />
+            Only AI flagged ({questions.filter(flagged).length})
+          </label>
+        )}
         <div className="ml-auto inline-flex rounded-lg border border-border p-0.5 text-xs">
           {(["both", "hi", "en"] as const).map((l) => (
             <button
@@ -1832,12 +2057,23 @@ function ProofCards({
               />
             ) : (
               <ol>
-                <QuestionCard key={q.id} q={q} lang={lang} locked onChanged={onChanged} />
+                <QuestionCard
+                  key={q.id}
+                  q={q}
+                  lang={lang}
+                  locked
+                  flagsLocked={locked}
+                  onChanged={onChanged}
+                />
               </ol>
             )
           ) : (
             <p className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-              {onlyOpen ? "Every question is verified." : "No questions."}
+              {onlyFlagged
+                ? "No flagged question here."
+                : onlyOpen
+                  ? "Every question is verified."
+                  : "No questions."}
             </p>
           )}
           {q?.key_note && (
@@ -1878,6 +2114,15 @@ function ProofCards({
             >
               <Sparkles className="mr-1 h-4 w-4" />
               {q.explanation_en || q.explanation_hi ? "Explain again" : "Explain"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={saving || busy}
+              onClick={() => void onRecheck(q.id)}
+            >
+              <ShieldAlert className="mr-1 h-4 w-4" />
+              {checkedNow(q) ? "Check again" : "AI check"}
             </Button>
             <Button size="sm" variant="ghost" disabled={saving} onClick={() => void remove()}>
               <Trash2 className="mr-1 h-4 w-4" /> Delete
