@@ -11,6 +11,12 @@ import {
   type SaathiRpc,
 } from "../../supabase/functions/_shared/saathi-core.ts";
 import {
+  CHECK_BATCH,
+  checkSig,
+  checkedNow,
+  parseReview,
+  reviewMessages,
+  subjectSection,
   EXPLAIN_BATCH,
   OPTION_COUNT,
   classifyMessages,
@@ -68,6 +74,28 @@ export type PaperSummary = ExamPaper & {
 
 const QUESTION_COLS =
   "id,paper_id,q_no,question_en,question_hi,extra_en,extra_hi,options,correct,deleted,ca,matched_item,match,match_note,explanation_en,explanation_hi,explanation_source,explanation_general,verified,key_note";
+
+// After the paper_check_subjects migration: subjects, topics, the AI check.
+const CHECK_COLS = ",subject_section,topic_en,topic_hi,ai_check";
+const missingCheck = (e: { message: string } | null) =>
+  !!e && /subject_section|topic_en|topic_hi|ai_check/.test(e.message);
+export const CHECK_NOT_READY =
+  "Subjects and the AI check need a database update: run the latest migration (paper_check_subjects) in Lovable or the SQL editor.";
+
+// A paper's questions (those numbered, or all), with the migration's columns
+// when it has run.
+async function selectQuestions(paperId: string, qNos?: number[]) {
+  const q = (cols: string) => {
+    let x = from("exam_questions").select(cols).eq("paper_id", paperId);
+    if (qNos) x = x.in("q_no", qNos);
+    return x.order("q_no");
+  };
+  let r = await q(QUESTION_COLS + CHECK_COLS);
+  const ready = !missingCheck(r.error);
+  if (!ready) r = await q(QUESTION_COLS);
+  fail(r.error);
+  return { ready, questions: ((r.data ?? []) as unknown[]).map(readQuestion) };
+}
 
 function readQuestion(r: unknown): ExamQuestion {
   const q = r as ExamQuestion;
@@ -201,15 +229,11 @@ export async function getPaper(
   const { data, error } = await from("exam_papers").select("*").eq("id", id).single();
   if (missing(error)) throw new Error(PAPERS_NOT_READY);
   fail(error);
-  const { data: rows, error: qErr } = await from("exam_questions")
-    .select(QUESTION_COLS)
-    .eq("paper_id", id)
-    .order("q_no");
-  fail(qErr);
+  const { questions } = await selectQuestions(id);
   const paper = data as unknown as ExamPaper;
   return {
     paper: { ...paper, lessons: Array.isArray(paper.lessons) ? paper.lessons : [] },
-    questions: (rows ?? []).map(readQuestion),
+    questions,
   };
 }
 
@@ -217,14 +241,13 @@ export async function getPaper(
 // before merged (a question cut across two pages). The answer key is kept.
 export async function saveQuestions(paperId: string, drafts: QuestionDraft[], replace = false) {
   if (!drafts.length) return;
-  const { data } = await from("exam_questions")
-    .select(QUESTION_COLS)
-    .eq("paper_id", paperId)
-    .in(
-      "q_no",
-      drafts.map((d) => d.q_no),
-    );
-  const had = new Map((data ?? []).map((r) => [readQuestion(r).q_no, readQuestion(r)]));
+  const { ready, questions: old0 } = await selectQuestions(
+    paperId,
+    drafts.map((d) => d.q_no),
+  );
+  const had = new Map(old0.map((q) => [q.q_no, q]));
+  // Subjects and topics from the sheet (kept otherwise).
+  const subjects = ready && drafts.some((d) => d.subject_section || d.topic_en || d.topic_hi);
   const rows = drafts.map((d) => {
     const old = had.get(d.q_no);
     const q = old && !replace ? mergeQuestion(old, d) : d;
@@ -245,6 +268,13 @@ export async function saveQuestions(paperId: string, drafts: QuestionDraft[], re
       explanation_source: d.explanation_source ?? old?.explanation_source ?? "",
       explanation_general: d.explanation_general ?? old?.explanation_general ?? false,
       key_note: d.key_note ?? old?.key_note ?? "",
+      ...(subjects
+        ? {
+            subject_section: d.subject_section ?? old?.subject_section ?? "",
+            topic_en: d.topic_en ?? old?.topic_en ?? "",
+            topic_hi: d.topic_hi ?? old?.topic_hi ?? "",
+          }
+        : {}),
       updated_at: now(),
     };
   });
@@ -409,10 +439,28 @@ export async function updateQuestion(
       | "explanation_en"
       | "explanation_hi"
       | "verified"
+      | "subject_section"
+      | "topic_en"
+      | "topic_hi"
     >
   >,
 ) {
   await assertDraft({ question: id });
+  // The subject and topic: no need to verify again.
+  const sorted: Record<string, unknown> = {};
+  if (patch.subject_section !== undefined)
+    sorted.subject_section = subjectSection(patch.subject_section);
+  for (const k of ["topic_en", "topic_hi"] as const)
+    if (patch[k] !== undefined) sorted[k] = String(patch[k]).trim().slice(0, 80);
+  if (Object.keys(sorted).length) {
+    const { error } = await from("exam_questions")
+      .update({ ...sorted, updated_at: now() } as never)
+      .eq("id", id);
+    if (missingCheck(error)) throw new Error(CHECK_NOT_READY);
+    fail(error);
+    const rest = Object.keys(patch).filter((k) => !(k in sorted));
+    if (!rest.length) return;
+  }
   const row: Record<string, unknown> = { updated_at: now() };
   for (const k of [
     "question_en",
@@ -575,6 +623,73 @@ export async function explainStep(
             explanation_general: !used.length,
             verified: false,
             updated_at: now(),
+          } as never)
+          .eq("id", q.id)
+      ).error,
+    );
+    done++;
+  }
+  const left = redo.length ? Math.max(0, todo.length - batch.length) : todo.length - done;
+  return { done, left, total: questions.length };
+}
+
+// ---------- Subjects and the AI check ----------
+
+// The next questions not checked (or changed since, or asked for again):
+// sorted into subject sections and topics (where not set by hand) and
+// checked, a batch per AI call. Returns how many are left.
+export async function reviewStep(
+  paperId: string,
+  redo: string[] = [],
+): Promise<{ done: number; left: number; total: number }> {
+  await assertDraft({ paper: paperId });
+  const { data: p, error } = await from("exam_papers").select("exam").eq("id", paperId).single();
+  fail(error);
+  const { ready, questions } = await selectQuestions(paperId);
+  if (!ready) throw new Error(CHECK_NOT_READY);
+  const wanted = (q: ExamQuestion) => (redo.length ? redo.includes(q.id) : !checkedNow(q));
+  const todo = questions.filter(wanted);
+  const batch = todo.slice(0, CHECK_BATCH);
+  if (!batch.length) return { done: 0, left: 0, total: questions.length };
+  const out = parseReview(
+    await saathiComplete(
+      apiKey(),
+      reviewMessages(
+        batch.map((q) => ({
+          n: q.q_no,
+          question_en: [q.question_en, q.extra_en].filter(Boolean).join("\n"),
+          question_hi: [q.question_hi, q.extra_hi].filter(Boolean).join("\n"),
+          options_en: q.options.map((o) => o.en),
+          options_hi: q.options.map((o) => o.hi),
+          correct: q.correct,
+          deleted: q.deleted,
+          explanation_en: q.explanation_en,
+          explanation_hi: q.explanation_hi,
+        })),
+        (p as unknown as { exam: string }).exam,
+      ),
+    ),
+    batch.map((q) => q.q_no),
+  );
+  if (!out.size) throw new Error("The AI's check couldn't be read: try again.");
+  let done = 0;
+  for (const q of batch) {
+    const r = out.get(q.q_no);
+    if (!r) continue;
+    // A question deleted by the key: no key to doubt.
+    const issues = q.deleted ? r.issues.filter((i) => i.kind !== "key") : r.issues;
+    fail(
+      (
+        await from("exam_questions")
+          .update({
+            ...(q.subject_section ? {} : { subject_section: r.subject }),
+            ...(q.topic_en || q.topic_hi ? {} : { topic_en: r.topic.en, topic_hi: r.topic.hi }),
+            ai_check: {
+              issues,
+              suggest: q.deleted ? null : r.suggest,
+              sig: checkSig(q),
+              at: now(),
+            },
           } as never)
           .eq("id", q.id)
       ).error,

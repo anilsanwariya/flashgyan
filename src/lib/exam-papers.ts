@@ -58,7 +58,193 @@ export type ExamQuestion = {
   verified: boolean;
   // The sheet's "Correct Answer" text didn't match the option numbered.
   key_note: string;
+  // After the paper_check_subjects migration: the syllabus subject section
+  // (one of SUBJECT_SECTIONS, or the editor's own) and topic, and the AI's
+  // check of the question, key and explanation.
+  subject_section?: string;
+  topic_en?: string;
+  topic_hi?: string;
+  ai_check?: AiCheck | null;
 };
+
+// ---------- Subjects and the AI check ----------
+
+// The subject sections of the RPSC / RSSB syllabus a question is sorted into.
+export const SUBJECT_SECTIONS = [
+  { en: "Rajasthan History", hi: "राजस्थान का इतिहास" },
+  { en: "Rajasthan Art & Culture", hi: "राजस्थान की कला एवं संस्कृति" },
+  { en: "Rajasthan Geography", hi: "राजस्थान का भूगोल" },
+  { en: "Rajasthan Polity", hi: "राजस्थान की राजव्यवस्था" },
+  { en: "Rajasthan Economy", hi: "राजस्थान की अर्थव्यवस्था" },
+  { en: "Indian History", hi: "भारत का इतिहास" },
+  { en: "Indian Art & Culture", hi: "भारतीय कला एवं संस्कृति" },
+  { en: "Indian Geography", hi: "भारत का भूगोल" },
+  { en: "World Geography", hi: "विश्व का भूगोल" },
+  { en: "Indian Polity", hi: "भारतीय राजव्यवस्था" },
+  { en: "Indian Economy", hi: "भारतीय अर्थव्यवस्था" },
+  { en: "General Science", hi: "सामान्य विज्ञान" },
+  { en: "Science & Technology", hi: "विज्ञान एवं प्रौद्योगिकी" },
+  { en: "Environment & Ecology", hi: "पर्यावरण एवं पारिस्थितिकी" },
+  { en: "Current Affairs", hi: "समसामयिकी" },
+  { en: "Reasoning", hi: "तर्कशक्ति" },
+  { en: "Mathematics", hi: "गणित" },
+  { en: "Hindi", hi: "हिंदी" },
+  { en: "English", hi: "अंग्रेज़ी" },
+  { en: "Computer", hi: "कंप्यूटर" },
+  { en: "Ethics", hi: "नीतिशास्त्र" },
+  { en: "Other", hi: "अन्य" },
+] as const;
+
+// A subject section as given (in English or Hindi, any case): its English
+// name; other text is kept as the editor's own.
+export function subjectSection(v: unknown): string {
+  const t = typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, 80) : "";
+  if (!t) return "";
+  const k = t
+    .toLowerCase()
+    .replace(/\band\b/g, "&")
+    .replace(/\s+/g, "");
+  const hit = SUBJECT_SECTIONS.find(
+    (s) => s.en.toLowerCase().replace(/\s+/g, "") === k || s.hi.replace(/\s+/g, "") === k,
+  );
+  return hit?.en ?? t;
+}
+export const subjectName = (en: string, lang: "en" | "hi") =>
+  lang === "hi" ? (SUBJECT_SECTIONS.find((s) => s.en === en)?.hi ?? en) : en;
+
+export const CHECK_KINDS = ["key", "explanation", "language", "question"] as const;
+export type CheckKind = (typeof CHECK_KINDS)[number];
+export const CHECK_LABEL: Record<CheckKind, string> = {
+  key: "Key",
+  explanation: "Explanation",
+  language: "Hindi–English",
+  question: "Question text",
+};
+export type AiCheck = {
+  issues: { kind: CheckKind; note: string }[];
+  // The option the AI thinks is right, when it doubts the key.
+  suggest: number | null;
+  // What it checked (a change to the question makes the check out of date).
+  sig: string;
+  at: string;
+};
+
+// What the check looked at: the question, options, key and explanation.
+export function checkSig(
+  q: Pick<
+    ExamQuestion,
+    | "question_en"
+    | "question_hi"
+    | "extra_en"
+    | "extra_hi"
+    | "options"
+    | "correct"
+    | "deleted"
+    | "explanation_en"
+    | "explanation_hi"
+  >,
+): string {
+  const s = JSON.stringify([
+    q.question_en,
+    q.question_hi,
+    q.extra_en,
+    q.extra_hi,
+    q.options,
+    q.correct,
+    q.deleted,
+    q.explanation_en,
+    q.explanation_hi,
+  ]);
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return `${h.toString(36)}${s.length.toString(36)}`;
+}
+
+// Checked, and nothing changed since.
+export const checkedNow = (q: ExamQuestion) => !!q.ai_check && q.ai_check.sig === checkSig(q);
+export const flagged = (q: ExamQuestion) => checkedNow(q) && !!q.ai_check!.issues.length;
+
+// Questions per AI call.
+export const CHECK_BATCH = 8;
+
+export function reviewMessages(
+  qs: {
+    n: number;
+    question_en: string;
+    question_hi: string;
+    options_en: string[];
+    options_hi: string[];
+    correct: number | null;
+    deleted: boolean;
+    explanation_en: string;
+    explanation_hi: string;
+  }[],
+  examName: string,
+): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: `You check a solved previous-year paper of a Rajasthan competitive exam (RPSC, RSSB) before students use it, and sort its questions by syllabus.
+For each question:
+1. "subject": one of ${JSON.stringify(SUBJECT_SECTIONS.map((s) => s.en))} (Rajasthan-specific questions in the Rajasthan sections; news of the last two years in "Current Affairs").
+2. "topic": the syllabus topic within it in 2 to 5 words, in English and Hindi (e.g. "Rivers and lakes" / "नदियाँ एवं झीलें", "Fundamental Rights" / "मौलिक अधिकार").
+3. "issues": only real problems a proofreader must fix, each {"kind", "note"} with a short note saying what is wrong:
+   - "key": the correct option given looks wrong (give the option you think is right in "suggest");
+   - "explanation": the explanation argues for another option, or states a wrong fact, or doesn't explain the question;
+   - "language": the Hindi and English versions of the question or options don't say the same thing (a different number, name, negation or option order);
+   - "question": the text or an option is garbled, cut off, misspelt so as to change the meaning, or two options are the same.
+Be strict but fair: no issues for style, wording or small spelling slips. A question deleted by the key needs no key check. Use well-established knowledge; when unsure, don't raise an issue.
+Reply with JSON only: [{"n": question number, "subject": "...", "topic": {"en": "...", "hi": "..."}, "issues": [{"kind": "...", "note": "..."}], "suggest": option number or null}]`,
+    },
+    {
+      role: "user",
+      content: `Exam: ${examName}\n\n${qs
+        .map(
+          (q) =>
+            `Question ${q.n}\nEnglish: ${q.question_en || "(none)"}\n${q.options_en.map((o, i) => `  (${i + 1}) ${o}`).join("\n")}\nHindi: ${q.question_hi || "(none)"}\n${q.options_hi.map((o, i) => `  (${i + 1}) ${o}`).join("\n")}\n${q.deleted ? "Deleted by the answer key." : `Correct option given: ${q.correct ?? "none"}`}\nExplanation (English): ${q.explanation_en || "(none yet)"}\nExplanation (Hindi): ${q.explanation_hi || "(none yet)"}`,
+        )
+        .join("\n\n---\n\n")}`,
+    },
+  ];
+}
+
+export type Review = {
+  subject: string;
+  topic: Bi;
+  issues: { kind: CheckKind; note: string }[];
+  suggest: number | null;
+};
+
+export function parseReview(raw: string, nums: number[]): Map<number, Review> {
+  const out = new Map<number, Review>();
+  const list = parseJson<unknown>(raw.slice(Math.max(0, raw.indexOf("["))));
+  for (const x of Array.isArray(list) ? list : []) {
+    const o = (x ?? {}) as Record<string, unknown>;
+    const n = Number(o.n);
+    if (!nums.includes(n) || out.has(n)) continue;
+    const t = (o.topic ?? {}) as Record<string, unknown>;
+    const topic = { en: str(t.en, 80), hi: str(t.hi, 80) };
+    const issues = (Array.isArray(o.issues) ? o.issues : [])
+      .map((i) => (i ?? {}) as Record<string, unknown>)
+      .map((i) => ({
+        kind: CHECK_KINDS.find((k) => k === i.kind) ?? ("question" as CheckKind),
+        note: str(i.note, 400),
+      }))
+      .filter((i) => i.note)
+      .slice(0, 4);
+    const sg = Number(o.suggest);
+    out.set(n, {
+      subject: subjectSection(o.subject),
+      topic: { en: topic.en || topic.hi, hi: topic.hi || topic.en },
+      issues,
+      suggest:
+        issues.some((i) => i.kind === "key") && Number.isInteger(sg) && sg >= 1 && sg <= 4
+          ? sg
+          : null,
+    });
+  }
+  return out;
+}
 
 // A question as read (from a page, or a row of Excel), before it is saved.
 export type QuestionDraft = {
@@ -75,6 +261,9 @@ export type QuestionDraft = {
   explanation_source?: string;
   explanation_general?: boolean;
   key_note?: string;
+  subject_section?: string;
+  topic_en?: string;
+  topic_hi?: string;
 };
 
 export const OPTION_COUNT = 4;
@@ -100,6 +289,8 @@ function parseJson<T>(raw: string): T | null {
 export const EXCEL_COLUMNS = [
   "Exam name",
   "Subject",
+  "Subject section",
+  "Topic",
   "Question No.",
   "Question",
   "Other part of question",
@@ -124,6 +315,9 @@ export function questionsToRows(
     | "options"
     | "correct"
     | "deleted"
+    | "subject_section"
+    | "topic_en"
+    | "topic_hi"
   >[],
   lang: "en" | "hi",
 ): Record<(typeof EXCEL_COLUMNS)[number], string | number>[] {
@@ -134,6 +328,8 @@ export function questionsToRows(
       return {
         "Exam name": paper.exam,
         Subject: paper.subject,
+        "Subject section": subjectName(q.subject_section ?? "", lang),
+        Topic: (lang === "hi" ? q.topic_hi : q.topic_en) ?? "",
         "Question No.": q.q_no,
         Question: lang === "hi" ? q.question_hi : q.question_en,
         "Other part of question": lang === "hi" ? q.extra_hi : q.extra_en,
@@ -159,6 +355,8 @@ export const SHEET_COLUMNS = [
   "S. No.",
   "Exam name",
   "Subject",
+  "Subject section",
+  "Topic",
   "Question",
   "Other part of question",
   "Option 1",
@@ -187,6 +385,9 @@ export function paperSheetRows(
     | "explanation_hi"
     | "explanation_source"
     | "explanation_general"
+    | "subject_section"
+    | "topic_en"
+    | "topic_hi"
   >[],
 ): Record<(typeof SHEET_COLUMNS)[number], string | number>[] {
   return [...questions]
@@ -199,6 +400,8 @@ export function paperSheetRows(
           "S. No.": `${hi ? "H" : "E"}-${q.q_no}`,
           "Exam name": paper.exam,
           Subject: paper.subject,
+          "Subject section": subjectName(q.subject_section ?? "", lang),
+          Topic: (hi ? q.topic_hi : q.topic_en) ?? "",
           Question: hi ? q.question_hi : q.question_en,
           "Other part of question": hi ? q.extra_hi : q.extra_en,
           "Option 1": opt(0),
@@ -310,6 +513,9 @@ Object.assign(COLUMN_KEYS, {
   sno: "Question No.",
   otherpart: "Other part of question",
   statements: "Other part of question",
+  subjectsection: "Subject section",
+  section: "Subject section",
+  topic: "Topic",
   correctoption: "Correct Option No.",
   correctoptionno: "Correct Option No.",
   answer: "Correct Option No.",
@@ -390,6 +596,8 @@ export function rowsToPapers(
       else if (/^[1-4](\.0+)?$/.test(ans)) q.correct = Number(ans);
       if (extra.explanation)
         q[lang === "hi" ? "explanation_hi" : "explanation_en"] = extra.explanation;
+      if (row["Subject section"]) q.subject_section = subjectSection(row["Subject section"]);
+      if (row.Topic) q[lang === "hi" ? "topic_hi" : "topic_en"] = row.Topic.slice(0, 80);
       if (extra.source) {
         const general = /^(general knowledge|सामान्य ज्ञान)$/i.test(extra.source);
         q.explanation_general = general;
