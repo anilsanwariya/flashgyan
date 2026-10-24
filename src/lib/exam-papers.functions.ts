@@ -42,6 +42,14 @@ const draft = z.object({
   options: z.array(bi).max(4),
   correct: z.number().int().min(1).max(4).nullable().optional(),
   deleted: z.boolean().optional(),
+  explanation_en: z.string().max(6000).optional(),
+  explanation_hi: z.string().max(6000).optional(),
+  explanation_source: z.string().max(4000).optional(),
+  explanation_general: z.boolean().optional(),
+  key_note: z.string().max(4000).optional(),
+  subject_section: z.string().max(80).optional(),
+  topic_en: z.string().max(80).optional(),
+  topic_hi: z.string().max(80).optional(),
 });
 const keyEntry = z.object({
   q_no: z.number().int().min(1).max(1000),
