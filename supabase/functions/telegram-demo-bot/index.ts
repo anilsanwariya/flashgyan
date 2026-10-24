@@ -69,6 +69,24 @@ import {
   type QuizMcq,
 } from "../_shared/ca-quiz.ts";
 import {
+  addDays,
+  afterAnswer,
+  comeBackLine,
+  groupHeading,
+  monthLabel,
+  monthState,
+  nextSlice,
+  onelinerCard,
+  ONELINERS_PER_DAY,
+  practiceMcq,
+  PRACTICE_PER_DAY,
+  questionKey,
+  REVISION_GAPS,
+  REVISION_MAX,
+  type PracticeLike,
+  type RevisionState,
+} from "../_shared/ca-revision.ts";
+import {
   BOT_DEFAULT_TEXTS,
   BROADCAST_DELAY_MS,
   clipHtml,
@@ -1187,10 +1205,16 @@ async function sendQuizPolls(
   anonymous: boolean,
   gapMs: number,
   lang?: QuizLang,
+  numbering?: { start: number; total: number },
 ): Promise<{ id: string; correct: number }[]> {
   const sent: { id: string; correct: number }[] = [];
   for (let i = 0; i < mcqs.length; i++) {
-    const poll = quizPoll(mcqs[i], i + 1, mcqs.length, lang);
+    const poll = quizPoll(
+      mcqs[i],
+      (numbering?.start ?? 0) + i + 1,
+      numbering?.total ?? mcqs.length,
+      lang,
+    );
     if (poll.intro) {
       await tg("sendMessage", { chat_id, text: poll.intro, parse_mode: "HTML" });
       await pause(gapMs);
@@ -1773,10 +1797,13 @@ type DailyRow = DailyQuizState & {
   quiz: {
     issue: string;
     date: string;
-    polls: { id: string; correct: number }[];
+    // key and mcq: the question, kept when it's missed; rev: brought back.
+    polls: { id: string; correct: number; key?: string; mcq?: QuizMcq; rev?: boolean }[];
     answered?: string[];
     correct?: number;
   } | null;
+  // Where the student is in the posted monthly's practice set and one-liners.
+  revision?: RevisionState | null;
 };
 
 async function getDaily(chat_id: number): Promise<DailyRow | null> {
@@ -1877,14 +1904,37 @@ async function deliverDailyQuiz(
   if (claimed !== true) return "already";
   const streak = streakOnSend(row);
   const lang = row.lang ?? undefined;
+  const extra = await revisionFor(row, today, mcqs).catch((e) => {
+    console.error("daily quiz revision", e);
+    return null;
+  });
+  const total = mcqs.length + (extra?.due.length ?? 0) + (extra?.practice.length ?? 0);
+  const more = extra
+    ? [
+        extra.due.length
+          ? lang === "hi"
+            ? `🔁 ${extra.due.length} दोहराने के लिए`
+            : `🔁 ${extra.due.length} to revise`
+          : "",
+        extra.practice.length
+          ? lang === "hi"
+            ? `📘 ${extra.practice.length} मासिक अभ्यास से`
+            : `📘 ${extra.practice.length} from the monthly practice set`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
   const res = await tg("sendMessage", {
     chat_id: row.chat_id,
     text:
       lang === "hi"
         ? `🧠 <b>दैनिक क्विज़</b> · ${issue} की FlashGyan पत्रिका से ${mcqs.length} प्रश्न\n` +
-          `🔥 स्ट्रीक: <b>${streak}</b> · स्ट्रीक जारी रखने के लिए सभी ${mcqs.length} के उत्तर दें`
+          (more ? `+ ${more}\n` : "") +
+          `🔥 स्ट्रीक: <b>${streak}</b> · स्ट्रीक जारी रखने के लिए सभी ${total} के उत्तर दें`
         : `🧠 <b>Daily quiz</b> · ${mcqs.length} questions from the FlashGyan magazine of ${issue}\n` +
-          `🔥 Streak: <b>${streak}</b> · answer all ${mcqs.length} to keep it going` +
+          (more ? `+ ${more}\n` : "") +
+          `🔥 Streak: <b>${streak}</b> · answer all ${total} to keep it going` +
           // Students from before languages could be picked: how to pick one.
           (lang ? "" : `\n🗣 Pick Hindi or English for your quiz / भाषा चुनें: /daily`),
     parse_mode: "HTML",
@@ -1895,12 +1945,152 @@ async function deliverDailyQuiz(
     await setDaily(row.chat_id, { enabled: false });
     return "sent";
   }
-  const polls = await sendQuizPolls(row.chat_id, mcqs, false, 60, lang);
+  if (extra?.lines.length)
+    await tg("sendMessage", {
+      chat_id: row.chat_id,
+      text: onelinerCard(extra.lines, monthLabel(extra.state.month, lang), lang),
+      parse_mode: "HTML",
+    });
+  // With revision on, each poll keeps its question, to bring back if missed.
+  const keyed = (list: QuizMcq[], keys?: string[]) => (sent: { id: string; correct: number }[]) =>
+    extra
+      ? sent.map((p, i) => ({
+          ...p,
+          key: keys?.[i] ?? questionKey(list[i]),
+          mcq: list[i],
+          ...(keys ? { rev: true } : {}),
+        }))
+      : sent;
+  const polls = keyed(mcqs)(
+    await sendQuizPolls(row.chat_id, mcqs, false, 60, lang, { start: 0, total }),
+  );
+  let at = mcqs.length;
+  for (const [kind, list, keys] of [
+    ["revision", (extra?.due ?? []).map((c) => c.mcq), (extra?.due ?? []).map((c) => c.key)],
+    ["practice", extra?.practice ?? [], undefined],
+  ] as const) {
+    if (!list.length) continue;
+    await tg("sendMessage", { chat_id: row.chat_id, text: groupHeading(kind, lang), parse_mode: "HTML" });
+    polls.push(
+      ...keyed(list, keys)(
+        await sendQuizPolls(row.chat_id, list, false, 60, lang, { start: at, total }),
+      ),
+    );
+    at += list.length;
+  }
   await setDaily(row.chat_id, {
     streak,
     quiz: { issue, date: today, polls, answered: [], correct: 0 },
+    ...(extra ? { revision: extra.state } : {}),
   });
+  // Brought back: not again before it's answered (an answer sets when next).
+  if (extra?.due.length)
+    await supabase
+      .from("bot_revision")
+      .update({ due: addDays(today, REVISION_GAPS[0]), updated_at: new Date().toISOString() })
+      .eq("chat_id", row.chat_id)
+      .in("key", extra.due.map((c) => c.key));
   return "sent";
+}
+
+// The newest monthly issue posted to the channel (YYYY-MM), or null.
+async function latestPostedMonth(): Promise<string | null> {
+  const { data } = await supabase
+    .from("ca_issues")
+    .select("period")
+    .eq("kind", "monthly")
+    .eq("status", "posted")
+    .order("period", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const p = (data as { period?: string } | null)?.period;
+  return p ? p.slice(0, 7) : null;
+}
+
+async function settingValue(key: string): Promise<unknown> {
+  const { data } = await supabase.from("bot_settings").select("value").eq("key", key).maybeSingle();
+  return (data as { value?: unknown } | null)?.value ?? null;
+}
+
+// What a student's quiz adds to the issue's questions: missed questions
+// due again, the next practice set questions and one-liners of the posted
+// monthly. Null when revision is off in Magazine settings.
+async function revisionFor(row: DailyRow, today: string, issueMcqs: QuizMcq[]) {
+  const magazine = ((await settingValue("ca_magazine")) ?? {}) as { quiz_revision?: boolean };
+  if (magazine.quiz_revision === false) return null;
+  const have = new Set(issueMcqs.map(questionKey));
+  const { data: cards, error } = await supabase
+    .from("bot_revision")
+    .select("key,mcq")
+    .eq("chat_id", row.chat_id)
+    .lte("due", today)
+    .order("due")
+    .limit(REVISION_MAX + 5);
+  if (error && !isMissingTable(error)) console.error("revision cards", error.message);
+  const due: { key: string; mcq: QuizMcq }[] = [];
+  for (const c of (cards ?? []) as { key: string; mcq: QuizMcq }[]) {
+    if (due.length >= REVISION_MAX || have.has(c.key)) continue;
+    if (quizMcqs([{ mcq: c.mcq }], 1).length) {
+      due.push(c);
+      have.add(c.key);
+    }
+  }
+  const month = await latestPostedMonth();
+  const state = monthState(row.revision, month ?? "");
+  const practice: QuizMcq[] = [];
+  const lines: { text: { en: string; hi: string } }[] = [];
+  if (month) {
+    const set = (await settingValue(`ca_practice:${month}`)) as { questions?: PracticeLike[] } | null;
+    const qs = (set?.questions ?? []).map(practiceMcq);
+    const take = nextSlice(state.practice_next, qs.length, PRACTICE_PER_DAY);
+    for (const i of take) {
+      const m = qs[i];
+      if (m && !have.has(questionKey(m))) practice.push(m);
+    }
+    state.practice_next = take.length ? take[take.length - 1] + 1 : state.practice_next;
+    const list = (await settingValue(`ca_oneliners:${month}`)) as {
+      lines?: { text?: { en?: string; hi?: string } }[];
+    } | null;
+    const all = (list?.lines ?? []).filter((l) => l.text?.en || l.text?.hi);
+    const lt = nextSlice(state.lines_next, all.length, ONELINERS_PER_DAY);
+    for (const i of lt) lines.push({ text: { en: all[i].text?.en ?? "", hi: all[i].text?.hi ?? "" } });
+    state.lines_next = lt.length ? lt[lt.length - 1] + 1 : state.lines_next;
+  }
+  return { due, practice, lines, state };
+}
+
+// A daily quiz answer for revision: a missed question is kept to come
+// back; one brought back and answered right comes once more, then is learnt.
+async function reviseAnswer(chat_id: number, poll: NonNullable<DailyRow["quiz"]>["polls"][number], option: number) {
+  if (!poll.key || !poll.mcq) return;
+  const today = istNow().date;
+  const correct = poll.correct === option;
+  const { data: had } = await supabase
+    .from("bot_revision")
+    .select("box,misses")
+    .eq("chat_id", chat_id)
+    .eq("key", poll.key)
+    .maybeSingle();
+  const card = had as { box: number; misses: number } | null;
+  if (correct && !poll.rev && card) return;
+  const change = afterAnswer(card, correct, today);
+  if (change.action === "drop")
+    await supabase.from("bot_revision").delete().eq("chat_id", chat_id).eq("key", poll.key);
+  else if (change.action === "save") {
+    const { error } = await supabase.from("bot_revision").upsert(
+      {
+        chat_id,
+        key: poll.key,
+        mcq: poll.mcq,
+        box: change.box,
+        due: change.due,
+        misses: (card?.misses ?? 0) + (correct ? 0 : 1),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "chat_id,key" },
+    );
+    if (error && !isMissingTable(error)) console.error("revision save", error.message);
+  }
 }
 
 async function takeDailyNow(chat_id: number) {
@@ -1970,12 +2160,19 @@ async function handleDailyAnswer(chat_id: number, poll_id: string, option: numbe
   }
   const row = ((data ?? []) as DailyRow[])[0];
   const quiz = row?.quiz;
+  const poll = quiz?.polls.find((p) => p.id === poll_id);
+  if (poll) await reviseAnswer(chat_id, poll, option).catch((e) => console.error("revision", e));
   if (!row || !quiz || (quiz.answered?.length ?? 0) < quiz.polls.length) return;
   const done = streakOnDone(row, quiz.date);
   await setDaily(chat_id, done);
+  // The missed ones that will come back (questions kept for revision).
+  const missed = quiz.polls.length - (quiz.correct ?? 0);
+  const comeBack = quiz.polls.some((p) => p.key) ? comeBackLine(missed, row.lang ?? undefined) : "";
   await tg("sendMessage", {
     chat_id,
-    text: quizResultText(quiz.correct ?? 0, quiz.polls.length, done.streak, done.best_streak, row.lang ?? undefined),
+    text:
+      quizResultText(quiz.correct ?? 0, quiz.polls.length, done.streak, done.best_streak, row.lang ?? undefined) +
+      comeBack,
     parse_mode: "HTML",
     reply_markup: {
       inline_keyboard: [

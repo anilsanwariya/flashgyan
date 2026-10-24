@@ -1548,6 +1548,7 @@ const SETTINGS_FIELDS: Record<SettingsTab, string[]> = {
     "channel_quiz",
     "channel_quiz_count",
     "post_corrections",
+    "quiz_revision",
   ],
   look: [
     "title_hi",
@@ -1671,6 +1672,7 @@ function SettingsPanel() {
           add_to_flashcards: Boolean(form!.add_to_flashcards),
           weekly_report: Boolean(form!.weekly_report),
           post_corrections: Boolean(form!.post_corrections),
+          quiz_revision: Boolean(form!.quiz_revision),
           min_rajasthan: Math.min(
             20,
             Math.max(0, Math.round(Number(text("min_rajasthan") || "5") || 0)),
@@ -1805,6 +1807,21 @@ function SettingsPanel() {
                     in that issue's language, so readers can test themselves and share them. The
                     same questions reach students who turned on the bot's daily quiz (/daily), in
                     the language each student picks.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3">
+                <Switch
+                  checked={Boolean(form.quiz_revision)}
+                  onCheckedChange={(v) => set("quiz_revision", v)}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Revision in students' daily quiz</span>
+                  <span className="block text-muted-foreground">
+                    In the bot's daily quiz (/daily), a question a student gets wrong comes back 3
+                    days later, and once more a week after they get it right. Once the monthly is
+                    posted, each quiz also adds 2 questions from its practice set and starts with 5
+                    of its one-liners.
                   </span>
                 </span>
               </label>

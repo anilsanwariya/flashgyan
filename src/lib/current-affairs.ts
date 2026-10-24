@@ -1222,6 +1222,9 @@ export type MagazineSettings = {
   // A correction approved after the day's issue was posted is announced on
   // the channel, under that day's PDF.
   post_corrections: boolean;
+  // Students' daily quiz: missed questions come back, the posted monthly's
+  // practice set and one-liners a few a day.
+  quiz_revision: boolean;
   // House style: the editor's writing rules, added to SAATHI's instructions.
   style_rules: string[];
   // Lessons from real exam papers (Exam papers → Check against the
@@ -1298,6 +1301,7 @@ export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   weekly_report: true,
   min_rajasthan: DEFAULT_MIN_RAJASTHAN,
   post_corrections: true,
+  quiz_revision: true,
   style_rules: [],
   daily_cover: "classic",
   daily_back_cover: "",
