@@ -561,9 +561,12 @@ export function extractMessages(opts: {
   extra?: string;
   // Lessons from real exam papers: kinds of news that were asked.
   lessons?: string[];
+  // The editor's picking rules.
+  pickRules?: string[];
 }): ChatMessage[] {
   if (opts.section === "editorial") return editorialExtractMessages(opts);
   const lessons = (opts.lessons ?? []).filter(Boolean).slice(0, 12);
+  const pickRules = (opts.pickRules ?? []).filter(Boolean).slice(0, 10);
   return [
     {
       role: "system",
@@ -575,6 +578,10 @@ Reply with JSON only: [{"type": one story type id, "headline": a short factual h
 Every fact must fill one slot of its story's type; leave a slot out if the source doesn't state it, and drop any fact that fits no slot. Use only facts stated in the source and keep every number, name and date exactly. Reply [] if nothing is exam-relevant.${
         lessons.length
           ? `\nLessons from recent RPSC and RSSB papers (news like this was asked, so keep it):\n${lessons.map((l) => `- ${l}`).join("\n")}`
+          : ""
+      }${
+        pickRules.length
+          ? `\nThe editor's picking rules (follow them when choosing what to keep, its importance and its section):\n${pickRules.map((l) => `- ${l}`).join("\n")}`
           : ""
       }`,
     },
@@ -1218,6 +1225,9 @@ export type MagazineSettings = {
   // Lessons from real exam papers (Exam papers → Check against the
   // magazine): kinds of news that were asked, added to how stories are picked.
   exam_lessons?: string[];
+  // The editor's picking rules (learnt from their picks, ca-picks.ts):
+  // added to how stories are picked from every source.
+  pick_rules?: string[];
   // The daily issue's cover layout.
   daily_cover: DailyLayout;
   // An ad from the library printed as the daily issue's last page ("": none).

@@ -77,6 +77,7 @@ import { FactCheckDialog } from "@/components/ca-fact-check";
 import { StyleCheckDialog } from "@/components/ca-style-check";
 import { LangCheckDialog } from "@/components/ca-lang-check";
 import { HouseStyle } from "@/components/ca-house-style";
+import { PickRules } from "@/components/ca-pick-rules";
 import { Glossary } from "@/components/ca-glossary-panel";
 import { dayChecklist, type CheckAction } from "@/lib/ca-checklist";
 import { styleStatus } from "@/lib/ca-style";
@@ -1605,6 +1606,8 @@ function SettingsPanel() {
         cover_presets: _presets,
         // Kept from exam papers (Exam papers page).
         exam_lessons: _lessons,
+        // Picking rules: saved on their own (Collection tab).
+        pick_rules: _pickRules,
         ...rest
       } = q.data;
       const loaded = {
@@ -2029,6 +2032,7 @@ function SettingsPanel() {
         )}
         {tab === "collection" && (
           <>
+            <PickRules />
             <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
               <h3 className="font-semibold">Automatic news collection</h3>
               <label className="flex items-start gap-3">

@@ -129,7 +129,7 @@ export async function styleWeek(
 ): Promise<StyleScore[]> {
   if (!rules.length) return [];
   const keys: string[] = [];
-  for (let d = new Date(`${fromDate}T00:00:00Z`); d <= new Date(`${toDate}T00:00:00Z`);) {
+  for (let d = new Date(`${fromDate}T00:00:00Z`); d <= new Date(`${toDate}T00:00:00Z`); ) {
     keys.push(`ca_style_check:${d.toISOString().slice(0, 10)}`);
     d = new Date(d.getTime() + 86_400_000);
   }
@@ -177,7 +177,7 @@ async function accuracyStats(
     }
   }
   const dates: string[] = [];
-  for (let d = fromDate; d <= toDate;) {
+  for (let d = fromDate; d <= toDate; ) {
     dates.push(d);
     const next = new Date(`${d}T00:00:00Z`);
     next.setUTCDate(next.getUTCDate() + 1);
@@ -273,6 +273,13 @@ export async function sendWeeklyReport(
       // Too few edits, or the AI failed: the report goes out without it.
       console.error("house style:", e instanceof Error ? e.message : e);
     }
+    try {
+      const picks = await import("@/lib/ca-picks.server");
+      stats.pickSuggestions = (await picks.suggestPickRules()).rules.length;
+    } catch (e) {
+      // Too few changed picks, no migration yet, or the AI failed.
+      console.error("picking rules:", e instanceof Error ? e.message : e);
+    }
   }
   const text = weeklyReportText(stats, origin ? `${origin}/admin?section=ca.daily` : undefined);
   if (!token || !settings.test_chat_id) return { sent: false, text };
@@ -302,7 +309,8 @@ export async function maybeSendWeeklyReport(origin?: string) {
   if (!settings.weekly_report || !settings.test_chat_id) return;
   const { data } = await from("bot_settings").select("value").eq("key", STATE_KEY).maybeSingle();
   const last = ((data as { value?: { last_to?: string } } | null)?.value?.last_to ?? null) as
-    string | null;
+    | string
+    | null;
   if (!weeklyReportDue(new Date(), last)) return;
   // Mark the week first so overlapping ticks never send it twice; undo on failure.
   await from("bot_settings").upsert({

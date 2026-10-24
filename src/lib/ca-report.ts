@@ -85,6 +85,8 @@ export type WeeklyStats = {
   // House style rules SAATHI suggested from the week's edits, waiting for
   // the editor.
   styleSuggestions?: number;
+  // Picking rules SAATHI suggested from the editor's picks, waiting.
+  pickSuggestions?: number;
   // Each house style rule's week in the style check.
   style?: StyleScore[];
 };
@@ -234,6 +236,10 @@ export function weeklyReportText(s: WeeklyStats, adminUrl?: string): string {
   if (s.styleSuggestions)
     lines.push(
       `✍️ SAATHI suggests ${s.styleSuggestions} house style rule${s.styleSuggestions === 1 ? "" : "s"} from your edits: add the ones you agree with in Magazine settings → House style.`,
+    );
+  if (s.pickSuggestions)
+    lines.push(
+      `🎯 SAATHI suggests ${s.pickSuggestions} picking rule${s.pickSuggestions === 1 ? "" : "s"} from the stories you dropped, kept or moved: add the ones you agree with in Magazine settings → Collection → Learnt from your picks.`,
     );
   lines.push(
     "",
