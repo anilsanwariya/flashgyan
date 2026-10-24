@@ -1223,9 +1223,11 @@ export type Database = {
           file_size: number
           id: string
           issue_date: string
+          locked_until: string | null
           official: boolean
           pages: number
           source_name: string
+          work: Json | null
         }
         Insert: {
           created_at?: string
@@ -1234,9 +1236,11 @@ export type Database = {
           file_size?: number
           id?: string
           issue_date: string
+          locked_until?: string | null
           official?: boolean
           pages?: number
           source_name: string
+          work?: Json | null
         }
         Update: {
           created_at?: string
@@ -1245,9 +1249,11 @@ export type Database = {
           file_size?: number
           id?: string
           issue_date?: string
+          locked_until?: string | null
           official?: boolean
           pages?: number
           source_name?: string
+          work?: Json | null
         }
         Relationships: []
       }
