@@ -6,6 +6,7 @@ import { SchemeRegister } from "@/components/ca-scheme-register";
 import { ExamPapers } from "@/components/exam-papers-panel";
 import { NewspaperClipping } from "@/components/ca-clipper";
 import { CoverageMeter } from "@/components/ca-asked-panel";
+import { PracticeBox } from "@/components/ca-practice-panel";
 import { PastCollection } from "@/components/ca-past-collection";
 import { EventsPanel } from "@/components/ca-events-panel";
 import { useEffect, useRef, useState } from "react";
@@ -1314,6 +1315,7 @@ function MonthlyPanel() {
 
           {items > 0 && <ResortMonth month={month} />}
           {items > 0 && <CoverageMeter month={month} />}
+          {items > 0 && <PracticeBox month={month} />}
 
           <PastCollection month={month} />
         </div>

@@ -2,6 +2,7 @@
 // issue and the English issue are made from the same stories. Cloudflare's
 // browser rendering turns it into the PDF; the admin panel shows the same
 // HTML as a preview.
+import type { OneLiners, PracticeSet } from "@/lib/ca-practice";
 import { ASKED_SHOWN, askedLine, type AskedQ } from "@/lib/ca-asked";
 import { HISTORY_LABEL, type StoryHistory } from "@/lib/ca-history";
 import {
@@ -139,6 +140,10 @@ const T = {
     asked: "Asked before",
     numbersSub: "Figures, targets and ranks to remember",
     practice: "Practice Questions",
+    practiceSet: "Practice Set: RPSC &amp; RSSB Pattern",
+    practiceSetSub: (n: number) => `${n} questions, answers at the end`,
+    oneliners: "Month in One-liners",
+    onelinersSub: "Facts to revise before the exam",
     ctaText: "Free current affairs every morning.",
     edition: "English edition",
     source: "Source",
@@ -184,6 +189,10 @@ const T = {
     asked: "पहले पूछा गया",
     numbersSub: "याद रखने योग्य आँकड़े, लक्ष्य और रैंक",
     practice: "अभ्यास प्रश्न",
+    practiceSet: "अभ्यास सेट: RPSC एवं RSSB पैटर्न",
+    practiceSetSub: (n: number) => `${n} प्रश्न, उत्तर अंत में`,
+    oneliners: "माह की एक-पंक्ति बातें",
+    onelinersSub: "परीक्षा से पहले दोहराने योग्य तथ्य",
     ctaText: "हर सुबह निःशुल्क करेंट अफेयर्स।",
     edition: "हिंदी संस्करण",
     source: "स्रोत",
@@ -597,6 +606,11 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .side li { margin-bottom: .6mm; }
 .opt { font-weight: 600; color: ${accent}; }
 .answers { border-collapse: collapse; width: 100%; }
+.ps-extra { white-space: pre-line; margin: 1mm 0 1.5mm; padding: 1.2mm 2.5mm; background: #f8fafc; border-left: 2px solid ${accent}; font-size: 9pt; }
+.ps-style { font-size: 7.5pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
+.ol-list { columns: 2; column-gap: 6mm; padding-left: 0; margin: 0 0 3mm; list-style: none; counter-reset: ol; }
+.ol-list li { break-inside: avoid; padding: 1mm 0 1mm 7mm; position: relative; font-size: 9pt; border-bottom: 1px dotted #e5e7eb; }
+.ol-list li::before { counter-increment: ol; content: counter(ol) "."; position: absolute; left: 0; font-weight: 700; color: ${accent}; }
 .answers td { padding: 1.5mm 2.5mm; border: 1px solid #e5e7eb; font-size: 9pt; vertical-align: top; }
 .answers .kn, .answers .ka { width: 9mm; text-align: center; font-weight: 600; }
 .answers .en { color: #475569; }
@@ -838,6 +852,56 @@ function mcqSide(question: string, options: string[], letters: string[]): string
     .join("")}</ol></div>`;
 }
 
+// "Month in One-liners": the month's short facts, by section, in two columns.
+function onelinersPage(
+  list: OneLiners | null | undefined,
+  lang: Lang,
+  label: (cat: string) => Bi = categoryLabel,
+): string {
+  if (!list?.lines.length) return "";
+  const t = T[lang];
+  const sections: string[] = [];
+  for (const l of list.lines) if (!sections.includes(l.section)) sections.push(l.section);
+  let start = 0;
+  const parts = sections
+    .map((sec) => {
+      const lines = list.lines.filter((l) => l.section === sec);
+      const html = `<h3 class="rev-cat">${icon(sec)} ${esc(label(sec)[lang])}</h3><ol class="ol-list" style="counter-reset: ol ${start}">${lines
+        .map((l) => `<li>${esc(pick(l.text, lang))}</li>`)
+        .join("")}</ol>`;
+      start += lines.length;
+      return html;
+    })
+    .join("");
+  return `<section class="section new-page"><div class="section-title"><h2>${icon("revision")} ${t.oneliners}</h2><span>${t.onelinersSub}</span></div>${parts}</section>`;
+}
+
+// The exam-pattern practice set: questions in RPSC style (statements, lists,
+// options numbered 1-4), then the answers with explanations.
+function practiceSetPage(set: PracticeSet | null | undefined, lang: Lang): string {
+  if (!set?.questions.length) return "";
+  const t = T[lang];
+  const qs = set.questions
+    .map((q, n) => {
+      const extra = pick(q.extra, lang);
+      return `<div class="mcq"><span class="qn">${n + 1}.</span><div class="pair"><div class="side"><div class="stmt">${esc(pick(q.question, lang))}</div>${
+        extra ? `<div class="ps-extra">${esc(extra)}</div>` : ""
+      }<ol>${q.options
+        .map((o, i) => `<li><span class="opt">(${i + 1})</span> ${esc(pick(o, lang))}</li>`)
+        .join("")}</ol></div></div></div>`;
+    })
+    .join("");
+  const key = set.questions
+    .map(
+      (q, n) =>
+        `<tr><td class="kn">${n + 1}</td><td class="ka">(${q.answer + 1})</td><td>${esc(pick(q.explanation, lang))}</td></tr>`,
+    )
+    .join("");
+  return `<section class="section new-page"><div class="section-title"><h2>${icon("practice")} ${t.practiceSet}</h2><span>${t.practiceSetSub(set.questions.length)}</span></div>
+${qs}
+<h3 class="part">${t.key}</h3><table class="answers">${key}</table></section>`;
+}
+
 // The last section: RAS Prelims MCQs (RPSC pattern) with an answer key, then
 // RAS Mains questions.
 function practicePage(items: MagazineItem[], lang: Lang): string {
@@ -883,6 +947,9 @@ export function renderMagazine(opts: {
   corrections?: MagazineCorrection[];
   // Monthly only: the background article, when included.
   feature?: CaFeature | null;
+  // Monthly only: the exam-pattern practice set and the one-liners.
+  practiceSet?: PracticeSet | null;
+  oneliners?: OneLiners | null;
   // Monthly only: draws the "Places in News" maps from its stories' numbers
   // and locations (the server has the outlines).
   placeMaps?: (dots: { n: number; geo: Geo }[], lang: Lang, accent: string) => string;
@@ -1154,7 +1221,12 @@ export function renderMagazine(opts: {
     : "";
 
   const numbersHtml = monthly && !opts.coverOnly ? numbersPage(allGroups, lang, label) : "";
-  const tocHtml = `${blocks.length ? `<div class="toc-row"><span>${icon("events")} ${t.events}</span><b>${blocks.length}</b></div>` : ""}${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${numbersHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.numbers}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}`;
+  const onelinersHtml =
+    monthly && !opts.coverOnly ? onelinersPage(opts.oneliners, lang, label) : "";
+  const practiceSetHtml = monthly && !opts.coverOnly ? practiceSetPage(opts.practiceSet, lang) : "";
+  const setSize = opts.practiceSet?.questions.length ?? 0;
+  const onelinerCount = opts.oneliners?.lines.length ?? 0;
+  const tocHtml = `${blocks.length ? `<div class="toc-row"><span>${icon("events")} ${t.events}</span><b>${blocks.length}</b></div>` : ""}${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${numbersHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.numbers}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${onelinersHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.oneliners}</span><b>${onelinerCount}</b></div>` : ""}${practiceSetHtml ? `<div class="toc-row"><span>${icon("practice")} ${t.practiceSet}</span><b>${setSize}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}`;
   const parts: CoverParts = {
     lang,
     period: opts.period,
@@ -1224,6 +1296,8 @@ ${
 ${opts.feature ? featurePage(opts.feature, lang) : ""}
 ${numbersHtml}
 ${revisionPage(allGroups, lang, label)}
+${onelinersHtml}
+${practiceSetHtml}
 ${practicePage(everything, lang)}
 ${notes}
 ${back ? adPageHtml(back, lang, "back") : ""}`
