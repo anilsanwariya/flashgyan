@@ -1934,6 +1934,7 @@ export type Database = {
         Row: {
           created_at: string
           description: string
+          from_papers: boolean
           id: string
           is_public: boolean
           name: string
@@ -1945,6 +1946,7 @@ export type Database = {
         Insert: {
           created_at?: string
           description?: string
+          from_papers?: boolean
           id?: string
           is_public?: boolean
           name: string
@@ -1956,6 +1958,7 @@ export type Database = {
         Update: {
           created_at?: string
           description?: string
+          from_papers?: boolean
           id?: string
           is_public?: boolean
           name?: string
