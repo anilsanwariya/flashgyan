@@ -211,6 +211,13 @@
       "when": 1792831729492,
       "tag": "0029_ca_clip_work",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1792835878007,
+      "tag": "0030_bot_revision",
+      "breakpoints": true
     }
   ]
 }

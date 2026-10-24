@@ -213,6 +213,7 @@ export type Database = {
           last_done_date: string | null
           last_sent_date: string | null
           quiz: Json | null
+          revision: Json | null
           send_hour: number
           streak: number
           updated_at: string
@@ -226,6 +227,7 @@ export type Database = {
           last_done_date?: string | null
           last_sent_date?: string | null
           quiz?: Json | null
+          revision?: Json | null
           send_hour?: number
           streak?: number
           updated_at?: string
@@ -239,6 +241,7 @@ export type Database = {
           last_done_date?: string | null
           last_sent_date?: string | null
           quiz?: Json | null
+          revision?: Json | null
           send_hour?: number
           streak?: number
           updated_at?: string
@@ -399,6 +402,39 @@ export type Database = {
           order_index?: number
           subject?: string
           topic?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      bot_revision: {
+        Row: {
+          box: number
+          chat_id: number
+          created_at: string
+          due: string
+          key: string
+          mcq: Json
+          misses: number
+          updated_at: string
+        }
+        Insert: {
+          box?: number
+          chat_id: number
+          created_at?: string
+          due: string
+          key: string
+          mcq: Json
+          misses?: number
+          updated_at?: string
+        }
+        Update: {
+          box?: number
+          chat_id?: number
+          created_at?: string
+          due?: string
+          key?: string
+          mcq?: Json
+          misses?: number
           updated_at?: string
         }
         Relationships: []
@@ -2589,6 +2625,7 @@ export type Database = {
           last_done_date: string | null
           last_sent_date: string | null
           quiz: Json | null
+          revision: Json | null
           send_hour: number
           streak: number
           updated_at: string
