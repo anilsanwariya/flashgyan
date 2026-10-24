@@ -21,6 +21,7 @@ import {
 import { EVENT_KINDS, summaryMonth, type CaEvent, type EventKind } from "@/lib/ca-events";
 import { formatDate, type CaContent } from "@/lib/current-affairs";
 import { Badge, errorText, SavesInstantly } from "@/components/ca-ui";
+import { MedalBox } from "@/components/ca-medals-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -423,6 +424,7 @@ function EventCard({
             }
             onSave={(summary) => save({ summary }, "Summary saved")}
           />
+          {e.kind === "sports" && <MedalBox eventId={e.id} eventName={e.name} />}
         </div>
       )}
     </li>

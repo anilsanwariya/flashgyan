@@ -34,6 +34,7 @@ import { CARD_LABELS, SCHEME_GROUPS, schemeGroup } from "@/lib/ca-blueprint";
 import type { Geo } from "@/lib/ca-map";
 import type { Earlier } from "@/lib/ca-schemes";
 import type { EventBlock } from "@/lib/ca-events";
+import { indiaTally, isRajasthan, sortMedals, type MedalTally } from "@/lib/ca-medals";
 import {
   COVER_CSS,
   COVER_FONTS,
@@ -168,6 +169,13 @@ const T = {
     continues:
       "Continues next month: its complete summary prints in the issue of the month it concludes.",
     fullSummary: "Complete summary",
+    medalsTitle: "India's medals",
+    medalCols: ["Player / team", "State", "Sport, event", "Medal"],
+    medalNames: { gold: "Gold", silver: "Silver", bronze: "Bronze" },
+    medalTotal: "Total",
+    medalRank: "Rank",
+    medalTable: "Medal table",
+    country: "Country",
     thisMonth: (n: number) => `${n} this month`,
     correctionsIntro:
       "These facts changed after the day's issue was posted. The stories in this issue already show them corrected.",
@@ -216,6 +224,13 @@ const T = {
     running: "जारी",
     continues: "अगले माह जारी: इसका संपूर्ण सारांश उस माह के अंक में छपेगा जिसमें यह संपन्न होगा।",
     fullSummary: "संपूर्ण सारांश",
+    medalsTitle: "भारत के पदक",
+    medalCols: ["खिलाड़ी / टीम", "राज्य", "खेल, स्पर्धा", "पदक"],
+    medalNames: { gold: "स्वर्ण", silver: "रजत", bronze: "कांस्य" },
+    medalTotal: "कुल",
+    medalRank: "स्थान",
+    medalTable: "पदक तालिका",
+    country: "देश",
     thisMonth: (n: number) => `इस महीने ${n}`,
     correctionsIntro:
       "ये तथ्य दैनिक अंक प्रकाशित होने के बाद बदले। इस अंक की खबरों में सही तथ्य दिए गए हैं।",
@@ -663,6 +678,17 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .card tr:last-child th, .card tr:last-child td { border-bottom: 0; }
 .earlier { margin: 1mm 0 2mm; padding: 1.2mm 2.5mm; border-left: 2px solid ${accent}; background: #f8fafc; font-size: 8.5pt; color: #475569; }
 .earlier b { color: ${accent}; }
+.medal-box { margin: 2mm 0 4mm; padding: 2.5mm 3mm; border: 1px solid #e2e8f0; border-radius: 2mm; break-inside: avoid-page; }
+.medal-box h4 { margin: 0 0 1.5mm; font-size: 10pt; color: ${accent}; }
+.medal-tally { margin: 0 0 2mm; font-size: 9.5pt; font-weight: 700; }
+table.medals { width: 100%; border-collapse: collapse; font-size: 8.5pt; margin-bottom: 2mm; }
+table.medals th { text-align: left; background: #f1f5f9; padding: 1mm 1.5mm; }
+table.medals td { border-top: 1px solid #e2e8f0; padding: 0.8mm 1.5mm; }
+table.medals tr.gold td:last-child { color: #a16207; font-weight: 700; }
+table.medals tr.silver td:last-child { color: #475569; font-weight: 700; }
+table.medals tr.bronze td:last-child { color: #9a3412; font-weight: 700; }
+table.medals tr.raj td { background: #fef3c7; font-weight: 600; }
+table.medals.board td:not(:nth-child(2)), table.medals.board th:not(:nth-child(2)) { text-align: center; width: 10%; }
 .asked { margin: 1mm 0 2mm; padding: 1.2mm 2.5mm; border-left: 2px solid #b45309; background: #fffbeb; font-size: 8.5pt; color: #57534e; }
 .asked b { color: #b45309; }
 .nums { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin-bottom: 3mm; }
@@ -966,6 +992,8 @@ export function renderMagazine(opts: {
   // Monthly only: the month's several-day events (their stories are not in
   // items): a concluded event's complete summary, or a running one's stories.
   events?: EventBlock<MagazineItem>[];
+  // Sports events' medal tallies, by event id.
+  medals?: Record<string, MedalTally>;
   // A custom magazine (printed like a monthly one): its title, period and
   // sections with subsections, in print order; items' category is the
   // section and `sub` the subsection.
@@ -1112,6 +1140,33 @@ export function renderMagazine(opts: {
       : from || to
         ? formatDate((from || to)!, lang)
         : "";
+  // A sports event's medal tally: India's tally, its medals (Rajasthan's
+  // marked) and the top of the medal table.
+  const medalsHtml = (b: EventBlock<MagazineItem>) => {
+    const m = b.event.kind === "sports" ? opts.medals?.[b.event.id] : undefined;
+    if (!m || (!m.medals.length && !m.reported && !m.table.length)) return "";
+    const india = indiaTally(m);
+    const tally = `<p class="medal-tally">🥇 ${t.medalNames.gold} ${india.gold} · 🥈 ${t.medalNames.silver} ${india.silver} · 🥉 ${t.medalNames.bronze} ${india.bronze} · ${t.medalTotal} ${india.total}${india.rank ? ` · ${t.medalRank} ${india.rank}` : ""}</p>`;
+    const list = m.medals.length
+      ? `<table class="medals"><thead><tr>${t.medalCols.map((c) => `<th>${c}</th>`).join("")}</tr></thead><tbody>${sortMedals(
+          m.medals,
+        )
+          .map(
+            (x) =>
+              `<tr class="${x.medal}${isRajasthan(x) ? " raj" : ""}"><td>${esc(pick(x.who, lang))}</td><td>${esc(pick(x.state, lang))}</td><td>${esc(pick(x.what, lang))}</td><td>${t.medalNames[x.medal]}</td></tr>`,
+          )
+          .join("")}</tbody></table>`
+      : "";
+    const table = m.table.length
+      ? `<table class="medals board"><thead><tr><th>#</th><th>${t.country}</th><th>🥇</th><th>🥈</th><th>🥉</th></tr></thead><tbody>${m.table
+          .map(
+            (r, i) =>
+              `<tr><td>${i + 1}</td><td>${esc(pick(r.country, lang))}</td><td>${r.gold}</td><td>${r.silver}</td><td>${r.bronze}</td></tr>`,
+          )
+          .join("")}</tbody></table>`
+      : "";
+    return `<div class="medal-box"><h4>${t.medalsTitle}</h4>${tally}${list}${table ? `<h4>${t.medalTable}</h4>${table}` : ""}</div>`;
+  };
   const eventsHtml = blocks.length
     ? `<section class="section new-page events"><div class="section-title"><h2>${icon("events")} ${t.events}</h2><span>${t.eventsSub(blocks.length)}</span></div>${blocks
         .map((b) => {
@@ -1129,7 +1184,7 @@ export function renderMagazine(opts: {
             b.mode === "summary"
               ? itemHtml(summaryItem(b), ++n, false, accent, lang, boxes)
               : b.items.map((it) => itemHtml(it, ++n, true, accent, lang, boxes)).join("");
-          return `<div class="event"><div class="event-head"><h3>${esc(eventName(b))}</h3><span>${place}${esc(when)} ${badge}</span></div>${body}${
+          return `<div class="event"><div class="event-head"><h3>${esc(eventName(b))}</h3><span>${place}${esc(when)} ${badge}</span></div>${body}${medalsHtml(b)}${
             b.mode === "stories" && b.continues ? `<p class="event-note">${t.continues}</p>` : ""
           }</div>`;
         })
