@@ -4420,7 +4420,7 @@ export async function decideCorrection(id: string, approve: boolean) {
 
 // ---------- Building issues ----------
 
-async function magazineItems(fromDate: string, toDate: string): Promise<MagazineItem[]> {
+export async function magazineItems(fromDate: string, toDate: string): Promise<MagazineItem[]> {
   const { data, error } = await from("ca_items")
     .select(ITEM_COLS)
     .gte("issue_date", fromDate)
@@ -4598,6 +4598,14 @@ export async function issueHtml(
   const topicIndex = practice
     ? await (await import("@/lib/ca-index.server")).getIndex(range.from).catch(() => null)
     : null;
+  // Exam Radar: the editor's choices and the exams' section shares.
+  const radarLib = practice ? await import("@/lib/ca-radar.server") : null;
+  const radar = radarLib
+    ? {
+        settings: await radarLib.getRadarSettings(range.from),
+        shares: await radarLib.examShares(),
+      }
+    : null;
   // The sports events' medal tallies, when made.
   const sports = events.filter((b) => b.event.kind === "sports").map((b) => b.event.id);
   const medals = sports.length
@@ -4625,6 +4633,7 @@ export async function issueHtml(
       practiceSet,
       oneliners,
       topicIndex,
+      radar,
       reports,
       placeMaps: maps?.placeMaps,
       design,

@@ -35,6 +35,7 @@ import type { Geo } from "@/lib/ca-map";
 import type { Earlier } from "@/lib/ca-schemes";
 import type { EventBlock } from "@/lib/ca-events";
 import { indexRows, type TopicIndex } from "@/lib/ca-index";
+import { pickRadar, reasonText, type RadarSettings } from "@/lib/ca-radar";
 import { indiaTally, isRajasthan, sortMedals, type MedalTally } from "@/lib/ca-medals";
 import {
   COVER_CSS,
@@ -172,6 +173,11 @@ const T = {
     fullSummary: "Complete summary",
     medalsTitle: "India's medals",
     topicIndex: "Index",
+    radar: "Exam Radar",
+    radarStory: "Story",
+    radarSub: "Most likely to be asked",
+    radarIntro:
+      "This month's stories most likely to be asked in RPSC and RSSB exams, in the order to revise them. The number is the story's number in this issue.",
     topicIndexSub: "Schemes, persons, places and more, A–Z, with story numbers",
     medalCols: ["Player / team", "State", "Sport, event", "Medal"],
     medalNames: { gold: "Gold", silver: "Silver", bronze: "Bronze" },
@@ -229,6 +235,11 @@ const T = {
     fullSummary: "संपूर्ण सारांश",
     medalsTitle: "भारत के पदक",
     topicIndex: "अनुक्रमणिका",
+    radar: "परीक्षा रडार",
+    radarStory: "खबर",
+    radarSub: "सबसे संभावित प्रश्न",
+    radarIntro:
+      "इस माह की वे खबरें जिनसे RPSC और RSSB परीक्षाओं में प्रश्न आने की सबसे अधिक संभावना है, दोहराने के क्रम में। संख्या इस अंक में खबर की संख्या है।",
     topicIndexSub: "योजनाएँ, व्यक्ति, स्थान आदि, वर्णानुक्रम में, खबर संख्या सहित",
     medalCols: ["खिलाड़ी / टीम", "राज्य", "खेल, स्पर्धा", "पदक"],
     medalNames: { gold: "स्वर्ण", silver: "रजत", bronze: "कांस्य" },
@@ -683,6 +694,18 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .card tr:last-child th, .card tr:last-child td { border-bottom: 0; }
 .earlier { margin: 1mm 0 2mm; padding: 1.2mm 2.5mm; border-left: 2px solid ${accent}; background: #f8fafc; font-size: 8.5pt; color: #475569; }
 .earlier b { color: ${accent}; }
+.radar-intro { font-size: 9pt; color: #475569; margin: 0 0 3mm; }
+.radar-list { list-style: none; margin: 0; padding: 0; counter-reset: rd; }
+.radar-list li { display: flex; gap: 3mm; padding: 2mm 0; border-bottom: 1px solid #e2e8f0; break-inside: avoid; }
+.radar-list li::before { counter-increment: rd; content: counter(rd); font-weight: 700; font-size: 14pt; color: ${accent}; min-width: 7mm; }
+.rd-n { order: 3; margin-left: auto; font-size: 8pt; color: #475569; white-space: nowrap; }
+.rd-body { flex: 1; font-size: 9.5pt; }
+.rd-line { color: #334155; font-size: 8.5pt; margin-top: 0.5mm; }
+.rd-tags { display: flex; flex-wrap: wrap; gap: 1mm; margin-top: 1mm; }
+.rd-tag { font-size: 7.5pt; padding: 0.3mm 1.6mm; border-radius: 2mm; background: #f1f5f9; color: #334155; }
+.rd-asked { background: #fef3c7; color: #92400e; font-weight: 600; }
+.rd-rajasthan { background: #ffedd5; color: #9a3412; }
+.rd-pinned { background: ${accent}; color: #fff; }
 .ix-cols { column-count: 3; column-gap: 6mm; font-size: 8.5pt; }
 .ix-group { break-inside: avoid-column; margin-bottom: 2mm; }
 .ix-letter { margin: 0 0 1mm; font-size: 11pt; color: ${accent}; border-bottom: 1px solid #e2e8f0; }
@@ -989,6 +1012,8 @@ export function renderMagazine(opts: {
   practiceSet?: PracticeSet | null;
   // The month's A–Z topic index.
   topicIndex?: TopicIndex | null;
+  // Exam Radar: the editor's choices and the exams' section shares (%).
+  radar?: { settings: RadarSettings; shares: Record<string, number> } | null;
   oneliners?: OneLiners | null;
   // Monthly only: draws the "Places in News" maps from its stories' numbers
   // and locations (the server has the outlines).
@@ -1313,6 +1338,28 @@ export function renderMagazine(opts: {
     monthly && !opts.coverOnly ? onelinersPage(opts.oneliners, lang, label) : "";
   const practiceSetHtml = monthly && !opts.coverOnly ? practiceSetPage(opts.practiceSet, lang) : "";
   const index = monthly && !opts.coverOnly ? indexRows(opts.topicIndex, numberOf, lang) : [];
+  // Exam Radar, after the cover: the stories to revise first.
+  const radar =
+    monthly && !custom && !opts.coverOnly && opts.radar && !opts.radar.settings.off
+      ? pickRadar(
+          everything.filter((i) => numberOf.has(i.id)),
+          opts.radar.settings,
+          opts.radar.shares,
+        )
+      : [];
+  const clip = (v: string, max: number) => (v.length > max ? `${v.slice(0, max - 1)}…` : v);
+  const radarHtml = radar.length
+    ? `<section class="section new-page radar"><div class="section-title"><h2>${icon("practice")} ${t.radar}</h2><span>${t.radarSub}</span></div><p class="radar-intro">${t.radarIntro}</p><ol class="radar-list">${radar
+        .map(
+          ({ story: it, reasons }) =>
+            `<li><span class="rd-n">${t.radarStory} ${numberOf.get(it.id)}</span><div class="rd-body"><b>${esc(pick(it.content.headline, lang))}</b><div class="rd-line">${esc(clip(pick(it.content.oneliner ?? it.content.summary, lang), 170))}</div>${
+              reasons.length
+                ? `<div class="rd-tags">${reasons.map((r) => `<span class="rd-tag rd-${r.kind}">${esc(reasonText(r, lang))}</span>`).join("")}</div>`
+                : ""
+            }</div></li>`,
+        )
+        .join("")}</ol></section>`
+    : "";
   const indexTerms = index.reduce((a, g) => a + g.rows.length, 0);
   const indexHtml = index.length
     ? `<section class="section new-page topic-index"><div class="section-title"><h2>${icon("revision")} ${t.topicIndex}</h2><span>${t.topicIndexSub}</span></div><div class="ix-cols">${index
@@ -1329,7 +1376,7 @@ export function renderMagazine(opts: {
     : "";
   const setSize = opts.practiceSet?.questions.length ?? 0;
   const onelinerCount = opts.oneliners?.lines.length ?? 0;
-  const tocHtml = `${blocks.length ? `<div class="toc-row"><span>${icon("events")} ${t.events}</span><b>${blocks.length}</b></div>` : ""}${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${numbersHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.numbers}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${onelinersHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.oneliners}</span><b>${onelinerCount}</b></div>` : ""}${practiceSetHtml ? `<div class="toc-row"><span>${icon("practice")} ${t.practiceSet}</span><b>${setSize}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}${indexHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.topicIndex}</span><b>${indexTerms}</b></div>` : ""}`;
+  const tocHtml = `${radarHtml ? `<div class="toc-row"><span>${icon("practice")} ${t.radar}</span><b>${radar.length}</b></div>` : ""}${blocks.length ? `<div class="toc-row"><span>${icon("events")} ${t.events}</span><b>${blocks.length}</b></div>` : ""}${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${numbersHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.numbers}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${onelinersHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.oneliners}</span><b>${onelinerCount}</b></div>` : ""}${practiceSetHtml ? `<div class="toc-row"><span>${icon("practice")} ${t.practiceSet}</span><b>${setSize}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}${indexHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.topicIndex}</span><b>${indexTerms}</b></div>` : ""}`;
   const parts: CoverParts = {
     lang,
     period: opts.period,
@@ -1391,7 +1438,7 @@ ${
   opts.coverOnly
     ? coverSection
     : `${watermark}
-${!part || part.cover ? `${coverSection}\n${eventsHtml}` : ""}
+${!part || part.cover ? `${coverSection}\n${radarHtml}\n${eventsHtml}` : ""}
 ${sections}
 ${
   !part || part.tail
