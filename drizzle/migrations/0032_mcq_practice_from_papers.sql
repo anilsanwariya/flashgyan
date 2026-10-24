@@ -1,0 +1,1 @@
+ALTER TABLE public.mcq_practice_tests ADD COLUMN IF NOT EXISTS from_papers boolean NOT NULL DEFAULT false;
