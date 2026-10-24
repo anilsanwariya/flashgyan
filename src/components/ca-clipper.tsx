@@ -324,7 +324,8 @@ type Gesture =
       box: ClipBox;
     }
   | { kind: "pan"; x: number; y: number; sl: number; st: number; px: { x: number; y: number } }
-  | { kind: "tap"; px: { x: number; y: number } }
+  // `t`: when it started (a quick sideways swipe turns the page).
+  | { kind: "tap"; px: { x: number; y: number }; t: number }
   | { kind: "pinch"; dist: number; zoom: number }
   | null;
 
@@ -337,7 +338,11 @@ type Undo =
 
 const PAGE_WIDTH = 2000;
 const THUMB_WIDTH = 150;
-const ZOOMS = [1, 1.5, 2, 3, 4, 6];
+const ZOOMS = [0.5, 0.75, 1, 1.5, 2, 3, 4, 6];
+// Widest the page is shown at 100% (fit to the width, on large screens).
+const BASE_MAX = 900;
+// A sideways swipe this long (px) turns the page.
+const SWIPE = 60;
 
 const boxOf = ({ page, x, y, w, h }: ClipBox): ClipBox => ({ page, x, y, w, h });
 // A box moved (no corner) or resized by a corner, kept on the page.
@@ -716,6 +721,11 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
   const scroller = useRef<HTMLDivElement>(null);
   const sheet = useRef<HTMLDivElement>(null);
   const [zoom, setZoomState] = useState(1);
+  // "Whole page": the zoom at which the full page height fits on screen.
+  const [fit, setFit] = useState(0.5);
+  const fitRef = useRef(fit);
+  fitRef.current = fit;
+  const minZoom = () => Math.min(1, Math.max(0.2, Math.min(fitRef.current, 0.5)));
   // The how-to tip, until hidden once (on this device).
   const [showTip, setShowTip] = useState(() => {
     try {
@@ -738,7 +748,7 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
   const zoomAt = (z: number, clientX?: number, clientY?: number) => {
     const s = scroller.current;
     const el = sheet.current;
-    const next = Math.min(6, Math.max(1, Math.round(z * 100) / 100));
+    const next = Math.min(6, Math.max(minZoom(), Math.round(z * 100) / 100));
     if (s && el) {
       const r = s.getBoundingClientRect();
       const ox = (clientX ?? r.left + r.width / 2) - r.left;
@@ -779,7 +789,7 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
     const el = sheet.current;
     const pv = preview.current;
     if (!el || !pv) return;
-    pv.z = Math.min(6, Math.max(1, z));
+    pv.z = Math.min(6, Math.max(minZoom(), z));
     el.style.transform = `scale(${pv.z / zoomRef.current})`;
   };
   const commitPreview = () => {
@@ -803,7 +813,20 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
     const s = scroller.current;
     if (!s) return;
     const onWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey) return;
+      if (!e.ctrlKey) {
+        // A touchpad's sideways swipe turns the page (not when zoomed in).
+        if (zoomRef.current > 1.001 || Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+        e.preventDefault();
+        const w = wheelSwipe.current;
+        if (Date.now() < w.until) return;
+        w.dx += e.deltaX;
+        if (Math.abs(w.dx) > 120) {
+          turnPage(w.dx > 0 ? 1 : -1);
+          w.dx = 0;
+          w.until = Date.now() + 600;
+        }
+        return;
+      }
       e.preventDefault();
       if (!preview.current) startPreview(e.clientX, e.clientY);
       previewZoom(preview.current!.z * Math.exp(-e.deltaY / 300));
@@ -815,6 +838,7 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
   });
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
+  const wheelSwipe = useRef({ dx: 0, until: 0 });
 
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<Gesture>(null);
@@ -854,6 +878,42 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
   };
   const canDraw = !!pdf && !finishing;
 
+  // Pages turn by a swipe only when not zoomed in, in Move, with nothing
+  // waiting to be captured.
+  const swipeable = () => zoomRef.current <= 1.001 && mode === "move" && !pending;
+  const settleBack = () => {
+    const el = sheet.current;
+    if (!el || !el.style.transform.startsWith("translateX")) return;
+    const from = el.style.transform;
+    el.style.transform = "";
+    el.animate?.([{ transform: from }, { transform: "translateX(0)" }], {
+      duration: 150,
+      easing: "ease-out",
+    });
+  };
+  // The next (1) or previous (-1) page, sliding in from that side.
+  const turnPage = (dir: 1 | -1) => {
+    const n = page + dir;
+    if (n < 1 || n > pages) return settleBack();
+    const el = sheet.current;
+    if (el) el.style.transform = "";
+    slideFrom.current = dir;
+    setPage(n);
+  };
+  const slideFrom = useRef<1 | -1 | null>(null);
+  useLayoutEffect(() => {
+    const dir = slideFrom.current;
+    slideFrom.current = null;
+    if (!dir || !sheet.current) return;
+    sheet.current.animate?.(
+      [
+        { transform: `translateX(${dir * 40}%)`, opacity: 0.4 },
+        { transform: "translateX(0)", opacity: 1 },
+      ],
+      { duration: 200, easing: "ease-out" },
+    );
+  }, [page]);
+
   function onDown(e: React.PointerEvent) {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -888,7 +948,7 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
           st: scroller.current.scrollTop,
           px: { x: e.clientX, y: e.clientY },
         };
-      else gesture.current = { kind: "tap", px: { x: e.clientX, y: e.clientY } };
+      else gesture.current = { kind: "tap", px: { x: e.clientX, y: e.clientY }, t: Date.now() };
       return;
     }
     if (!canDraw) return;
@@ -918,6 +978,12 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
     } else if (g.kind === "pending") {
       const p = at(e);
       setPending(moveBox(g.box, g.corner, p.x - g.start.x, p.y - g.start.y));
+    } else if (g.kind === "tap" && swipeable() && sheet.current) {
+      // Not zoomed in: the page follows a sideways finger.
+      const dx = e.clientX - g.px.x;
+      const dy = e.clientY - g.px.y;
+      if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy))
+        sheet.current.style.transform = `translateX(${dx}px)`;
     } else if (g.kind === "pan" && scroller.current) {
       scroller.current.scrollLeft = g.sl - (e.clientX - g.x);
       scroller.current.scrollTop = g.st - (e.clientY - g.y);
@@ -956,6 +1022,21 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
         .sort((a, b) => a.part.w * a.part.h - b.part.w * b.part.h)[0];
       if (!adding) setSelected(hit?.c.id ?? null);
     };
+    if (g.kind === "tap" && swipeable()) {
+      const dx = e.clientX - g.px.x;
+      const dy = e.clientY - g.px.y;
+      const swipe =
+        e.type !== "pointercancel" &&
+        Math.abs(dx) > SWIPE &&
+        Math.abs(dx) > 1.5 * Math.abs(dy) &&
+        Date.now() - g.t < 800;
+      const dir = dx < 0 ? 1 : -1;
+      if (swipe && page + dir >= 1 && page + dir <= pages) {
+        turnPage(dir);
+        return;
+      }
+      settleBack();
+    }
     if (g.kind === "tap" || g.kind === "pan") {
       if (Math.hypot(e.clientX - g.px.x, e.clientY - g.px.y) < 8) pickAt(at(e));
     } else if (g.kind === "pending") {
@@ -1049,6 +1130,33 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
     };
   }, [pdf, page, zoom, hires]);
   const img = img0 && hires?.page === page ? { ...img0, url: hires.url } : img0;
+  // "Whole page" on this screen; phones and tablets open at it.
+  const opened = useRef(false);
+  const imgW = img0?.w;
+  const imgH = img0?.h;
+  useLayoutEffect(() => {
+    const s = scroller.current;
+    if (!s || !imgW || !imgH) return;
+    const measure = () => {
+      const base = Math.min(s.clientWidth, BASE_MAX);
+      if (!base || !s.clientHeight) return;
+      const f =
+        Math.round(
+          Math.min(1, Math.max(0.2, (s.clientHeight - 16) / ((base * imgH) / imgW))) * 100,
+        ) / 100;
+      fitRef.current = f;
+      setFit(f);
+      if (!opened.current) {
+        opened.current = true;
+        if (window.innerWidth < 1280) setZoomState(f);
+      }
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(s);
+    return () => ro.disconnect();
+  }, [imgW, imgH]);
+  const whole = Math.abs(zoom - fit) < 0.01;
   const onPage = clips
     .flatMap((c) =>
       c.parts.map((p, i) => ({
@@ -1167,16 +1275,24 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
             size="sm"
             variant="ghost"
             aria-label="Zoom out"
-            disabled={zoom <= 1}
-            onClick={() => zoomAt(ZOOMS.filter((z) => z < zoom).at(-1) ?? 1)}
+            disabled={zoom <= minZoom() + 0.001}
+            onClick={() =>
+              zoomAt(
+                Math.max(
+                  minZoom(),
+                  [fit, ...ZOOMS].filter((z) => z < zoom - 0.001).sort((a, b) => b - a)[0] ?? 0,
+                ),
+              )
+            }
           >
             <Minus className="h-4 w-4" />
           </Button>
           <button
             type="button"
             className="min-w-[3rem] text-xs tabular-nums text-muted-foreground"
-            title="Fit the page"
-            onClick={() => zoomAt(1)}
+            title={whole ? "Fit the width" : "Whole page"}
+            aria-label={`Zoom ${Math.round(zoom * 100)}%: ${whole ? "fit the width" : "show the whole page"}`}
+            onClick={() => zoomAt(whole ? 1 : fit)}
           >
             {Math.round(zoom * 100)}%
           </button>
@@ -1185,7 +1301,7 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
             variant="ghost"
             aria-label="Zoom in"
             disabled={zoom >= 6}
-            onClick={() => zoomAt(ZOOMS.find((z) => z > zoom) ?? 6)}
+            onClick={() => zoomAt(ZOOMS.find((z) => z > zoom + 0.001) ?? 6)}
           >
             <Plus className="h-4 w-4" />
           </Button>
@@ -1328,7 +1444,8 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
                 <p className="m-2 flex max-w-[30rem] items-start gap-2 rounded-xl bg-background/95 p-2.5 text-sm shadow">
                   <span className="flex-1">
                     Tap <b>Clip</b>, drag a box around an article, adjust it and press{" "}
-                    <b>Capture</b>. Pinch or Ctrl + wheel zooms; drag moves the page.
+                    <b>Capture</b>. Pinch or Ctrl + wheel zooms; drag moves the page; swipe sideways
+                    for the next page.
                   </span>
                   <button
                     type="button"
@@ -1350,10 +1467,11 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
               onPointerCancel={onUp}
               className={`relative mx-auto select-none bg-white shadow ${mode === "draw" && canDraw ? "cursor-crosshair" : "cursor-grab"}`}
               style={{
-                width: `${zoom * 100}%`,
-                maxWidth: zoom === 1 ? "min(100%, 900px)" : undefined,
+                width: zoom <= 1 ? `calc(min(100%, ${BASE_MAX}px) * ${zoom})` : `${zoom * 100}%`,
+                marginTop: zoom < 1 ? 8 : undefined,
                 aspectRatio: img ? `${img.w} / ${img.h}` : "0.62",
-                touchAction: mode === "draw" ? "none" : "pan-x pan-y",
+                // Not zoomed in, sideways is a swipe (to turn the page).
+                touchAction: mode === "draw" ? "none" : zoom <= 1 ? "pan-y" : "pan-x pan-y",
               }}
             >
               {img ? (

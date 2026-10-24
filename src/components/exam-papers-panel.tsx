@@ -21,6 +21,7 @@ import {
   Upload,
   X,
   FileUp,
+  Grid3x3,
   KeyRound,
   Pencil,
   Plus,
@@ -572,6 +573,23 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
   });
   const [reading, setReading] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
+  // A question jumped to: scrolled to and lit up once it's in the list.
+  const jumpTo = useRef<number | null>(null);
+  const [jumped, setJumped] = useState<number | null>(null);
+  useEffect(() => {
+    const n = jumpTo.current;
+    if (n === null) return;
+    const el = document.querySelector<HTMLElement>(
+      `[data-testid="questions"] [data-question="${n}"]`,
+    );
+    if (!el) return;
+    jumpTo.current = null;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.animate?.(
+      [{ boxShadow: "0 0 0 3px hsl(var(--primary))" }, { boxShadow: "0 0 0 0 transparent" }],
+      { duration: 1600, easing: "ease-out" },
+    );
+  }, [jumped, filter]);
   const [lang, setLang] = useState<Lang>("both");
   const [editing, setEditing] = useState(false);
   // A key for several series, waiting for the paper's series.
@@ -869,7 +887,17 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
         onChanged={refresh}
       />
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-2 bg-background/95 px-1 py-1.5 backdrop-blur">
+        <QuestionJump
+          questions={questions}
+          onJump={(x) => {
+            // Any question: one the filter hides shows the full list.
+            if (!shown.some((y) => y.id === x.id)) setFilter("all");
+            jumpTo.current = x.q_no;
+            // A new value each time, so the same question can be jumped to again.
+            setJumped(Date.now());
+          }}
+        />
         <div role="radiogroup" aria-label="Show questions" className="flex flex-wrap gap-1">
           {(
             [
@@ -1537,6 +1565,129 @@ function Proofread({
 
 // One question at a time: edit, delete, write the explanation again, or
 // verify and go to the next (keys: V verify, → next, ← back, E edit).
+// Jump to a question by its number: a "Go to" box (G puts the cursor in it)
+// and a grid of every number, coloured by whether it's verified.
+function QuestionJump({
+  questions,
+  current,
+  onJump,
+}: {
+  questions: ExamQuestion[];
+  current?: number;
+  onJump: (q: ExamQuestion) => void;
+}) {
+  const [value, setValue] = useState("");
+  const [grid, setGrid] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const go = (q: ExamQuestion) => {
+    onJump(q);
+    setValue("");
+    setGrid(false);
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+      if (e.key !== "g" && e.key !== "G") return;
+      // The cards cover the list: only theirs.
+      const cards = document.querySelector('[role="dialog"][aria-label="Proofread questions"]');
+      if (!input.current || (cards && !cards.contains(input.current))) return;
+      e.preventDefault();
+      input.current.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  return (
+    <div className="relative flex items-center gap-1">
+      <form
+        className="flex items-center gap-1"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const n = Number(value);
+          const q = questions.find((x) => x.q_no === n);
+          if (q) go(q);
+          else toast.error(value ? `There's no question ${value}` : "Type a question number");
+        }}
+      >
+        <Input
+          ref={input}
+          type="number"
+          inputMode="numeric"
+          min={1}
+          aria-label="Go to question"
+          placeholder="Go to Q"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className="h-8 w-24 text-xs"
+        />
+      </form>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-8"
+        aria-label="All question numbers"
+        aria-expanded={grid}
+        onClick={() => setGrid(!grid)}
+      >
+        <Grid3x3 className="h-4 w-4" />
+      </Button>
+      {grid && (
+        <div
+          role="group"
+          aria-label="Question numbers"
+          className="absolute left-0 top-full z-30 mt-1 w-[min(22rem,calc(100vw-2rem))] space-y-2 rounded-xl border border-border bg-popover p-2 shadow-lg"
+        >
+          <div className="grid max-h-64 grid-cols-8 gap-1 overflow-y-auto">
+            {questions.map((x) => (
+              <button
+                key={x.id}
+                type="button"
+                data-q={x.q_no}
+                onClick={() => go(x)}
+                title={
+                  x.deleted
+                    ? "Deleted"
+                    : x.verified
+                      ? "Verified"
+                      : !x.explanation_en && !x.explanation_hi
+                        ? "Not verified · no explanation"
+                        : "Not verified"
+                }
+                className={`h-7 rounded text-xs tabular-nums ${
+                  x.deleted
+                    ? "text-muted-foreground line-through"
+                    : x.verified
+                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                      : !x.explanation_en && !x.explanation_hi
+                        ? "bg-amber-500/15 text-amber-800 dark:text-amber-300"
+                        : "bg-muted"
+                } ${x.q_no === current ? "ring-2 ring-primary" : ""}`}
+              >
+                {x.q_no}
+              </button>
+            ))}
+          </div>
+          <p className="flex flex-wrap gap-x-3 text-[11px] text-muted-foreground">
+            <span>
+              <span className="mr-1 inline-block h-2 w-2 rounded-sm bg-emerald-500/60" />
+              Verified
+            </span>
+            <span>
+              <span className="mr-1 inline-block h-2 w-2 rounded-sm bg-muted-foreground/30" />
+              Not verified
+            </span>
+            <span>
+              <span className="mr-1 inline-block h-2 w-2 rounded-sm bg-amber-500/60" />
+              No explanation
+            </span>
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProofCards({
   questions,
   lang: lang0,
@@ -1625,6 +1776,25 @@ function ProofCards({
           {list.length ? `${i + 1} of ${list.length}` : "Nothing here"} · {verifiedCount} of{" "}
           {questions.length} verified
         </span>
+        <QuestionJump
+          questions={questions}
+          current={q?.q_no}
+          onJump={(x) => {
+            setEditing(false);
+            // Any question: one already verified shows the full list.
+            const inList = list.findIndex((y) => y.id === x.id);
+            if (inList >= 0) setAt(inList);
+            else {
+              setOnlyOpen(false);
+              setAt(
+                Math.max(
+                  0,
+                  questions.findIndex((y) => y.id === x.id),
+                ),
+              );
+            }
+          }}
+        />
         <label className="flex items-center gap-1.5 text-xs">
           <input
             type="checkbox"
