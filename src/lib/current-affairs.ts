@@ -561,9 +561,14 @@ export function extractMessages(opts: {
   extra?: string;
   // Lessons from real exam papers: kinds of news that were asked.
   lessons?: string[];
+  // The editor's picking rules.
+  pickRules?: string[];
+  // The exams the magazine prepares for and what they ask (exam weights).
+  focus?: string;
 }): ChatMessage[] {
   if (opts.section === "editorial") return editorialExtractMessages(opts);
   const lessons = (opts.lessons ?? []).filter(Boolean).slice(0, 12);
+  const pickRules = (opts.pickRules ?? []).filter(Boolean).slice(0, 10);
   return [
     {
       role: "system",
@@ -576,7 +581,11 @@ Every fact must fill one slot of its story's type; leave a slot out if the sourc
         lessons.length
           ? `\nLessons from recent RPSC and RSSB papers (news like this was asked, so keep it):\n${lessons.map((l) => `- ${l}`).join("\n")}`
           : ""
-      }`,
+      }${
+        pickRules.length
+          ? `\nThe editor's picking rules (follow them when choosing what to keep, its importance and its section):\n${pickRules.map((l) => `- ${l}`).join("\n")}`
+          : ""
+      }${opts.focus ? `\n${opts.focus}` : ""}`,
     },
     {
       role: "user",
@@ -1218,6 +1227,12 @@ export type MagazineSettings = {
   // Lessons from real exam papers (Exam papers → Check against the
   // magazine): kinds of news that were asked, added to how stories are picked.
   exam_lessons?: string[];
+  // The editor's picking rules (learnt from their picks, ca-picks.ts):
+  // added to how stories are picked from every source.
+  pick_rules?: string[];
+  // How much each exam matters (exam name without its year → 0-3; see
+  // ca-exam-weights.ts); an exam not listed counts as low.
+  exam_weights?: Record<string, number>;
   // The daily issue's cover layout.
   daily_cover: DailyLayout;
   // An ad from the library printed as the daily issue's last page ("": none).

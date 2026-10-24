@@ -20,6 +20,7 @@ import {
 } from "@/lib/ca-practice";
 import { CATEGORIES, monthRange, type CaContent, type CaFact } from "@/lib/current-affairs";
 import { getMagazineSettings } from "@/lib/current-affairs.server";
+import { focusText } from "@/lib/ca-exam-weights";
 
 const from = (table: string) => supabaseAdmin.from(table as never);
 const fail = (e: { message: string } | null) => {
@@ -121,6 +122,12 @@ async function styleExamples(): Promise<{ style: PracticeStyle; text: string }[]
   return out;
 }
 
+// The exams the magazine prepares for ("" until weighed).
+async function focus(): Promise<string> {
+  const W = await import("@/lib/ca-exam-weights.server");
+  return focusText(await W.savedProfile().catch(() => null));
+}
+
 // ---------- Practice set ----------
 
 export async function getPractice(month: string): Promise<PracticeSet | null> {
@@ -147,7 +154,7 @@ export async function practiceStep(month: string, part: number): Promise<Practic
   const made = parsePractice(
     await saathiComplete(
       apiKey(),
-      practiceMessages(stories, styles, await styleExamples(), settings.glossary),
+      practiceMessages(stories, styles, await styleExamples(), settings.glossary, await focus()),
     ),
     stories,
     part,
@@ -178,7 +185,13 @@ export async function replaceQuestion(month: string, index: number): Promise<Pra
   const made = parsePractice(
     await saathiComplete(
       apiKey(),
-      practiceMessages(stories, { [q.style]: 1 }, await styleExamples(), settings.glossary),
+      practiceMessages(
+        stories,
+        { [q.style]: 1 },
+        await styleExamples(),
+        settings.glossary,
+        await focus(),
+      ),
     ),
     stories,
     q.part,

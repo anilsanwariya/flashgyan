@@ -101,6 +101,8 @@ export function practiceMessages(
   styles: Partial<Record<PracticeStyle, number>>,
   examples: { style: PracticeStyle; text: string }[],
   glossary?: GlossaryEntry[],
+  // The exams the magazine prepares for and what they ask (exam weights).
+  focus?: string,
 ): ChatMessage[] {
   const wanted = Object.entries(styles).filter(([, n]) => n);
   return [
@@ -110,7 +112,7 @@ export function practiceMessages(
 Write exactly: ${wanted.map(([s, n]) => `${n} "${s}"`).join(", ")}.
 How each style looks:
 ${wanted.map(([s]) => `- ${STYLE_HOW[s as PracticeStyle]}`).join("\n")}
-Rules: every fact in a question, statement, option and answer comes from the stories' facts given (never from your own knowledge); a false statement or wrong option changes one real fact (a wrong number, place, year or name) so it is plausible; exactly one option is correct; mix the sections (Rajasthan, national, schemes, persons, sports…) and prefer Rajasthan news; no two questions on the same story; the explanation (1-2 sentences) says why the answer is right, with the fact. Write each in English and in Hindi; options and the answer are the same in both.${examples.length ? `\nThe papers write these styles like this (follow their wording, not their content):\n${examples.map((e) => `[${e.style}] ${e.text}`).join("\n")}` : ""}${hindiGuide(glossary)}
+${focus ? `${focus} Prefer questions on what these exams ask most.\n` : ""}Rules: every fact in a question, statement, option and answer comes from the stories' facts given (never from your own knowledge); a false statement or wrong option changes one real fact (a wrong number, place, year or name) so it is plausible; exactly one option is correct; mix the sections (Rajasthan, national, schemes, persons, sports…) and prefer Rajasthan news; no two questions on the same story; the explanation (1-2 sentences) says why the answer is right, with the fact. Write each in English and in Hindi; options and the answer are the same in both.${examples.length ? `\nThe papers write these styles like this (follow their wording, not their content):\n${examples.map((e) => `[${e.style}] ${e.text}`).join("\n")}` : ""}${hindiGuide(glossary)}
 Reply with JSON only: [{"style": "...", "stories": [story numbers used], "question": {"en": "...", "hi": "..."}, "extra": {"en": "lines", "hi": "lines"}, "options": [{"en": "...", "hi": "..."} ×4], "answer": 1-4, "explanation": {"en": "...", "hi": "..."}}]`,
     },
     {

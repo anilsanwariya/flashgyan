@@ -189,8 +189,40 @@ export type OpenPdf = {
     box: { x: number; y: number; w: number; h: number },
     side?: number,
   ) => Promise<PageImage & { w: number; h: number }>;
+  // The page's text lines with where they are (parts of the page, 0-1);
+  // none for a scanned page.
+  lines: (page: number) => Promise<PageLine[]>;
   close: () => Promise<void>;
 };
+
+export type PageLine = { x: number; y: number; w: number; h: number; text: string };
+
+// Text pieces joined into lines: a piece on the same baseline, close after
+// the line so far, continues it.
+export function joinLines(
+  items: { x: number; y: number; w: number; h: number; text: string }[],
+  max = 600,
+): PageLine[] {
+  const out: PageLine[] = [];
+  const sorted = items
+    .filter((i) => i.text.trim() && i.h > 0)
+    .sort((a, b) => a.y - b.y || a.x - b.x);
+  for (const it of sorted) {
+    const line = out.find(
+      (l) => Math.abs(l.y - it.y) < l.h * 0.5 && it.x >= l.x && it.x - (l.x + l.w) < l.h * 1.5,
+    );
+    if (line) {
+      const right = Math.max(line.x + line.w, it.x + it.w);
+      line.text += (it.x - (line.x + line.w) > line.h * 0.2 ? " " : "") + it.text;
+      line.w = right - line.x;
+      line.h = Math.max(line.h, it.h);
+    } else out.push({ ...it, text: it.text });
+  }
+  return out
+    .map((l) => ({ ...l, text: l.text.replace(/\s+/g, " ").trim() }))
+    .filter((l) => l.text)
+    .slice(0, max);
+}
 
 export async function openPdf(src: File | string): Promise<OpenPdf> {
   const lib = await pdfjs();
@@ -269,6 +301,30 @@ export async function openPdf(src: File | string): Promise<OpenPdf> {
         w: canvas.width,
         h: canvas.height,
       };
+    },
+    async lines(page) {
+      const p = await doc.getPage(page);
+      const vp = p.getViewport({ scale: 1 });
+      const content = await p.getTextContent();
+      const items = (
+        content.items as { str?: string; transform?: number[]; width?: number; height?: number }[]
+      )
+        .filter((i) => i.str && i.transform)
+        .map((i) => {
+          const [, , c, d, e, f] = i.transform!;
+          const h = i.height || Math.hypot(c, d);
+          // The baseline's point on the page as shown (handles a page's own
+          // origin and rotation).
+          const [vx, vy] = vp.convertToViewportPoint(e, f);
+          return {
+            x: vx / vp.width,
+            y: (vy - h) / vp.height,
+            w: (i.width ?? 0) / vp.width,
+            h: h / vp.height,
+            text: i.str!,
+          };
+        });
+      return joinLines(items);
     },
     close: () => doc.loadingTask.destroy(),
   };

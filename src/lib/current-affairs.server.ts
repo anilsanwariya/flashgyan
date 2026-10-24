@@ -2,6 +2,7 @@
 // issues → PDF (Cloudflare browser rendering) → scheduled Telegram post.
 import type { AskedQ } from "@/lib/ca-asked";
 import type { StoryHistory } from "@/lib/ca-history";
+import type { AiPick } from "@/lib/ca-picks";
 import {
   EVENT_POINTS_MAX,
   eventNameKey,
@@ -543,11 +544,33 @@ async function insertItem(row: Record<string, unknown>) {
     row = rest;
     ({ error } = await from("ca_items").insert(row as never));
   }
+  // Before the picks migration: no AI decision kept.
+  if (error && /ai_pick/.test(error.message)) {
+    const { ai_pick: _p, ...rest } = row;
+    row = rest;
+    ({ error } = await from("ca_items").insert(row as never));
+  }
   if (missingKeyColumns(error)) {
     const { story_key: _k, key_embedding: _e, event_id: _v, ...rest } = row;
     ({ error } = await from("ca_items").insert(rest as never));
   }
   fail(error);
+}
+
+// The exams the magazine prepares for, from the saved exam profile ("" until
+// the editor weighs them).
+async function examFocus(): Promise<string> {
+  const W = await import("@/lib/ca-exam-weights.server");
+  const { focusText } = await import("@/lib/ca-exam-weights");
+  return focusText(await W.savedProfile().catch(() => null));
+}
+
+// The AI's first decision kept with a story (null before the migration or
+// for older stories).
+async function aiPickOf(id: string): Promise<AiPick | null> {
+  const { data, error } = await from("ca_items").select("ai_pick").eq("id", id).maybeSingle();
+  if (error) return null;
+  return (data as { ai_pick: AiPick | null } | null)?.ai_pick ?? null;
 }
 
 // The same day's story a new item is the same news as, if any: a near-identical
@@ -622,6 +645,8 @@ export async function extractSourceChunk(sourceId: string, index: number) {
         date: src.issue_date,
         text,
         lessons: settingsNow.exam_lessons ?? [],
+        pickRules: settingsNow.pick_rules ?? [],
+        focus: await examFocus(),
       }),
     );
     const found = parseExtracted(raw, text, src.id);
@@ -678,6 +703,14 @@ export async function extractSourceChunk(sourceId: string, index: number) {
             same.status = "included";
           }
         }
+        // The AI's own decision follows (it isn't the editor's change).
+        const aiPick = await aiPickOf(same.id);
+        if (aiPick)
+          update.ai_pick = {
+            ...aiPick,
+            importance: update.importance,
+            ...(update.status === "included" ? { status: "included", capped: false } : {}),
+          };
         // An older story without an event key takes this one's.
         if (!same.story_key && item.key && keyEmbedding)
           Object.assign(update, { story_key: item.key, key_embedding: keyEmbedding });
@@ -738,6 +771,13 @@ export async function extractSourceChunk(sourceId: string, index: number) {
         key_embedding: keyEmbedding as unknown as string,
         ...(eventId ? { event_id: eventId } : {}),
         story_type: item.type,
+        // The AI's first decision, to learn from the editor's changes.
+        ai_pick: {
+          status: included ? "included" : "dropped",
+          importance: item.importance,
+          category,
+          ...(!included && item.importance === 2 ? { capped: true } : {}),
+        },
         related_item_id: earlier?.id ?? null,
         position: 1000 + created,
       });
@@ -3217,6 +3257,12 @@ export async function resortMonth(
         .update({ category: m.section } as never)
         .eq("id", id));
     fail(uErr);
+    // The AI's own move (not the editor's).
+    const aiPick = await aiPickOf(id);
+    if (aiPick)
+      await from("ca_items")
+        .update({ ai_pick: { ...aiPick, category: m.section } } as never)
+        .eq("id", id);
   }
   return {
     checked: rows.length,

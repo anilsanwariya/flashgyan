@@ -12,10 +12,14 @@ import {
   clipPages,
   clipReadMessages,
   parseClipRead,
+  parseSuggestions,
+  suggestMessages,
   type Clip,
   type ClipBox,
   type ClipPart,
   type Newspaper,
+  type PageTextLine,
+  type SuggestedClip,
 } from "@/lib/ca-clips";
 import type { CaSource } from "@/lib/current-affairs.server";
 import * as CA from "@/lib/current-affairs.server";
@@ -188,6 +192,7 @@ export async function deleteNewspaper(id: string, withSources: boolean) {
   const paths = [newspaper.file_path, ...clips.flatMap((c) => c.parts.map((p) => p.path))];
   if (paths.length) await store().remove(paths);
   fail((await from("ca_newspapers").delete().eq("id", id)).error);
+  await from("bot_settings").delete().eq("key", suggestKey(id));
 }
 
 // Newspaper PDFs kept for 30 days, then removed (the clippings stay).
@@ -406,4 +411,83 @@ export async function clipsOfSources(
     source_name: papers.get(c.newspaper_id) ?? "",
     parts: c.parts,
   }));
+}
+
+// ---------- Suggested articles ----------
+
+const suggestKey = (newspaperId: string) => `ca_clip_suggest:${newspaperId}`;
+// Each page's suggestions, kept until the newspaper goes.
+export type PageSuggestions = Record<string, { at: string; items: SuggestedClip[] }>;
+
+export async function getSuggestions(newspaperId: string): Promise<PageSuggestions> {
+  const { data } = await from("bot_settings")
+    .select("value")
+    .eq("key", suggestKey(newspaperId))
+    .maybeSingle();
+  return ((data as { value: PageSuggestions } | null)?.value ?? {}) as PageSuggestions;
+}
+
+async function putSuggestions(newspaperId: string, value: PageSuggestions) {
+  fail(
+    (
+      await from("bot_settings").upsert({
+        key: suggestKey(newspaperId),
+        value,
+        updated_at: now(),
+      } as never)
+    ).error,
+  );
+}
+
+// The articles worth clipping on a page (one AI request with the page's
+// image and its text lines), leaving out what is already clipped.
+export async function suggestPage(input: {
+  newspaper_id: string;
+  page: number;
+  image: string;
+  lines: PageTextLine[];
+}): Promise<SuggestedClip[]> {
+  const { newspaper, clips } = await getNewspaper(input.newspaper_id);
+  if (input.page < 1 || input.page > Math.max(1, newspaper.pages)) throw new Error("No such page.");
+  const settings = await CA.getMagazineSettings();
+  const W = await import("@/lib/ca-exam-weights.server");
+  const { focusText } = await import("@/lib/ca-exam-weights");
+  const rules = settings.pick_rules ?? [];
+  const guide = [
+    rules.length ? `The editor's picking rules:\n${rules.map((r) => `- ${r}`).join("\n")}` : "",
+    focusText(await W.savedProfile().catch(() => null)),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const raw = await saathiComplete(
+    apiKey(),
+    suggestMessages({
+      sourceName: newspaper.source_name,
+      page: input.page,
+      lines: input.lines,
+      guide,
+    }),
+    undefined,
+    [{ media_type: "image/jpeg", data: input.image }],
+  );
+  const items = parseSuggestions(
+    raw,
+    input.page,
+    input.lines,
+    clips.flatMap((c) => c.parts.filter((p) => p.page === input.page)),
+  );
+  const all = await getSuggestions(input.newspaper_id);
+  all[String(input.page)] = { at: now(), items };
+  await putSuggestions(input.newspaper_id, all);
+  return items;
+}
+
+// A suggestion the editor clipped or doesn't want, taken off its page.
+export async function dropSuggestion(newspaperId: string, page: number, headline: string) {
+  const all = await getSuggestions(newspaperId);
+  const p = all[String(page)];
+  if (!p) return all;
+  p.items = p.items.filter((s) => s.headline !== headline);
+  await putSuggestions(newspaperId, all);
+  return all;
 }

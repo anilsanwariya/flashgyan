@@ -293,6 +293,9 @@ export async function askedForItems(
 
 // The month's stories per section against the share of current affairs
 // questions asked from each (all saved papers, or one body's).
+// The coverage meter's "weighted by your exams" choice.
+export const WEIGHTED = "__weighted";
+
 export async function coverage(
   month: string,
   body: string | null,
@@ -324,6 +327,25 @@ export async function coverage(
   fail(pErr);
   const all = (papers ?? []) as { id: string; conducted_by: string }[];
   const bodies = [...new Set(all.map((p) => p.conducted_by).filter(Boolean))].sort();
+  // Weighted by the editor's exam weights: each exam's mix by its weight.
+  if (body === WEIGHTED) {
+    const W = await import("@/lib/ca-exam-weights.server");
+    const { weightedAsked } = await import("@/lib/ca-exam-weights");
+    const profile = await W.makeProfile();
+    const asked = weightedAsked(profile.families);
+    const used = profile.families.filter((f) => f.weight);
+    return {
+      ready: true,
+      rows: coverageRows(stories, asked),
+      questions: Math.round(Object.values(asked).reduce((a, b) => a + b, 0)),
+      unsorted: used.reduce(
+        (a, f) => a + f.questions - Object.values(f.sections).reduce((x, y) => x + y, 0),
+        0,
+      ),
+      papers: used.reduce((a, f) => a + f.papers, 0),
+      bodies,
+    };
+  }
   const chosen = all.filter((p) => !body || p.conducted_by === body).map((p) => p.id);
   const asked: Record<string, number> = {};
   let unsorted = 0;

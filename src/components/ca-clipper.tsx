@@ -19,6 +19,7 @@ import {
   Plus,
   RefreshCw,
   Scissors,
+  Sparkles,
   SquareDashed,
   Trash2,
   Undo2,
@@ -28,11 +29,14 @@ import {
 import {
   deleteCaClip,
   deleteCaNewspaper,
+  dropCaClipSuggestion,
+  getCaClipSuggestions,
   getCaNewspaper,
   listCaNewspapers,
   readCaClip,
   saveCaClip,
   startCaNewspaper,
+  suggestCaClips,
   type NewspaperSummary,
 } from "@/lib/ca-clips.functions";
 import {
@@ -46,8 +50,10 @@ import {
   MAX_PDF_MB,
   cleanBox,
   clipPages,
+  covered,
   type Clip,
   type ClipBox,
+  type SuggestedClip,
 } from "@/lib/ca-clips";
 import type { OpenPdf } from "@/lib/exam-pdf";
 import { supabase } from "@/integrations/supabase/client";
@@ -460,6 +466,64 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
 
   // New boxes for a clipping: a box as it was keeps its image, a moved or
   // resized one gets a new image.
+  // ---------- Suggested articles ----------
+  const suggestFn = useServerFn(suggestCaClips);
+  const suggestionsFn = useServerFn(getCaClipSuggestions);
+  const dropFn = useServerFn(dropCaClipSuggestion);
+  const [sugg, setSugg] = useState<Record<string, { at: string; items: SuggestedClip[] }>>({});
+  const [suggesting, setSuggesting] = useState<number | null>(null);
+  useEffect(() => {
+    void suggestionsFn({ data: { newspaper_id: id } })
+      .then((v) => setSugg(v ?? {}))
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+  // A page's suggestions not clipped since.
+  const suggestedOn = (n: number) =>
+    (sugg[String(n)]?.items ?? []).filter(
+      (s) =>
+        !clips.some((c) => c.parts.some((p) => covered(s.box, p) > 0.5 || covered(p, s.box) > 0.5)),
+    );
+  async function suggest() {
+    if (!pdf) return;
+    const n = page;
+    setSuggesting(n);
+    try {
+      const [image, lines] = await Promise.all([
+        pdf.crop(n, { x: 0, y: 0, w: 1, h: 1 }, 1800),
+        pdf.lines(n).catch(() => []),
+      ]);
+      const items = await suggestFn({
+        data: { newspaper_id: id, page: n, image: image.data, lines },
+      });
+      setSugg((cur) => ({ ...cur, [String(n)]: { at: new Date().toISOString(), items } }));
+      toast.success(
+        items.length
+          ? `${items.length} ${items.length === 1 ? "article" : "articles"} suggested on page ${n}`
+          : `Nothing more worth clipping on page ${n}`,
+      );
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't suggest articles"));
+    } finally {
+      setSuggesting(null);
+    }
+  }
+  async function dropSuggested(s: SuggestedClip) {
+    setSugg((cur) => {
+      const p = cur[String(s.box.page)];
+      return p
+        ? { ...cur, [String(s.box.page)]: { ...p, items: p.items.filter((x) => x !== s) } }
+        : cur;
+    });
+    await dropFn({
+      data: { newspaper_id: id, page: s.box.page, headline: s.headline },
+    }).catch(() => undefined);
+  }
+  async function clipSuggested(s: SuggestedClip) {
+    await addBox(s.box, null);
+    await dropSuggested(s);
+  }
+
   async function setParts(clip: Clip, next: ClipBox[], remember = true) {
     const same = (a: ClipBox, b: ClipBox) =>
       a.page === b.page && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
@@ -987,6 +1051,23 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
         </div>
         <Button
           size="sm"
+          variant="outline"
+          aria-label="Suggest articles on this page"
+          title="Suggest articles worth clipping on this page"
+          disabled={!pdf || suggesting !== null || !!finishing}
+          onClick={() => void suggest()}
+        >
+          {suggesting !== null ? (
+            <RefreshCw className="h-4 w-4 animate-spin sm:mr-1" />
+          ) : (
+            <Sparkles className="h-4 w-4 sm:mr-1" />
+          )}
+          <span className="hidden sm:inline">
+            {suggesting !== null ? `Looking at page ${suggesting}…` : "Suggest"}
+          </span>
+        </Button>
+        <Button
+          size="sm"
           variant="ghost"
           aria-label="Undo"
           disabled={!undo.length}
@@ -1060,7 +1141,7 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
             data-testid="clip-scroller"
             className="relative min-h-0 flex-1 overflow-auto bg-muted/50"
           >
-            {clips.length === 0 && !finishing && pdf && (
+            {clips.length === 0 && !finishing && pdf && !suggestedOn(page).length && (
               <p className="pointer-events-none absolute left-1/2 top-3 z-10 w-[min(92%,30rem)] -translate-x-1/2 rounded-xl bg-background/95 p-3 text-center text-sm shadow">
                 Drag a box around an article to clip it. Zoom with + / −, Ctrl + wheel or two
                 fingers; two fingers (or the Move tool) move the page.
@@ -1129,6 +1210,46 @@ function Clipper({ id, date, onClose }: { id: string; date: string; onClose: () 
                   </div>
                 );
               })}
+              {suggestedOn(page).map((s) => (
+                <div
+                  key={`s-${s.headline}`}
+                  data-suggested={s.headline}
+                  className="pointer-events-none absolute border-2 border-dashed border-amber-500 bg-amber-400/10"
+                  style={{
+                    left: `${s.box.x * 100}%`,
+                    top: `${s.box.y * 100}%`,
+                    width: `${s.box.w * 100}%`,
+                    height: `${s.box.h * 100}%`,
+                  }}
+                >
+                  <div
+                    className={`pointer-events-auto absolute left-0 flex max-w-full items-center gap-1 bg-amber-500 px-1 py-0.5 text-xs text-white shadow ${s.box.y > 0.03 ? "top-0 -translate-y-full rounded-t" : "top-0 rounded-br"}`}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    title={s.why}
+                  >
+                    <span className="truncate">
+                      {"★".repeat(s.importance)} {s.headline}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Clip ${s.headline}`}
+                      disabled={!canDraw}
+                      onClick={() => void clipSuggested(s)}
+                      className="shrink-0 rounded bg-white/90 px-1.5 font-semibold text-amber-700"
+                    >
+                      Clip
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Not this: ${s.headline}`}
+                      onClick={() => void dropSuggested(s)}
+                      className="shrink-0 rounded px-0.5 hover:bg-white/20"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
               {[...saving.filter((b) => b.page === page), ...(draft ? [draft] : [])].map((b, k) => {
                 const n = cleanBox(b, pages) ?? {
                   ...b,

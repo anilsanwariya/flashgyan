@@ -105,3 +105,129 @@ export function parseClipRead(raw: string): { kind: ClipKind; headline: string; 
 export function clipContent(headline: string, text: string, sourceName: string, pages: string) {
   return `# ${headline}\n\n${text}\n\n(${[sourceName, pages].filter(Boolean).join(", ")})`;
 }
+
+// ---------- Suggested articles ----------
+
+// An article the AI thinks worth clipping on a page, with its box.
+export type SuggestedClip = {
+  box: ClipBox;
+  headline: string;
+  why: string;
+  // 1 = may be asked, 3 = likely asked.
+  importance: number;
+};
+// Text lines of a page with where they are (from the PDF's own text).
+export type PageTextLine = { x: number; y: number; w: number; h: number; text: string };
+
+// Lines given to the AI: enough to place the articles, not the whole page.
+export const SUGGEST_LINES = 350;
+const pct = (v: number) => Math.round(v * 1000) / 10;
+
+export function suggestMessages(o: {
+  sourceName: string;
+  page: number;
+  lines: PageTextLine[];
+  // The editor's picking rules and the exams (as for picking stories).
+  guide?: string;
+}): ChatMessage[] {
+  const lines = o.lines.slice(0, SUGGEST_LINES);
+  return [
+    {
+      role: "system",
+      content: `You help the editor of a current affairs magazine for Rajasthan competitive exams (RPSC and RSSB, with depth for RAS Mains) clip a newspaper. The image is page ${o.page} of ${o.sourceName || "a newspaper"}. Find the articles worth clipping: news an exam may ask about (government schemes and decisions, appointments, awards, reports and indices, sports results, science, economy, places, Rajasthan's districts, international relations, and editorials on such issues). Leave out crime, accidents, local incidents, politics without decisions, entertainment, ads, notices, horoscopes and photos without a story.
+For each article give its box: the whole article from its headline to its last line (all its columns, its photo and caption), as percentages of the page from the top left: "x", "y", "w", "h".${lines.length ? ` The page's text lines are listed with their place (x%, y%, width%, height%); also give the numbers of the article's first and last lines ("from", "to") and any line inside it you're sure of.` : ""}
+"importance": 3 likely asked, 2 may be asked, 1 rarely asked (leave out what is never asked). "why": a few words on what an exam would ask. "headline": the article's headline as printed.${o.guide ? `\n${o.guide}` : ""}
+Reply with JSON only: {"articles": [{"headline": "...", "why": "...", "importance": 2, "x": 0, "y": 0, "w": 0, "h": 0${lines.length ? ', "lines": [line numbers in the article]' : ""}}]}; {"articles": []} when none is worth clipping.`,
+    },
+    {
+      role: "user",
+      content: lines.length
+        ? `Text lines of the page:\n${lines
+            .map(
+              (l, i) =>
+                `${i + 1}. (${pct(l.x)}, ${pct(l.y)}, ${pct(l.w)}, ${pct(l.h)}) ${l.text.slice(0, 70)}`,
+            )
+            .join("\n")}`
+        : "The page has no text of its own (a scan): use the image.",
+    },
+  ];
+}
+
+// How much of box `a` lies inside box `b` (0-1), on the same page.
+export function covered(a: ClipBox, b: ClipBox): number {
+  if (a.page !== b.page) return 0;
+  const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  return w > 0 && h > 0 ? (w * h) / (a.w * a.h) : 0;
+}
+
+// The AI's articles as boxes on the page. With the page's text lines, the
+// box is fitted to the lines it names (the AI's own box only widens it a
+// little); articles already clipped, or boxed twice, are left out.
+export function parseSuggestions(
+  raw: string,
+  page: number,
+  lines: PageTextLine[],
+  clipped: ClipBox[] = [],
+): SuggestedClip[] {
+  const body = raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
+  let o: { articles?: unknown };
+  try {
+    o = JSON.parse(body.slice(body.indexOf("{"), body.lastIndexOf("}") + 1));
+  } catch {
+    return [];
+  }
+  const shown = lines.slice(0, SUGGEST_LINES);
+  const out: SuggestedClip[] = [];
+  for (const x of Array.isArray(o.articles) ? o.articles : []) {
+    const a = (x ?? {}) as Record<string, unknown>;
+    const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) / 100 : NaN);
+    let box: ClipBox | null = cleanBox({ page, x: n(a.x), y: n(a.y), w: n(a.w), h: n(a.h) }, page);
+    const named = [
+      ...(Array.isArray(a.lines) ? a.lines : []),
+      ...[a.from, a.to].filter((v) => v != null),
+    ]
+      .map((v) => shown[Number(v) - 1])
+      .filter((l): l is PageTextLine => !!l);
+    if (named.length) {
+      const pad = 0.004;
+      const x0 = Math.min(...named.map((l) => l.x));
+      const y0 = Math.min(...named.map((l) => l.y));
+      const x1 = Math.max(...named.map((l) => l.x + l.w));
+      const y1 = Math.max(...named.map((l) => l.y + l.h));
+      const fit = cleanBox(
+        { page, x: x0 - pad, y: y0 - pad, w: x1 - x0 + 2 * pad, h: y1 - y0 + 2 * pad },
+        page,
+      );
+      // The AI's box adds what has no text (a photo), when it mostly agrees.
+      if (fit && box && covered(fit, box) > 0.6) {
+        const ux = Math.min(fit.x, box.x);
+        const uy = Math.min(fit.y, box.y);
+        box = cleanBox(
+          {
+            page,
+            x: ux,
+            y: uy,
+            w: Math.max(fit.x + fit.w, box.x + box.w) - ux,
+            h: Math.max(fit.y + fit.h, box.y + box.h) - uy,
+          },
+          page,
+        );
+      } else box = fit ?? box;
+    }
+    const headline =
+      typeof a.headline === "string" ? a.headline.replace(/\s+/g, " ").trim().slice(0, 200) : "";
+    const importance = Math.min(3, Math.max(1, Math.round(Number(a.importance)) || 2));
+    if (!box || !headline) continue;
+    const b = box;
+    if (clipped.some((c) => covered(b, c) > 0.5 || covered(c, b) > 0.5)) continue;
+    if (out.some((s) => covered(b, s.box) > 0.6 || covered(s.box, b) > 0.6)) continue;
+    out.push({
+      box: b,
+      headline,
+      why: typeof a.why === "string" ? a.why.replace(/\s+/g, " ").trim().slice(0, 160) : "",
+      importance,
+    });
+  }
+  return out.sort((x, y) => y.importance - x.importance || x.box.y - y.box.y || x.box.x - y.box.x);
+}

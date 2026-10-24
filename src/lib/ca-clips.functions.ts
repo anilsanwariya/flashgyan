@@ -125,3 +125,54 @@ export const getCaSourceClips = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await server()).clipsOfSources(data.source_ids);
   });
+
+// Suggested articles: a page's suggestions (its image and text lines sent
+// from the browser, which has the PDF open), all of them, and one dropped.
+const line = z.object({
+  x: z.number(),
+  y: z.number(),
+  w: z.number(),
+  h: z.number(),
+  text: z.string().max(400),
+});
+export const suggestCaClips = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        newspaper_id: id,
+        page: z.number().int().min(1).max(500),
+        // A page as a JPEG (base64), at most about 6 MB.
+        image: z.string().min(100).max(8_000_000),
+        lines: z.array(line).max(1000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).suggestPage(data);
+  });
+
+export const getCaClipSuggestions = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ newspaper_id: id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).getSuggestions(data.newspaper_id);
+  });
+
+export const dropCaClipSuggestion = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        newspaper_id: id,
+        page: z.number().int().min(1).max(500),
+        headline: z.string().max(200),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).dropSuggestion(data.newspaper_id, data.page, data.headline);
+  });
