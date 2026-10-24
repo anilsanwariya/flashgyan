@@ -34,6 +34,7 @@ import { CARD_LABELS, SCHEME_GROUPS, schemeGroup } from "@/lib/ca-blueprint";
 import type { Geo } from "@/lib/ca-map";
 import type { Earlier } from "@/lib/ca-schemes";
 import type { EventBlock } from "@/lib/ca-events";
+import { indexRows, type TopicIndex } from "@/lib/ca-index";
 import { indiaTally, isRajasthan, sortMedals, type MedalTally } from "@/lib/ca-medals";
 import {
   COVER_CSS,
@@ -170,6 +171,8 @@ const T = {
       "Continues next month: its complete summary prints in the issue of the month it concludes.",
     fullSummary: "Complete summary",
     medalsTitle: "India's medals",
+    topicIndex: "Index",
+    topicIndexSub: "Schemes, persons, places and more, A–Z, with story numbers",
     medalCols: ["Player / team", "State", "Sport, event", "Medal"],
     medalNames: { gold: "Gold", silver: "Silver", bronze: "Bronze" },
     medalTotal: "Total",
@@ -225,6 +228,8 @@ const T = {
     continues: "अगले माह जारी: इसका संपूर्ण सारांश उस माह के अंक में छपेगा जिसमें यह संपन्न होगा।",
     fullSummary: "संपूर्ण सारांश",
     medalsTitle: "भारत के पदक",
+    topicIndex: "अनुक्रमणिका",
+    topicIndexSub: "योजनाएँ, व्यक्ति, स्थान आदि, वर्णानुक्रम में, खबर संख्या सहित",
     medalCols: ["खिलाड़ी / टीम", "राज्य", "खेल, स्पर्धा", "पदक"],
     medalNames: { gold: "स्वर्ण", silver: "रजत", bronze: "कांस्य" },
     medalTotal: "कुल",
@@ -678,6 +683,13 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .card tr:last-child th, .card tr:last-child td { border-bottom: 0; }
 .earlier { margin: 1mm 0 2mm; padding: 1.2mm 2.5mm; border-left: 2px solid ${accent}; background: #f8fafc; font-size: 8.5pt; color: #475569; }
 .earlier b { color: ${accent}; }
+.ix-cols { column-count: 3; column-gap: 6mm; font-size: 8.5pt; }
+.ix-group { break-inside: avoid-column; margin-bottom: 2mm; }
+.ix-letter { margin: 0 0 1mm; font-size: 11pt; color: ${accent}; border-bottom: 1px solid #e2e8f0; }
+.ix-row { display: flex; align-items: baseline; gap: 1mm; line-height: 1.35; }
+.ix-term { flex: 0 1 auto; min-width: 0; }
+.ix-dots { flex: 1 1 3mm; border-bottom: 1px dotted #94a3b8; min-width: 3mm; }
+.ix-n { flex: 0 1 auto; max-width: 60%; text-align: right; color: #475569; overflow-wrap: anywhere; }
 .medal-box { margin: 2mm 0 4mm; padding: 2.5mm 3mm; border: 1px solid #e2e8f0; border-radius: 2mm; break-inside: avoid-page; }
 .medal-box h4 { margin: 0 0 1.5mm; font-size: 10pt; color: ${accent}; }
 .medal-tally { margin: 0 0 2mm; font-size: 9.5pt; font-weight: 700; }
@@ -975,6 +987,8 @@ export function renderMagazine(opts: {
   feature?: CaFeature | null;
   // Monthly only: the exam-pattern practice set and the one-liners.
   practiceSet?: PracticeSet | null;
+  // The month's A–Z topic index.
+  topicIndex?: TopicIndex | null;
   oneliners?: OneLiners | null;
   // Monthly only: draws the "Places in News" maps from its stories' numbers
   // and locations (the server has the outlines).
@@ -1190,6 +1204,33 @@ export function renderMagazine(opts: {
         })
         .join("")}</section>`
     : "";
+  // A section's stories in print order: "Schemes, Policies & Reports" in
+  // its parts.
+  const groupIdx = new Map<string, number>(SCHEME_GROUPS.map((g, i) => [g.id, i]));
+  const printOrder = (cat: string, list: MagazineItem[]) =>
+    cat === "schemes" && !custom
+      ? [...list].sort(
+          (a, b) =>
+            (groupIdx.get(schemeGroup(a)) ?? 9) - (groupIdx.get(schemeGroup(b)) ?? 9) ||
+            a.issue_date.localeCompare(b.issue_date) ||
+            b.importance - a.importance,
+        )
+      : list;
+  // Every story's printed number in the whole issue (for the index, also in
+  // a part of a long PDF); an event's daily stories take its summary's.
+  const numberOf = new Map<string, number>();
+  {
+    let k = 0;
+    for (const b of blocks) {
+      if (b.mode === "summary") {
+        const num = ++k;
+        numberOf.set(`event-${b.event.id}`, num);
+        for (const i of b.items) numberOf.set(i.id, num);
+      } else for (const i of b.items) numberOf.set(i.id, ++k);
+    }
+    for (const [cat, all] of groups)
+      for (const it of printOrder(cat, all)) numberOf.set(it.id, ++k);
+  }
   // A part of a long PDF prints only its own stories.
   const part = opts.part ?? null;
   const inPart = part ? new Set(part.only) : null;
@@ -1202,15 +1243,7 @@ export function renderMagazine(opts: {
       // central schemes, policies and laws, reports and indices (with the
       // month's report pages).
       const parted = cat === "schemes" && !custom;
-      const groupIdx = new Map<string, number>(SCHEME_GROUPS.map((g, i) => [g.id, i]));
-      const list = parted
-        ? [...list0].sort(
-            (a, b) =>
-              (groupIdx.get(schemeGroup(a)) ?? 9) - (groupIdx.get(schemeGroup(b)) ?? 9) ||
-              a.issue_date.localeCompare(b.issue_date) ||
-              b.importance - a.importance,
-          )
-        : list0;
+      const list = printOrder(cat, list0);
       // A monthly issue can print an ad page after any section.
       const ad = adById(design?.section_ads[cat]);
       // A custom magazine's section ends with its background article, once
@@ -1279,9 +1312,24 @@ export function renderMagazine(opts: {
   const onelinersHtml =
     monthly && !opts.coverOnly ? onelinersPage(opts.oneliners, lang, label) : "";
   const practiceSetHtml = monthly && !opts.coverOnly ? practiceSetPage(opts.practiceSet, lang) : "";
+  const index = monthly && !opts.coverOnly ? indexRows(opts.topicIndex, numberOf, lang) : [];
+  const indexTerms = index.reduce((a, g) => a + g.rows.length, 0);
+  const indexHtml = index.length
+    ? `<section class="section new-page topic-index"><div class="section-title"><h2>${icon("revision")} ${t.topicIndex}</h2><span>${t.topicIndexSub}</span></div><div class="ix-cols">${index
+        .map(
+          (g) =>
+            `<div class="ix-group"><h3 class="ix-letter">${esc(g.letter)}</h3>${g.rows
+              .map(
+                (r) =>
+                  `<div class="ix-row"><span class="ix-term">${esc(r.term)}</span><span class="ix-dots"></span><span class="ix-n">${r.numbers.join(", ")}</span></div>`,
+              )
+              .join("")}</div>`,
+        )
+        .join("")}</div></section>`
+    : "";
   const setSize = opts.practiceSet?.questions.length ?? 0;
   const onelinerCount = opts.oneliners?.lines.length ?? 0;
-  const tocHtml = `${blocks.length ? `<div class="toc-row"><span>${icon("events")} ${t.events}</span><b>${blocks.length}</b></div>` : ""}${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${numbersHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.numbers}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${onelinersHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.oneliners}</span><b>${onelinerCount}</b></div>` : ""}${practiceSetHtml ? `<div class="toc-row"><span>${icon("practice")} ${t.practiceSet}</span><b>${setSize}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}`;
+  const tocHtml = `${blocks.length ? `<div class="toc-row"><span>${icon("events")} ${t.events}</span><b>${blocks.length}</b></div>` : ""}${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${numbersHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.numbers}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${onelinersHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.oneliners}</span><b>${onelinerCount}</b></div>` : ""}${practiceSetHtml ? `<div class="toc-row"><span>${icon("practice")} ${t.practiceSet}</span><b>${setSize}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}${indexHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.topicIndex}</span><b>${indexTerms}</b></div>` : ""}`;
   const parts: CoverParts = {
     lang,
     period: opts.period,
@@ -1354,6 +1402,7 @@ ${revisionPage(allGroups, lang, label)}
 ${onelinersHtml}
 ${practiceSetHtml}
 ${practicePage(everything, lang)}
+${indexHtml}
 ${notes}
 ${back ? adPageHtml(back, lang, "back") : ""}`
     : ""
