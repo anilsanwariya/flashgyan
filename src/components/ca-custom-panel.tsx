@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Eye,
   FileText,
+  GraduationCap,
   Library,
   Lock,
   Pencil,
@@ -24,6 +25,7 @@ import {
 } from "lucide-react";
 import {
   buildCaMagPdf,
+  createCaExamSpecial,
   createCaMag,
   deleteCaMag,
   fillCaMag,
@@ -43,6 +45,16 @@ import {
 } from "@/lib/ca-mags.functions";
 import { enrichCaItem, updateCaItem, type CaItem } from "@/lib/current-affairs.functions";
 import { OTHER_SECTION, magPeriod, type CustomMag, type MagSection } from "@/lib/ca-mags";
+import { getExamProfile } from "@/lib/ca-exam-weights.functions";
+import {
+  familyShares,
+  monthsBack,
+  specialSections,
+  SPECIAL_MAX,
+  SPECIAL_MIN,
+  SPECIAL_MONTHS,
+  SPECIAL_SIZE,
+} from "@/lib/ca-specials";
 import { formatDate, istDate } from "@/lib/current-affairs";
 import { StoryEditor } from "@/components/ca-story-editor";
 import { JobBar, useStoryJobs, type StoryJob } from "@/components/ca-story-jobs";
@@ -177,6 +189,7 @@ function MagazineList({ onOpen }: { onOpen: (id: string) => void }) {
   const mags = q.data?.mags ?? [];
   return (
     <div className="space-y-4">
+      <ExamSpecial onMade={onOpen} />
       <NewMagazine onMade={onOpen} />
       {mags.length > 0 && (
         <ul className="grid gap-3 md:grid-cols-2" aria-label="Custom magazines">
@@ -213,6 +226,127 @@ function MagazineList({ onOpen }: { onOpen: (id: string) => void }) {
         </ul>
       )}
     </div>
+  );
+}
+
+// An exam special: one exam, a period back from today, a number of stories.
+function ExamSpecial({ onMade }: { onMade: (id: string) => void }) {
+  const qc = useQueryClient();
+  const profileFn = useServerFn(getExamProfile);
+  const createFn = useServerFn(createCaExamSpecial);
+  const q = useQuery({ queryKey: ["examProfile"], queryFn: () => profileFn() });
+  const families = q.data?.families ?? [];
+  const [exam, setExam] = useState("");
+  const [months, setMonths] = useState(12);
+  const [size, setSize] = useState(String(SPECIAL_SIZE));
+  const [busy, setBusy] = useState(false);
+  const family = families.find((f) => f.family === exam) ?? families[0];
+  const today = istDate();
+  const from = monthsBack(today, months);
+  const count = Math.round(Number(size));
+  const ok = !!family && count >= SPECIAL_MIN && count <= SPECIAL_MAX;
+  const shares = familyShares(family);
+  const top = specialSections(shares)
+    .filter((s) => shares[s.id])
+    .slice(0, 4)
+    .map((s) => `${s.en} ${Math.round(shares[s.id])}%`);
+  async function create() {
+    if (!family) return;
+    setBusy(true);
+    try {
+      const m = await createFn({
+        data: { exam: family.family, date_from: from, date_to: today, size: count },
+      });
+      toast.success(`${family.family} special made`);
+      await qc.invalidateQueries({ queryKey: ["caMags"] });
+      onMade(m.id);
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't make it"));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section
+      aria-label="Exam special"
+      className="space-y-3 rounded-2xl border border-border bg-card p-4"
+    >
+      <div>
+        <div className="flex items-center gap-2">
+          <GraduationCap className="h-4 w-4 text-primary" />
+          <h3 className="font-semibold">Exam special</h3>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          A magazine for one coming exam: its sections in the order that exam's past papers ask
+          them, each with stories in proportion, the most likely to be asked first. Made at once
+          from the daily stories, with no AI requests; then it works like any custom magazine.
+        </p>
+      </div>
+      {q.isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading exams…</p>
+      ) : !families.length ? (
+        <p className="text-sm text-muted-foreground">
+          Publish exam papers on the Exam papers page first: an exam special follows its papers.
+        </p>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="space-y-1 text-xs font-medium text-muted-foreground">
+              <span className="block">Exam</span>
+              <select
+                aria-label="Exam"
+                value={family?.family ?? ""}
+                onChange={(e) => setExam(e.target.value)}
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+              >
+                {families.map((f) => (
+                  <option key={f.family} value={f.family}>
+                    {f.family} ({f.papers} {f.papers === 1 ? "paper" : "papers"})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1 text-xs font-medium text-muted-foreground">
+              <span className="block">Period</span>
+              <select
+                aria-label="Period"
+                value={months}
+                onChange={(e) => setMonths(Number(e.target.value))}
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+              >
+                {SPECIAL_MONTHS.map((m) => (
+                  <option key={m} value={m}>
+                    Last {m} months
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1 text-xs font-medium text-muted-foreground">
+              <span className="block">Stories</span>
+              <Input
+                type="number"
+                aria-label="Stories"
+                min={SPECIAL_MIN}
+                max={SPECIAL_MAX}
+                value={size}
+                onChange={(e) => setSize(e.target.value)}
+                className="h-9 w-24"
+              />
+            </label>
+            <Button onClick={() => void create()} disabled={!ok || busy}>
+              <Plus className="mr-1 h-4 w-4" />
+              {busy ? "Picking the stories…" : "Make exam special"}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground" data-testid="special-note">
+            {magPeriod(from, today, "en")}.{" "}
+            {top.length
+              ? `Its papers ask most from ${top.join(", ")}.`
+              : "Its papers' questions aren't sorted into sections yet, so the best stories of every section are taken."}
+          </p>
+        </>
+      )}
+    </section>
   );
 }
 

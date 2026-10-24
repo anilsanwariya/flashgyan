@@ -2,6 +2,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { SPECIAL_MAX, SPECIAL_MIN } from "@/lib/ca-specials";
 import type { MagItem, MagSummary } from "@/lib/ca-mags.server";
 
 export type { MagItem, MagSummary };
@@ -53,6 +54,23 @@ export const createCaMag = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return (await server()).createMag(data);
+  });
+
+export const createCaExamSpecial = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        exam: z.string().trim().min(1).max(120),
+        date_from: dateSchema,
+        date_to: dateSchema,
+        size: z.number().int().min(SPECIAL_MIN).max(SPECIAL_MAX),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).createExamSpecial(data);
   });
 
 export const getCaMag = createServerFn({ method: "POST" })
