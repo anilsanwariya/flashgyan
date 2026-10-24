@@ -45,6 +45,7 @@ import {
   readExamPaperPage,
   reviewExamPaper,
   setExamLesson,
+  syncExamPyqSets,
   updateExamPaper,
   updateExamQuestion,
   type PaperSummary,
@@ -247,6 +248,7 @@ function PaperList({ onOpen }: { onOpen: (id: string) => void }) {
     <div className="space-y-4">
       <AddPaper onAdded={onOpen} />
       <ExamWeights />
+      <PyqSets />
       {data.lessons.length > 0 && (
         <section className="space-y-1 rounded-2xl border border-border bg-card p-4 text-sm">
           <h3 className="font-semibold">Lessons in use for picking stories</h3>
@@ -549,6 +551,48 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
         </Button>
       </div>
     </form>
+  );
+}
+
+// Previous year questions as MCQ practice sets (by subject section and
+// topic): made again on every publish, or here.
+function PyqSets() {
+  const fn = useServerFn(syncExamPyqSets);
+  const [busy, setBusy] = useState(false);
+  return (
+    <section
+      aria-label="Practice sets from papers"
+      className="flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-card p-4"
+    >
+      <div className="min-w-[14rem] flex-1">
+        <h3 className="font-semibold">Practice sets from papers</h3>
+        <p className="text-sm text-muted-foreground">
+          The published papers' questions are in MCQ Practice for students, by subject section and
+          topic (from the AI check), with where each was asked. They're made again whenever a paper
+          is published or unpublished; sets you make by hand stay as they are.
+        </p>
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={busy}
+        onClick={() => {
+          setBusy(true);
+          void fn()
+            .then((r) =>
+              toast.success(
+                r.sets
+                  ? `${r.sets} practice set${r.sets === 1 ? "" : "s"} · ${r.questions} questions`
+                  : "No practice sets yet: publish papers checked by the AI (with subjects)",
+              ),
+            )
+            .catch((e) => toast.error(errorText(e, "Couldn't update them")))
+            .finally(() => setBusy(false));
+        }}
+      >
+        <RefreshCw className={`mr-1 h-4 w-4 ${busy ? "animate-spin" : ""}`} /> Update practice sets
+      </Button>
+    </section>
   );
 }
 

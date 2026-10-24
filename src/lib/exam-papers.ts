@@ -1102,3 +1102,126 @@ export function parseLessons(raw: string): string[] {
     .filter(Boolean)
     .slice(0, 6);
 }
+
+// ---------- Previous year questions as practice sets ----------
+
+// A topic with at least this many questions gets a set of its own; a
+// section's smaller topics share one.
+export const PYQ_MIN_SET = 5;
+export const PYQ_MIXED = { en: "Mixed topics", hi: "विविध टॉपिक" };
+
+export type PyqQuestion = Pick<
+  ExamQuestion,
+  | "q_no"
+  | "question_en"
+  | "question_hi"
+  | "extra_en"
+  | "extra_hi"
+  | "options"
+  | "correct"
+  | "deleted"
+  | "explanation_en"
+  | "explanation_hi"
+  | "explanation_source"
+  | "explanation_general"
+  | "subject_section"
+  | "topic_en"
+  | "topic_hi"
+> & { exam: string; exam_date: string | null };
+
+export type PyqSet = {
+  name: string;
+  subject: string;
+  topic: string;
+  description: string;
+  questions: PyqQuestion[];
+};
+
+// The practice sets: per subject section (in the syllabus order), a set per
+// topic with enough questions (most first) and one for the rest; newest
+// papers first within a set. Questions without a subject section or an
+// answer are left out.
+export function pyqSets(questions: PyqQuestion[]): PyqSet[] {
+  const usable = questions.filter((q) => q.subject_section && !q.deleted && q.correct);
+  const order = (s: string) => {
+    const i = SUBJECT_SECTIONS.findIndex((x) => x.en === s);
+    return i < 0 ? SUBJECT_SECTIONS.length : i;
+  };
+  const sections = [...new Set(usable.map((q) => q.subject_section!))].sort(
+    (a, b) => order(a) - order(b) || a.localeCompare(b),
+  );
+  const topicKey = (q: PyqQuestion) => (q.topic_en || q.topic_hi || "").trim().toLowerCase();
+  const byDate = (a: PyqQuestion, b: PyqQuestion) =>
+    (b.exam_date ?? "").localeCompare(a.exam_date ?? "") ||
+    a.exam.localeCompare(b.exam) ||
+    a.q_no - b.q_no;
+  const describe = (qs: PyqQuestion[]) => {
+    const exams = [...new Set([...qs].sort(byDate).map((q) => q.exam))];
+    return `Previous year questions · ${qs.length} question${qs.length === 1 ? "" : "s"} from ${exams.slice(0, 4).join(", ")}${exams.length > 4 ? ` and ${exams.length - 4} more` : ""}`;
+  };
+  const out: PyqSet[] = [];
+  for (const section of sections) {
+    const inSection = usable.filter((q) => q.subject_section === section);
+    const topics = new Map<string, PyqQuestion[]>();
+    for (const q of inSection) {
+      const k = topicKey(q);
+      topics.set(k, [...(topics.get(k) ?? []), q]);
+    }
+    const big = [...topics.entries()]
+      .filter(([k, qs]) => k && qs.length >= PYQ_MIN_SET)
+      .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+    const bigKeys = new Set(big.map(([k]) => k));
+    for (const [, qs] of big) {
+      const first = qs[0];
+      const topic = [first.topic_en, first.topic_hi].filter(Boolean).join(" / ");
+      out.push({
+        name: `${section}: ${first.topic_en || first.topic_hi} (PYQ)`,
+        subject: section,
+        topic,
+        description: describe(qs),
+        questions: [...qs].sort(byDate),
+      });
+    }
+    const rest = inSection.filter((q) => !bigKeys.has(topicKey(q)));
+    if (rest.length)
+      out.push({
+        name: `${section}: ${big.length ? PYQ_MIXED.en : "All topics"} (PYQ)`,
+        subject: section,
+        topic: big.length ? `${PYQ_MIXED.en} / ${PYQ_MIXED.hi}` : "All topics / सभी टॉपिक",
+        description: describe(rest),
+        questions: [...rest].sort(byDate),
+      });
+  }
+  return out;
+}
+
+// A question as a practice set's row: Hindi and English together, the
+// explanation, where it was asked and its source.
+export function pyqRow(q: PyqQuestion, index: number) {
+  const join = (a: string, b: string) => (a && b && a !== b ? `${a}\n${b}` : a || b);
+  return {
+    order_index: index,
+    question: join(q.question_hi, q.question_en),
+    question_ext: join(q.extra_hi, q.extra_en),
+    option_1: join(q.options[0]?.hi ?? "", q.options[0]?.en ?? ""),
+    option_2: join(q.options[1]?.hi ?? "", q.options[1]?.en ?? ""),
+    option_3: join(q.options[2]?.hi ?? "", q.options[2]?.en ?? ""),
+    option_4: join(q.options[3]?.hi ?? "", q.options[3]?.en ?? ""),
+    answer: q.correct!,
+    explanation_sections: [
+      { title: "पूछा गया / Asked in", body: `${q.exam} · Q${q.q_no}` },
+      q.explanation_hi ? { title: "व्याख्या", body: q.explanation_hi } : null,
+      q.explanation_en && q.explanation_en !== q.explanation_hi
+        ? { title: "Explanation", body: q.explanation_en }
+        : null,
+      q.explanation_general || q.explanation_source
+        ? {
+            title: "Source / स्रोत",
+            body: q.explanation_general
+              ? "General knowledge / सामान्य ज्ञान"
+              : q.explanation_source,
+          }
+        : null,
+    ].filter(Boolean),
+  };
+}

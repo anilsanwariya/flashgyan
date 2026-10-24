@@ -260,6 +260,14 @@ export const publishExamPaper = createServerFn({ method: "POST" })
     return (await server()).publishPaper(data.id, data.minutes);
   });
 
+// The MCQ practice sets made from published papers, made again.
+export const syncExamPyqSets = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).syncPyqSets();
+  });
+
 export const unpublishExamPaper = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id }).parse(d))

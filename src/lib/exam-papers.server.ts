@@ -11,6 +11,9 @@ import {
   type SaathiRpc,
 } from "../../supabase/functions/_shared/saathi-core.ts";
 import {
+  pyqRow,
+  pyqSets,
+  type PyqQuestion,
   CHECK_BATCH,
   checkSig,
   checkedNow,
@@ -775,6 +778,7 @@ export async function publishPaper(paperId: string, minutes?: number) {
     await from("mcq_tests").delete().eq("id", testId);
     throw e;
   }
+  await syncPyqSafely();
   return (await getPaper(paperId)).paper;
 }
 
@@ -794,7 +798,72 @@ export async function unpublishPaper(paperId: string) {
         .eq("id", paperId)
     ).error,
   );
+  await syncPyqSafely();
   return (await getPaper(paperId)).paper;
+}
+
+// ---------- Previous year questions as practice sets ----------
+
+const missingPyq = (e: { message: string } | null) => !!e && /from_papers/.test(e.message);
+export const PYQ_NOT_READY =
+  "Practice sets from papers need a database update: run the latest migration (pyq_practice) in Lovable or the SQL editor.";
+
+// The MCQ practice sets made from the published papers, made again: by
+// subject section and topic (sets made by hand are never touched).
+export async function syncPyqSets(): Promise<{ sets: number; questions: number }> {
+  const probe = await from("mcq_practice_tests").select("id").eq("from_papers", true).limit(1);
+  if (missingPyq(probe.error)) throw new Error(PYQ_NOT_READY);
+  fail(probe.error);
+  const { data: papers, error } = await from("exam_papers")
+    .select("id,exam,exam_date")
+    .eq("status", "published");
+  fail(error);
+  const all: PyqQuestion[] = [];
+  for (const p of (papers ?? []) as { id: string; exam: string; exam_date: string | null }[]) {
+    const { ready, questions } = await selectQuestions(p.id);
+    if (!ready) break;
+    all.push(...questions.map((q) => ({ ...q, exam: p.exam, exam_date: p.exam_date })));
+  }
+  const sets = pyqSets(all);
+  // After the sets made by hand.
+  const { data: last } = await from("mcq_practice_tests")
+    .select("order_index")
+    .eq("from_papers", false)
+    .order("order_index", { ascending: false })
+    .limit(1);
+  const after = ((last ?? []) as { order_index: number }[])[0]?.order_index ?? 0;
+  fail((await from("mcq_practice_tests").delete().eq("from_papers", true)).error);
+  let count = 0;
+  for (let i = 0; i < sets.length; i++) {
+    const set = sets[i];
+    const { data: t, error: tErr } = await from("mcq_practice_tests")
+      .insert({
+        name: set.name.slice(0, 200),
+        description: set.description.slice(0, 500),
+        subject: set.subject,
+        topic: set.topic.slice(0, 200),
+        order_index: after + 1 + i,
+        from_papers: true,
+      } as never)
+      .select("id")
+      .single();
+    fail(tErr);
+    const id = (t as unknown as { id: string }).id;
+    const rows = set.questions.map((q, k) => ({ test_id: id, ...pyqRow(q, k) }));
+    for (let k = 0; k < rows.length; k += 200)
+      fail((await from("mcq_practice_questions").insert(rows.slice(k, k + 200) as never)).error);
+    count += rows.length;
+  }
+  return { sets: sets.length, questions: count };
+}
+
+// Publishing never fails on the practice sets (before their migration too).
+async function syncPyqSafely() {
+  try {
+    await syncPyqSets();
+  } catch (e) {
+    console.error("practice sets from papers:", e);
+  }
 }
 
 // ---------- Checking a paper against the magazine ----------
