@@ -28,7 +28,11 @@ export async function makeProfile(): Promise<ExamProfile> {
       return { at: new Date().toISOString(), families: [], shares: {}, set: false };
     fail(error);
   }
-  const papers = (data ?? []) as { id: string; exam: string }[];
+  // Published papers only (proofread and verified).
+  const published = new Set(await (await import("@/lib/exam-papers.server")).publishedPaperIds());
+  const papers = ((data ?? []) as { id: string; exam: string }[]).filter((p) =>
+    published.has(p.id),
+  );
   const familyOf = new Map(papers.map((p) => [p.id, examFamily(p.exam)]));
   const fams = new Map<string, ExamFamily>();
   for (const p of papers) {

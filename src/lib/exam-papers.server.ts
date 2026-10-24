@@ -2,10 +2,20 @@
 // paper's pages with the AI, applying answer keys, importing from Excel, and
 // checking a paper against the current affairs magazine.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { saathiComplete, type SaathiImage } from "../../supabase/functions/_shared/saathi-core.ts";
 import {
+  matchLabel,
+  relevantMatches,
+  saathiComplete,
+  saathiSearchQuery,
+  type SaathiImage,
+  type SaathiRpc,
+} from "../../supabase/functions/_shared/saathi-core.ts";
+import {
+  EXPLAIN_BATCH,
   OPTION_COUNT,
   classifyMessages,
+  explainMessages,
+  parseExplanations,
   keyImageMessages,
   lessonsMessages,
   parseClassify,
@@ -38,9 +48,10 @@ function apiKey(): string {
 const now = () => new Date().toISOString();
 
 const missing = (e: { message: string } | null) =>
-  !!e && /exam_papers|exam_questions/.test(e.message);
+  !!e &&
+  /exam_papers|exam_questions|explanation_|verified|key_note|status|mcq_test_id/.test(e.message);
 export const PAPERS_NOT_READY =
-  "Exam papers need a database update: run the latest migration (exam_papers) in Lovable or the SQL editor.";
+  "Exam papers need a database update: run the latest migrations (exam_papers, exam_proofread) in Lovable or the SQL editor.";
 
 export type PaperSummary = ExamPaper & {
   questions: number;
@@ -51,10 +62,12 @@ export type PaperSummary = ExamPaper & {
   low: number;
   missed: number;
   ca: number;
+  verified: number;
+  explained: number;
 };
 
 const QUESTION_COLS =
-  "id,paper_id,q_no,question_en,question_hi,extra_en,extra_hi,options,correct,deleted,ca,matched_item,match,match_note";
+  "id,paper_id,q_no,question_en,question_hi,extra_en,extra_hi,options,correct,deleted,ca,matched_item,match,match_note,explanation_en,explanation_hi,explanation_source,explanation_general,verified,key_note";
 
 function readQuestion(r: unknown): ExamQuestion {
   const q = r as ExamQuestion;
@@ -92,6 +105,8 @@ export async function listPapers(): Promise<{ ready: boolean; papers: PaperSumma
       low: 0,
       missed: 0,
       ca: 0,
+      verified: 0,
+      explained: 0,
     });
   // A page at a time: one request returns at most 1,000 rows.
   for (let at = 0; papers.length; at += 1000) {
@@ -112,7 +127,10 @@ export async function listPapers(): Promise<{ ready: boolean; papers: PaperSumma
       if (q.match === "covered") s.covered++;
       if (q.match === "low") s.low++;
       if (q.match === "missed") s.missed++;
+      if (q.verified) s.verified++;
+      if (q.explanation_en || q.explanation_hi) s.explained++;
     }
+    if (missing(qErr)) return { ready: false, papers: [] };
     if ((rows ?? []).length < 1000) break;
   }
   return {
@@ -222,6 +240,10 @@ export async function saveQuestions(paperId: string, drafts: QuestionDraft[], re
       // from one row with null.
       correct: d.correct !== undefined ? d.correct : (old?.correct ?? null),
       deleted: d.deleted !== undefined ? d.deleted : (old?.deleted ?? false),
+      explanation_en: d.explanation_en ?? old?.explanation_en ?? "",
+      explanation_hi: d.explanation_hi ?? old?.explanation_hi ?? "",
+      explanation_source: d.explanation_source ?? old?.explanation_source ?? "",
+      key_note: d.key_note ?? old?.key_note ?? "",
       updated_at: now(),
     };
   });
@@ -376,13 +398,40 @@ export async function updateQuestion(
   patch: Partial<
     Pick<
       ExamQuestion,
-      "question_en" | "question_hi" | "extra_en" | "extra_hi" | "options" | "correct" | "deleted"
+      | "question_en"
+      | "question_hi"
+      | "extra_en"
+      | "extra_hi"
+      | "options"
+      | "correct"
+      | "deleted"
+      | "explanation_en"
+      | "explanation_hi"
+      | "verified"
     >
   >,
 ) {
+  await assertDraft({ question: id });
   const row: Record<string, unknown> = { updated_at: now() };
-  for (const k of ["question_en", "question_hi", "extra_en", "extra_hi"] as const)
-    if (patch[k] !== undefined) row[k] = String(patch[k]).trim().slice(0, 4000);
+  for (const k of [
+    "question_en",
+    "question_hi",
+    "extra_en",
+    "extra_hi",
+    "explanation_en",
+    "explanation_hi",
+  ] as const)
+    if (patch[k] !== undefined) row[k] = String(patch[k]).trim().slice(0, 6000);
+  // A change to the question or its explanation needs verifying again; the
+  // key's note is settled once the key is set by hand.
+  const changed =
+    Object.keys(row).length > 1 ||
+    !!patch.options ||
+    patch.correct !== undefined ||
+    patch.deleted !== undefined;
+  if (patch.correct !== undefined || patch.deleted !== undefined) row.key_note = "";
+  row.verified = patch.verified !== undefined ? patch.verified : changed ? false : undefined;
+  if (row.verified === undefined) delete row.verified;
   if (patch.options)
     row.options = Array.from({ length: OPTION_COUNT }, (_, i) => ({
       en: String(patch.options![i]?.en ?? "")
@@ -404,7 +453,232 @@ export async function updateQuestion(
 }
 
 export async function deleteQuestion(id: string) {
+  await assertDraft({ question: id });
   fail((await from("exam_questions").delete().eq("id", id)).error);
+}
+
+// A published paper is changed only after unpublishing it.
+async function assertDraft(where: { paper?: string; question?: string }) {
+  let paperId = where.paper;
+  if (!paperId && where.question) {
+    const { data } = await from("exam_questions")
+      .select("paper_id")
+      .eq("id", where.question)
+      .maybeSingle();
+    paperId = (data as { paper_id: string } | null)?.paper_id;
+  }
+  if (!paperId) return;
+  const { data, error } = await from("exam_papers").select("status").eq("id", paperId).single();
+  if (error && /status/.test(error.message)) return;
+  fail(error);
+  if ((data as unknown as { status: string }).status === "published")
+    throw new Error("This paper is published: unpublish it to make changes.");
+}
+
+// The papers the other features use: published ones (all of them before the
+// proofreading migration).
+export async function publishedPaperIds(): Promise<string[]> {
+  const { data, error } = await from("exam_papers").select("id").eq("status", "published");
+  if (error && /status/.test(error.message)) {
+    const { data: all } = await from("exam_papers").select("id");
+    return ((all ?? []) as { id: string }[]).map((r) => r.id);
+  }
+  fail(error);
+  return ((data ?? []) as { id: string }[]).map((r) => r.id);
+}
+
+// ---------- Explanations ----------
+
+const rpc: SaathiRpc = (fn, args) => supabaseAdmin.rpc(fn as never, args as never);
+
+// The next questions without an explanation (or those asked for again)
+// explained from SAATHI's books, a few per call. Returns how many are left.
+export async function explainStep(
+  paperId: string,
+  redo: string[] = [],
+): Promise<{ done: number; left: number; total: number }> {
+  await assertDraft({ paper: paperId });
+  const { questions } = await getPaper(paperId);
+  const wanted = (q: ExamQuestion) =>
+    redo.length ? redo.includes(q.id) : !q.explanation_en && !q.explanation_hi;
+  const todo = questions.filter(wanted);
+  const batch = todo.slice(0, EXPLAIN_BATCH);
+  if (!batch.length) return { done: 0, left: 0, total: questions.length };
+  const { data: subj } = await supabaseAdmin
+    .from("saathi_knowledge")
+    .select("subject")
+    .is("parent_id", null)
+    .limit(2000);
+  const subjects = [
+    ...new Set(((subj ?? []) as { subject: string }[]).map((r) => r.subject)),
+  ].filter(Boolean);
+  let k = 0;
+  const items = await Promise.all(
+    batch.map(async (q) => {
+      const answer = q.correct ? q.options[q.correct - 1] : null;
+      const text = [
+        q.question_en || q.question_hi,
+        q.extra_en || q.extra_hi,
+        answer?.en || answer?.hi,
+      ]
+        .filter(Boolean)
+        .join("\n")
+        .slice(0, 1000);
+      const matches = subjects.length
+        ? await saathiSearchQuery(apiKey(), rpc, { standalone: text, english: null }, subjects)
+            .then((m) => relevantMatches(m).slice(0, 3))
+            .catch(() => [])
+        : [];
+      return {
+        q,
+        passages: matches.map((m) => ({
+          k: ++k,
+          title: matchLabel(m),
+          content: m.content.slice(0, 1500),
+        })),
+      };
+    }),
+  );
+  const { glossary } = await CA.getMagazineSettings();
+  const { hindiGuide } = await import("../../supabase/functions/_shared/ca-hindi.ts");
+  const out = parseExplanations(
+    await saathiComplete(
+      apiKey(),
+      explainMessages(
+        items.map(({ q, passages }) => ({
+          n: q.q_no,
+          question: [q.question_en, q.question_hi].filter(Boolean).join("\n"),
+          extra: [q.extra_en, q.extra_hi].filter(Boolean).join("\n"),
+          options: q.options.map((o) => [o.en, o.hi].filter(Boolean).join(" / ")),
+          correct: q.correct,
+          deleted: q.deleted,
+          passages,
+        })),
+        hindiGuide(glossary),
+      ),
+    ),
+  );
+  if (!out.size) throw new Error("The AI's explanations couldn't be read: try again.");
+  let done = 0;
+  for (const { q, passages } of items) {
+    const e = out.get(q.q_no);
+    if (!e) continue;
+    const used = passages.filter((p) => e.from.includes(p.k));
+    fail(
+      (
+        await from("exam_questions")
+          .update({
+            explanation_en: e.en,
+            explanation_hi: e.hi,
+            explanation_source: [...new Set(used.map((p) => p.title))].join("; ").slice(0, 500),
+            explanation_general: !used.length,
+            verified: false,
+            updated_at: now(),
+          } as never)
+          .eq("id", q.id)
+      ).error,
+    );
+    done++;
+  }
+  const left = redo.length ? Math.max(0, todo.length - batch.length) : todo.length - done;
+  return { done, left, total: questions.length };
+}
+
+// ---------- Publishing ----------
+
+// A test for students: the paper as printed (Hindi and English together),
+// its explanations and source.
+export async function publishPaper(paperId: string, minutes?: number) {
+  const { paper, questions } = await getPaper(paperId);
+  if (paper.status === "published") return paper;
+  if (!questions.length) throw new Error("This paper has no questions.");
+  const left = questions.filter((q) => !q.verified).length;
+  if (left) throw new Error(`${left} question${left === 1 ? " isn't" : "s aren't"} verified yet.`);
+  const usable = questions.filter((q) => !q.deleted && q.correct);
+  const join = (a: string, b: string) => (a && b && a !== b ? `${a}\n${b}` : a || b);
+  const { data: first } = await from("mcq_tests")
+    .select("order_index")
+    .order("order_index", { ascending: true })
+    .limit(1);
+  const order = ((first ?? []) as { order_index: number }[])[0]?.order_index ?? 0;
+  const { data: test, error: tErr } = await from("mcq_tests")
+    .insert({
+      name: [paper.exam, paper.subject].filter(Boolean).join(" — ").slice(0, 200),
+      description: `Previous year paper${paper.conducted_by ? ` (${paper.conducted_by})` : ""} · ${usable.length} questions with explanations`,
+      order_index: order - 1,
+      duration_seconds: Math.max(600, Math.round((minutes ?? usable.length * 1.2) * 60)),
+    } as never)
+    .select("id")
+    .single();
+  fail(tErr);
+  const testId = (test as unknown as { id: string }).id;
+  try {
+    const rows = usable.map((q, i) => {
+      const sections = [
+        q.explanation_hi ? { title: "व्याख्या", body: q.explanation_hi } : null,
+        q.explanation_en && q.explanation_en !== q.explanation_hi
+          ? { title: "Explanation", body: q.explanation_en }
+          : null,
+        q.explanation_general || q.explanation_source
+          ? {
+              title: "Source / स्रोत",
+              body: q.explanation_general
+                ? "General knowledge / सामान्य ज्ञान"
+                : q.explanation_source,
+            }
+          : null,
+      ].filter(Boolean);
+      return {
+        test_id: testId,
+        order_index: i,
+        question: `${q.q_no}. ${join(q.question_hi, q.question_en)}`,
+        question_ext: join(q.extra_hi, q.extra_en),
+        option_1: join(q.options[0].hi, q.options[0].en),
+        option_2: join(q.options[1].hi, q.options[1].en),
+        option_3: join(q.options[2].hi, q.options[2].en),
+        option_4: join(q.options[3].hi, q.options[3].en),
+        answer: q.correct,
+        explanation_sections: sections,
+      };
+    });
+    for (let i = 0; i < rows.length; i += 200)
+      fail((await from("mcq_questions").insert(rows.slice(i, i + 200) as never)).error);
+    fail(
+      (
+        await from("exam_papers")
+          .update({
+            status: "published",
+            published_at: now(),
+            mcq_test_id: testId,
+            updated_at: now(),
+          } as never)
+          .eq("id", paperId)
+      ).error,
+    );
+  } catch (e) {
+    await from("mcq_tests").delete().eq("id", testId);
+    throw e;
+  }
+  return (await getPaper(paperId)).paper;
+}
+
+// Back to a draft: the students' test is taken down.
+export async function unpublishPaper(paperId: string) {
+  const { paper } = await getPaper(paperId);
+  if (paper.mcq_test_id) fail((await from("mcq_tests").delete().eq("id", paper.mcq_test_id)).error);
+  fail(
+    (
+      await from("exam_papers")
+        .update({
+          status: "draft",
+          published_at: null,
+          mcq_test_id: null,
+          updated_at: now(),
+        } as never)
+        .eq("id", paperId)
+    ).error,
+  );
+  return (await getPaper(paperId)).paper;
 }
 
 // ---------- Checking a paper against the magazine ----------

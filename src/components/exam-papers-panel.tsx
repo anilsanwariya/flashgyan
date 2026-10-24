@@ -11,8 +11,15 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  BadgeCheck,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Download,
+  Layers,
+  Sparkles,
+  Upload,
+  X,
   FileUp,
   KeyRound,
   Pencil,
@@ -26,7 +33,11 @@ import {
   checkExamPaper,
   createExamPaper,
   deleteExamPaper,
+  deleteExamQuestion,
+  explainExamPaper,
   getExamPaper,
+  publishExamPaper,
+  unpublishExamPaper,
   importExamPapers,
   listExamPapers,
   readExamPaperPage,
@@ -38,12 +49,13 @@ import {
 import {
   EXCEL_COLUMNS,
   OPTION_COUNT,
+  SHEET_COLUMNS,
   keyForSeries,
   keyFromRows,
   normSeries,
   parseKeySheet,
+  paperSheetRows,
   questionGaps,
-  questionsToRows,
   rowsToPapers,
   type ExamPaper,
   type KeySheet,
@@ -289,10 +301,20 @@ function PaperBadges({ p }: { p: PaperSummary }) {
   const reading = p.source === "pdf" && p.pages > 0 && p.pages_done < p.pages;
   return (
     <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
+      {p.status === "published" ? (
+        <Badge tone="good">Published</Badge>
+      ) : (
+        <Badge tone="muted">Draft</Badge>
+      )}
       <Badge tone="primary">
         {p.questions}
         {p.questions_total ? ` of ${p.questions_total}` : ""} questions
       </Badge>
+      {p.questions > 0 && p.status !== "published" && (
+        <Badge tone={p.verified === p.questions ? "good" : "muted"}>
+          {p.verified} of {p.questions} verified · {p.explained} explained
+        </Badge>
+      )}
       {reading && (
         <Badge tone="warn">
           Read {p.pages_done} of {p.pages} pages
@@ -404,8 +426,12 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
     return (
       <div className="flex flex-wrap items-center gap-2">
         <p className="min-w-0 flex-1 text-sm text-muted-foreground">
-          Question papers with their answer keys, exam by exam. Export any paper to Excel, or import
-          one in the same columns: {EXCEL_COLUMNS.join(", ")}.
+          Question papers with their answer keys, exam by exam. Import a paper from Excel: one row
+          per language (S. No. “E-1” English, “H-1” Hindi) with the columns{" "}
+          {SHEET_COLUMNS.slice(0, 11).join(", ")}; or one sheet per language in the columns{" "}
+          {EXCEL_COLUMNS.join(", ")}. Each paper starts as a draft: fill its explanations, proofread
+          and verify every question, then publish it. Export gives the same sheet with the
+          explanations.
         </p>
         <Button onClick={() => setOpenForm(true)}>
           <Plus className="mr-1 h-4 w-4" /> Add a paper
@@ -521,7 +547,16 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
 
 // ====================== One paper ======================
 
-type Filter = "all" | "answer" | "deleted" | "check" | "ca";
+type Filter =
+  | "all"
+  | "answer"
+  | "deleted"
+  | "check"
+  | "ca"
+  | "unverified"
+  | "verified"
+  | "noexpl"
+  | "key";
 type Lang = "both" | "hi" | "en";
 
 function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
@@ -625,8 +660,17 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
           ? questionGaps(x).length > 0
           : filter === "ca"
             ? x.ca
-            : true,
+            : filter === "unverified"
+              ? !x.verified
+              : filter === "verified"
+                ? x.verified
+                : filter === "noexpl"
+                  ? !x.explanation_en && !x.explanation_hi
+                  : filter === "key"
+                    ? !!x.key_note
+                    : true,
   );
+  const published = paper.status === "published";
 
   async function exportExcel() {
     try {
@@ -635,8 +679,7 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
         .replace(/[^\p{L}\p{N} .&-]+/gu, "")
         .slice(0, 80);
       await saveWorkbook(`${name}.xlsx`, [
-        { name: "English", rows: questionsToRows(paper!, questions, "en") },
-        { name: "Hindi", rows: questionsToRows(paper!, questions, "hi") },
+        { name: "Bilingual", rows: paperSheetRows(paper!, questions) },
       ]);
     } catch (e) {
       toast.error(errorText(e, "Couldn't export"));
@@ -816,6 +859,8 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
         )}
       </section>
 
+      <Proofread paper={paper} questions={questions} lang={lang} onChanged={refresh} />
+
       <MagazineCheck
         paper={paper}
         questions={questions}
@@ -834,6 +879,15 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
               ["check", `To check (${toCheck.length})`],
               ...(questions.some((x) => x.ca)
                 ? [["ca", `Current affairs (${questions.filter((x) => x.ca).length})`]]
+                : []),
+              ["unverified", `Not verified (${questions.filter((x) => !x.verified).length})`],
+              ["verified", `Verified (${questions.filter((x) => x.verified).length})`],
+              [
+                "noexpl",
+                `No explanation (${questions.filter((x) => !x.explanation_en && !x.explanation_hi).length})`,
+              ],
+              ...(questions.some((x) => x.key_note)
+                ? [["key", `Check the key (${questions.filter((x) => x.key_note).length})`]]
                 : []),
             ] as [Filter, string][]
           ).map(([k, label]) => (
@@ -871,6 +925,7 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
               key={x.id}
               q={x}
               lang={lang}
+              locked={published}
               story={x.matched_item ? data!.stories[x.matched_item] : undefined}
               onChanged={refresh}
             />
@@ -1000,16 +1055,36 @@ function QuestionCard({
   q,
   lang,
   story,
+  locked,
   onChanged,
 }: {
   q: ExamQuestion;
   lang: Lang;
   story?: { date: string; headline: string; status: string };
+  locked?: boolean;
   onChanged: () => Promise<unknown>;
 }) {
   const [editing, setEditing] = useState(false);
+  const updateFn = useServerFn(updateExamQuestion);
+  const removeFn = useServerFn(deleteExamQuestion);
   const gaps = questionGaps(q);
   const show = (l: "en" | "hi") => lang === "both" || lang === l;
+  const setVerified = (verified: boolean) =>
+    void updateFn({ data: { id: q.id, patch: { verified } } })
+      .then(async () => {
+        toast.success(verified ? `Question ${q.q_no} verified` : `Question ${q.q_no} not verified`);
+        await onChanged();
+      })
+      .catch((e) => toast.error(errorText(e, "Couldn't save")));
+  const remove = () => {
+    if (!confirm(`Delete question ${q.q_no} from this paper?`)) return;
+    void removeFn({ data: { id: q.id } })
+      .then(async () => {
+        toast.success(`Question ${q.q_no} deleted`);
+        await onChanged();
+      })
+      .catch((e) => toast.error(errorText(e, "Couldn't delete it")));
+  };
   return (
     <li
       data-question={q.q_no}
@@ -1022,15 +1097,42 @@ function QuestionCard({
         {gaps.length > 0 && <Badge tone="warn">Check: {gaps.join(", ")}</Badge>}
         {q.ca !== null && <Badge>{q.ca ? "Current affairs" : "Static"}</Badge>}
         {q.match && <Badge tone={MATCH_TONE[q.match]}>{MATCH_TEXT[q.match]}</Badge>}
-        <Button
-          size="sm"
-          variant="ghost"
-          className="ml-auto h-7"
-          aria-label={`Edit question ${q.q_no}`}
-          onClick={() => setEditing((e) => !e)}
-        >
-          <Pencil className="h-3.5 w-3.5" />
-        </Button>
+        {q.verified && (
+          <Badge tone="good">
+            <BadgeCheck className="h-3 w-3" /> Verified
+          </Badge>
+        )}
+        {q.key_note && <Badge tone="warn">Check the key</Badge>}
+        {!locked && (
+          <span className="ml-auto flex items-center gap-1">
+            <Button
+              size="sm"
+              variant={q.verified ? "ghost" : "outline"}
+              className="h-7"
+              onClick={() => setVerified(!q.verified)}
+            >
+              {q.verified ? "Unverify" : "Verify"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7"
+              aria-label={`Edit question ${q.q_no}`}
+              onClick={() => setEditing((e) => !e)}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7"
+              aria-label={`Delete question ${q.q_no}`}
+              onClick={remove}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </span>
+        )}
       </div>
       {editing ? (
         <QuestionEditor q={q} onDone={() => setEditing(false)} onSaved={onChanged} />
@@ -1063,6 +1165,7 @@ function QuestionCard({
               </div>
             );
           })}
+          <Explanation q={q} lang={lang} />
           {q.match && (
             <p className="text-xs text-muted-foreground">
               {story ? (
@@ -1103,6 +1206,8 @@ function QuestionEditor({
     extra_hi: q.extra_hi,
     options: q.options.map((o) => ({ ...o })),
     answer: q.deleted ? "deleted" : q.correct ? String(q.correct) : "",
+    explanation_en: q.explanation_en,
+    explanation_hi: q.explanation_hi,
   });
   const [busy, setBusy] = useState(false);
   const setOption = (i: number, l: "en" | "hi", v: string) =>
@@ -1125,6 +1230,8 @@ function QuestionEditor({
               options: f.options,
               deleted: f.answer === "deleted",
               correct: /^[1-4]$/.test(f.answer) ? Number(f.answer) : null,
+              explanation_en: f.explanation_en,
+              explanation_hi: f.explanation_hi,
             },
           },
         })
@@ -1167,7 +1274,7 @@ function QuestionEditor({
           placeholder="Statements / lists (if any)"
         />
         {Array.from({ length: OPTION_COUNT }, (_, i) => (
-          <div key={i} className="contents">
+          <div key={i} className="contents" data-option-row={i + 1}>
             <Input
               aria-label={`Option ${i + 1} (Hindi)`}
               value={f.options[i]?.hi ?? ""}
@@ -1182,6 +1289,20 @@ function QuestionEditor({
             />
           </div>
         ))}
+        <Textarea
+          aria-label="Explanation (Hindi)"
+          rows={6}
+          value={f.explanation_hi}
+          onChange={(e) => setF({ ...f, explanation_hi: e.target.value })}
+          placeholder="व्याख्या"
+        />
+        <Textarea
+          aria-label="Explanation (English)"
+          rows={6}
+          value={f.explanation_en}
+          onChange={(e) => setF({ ...f, explanation_en: e.target.value })}
+          placeholder="Explanation"
+        />
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <select
@@ -1206,6 +1327,411 @@ function QuestionEditor({
         </Button>
       </div>
     </form>
+  );
+}
+
+// ====================== Explanations and proofreading ======================
+
+function Explanation({ q, lang }: { q: ExamQuestion; lang: Lang }) {
+  if (!q.explanation_en && !q.explanation_hi) return null;
+  const show = (l: "en" | "hi") => lang === "both" || lang === l;
+  return (
+    <div className="space-y-1 rounded-xl bg-muted/50 p-2.5" data-explanation>
+      {(["hi", "en"] as const).filter(show).map((l) => {
+        const text = l === "hi" ? q.explanation_hi : q.explanation_en;
+        return text ? (
+          <p key={l} lang={l} className="whitespace-pre-line break-words">
+            {text}
+          </p>
+        ) : null;
+      })}
+      <p className="text-xs text-muted-foreground">
+        {q.explanation_general ? (
+          <span className="font-medium text-amber-700 dark:text-amber-400">
+            General knowledge — check carefully
+          </span>
+        ) : q.explanation_source ? (
+          `Source: ${q.explanation_source}`
+        ) : (
+          "Written or edited by hand"
+        )}
+      </p>
+    </div>
+  );
+}
+
+// Explanations, proofreading and publishing: the paper's state, filling
+// explanations from SAATHI's books, the cards, and publish / unpublish.
+function Proofread({
+  paper,
+  questions,
+  lang,
+  onChanged,
+}: {
+  paper: ExamPaper;
+  questions: ExamQuestion[];
+  lang: Lang;
+  onChanged: () => Promise<unknown>;
+}) {
+  const explainFn = useServerFn(explainExamPaper);
+  const publishFn = useServerFn(publishExamPaper);
+  const unpublishFn = useServerFn(unpublishExamPaper);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [cards, setCards] = useState(false);
+  const stop = useRef(false);
+  const published = paper.status === "published";
+  const verified = questions.filter((q) => q.verified).length;
+  const explained = questions.filter((q) => q.explanation_en || q.explanation_hi).length;
+  const toExplain = questions.length - explained;
+  const general = questions.filter((q) => q.explanation_general).length;
+  const usable = questions.filter((q) => !q.deleted && q.correct).length;
+
+  async function explain(redo: string[] = []) {
+    stop.current = false;
+    let done = 0;
+    try {
+      for (;;) {
+        setBusy(
+          redo.length
+            ? "Writing the explanation again…"
+            : `Writing explanations… ${explained + done} of ${questions.length}`,
+        );
+        const r: Awaited<ReturnType<typeof explainFn>> = await explainFn({
+          data: { id: paper.id, redo },
+        });
+        done += r.done;
+        if (done % 8 === 0 || r.left === 0) await onChanged();
+        if (redo.length || r.left === 0 || stop.current || !r.done) break;
+      }
+      toast.success(redo.length ? "Explanation written again" : `${done} explanations written`);
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't write the explanations"));
+    } finally {
+      setBusy(null);
+      await onChanged();
+    }
+  }
+
+  async function publish() {
+    const def = Math.max(10, Math.round(usable * 1.2));
+    const m = prompt(
+      `Publish “${paper.exam}”? It becomes a test for students (${usable} questions with explanations) and is used by the other features. Time for the test, in minutes:`,
+      String(def),
+    );
+    if (m === null) return;
+    const minutes = Math.min(600, Math.max(10, Math.round(Number(m) || def)));
+    setBusy("Publishing…");
+    try {
+      await publishFn({ data: { id: paper.id, minutes } });
+      toast.success("Published: students can take it as a test");
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't publish"));
+    } finally {
+      setBusy(null);
+      await onChanged();
+    }
+  }
+
+  async function unpublish() {
+    if (
+      !confirm(
+        "Unpublish this paper? Its test is taken down for students until you publish it again.",
+      )
+    )
+      return;
+    setBusy("Unpublishing…");
+    try {
+      await unpublishFn({ data: { id: paper.id } });
+      toast.success("Back to a draft");
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't unpublish"));
+    } finally {
+      setBusy(null);
+      await onChanged();
+    }
+  }
+
+  return (
+    <section
+      aria-label="Proofread and publish"
+      className="space-y-3 rounded-2xl border border-border bg-card p-4"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="font-semibold">Proofread and publish</h3>
+        {published ? <Badge tone="good">Published</Badge> : <Badge tone="muted">Draft</Badge>}
+        <span className="text-sm text-muted-foreground" data-testid="proof-counts">
+          {verified} of {questions.length} verified · {explained} explained
+          {general ? ` · ${general} from general knowledge` : ""}
+        </span>
+      </div>
+      {published ? (
+        <p className="text-sm text-muted-foreground">
+          Students can take it as a test, and the other features use it. Unpublish it to make
+          changes.
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Fill the explanations, then check every question and its explanation: edit, delete or
+          verify. When all are verified, publish it for students and the other features.
+        </p>
+      )}
+      {busy && (
+        <p role="status" className="flex items-center gap-2 text-sm text-primary">
+          <RefreshCw className="h-4 w-4 animate-spin" /> {busy}
+          {busy.startsWith("Writing explanations") && (
+            <Button size="sm" variant="ghost" onClick={() => (stop.current = true)}>
+              Stop
+            </Button>
+          )}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {!published && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!!busy || !toExplain}
+            onClick={() => void explain()}
+          >
+            <Sparkles className="mr-1 h-4 w-4" />
+            {toExplain ? `Fill explanations (${toExplain})` : "All explained"}
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!questions.length}
+          onClick={() => setCards(true)}
+        >
+          <Layers className="mr-1 h-4 w-4" /> {published ? "Read as cards" : "Proofread one by one"}
+        </Button>
+        {published ? (
+          <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => void unpublish()}>
+            Unpublish
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            disabled={!!busy || !questions.length || verified < questions.length}
+            title={verified < questions.length ? "Verify every question first" : undefined}
+            onClick={() => void publish()}
+          >
+            <Upload className="mr-1 h-4 w-4" /> Publish
+          </Button>
+        )}
+      </div>
+      {cards && (
+        <ProofCards
+          questions={questions}
+          lang={lang}
+          locked={published}
+          busy={!!busy}
+          onRedo={(id) => explain([id])}
+          onClose={() => setCards(false)}
+          onChanged={onChanged}
+        />
+      )}
+    </section>
+  );
+}
+
+// One question at a time: edit, delete, write the explanation again, or
+// verify and go to the next (keys: V verify, → next, ← back, E edit).
+function ProofCards({
+  questions,
+  lang: lang0,
+  locked,
+  busy,
+  onRedo,
+  onClose,
+  onChanged,
+}: {
+  questions: ExamQuestion[];
+  lang: Lang;
+  locked: boolean;
+  busy: boolean;
+  onRedo: (id: string) => Promise<void>;
+  onClose: () => void;
+  onChanged: () => Promise<unknown>;
+}) {
+  const updateFn = useServerFn(updateExamQuestion);
+  const removeFn = useServerFn(deleteExamQuestion);
+  const [onlyOpen, setOnlyOpen] = useState(!locked);
+  const [lang, setLang] = useState<Lang>(lang0);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const list = onlyOpen ? questions.filter((q) => !q.verified) : questions;
+  const [at, setAt] = useState(0);
+  const i = Math.min(at, Math.max(0, list.length - 1));
+  const q = list[i];
+  const verifiedCount = questions.filter((x) => x.verified).length;
+
+  async function verify() {
+    if (!q || locked) return;
+    setSaving(true);
+    try {
+      await updateFn({ data: { id: q.id, patch: { verified: true } } });
+      toast.success(`Question ${q.q_no} verified`);
+      await onChanged();
+      // The verified question leaves the "not verified" list: the next
+      // takes its place; in the full list, go on.
+      if (!onlyOpen) setAt(i + 1);
+      setEditing(false);
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't save"));
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function remove() {
+    if (!q || locked || !confirm(`Delete question ${q.q_no} from this paper?`)) return;
+    setSaving(true);
+    try {
+      await removeFn({ data: { id: q.id } });
+      toast.success(`Question ${q.q_no} deleted`);
+      await onChanged();
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't delete it"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowRight") setAt((x) => Math.min(x + 1, list.length - 1));
+      else if (e.key === "ArrowLeft") setAt((x) => Math.max(0, x - 1));
+      else if ((e.key === "v" || e.key === "V") && !editing) void verify();
+      else if ((e.key === "e" || e.key === "E") && !locked) setEditing(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col bg-background"
+      role="dialog"
+      aria-label="Proofread questions"
+    >
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
+        <Button size="sm" variant="ghost" aria-label="Close" onClick={onClose}>
+          <X className="h-4 w-4" />
+        </Button>
+        <span className="text-sm font-medium" data-testid="card-progress">
+          {list.length ? `${i + 1} of ${list.length}` : "Nothing here"} · {verifiedCount} of{" "}
+          {questions.length} verified
+        </span>
+        <label className="flex items-center gap-1.5 text-xs">
+          <input
+            type="checkbox"
+            checked={onlyOpen}
+            onChange={(e) => {
+              setOnlyOpen(e.target.checked);
+              setAt(0);
+            }}
+          />
+          Only not verified
+        </label>
+        <div className="ml-auto inline-flex rounded-lg border border-border p-0.5 text-xs">
+          {(["both", "hi", "en"] as const).map((l) => (
+            <button
+              key={l}
+              type="button"
+              aria-pressed={lang === l}
+              onClick={() => setLang(l)}
+              className={`rounded-md px-2.5 py-1 ${lang === l ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+            >
+              {l === "both" ? "Both" : l === "hi" ? "हिंदी" : "English"}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        <div className="mx-auto max-w-3xl">
+          {q ? (
+            editing ? (
+              <QuestionEditor
+                key={q.id}
+                q={q}
+                onDone={() => setEditing(false)}
+                onSaved={onChanged}
+              />
+            ) : (
+              <ol>
+                <QuestionCard key={q.id} q={q} lang={lang} locked onChanged={onChanged} />
+              </ol>
+            )
+          ) : (
+            <p className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+              {onlyOpen ? "Every question is verified." : "No questions."}
+            </p>
+          )}
+          {q?.key_note && (
+            <p className="mt-2 rounded-xl border border-amber-400/60 bg-amber-500/10 p-2.5 text-sm">
+              {q.key_note} Set the right option in Edit, or verify if the key is right.
+            </p>
+          )}
+          {q && !q.explanation_en && !q.explanation_hi && (
+            <p className="mt-2 text-sm text-muted-foreground">No explanation yet.</p>
+          )}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-2 border-t border-border px-3 py-2">
+        <Button
+          size="sm"
+          variant="outline"
+          aria-label="Previous question"
+          disabled={i === 0}
+          onClick={() => setAt(i - 1)}
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        {!locked && q && (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={saving}
+              onClick={() => setEditing(!editing)}
+            >
+              <Pencil className="mr-1 h-4 w-4" /> {editing ? "Close editor" : "Edit"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={saving || busy}
+              onClick={() => void onRedo(q.id)}
+            >
+              <Sparkles className="mr-1 h-4 w-4" />
+              {q.explanation_en || q.explanation_hi ? "Explain again" : "Explain"}
+            </Button>
+            <Button size="sm" variant="ghost" disabled={saving} onClick={() => void remove()}>
+              <Trash2 className="mr-1 h-4 w-4" /> Delete
+            </Button>
+            <Button
+              size="sm"
+              disabled={saving || editing || q.verified}
+              onClick={() => void verify()}
+            >
+              <BadgeCheck className="mr-1 h-4 w-4" /> {q.verified ? "Verified" : "Verify & next"}
+            </Button>
+          </>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          aria-label="Next question"
+          disabled={i >= list.length - 1}
+          onClick={() => setAt(i + 1)}
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
   );
 }
 

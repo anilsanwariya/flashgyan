@@ -325,7 +325,11 @@ export async function coverage(
   }
   const { data: papers, error: pErr } = await from("exam_papers").select("id,conducted_by");
   fail(pErr);
-  const all = (papers ?? []) as { id: string; conducted_by: string }[];
+  // Published papers only (proofread and verified).
+  const published = new Set(await (await import("@/lib/exam-papers.server")).publishedPaperIds());
+  const all = ((papers ?? []) as { id: string; conducted_by: string }[]).filter((p) =>
+    published.has(p.id),
+  );
   const bodies = [...new Set(all.map((p) => p.conducted_by).filter(Boolean))].sort();
   // Weighted by the editor's exam weights: each exam's mix by its weight.
   if (body === WEIGHTED) {
