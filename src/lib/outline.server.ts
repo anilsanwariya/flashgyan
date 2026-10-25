@@ -11,6 +11,9 @@ import {
   outlineText,
   parseFit,
   parseOutline,
+  parseQuestionTopics,
+  QUESTION_LINK_BATCH,
+  questionTopicMessages,
   type Level,
   type MasterTopic,
   type OutlineLine,
@@ -155,11 +158,142 @@ export async function listOutlines(): Promise<{ ready: boolean; sections: Outlin
   }
 }
 
+// A past question filed under a topic.
+export type TopicQuestion = {
+  id: string;
+  topic_id: string;
+  exam: string;
+  q_no: number;
+  text: string;
+  marks: number | null;
+  written: boolean;
+  published: boolean;
+};
+
 export async function getOutline(
   section: string,
-): Promise<{ topics: MasterTopic[]; lines: OutlineLine[] }> {
+): Promise<{ topics: MasterTopic[]; lines: OutlineLine[]; questions: TopicQuestion[] }> {
   const [topics, lines] = await Promise.all([sectionTopics(section), officialLines(section)]);
-  return { topics, lines };
+  return { topics, lines, questions: await topicQuestions(topics.map((t) => t.id)) };
+}
+
+// The past questions filed under these topics (none before the mains_papers
+// migration).
+async function topicQuestions(ids: string[]): Promise<TopicQuestion[]> {
+  const out: TopicQuestion[] = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data, error } = await from("exam_questions")
+      .select(
+        "id,q_no,question_en,question_hi,marks,master_topic_id,deleted,paper:exam_papers(exam,kind,status)",
+      )
+      .in("master_topic_id", ids.slice(i, i + 100));
+    if (error) return [];
+    for (const r of (data ?? []) as unknown as {
+      id: string;
+      q_no: number;
+      question_en: string;
+      question_hi: string;
+      marks: number | null;
+      master_topic_id: string;
+      deleted: boolean;
+      paper: { exam: string; kind?: string; status?: string } | null;
+    }[]) {
+      if (r.deleted) continue;
+      out.push({
+        id: r.id,
+        topic_id: r.master_topic_id,
+        exam: r.paper?.exam ?? "",
+        q_no: r.q_no,
+        text: (r.question_en || r.question_hi).slice(0, 300),
+        marks: r.marks,
+        written: r.paper?.kind === "subjective",
+        published: r.paper?.status === "published",
+      });
+    }
+  }
+  return out.sort((a, b) => a.exam.localeCompare(b.exam) || a.q_no - b.q_no);
+}
+
+// ---------- Past questions on the outline ----------
+
+// The next questions of a paper (with a subject section whose outline is
+// made) filed under the outline's topics, one section's batch per call.
+// `skip`: questions the AI couldn't place before. Returns how many are left
+// and the sections that have no outline yet.
+export async function linkPaperTopics(
+  paperId: string,
+  skip: string[] = [],
+): Promise<{ done: number; missed: string[]; left: number; noOutline: string[] }> {
+  const { data, error } = await from("exam_questions")
+    .select("id,q_no,question_en,question_hi,extra_en,subject_section,master_topic_id,deleted")
+    .eq("paper_id", paperId)
+    .order("q_no");
+  if (error && /master_topic_id/.test(error.message))
+    throw new Error(
+      "Linking questions to the outlines needs a database update: run the latest migration (mains_papers) in Lovable or the SQL editor.",
+    );
+  fail(error);
+  const all = (data ?? []) as unknown as {
+    id: string;
+    q_no: number;
+    question_en: string;
+    question_hi: string;
+    extra_en: string;
+    subject_section: string;
+    master_topic_id: string | null;
+    deleted: boolean;
+  }[];
+  const pending = all.filter(
+    (q) => !q.deleted && !q.master_topic_id && q.subject_section && !skip.includes(q.id),
+  );
+  const sections = [...new Set(pending.map((q) => q.subject_section))];
+  const outlines = new Map<string, MasterTopic[]>();
+  for (const s of sections) {
+    const t = await sectionTopics(s);
+    if (t.length) outlines.set(s, t);
+  }
+  const noOutline = sections.filter((s) => !outlines.has(s));
+  const todo = pending.filter((q) => outlines.has(q.subject_section));
+  if (!todo.length) return { done: 0, missed: [], left: 0, noOutline };
+  const section = todo[0].subject_section;
+  const batch = todo.filter((q) => q.subject_section === section).slice(0, QUESTION_LINK_BATCH);
+  const { text, ids } = outlineText(outlines.get(section)!);
+  const placed = parseQuestionTopics(
+    await saathiComplete(
+      apiKey(),
+      questionTopicMessages(
+        section,
+        text,
+        batch.map((q) => ({
+          n: q.q_no,
+          text: [q.question_en || q.question_hi, q.extra_en]
+            .filter(Boolean)
+            .join(" ")
+            .slice(0, 600),
+        })),
+      ),
+    ),
+    batch.map((q) => q.q_no),
+    ids.length,
+  );
+  let done = 0;
+  const missed: string[] = [];
+  for (const q of batch) {
+    const t = placed.get(q.q_no);
+    if (!t) {
+      missed.push(q.id);
+      continue;
+    }
+    fail(
+      (
+        await from("exam_questions")
+          .update({ master_topic_id: ids[t - 1] } as never)
+          .eq("id", q.id)
+      ).error,
+    );
+    done++;
+  }
+  return { done, missed, left: todo.length - batch.length, noOutline };
 }
 
 // Planned topics saved a level at a time (each level's ids for the next),
@@ -394,6 +528,27 @@ export async function linksForExam(
       topic: { id: string; name_en: string; section: string } | null;
     }[])
       if (r.topic) out[r.node_id] = [...(out[r.node_id] ?? []), r.topic];
+  }
+  return out;
+}
+
+// Topics' names, for the questions filed under them.
+export async function topicNames(
+  ids: string[],
+): Promise<Record<string, { name_en: string; name_hi: string; section: string }>> {
+  const out: Record<string, { name_en: string; name_hi: string; section: string }> = {};
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await from("master_topics")
+      .select("id,name_en,name_hi,section")
+      .in("id", ids.slice(i, i + 200));
+    if (error) return out;
+    for (const t of (data ?? []) as {
+      id: string;
+      name_en: string;
+      name_hi: string;
+      section: string;
+    }[])
+      out[t.id] = { name_en: t.name_en, name_hi: t.name_hi, section: t.section };
   }
   return out;
 }

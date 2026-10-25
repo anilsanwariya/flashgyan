@@ -36,11 +36,14 @@ import {
   childLevel,
   childrenOf,
   numbering,
+  subtree,
   topicExams,
   type MasterTopic,
   type OutlineLine,
 } from "@/lib/outline";
 import { Badge, errorText } from "@/components/ca-ui";
+
+type TopicQuestion = Awaited<ReturnType<typeof getOutline>>["questions"][number];
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -128,6 +131,8 @@ function OutlineView({ section, onBack }: { section: string; onBack: () => void 
   const [newChapter, setNewChapter] = useState(false);
   const topics = q.data?.topics ?? [];
   const lines = q.data?.lines ?? [];
+  // Past questions filed under the topics (Exam papers → Link to outlines).
+  const asked = q.data?.questions ?? [];
   const refresh = async () => {
     await qc.invalidateQueries({ queryKey: ["outline", section] });
     await qc.invalidateQueries({ queryKey: ["outlines"] });
@@ -226,6 +231,7 @@ function OutlineView({ section, onBack }: { section: string; onBack: () => void 
               number={numbers.get(t.id) ?? ""}
               topics={topics}
               lines={lines}
+              asked={asked}
               first={childrenOf(topics, t.parent_id)[0]?.id === t.id}
               last={childrenOf(topics, t.parent_id).at(-1)?.id === t.id}
               onChanged={refresh}
@@ -280,6 +286,7 @@ function TopicRow({
   number,
   topics,
   lines,
+  asked,
   first,
   last,
   onChanged,
@@ -288,6 +295,7 @@ function TopicRow({
   number: string;
   topics: MasterTopic[];
   lines: OutlineLine[];
+  asked: TopicQuestion[];
   first: boolean;
   last: boolean;
   onChanged: () => Promise<unknown>;
@@ -300,7 +308,11 @@ function TopicRow({
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [showLines, setShowLines] = useState(false);
+  const [showAsked, setShowAsked] = useState(false);
   const own = lines.filter((l) => l.topics.includes(t.id));
+  // Asked here or anything under it.
+  const under = new Set(subtree(topics, t.id));
+  const pyqs = asked.filter((x) => under.has(x.topic_id));
   const exams = topicExams(topics, lines, t.id);
   const next = childLevel(t.level);
   const depth = t.level === "chapter" ? 0 : t.level === "topic" ? 1 : 2;
@@ -357,6 +369,18 @@ function TopicRow({
                 <ChevronRight className="h-3.5 w-3.5" />
               )}
               {own.length} {own.length === 1 ? "line" : "lines"}
+            </button>
+          )}
+          {pyqs.length > 0 && (
+            <button
+              type="button"
+              data-asked={pyqs.length}
+              className="flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:text-amber-300"
+              aria-expanded={showAsked}
+              title="Past questions filed under this topic"
+              onClick={() => setShowAsked(!showAsked)}
+            >
+              Asked {pyqs.length}×
             </button>
           )}
           <span className="flex gap-0.5 opacity-60 group-hover:opacity-100">
@@ -440,6 +464,19 @@ function TopicRow({
               >
                 <X className="h-3.5 w-3.5" />
               </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {showAsked && (
+        <ul className="ml-12 mt-1 space-y-0.5 text-xs" aria-label={`Questions on ${t.name_en}`}>
+          {pyqs.map((x) => (
+            <li key={x.id} className="flex items-start gap-1.5">
+              <Badge tone={x.written ? "primary" : "muted"}>
+                {x.exam} · Q{x.q_no}
+                {x.marks ? ` · ${x.marks} marks` : ""}
+              </Badge>
+              <span className="min-w-0 flex-1 break-words text-muted-foreground">{x.text}</span>
             </li>
           ))}
         </ul>
