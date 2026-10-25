@@ -8,3 +8,5 @@ bun.lock
 routeTree.gen.ts
 src/lib/ca-map-data.ts
 src/lib/notes-map-data.ts
+src/lib/geo-data.ts
+src/lib/geo-places-data.ts

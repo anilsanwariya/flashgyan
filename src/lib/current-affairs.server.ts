@@ -4513,6 +4513,27 @@ export async function toMagazineItems(rows: CaItem[]): Promise<MagazineItem[]> {
   }));
 }
 
+// A map for one story, suggested by the AI from its facts, its places put
+// where the place list says they are (nothing saved).
+export async function suggestStoryMap(itemId: string) {
+  const item = await getItem(itemId);
+  const { storyMapMessages, parseStoryMap } = await import("@/lib/ca-map");
+  const { hindiGuide } = await import("../../supabase/functions/_shared/ca-hindi.ts");
+  const map = parseStoryMap(
+    await saathiComplete(
+      apiKey(),
+      storyMapMessages(
+        item.content?.headline.en || item.headline,
+        item.facts.map((f) => f.text),
+        hindiGuide(await glossaryNow()),
+      ),
+    ),
+  );
+  if (!map) throw new Error("SAATHI found no place in this story worth a map.");
+  const { checkMapPlaces } = await import("@/lib/geo-places");
+  return checkMapPlaces(map);
+}
+
 // Finds where the month's "Places in News" stories are (one AI call for
 // those not located yet), keeps it on the stories, and fills it in on the
 // items. Without the migration, or when the AI fails, the maps are left out.
@@ -4532,7 +4553,15 @@ async function locatePlaces(items: MagazineItem[], maps: typeof import("@/lib/ca
       ),
       todo.length,
     );
-    for (const [k, geo] of found) {
+    // Where the place list has the place, its position wins over the AI's.
+    const { matchPlace } = await import("@/lib/geo-places");
+    for (const [k, found0] of found) {
+      let geo = found0;
+      const hit = geo.place ? await matchPlace({ en: geo.place }, geo, 60) : null;
+      if (hit) {
+        const fixed = maps.checkGeo({ lat: hit.place.lat, lon: hit.place.lon, region: geo.region });
+        if (fixed) geo = { ...fixed, place: geo.place, checked: true };
+      }
       todo[k].geo = geo;
       const { error } = await from("ca_items")
         .update({ geo } as never)
@@ -4636,6 +4665,7 @@ export async function issueHtml(
       radar,
       reports,
       placeMaps: maps?.placeMaps,
+      storyMap: (await import("@/lib/notes-map")).noteMapHtml,
       design,
       fillers: opts.fillers,
       coverOnly: opts.coverOnly,

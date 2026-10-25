@@ -51,7 +51,7 @@ const T = {
     map: "Map",
     end: (n: number) => `End of Chapter ${n}`,
     sources: "Sources for this chapter",
-    maps: "Maps: rivers from Natural Earth; outlines from DataMeet, following the Survey of India boundary; not to scale.",
+    maps: "Maps: Rajasthan's rivers from India-WRIS, India's from Natural Earth; canals from BharatMaps; protected areas from PM GatiShakti; districts (33, before 2023) from the 2011 Census boundaries; places from the Survey of India; outlines from DataMeet, following the Survey of India boundary. Not to scale.",
     review: "Review copy: ◇ marks lines written without a source passage.",
     words: "words",
   },
@@ -73,7 +73,7 @@ const T = {
     map: "मानचित्र",
     end: (n: number) => `अध्याय ${n} समाप्त`,
     sources: "इस अध्याय के स्रोत",
-    maps: "मानचित्र: नदियाँ Natural Earth से; सीमाएँ DataMeet से, भारतीय सर्वेक्षण की सीमा के अनुसार; पैमाने पर नहीं।",
+    maps: "मानचित्र: राजस्थान की नदियाँ इंडिया-WRIS से, भारत की Natural Earth से; नहरें भारतमैप्स से; संरक्षित क्षेत्र पीएम गतिशक्ति से; ज़िले (33, 2023 से पहले) 2011 की जनगणना की सीमाओं से; स्थान भारतीय सर्वेक्षण से; सीमाएँ DataMeet से, भारतीय सर्वेक्षण की सीमा के अनुसार। पैमाने पर नहीं।",
     review: "समीक्षा प्रति: ◇ उन पंक्तियों पर है जो किसी स्रोत अंश के बिना लिखी गईं।",
     words: "शब्द",
   },
@@ -190,7 +190,7 @@ export function topicHtml(
         .join("")}</tbody></table></figure>`
     : "";
   const map = c.map
-    ? `${h3(pick(c.map.title, lang) || L.map)}${noteMapHtml(c.map, lang, accent)}`
+    ? `${h3(pick(c.map.title, lang) || L.map)}${noteMapHtml(c.map, lang, accent, review)}`
     : "";
   const sourced = (xs: NoteContent["data"], cls: string) =>
     xs

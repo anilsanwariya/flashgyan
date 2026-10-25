@@ -697,6 +697,7 @@ export async function magHtml(
       lang,
       settings,
       items: list,
+      storyMap: (await import("@/lib/notes-map")).noteMapHtml,
       design,
       fillers: opts.fillers ?? 0,
       coverOnly: opts.coverOnly,

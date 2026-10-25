@@ -63,9 +63,11 @@ import {
   type NoteSourced,
 } from "@/lib/notes-write";
 import type { NotesStage } from "@/lib/notes-books";
+import { uncheckedPlaces } from "@/lib/map-spec";
 import { MAX_VISUALS, VISUAL_SLOTS, type Bi, type CaContent } from "@/lib/current-affairs";
 import { BiField, BiLines, LangToggle, PagesPreview } from "@/components/notes-books";
 import { StoryImages } from "@/components/ca-story-images";
+import { MapEdit } from "@/components/map-edit";
 import {
   PickedPointsVisual,
   StoryVisuals,
@@ -390,7 +392,13 @@ export function NotesTopicEditor({
           icon: BarChart3,
           count: VISUAL_SLOTS.filter(([k]) => c[k]).length,
         },
-        { id: "map", label: "Map", icon: MapIcon, count: c.map?.places.length },
+        {
+          id: "map",
+          label: "Map",
+          icon: MapIcon,
+          count: c.map?.places.length,
+          warn: warn(uncheckedPlaces(c.map)),
+        },
         {
           id: "revision",
           label: stage === "prelims" ? "Trap and revision" : "Did you know",
@@ -626,10 +634,10 @@ export function NotesTopicEditor({
               ) : tab === "map" ? (
                 <Section
                   title="Map"
-                  hint="Numbered places on the official outline; rivers from Natural Earth (smaller rivers aren't in it yet)."
+                  hint="Numbered places on the official outline, with the layers you choose. Places are checked against the place list; check the rest on Google Maps."
                   ai={<PartAI ctx={ctx} part="map" />}
                 >
-                  <MapEdit c={ctx.c} onChange={(map) => ctx.set({ map })} />
+                  <MapEdit map={ctx.c.map} onChange={(map) => ctx.set({ map })} />
                 </Section>
               ) : tab === "revision" ? (
                 <RevisionTab {...ctx} />
@@ -2170,103 +2178,6 @@ function TableEdit({
           }}
         />
       </div>
-    </div>
-  );
-}
-
-function MapEdit({ c, onChange }: { c: NoteContent; onChange: (m: NoteContent["map"]) => void }) {
-  const m = c.map;
-  if (!m)
-    return (
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={() => onChange({ region: "rajasthan", rivers: true, title: EMPTY, places: [] })}
-      >
-        <Plus className="mr-1 h-4 w-4" /> Add a map
-      </Button>
-    );
-  const setPlace = (i: number, patch: Partial<(typeof m.places)[number]>) =>
-    onChange({ ...m, places: m.places.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
-  return (
-    <div className="space-y-2">
-      <BiField label="Map title" value={m.title} onChange={(title) => onChange({ ...m, title })} />
-      <div className="flex flex-wrap items-center gap-3 text-sm">
-        <select
-          aria-label="Map region"
-          value={m.region}
-          onChange={(e) => onChange({ ...m, region: e.target.value as "rajasthan" | "india" })}
-          className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-        >
-          <option value="rajasthan">Rajasthan</option>
-          <option value="india">India</option>
-        </select>
-        <label className="flex items-center gap-1.5">
-          <input
-            type="checkbox"
-            checked={m.rivers}
-            onChange={(e) => onChange({ ...m, rivers: e.target.checked })}
-          />{" "}
-          Show rivers
-        </label>
-        <Button size="sm" variant="ghost" className="ml-auto" onClick={() => onChange(null)}>
-          Remove the map
-        </Button>
-      </div>
-      {m.places.map((p, i) => (
-        <div key={i} className="flex flex-wrap items-center gap-2">
-          <span className="w-5 text-right text-xs tabular-nums text-muted-foreground">{i + 1}</span>
-          <Input
-            aria-label={`Place ${i + 1} (Hindi)`}
-            lang="hi"
-            className="h-8 w-36"
-            value={p.name.hi}
-            onChange={(e) => setPlace(i, { name: { ...p.name, hi: e.target.value } })}
-          />
-          <Input
-            aria-label={`Place ${i + 1} (English)`}
-            className="h-8 w-36"
-            value={p.name.en}
-            onChange={(e) => setPlace(i, { name: { ...p.name, en: e.target.value } })}
-          />
-          <Input
-            aria-label={`Place ${i + 1} latitude`}
-            type="number"
-            step="0.01"
-            className="h-8 w-24"
-            value={p.lat}
-            onChange={(e) => setPlace(i, { lat: Number(e.target.value) })}
-          />
-          <Input
-            aria-label={`Place ${i + 1} longitude`}
-            type="number"
-            step="0.01"
-            className="h-8 w-24"
-            value={p.lon}
-            onChange={(e) => setPlace(i, { lon: Number(e.target.value) })}
-          />
-          <Button
-            size="sm"
-            variant="ghost"
-            aria-label={`Remove place ${i + 1}`}
-            onClick={() => onChange({ ...m, places: m.places.filter((_, k) => k !== i) })}
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-      ))}
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={() =>
-          onChange({ ...m, places: [...m.places, { name: EMPTY, lat: 26.9, lon: 75.8 }] })
-        }
-      >
-        <Plus className="mr-1 h-4 w-4" /> Add a place
-      </Button>
-      <p className="text-xs text-muted-foreground">
-        Check each place's position on the page; places off the map aren't drawn.
-      </p>
     </div>
   );
 }

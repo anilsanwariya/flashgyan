@@ -177,6 +177,13 @@ export async function listNotes(bookId: string) {
   return { chapters: plan.chapters, rows };
 }
 
+// The map's places put where the place list says they are.
+async function withCheckedMap(c: NoteContent): Promise<NoteContent> {
+  if (!c.map?.places.length) return c;
+  const { checkMapPlaces } = await import("@/lib/geo-places");
+  return { ...c, map: await checkMapPlaces(c.map) };
+}
+
 // The subjects searched for passages (current affairs aren't book material).
 async function bookSubjects(): Promise<string[]> {
   const { data: subj } = await from("saathi_knowledge")
@@ -254,8 +261,9 @@ async function writeTopic(
   );
   if (opts.note?.trim())
     messages[1].content += `\n\nThe editor's note: ${opts.note.trim().slice(0, 500)}`;
-  const written = parseNotes(await saathiComplete(apiKey(), messages), passages);
-  if (!written) return false;
+  const parsed = parseNotes(await saathiComplete(apiKey(), messages), passages);
+  if (!parsed) return false;
+  const written = await withCheckedMap(parsed);
   const keep = opts.keep;
   // New key points: the visuals stay but no longer stand in for any of them.
   const content: NoteContent = keep
@@ -479,7 +487,9 @@ export async function rewritePart(
   );
   const out = parsePart(raw, part, current, d.passages);
   if (!out) throw new Error("The AI's answer couldn't be read: try again.");
-  return out;
+  return part === "map" && out.map
+    ? { map: (await withCheckedMap({ ...current, map: out.map })).map }
+    : out;
 }
 
 // A visual made from the notes (the key points, or only those picked),
