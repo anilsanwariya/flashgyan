@@ -50,6 +50,7 @@ import { Badge, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { MasterOutlines } from "@/components/master-outlines";
 
 // The PDFs chosen on this device, kept while the page is open so reading
 // goes on after the exam is made.
@@ -58,10 +59,35 @@ const chosen = new Map<string, Files>();
 
 export function SyllabusPanel() {
   const [open, setOpen] = useState<string | null>(null);
-  return open ? (
-    <SyllabusView id={open} onBack={() => setOpen(null)} />
-  ) : (
-    <SyllabusList onOpen={setOpen} />
+  const [tab, setTab] = useState<"official" | "outlines">("official");
+  if (open) return <SyllabusView id={open} onBack={() => setOpen(null)} />;
+  return (
+    <div className="space-y-4">
+      <div
+        role="tablist"
+        aria-label="Syllabus"
+        className="inline-flex rounded-lg border border-border p-0.5 text-sm"
+      >
+        {(
+          [
+            ["official", "Official syllabi"],
+            ["outlines", "Master outlines"],
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            role="tab"
+            aria-selected={tab === k}
+            onClick={() => setTab(k)}
+            className={`rounded-md px-3 py-1.5 ${tab === k ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === "official" ? <SyllabusList onOpen={setOpen} /> : <MasterOutlines />}
+    </div>
   );
 }
 
@@ -273,6 +299,9 @@ function SyllabusView({ id, onBack }: { id: string; onBack: () => void }) {
   const [onlyUnsorted, setOnlyUnsorted] = useState(false);
   const exam = q.data?.exam;
   const nodes = q.data?.nodes ?? [];
+  const links = (
+    q.data as { links?: Record<string, { id: string; name_en: string }[]> } | undefined
+  )?.links;
   const refresh = () => qc.invalidateQueries({ queryKey: ["syllabus", id] });
 
   useEffect(
@@ -521,6 +550,7 @@ function SyllabusView({ id, onBack }: { id: string; onBack: () => void }) {
               n={n}
               lang={lang}
               examId={id}
+              topics={links?.[n.id]}
               dim={filtering && n.kind !== "line" && !match(n)}
               onChanged={refresh}
             />
@@ -664,12 +694,15 @@ function NodeRow({
   n,
   lang,
   examId,
+  topics,
   dim,
   onChanged,
 }: {
   n: SyllabusNode;
   lang: Lang;
   examId: string;
+  // The master outline's topics this line is linked to.
+  topics?: { id: string; name_en: string }[];
   dim: boolean;
   onChanged: () => Promise<unknown>;
 }) {
@@ -709,6 +742,18 @@ function NodeRow({
                     ({n.marks} marks)
                   </span>
                 ) : null}
+              </p>
+            )}
+            {!!topics?.length && (
+              <p className="col-span-full flex flex-wrap gap-1 pt-0.5" data-topics>
+                {topics.map((t) => (
+                  <span
+                    key={t.id}
+                    className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-normal text-primary"
+                  >
+                    {t.name_en}
+                  </span>
+                ))}
               </p>
             )}
           </div>

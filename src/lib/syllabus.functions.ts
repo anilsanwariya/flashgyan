@@ -70,7 +70,12 @@ export const getSyllabus = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ id }).parse(d))
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    return (await server()).getSyllabus(data.id);
+    const [syllabus, links] = await Promise.all([
+      (await server()).getSyllabus(data.id),
+      // Each line's master topics (none before the outlines' migration).
+      (await outlines()).linksForExam(data.id).catch(() => ({})),
+    ]);
+    return { ...syllabus, links };
   });
 
 export const readSyllabusPage = createServerFn({ method: "POST" })
@@ -164,5 +169,104 @@ export const deleteSyllabusNode = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     await (await server()).deleteSyllabusNode(data.id);
+    return { ok: true };
+  });
+
+// ---------- Master outlines ----------
+
+async function outlines() {
+  return import("@/lib/outline.server");
+}
+const section = z.string().trim().min(2).max(80);
+const names = z.object({
+  name_en: z.string().trim().max(160).optional(),
+  name_hi: z.string().trim().max(160).optional(),
+});
+
+export const listOutlines = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await outlines()).listOutlines();
+  });
+
+export const getOutline = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ section }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await outlines()).getOutline(data.section);
+  });
+
+export const makeOutline = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ section, replace: z.boolean().optional() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await outlines()).makeOutline(data.section, data.replace ?? false);
+  });
+
+export const fitOutlineLines = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ section }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await outlines()).fitLines(data.section);
+  });
+
+export const addMasterTopic = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        section,
+        parent: id.nullable(),
+        name_en: z.string().trim().max(160),
+        name_hi: z.string().trim().max(160),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return {
+      id: await (await outlines()).addTopic(data.section, data.parent, data.name_en, data.name_hi),
+    };
+  });
+
+export const updateMasterTopic = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id, patch: names }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await outlines()).updateTopic(data.id, data.patch);
+    return { ok: true };
+  });
+
+export const deleteMasterTopic = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await outlines()).deleteTopic(data.id);
+    return { ok: true };
+  });
+
+export const moveMasterTopic = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ id, dir: z.union([z.literal(-1), z.literal(1)]) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await outlines()).moveTopic(data.id, data.dir);
+    return { ok: true };
+  });
+
+export const setSyllabusLink = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ node: id, topic: id, on: z.boolean() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await outlines()).setLink(data.node, data.topic, data.on);
     return { ok: true };
   });
