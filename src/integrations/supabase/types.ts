@@ -2174,6 +2174,7 @@ export type Database = {
           status: string
           topic_id: string
           updated_at: string
+          versions: Json
           written_at: string
         }
         Insert: {
@@ -2183,6 +2184,7 @@ export type Database = {
           status?: string
           topic_id: string
           updated_at?: string
+          versions?: Json
           written_at?: string
         }
         Update: {
@@ -2192,6 +2194,7 @@ export type Database = {
           status?: string
           topic_id?: string
           updated_at?: string
+          versions?: Json
           written_at?: string
         }
         Relationships: [
