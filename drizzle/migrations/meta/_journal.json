@@ -232,6 +232,13 @@
       "when": 1792862472432,
       "tag": "0032_mcq_practice_from_papers",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792888584269,
+      "tag": "0033_syllabus",
+      "breakpoints": true
     }
   ]
 }
