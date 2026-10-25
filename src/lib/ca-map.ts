@@ -9,7 +9,8 @@ import {
   RAJASTHAN_MAP,
   type MapProjection,
 } from "@/lib/ca-map-data";
-import { RAJ_DISTRICTS, RAJ_RIVERS, type GeoLine } from "@/lib/geo-data";
+import { RAJ_RIVERS, type GeoLine } from "@/lib/geo-data";
+import { RAJ_DISTRICTS } from "@/lib/geo-admin";
 import { RIVERS } from "@/lib/notes-map-data";
 import { normalizeMap, type MapSpec } from "@/lib/map-spec";
 
@@ -125,7 +126,7 @@ export function placeMaps(
       : "",
   ].filter(Boolean);
   if (!maps.length) return "";
-  return `<div class="pmaps">${maps.join("")}</div><p class="pmap-credit">${MAP_CREDIT}; rivers: India-WRIS, Natural Earth; districts: 2011 Census (33)</p>`;
+  return `<div class="pmaps">${maps.join("")}</div><p class="pmap-credit">${MAP_CREDIT}; rivers: India-WRIS, Natural Earth; districts: SRSAC Rajasthan (41)</p>`;
 }
 
 // ---------- Where the places are (AI) ----------
@@ -187,8 +188,8 @@ export function storyMapMessages(
   return [
     {
       role: "system",
-      content: `You plan a small map for a news story in a bilingual (Hindi and English) current affairs magazine for Rajasthan's competitive exams. Mark the places the story is about (towns, districts' headquarters, dams, lakes, sanctuaries, forts, sites), at most 8, each with its name in English and Hindi and accurate latitude and longitude. Use "rajasthan" when every place is in Rajasthan, else "india". Turn on the layers that help a student: "rivers" for rivers, dams and floods; "canals" for canals and irrigation; "protected" for wildlife, parks and sanctuaries; "districts" when districts matter. Give a short title in both languages. If the story has no place worth mapping, reply {"map": null}.${hindiGuide}
-Reply with JSON only: {"map": {"region": "rajasthan" | "india", "rivers": false, "canals": false, "protected": false, "districts": false, "title": {"en": "", "hi": ""}, "places": [{"en": "", "hi": "", "lat": 0, "lon": 0}]} | null}`,
+      content: `You plan a small map for a news story in a bilingual (Hindi and English) current affairs magazine for Rajasthan's competitive exams. Mark the places the story is about (towns, districts' headquarters, dams, lakes, sanctuaries, forts, sites), at most 8, each with its name in English and Hindi and accurate latitude and longitude. Use "rajasthan" when every place is in Rajasthan, else "india". Turn on the layers that help a student: "rivers" for rivers, dams and floods; "canals" for canals and irrigation; "protected" for wildlife, parks and sanctuaries; "districts" when districts matter (Rajasthan has 41); "constituencies" for elections and by-elections (Rajasthan's 200 assembly seats). Give a short title in both languages. If the story has no place worth mapping, reply {"map": null}.${hindiGuide}
+Reply with JSON only: {"map": {"region": "rajasthan" | "india", "rivers": false, "canals": false, "protected": false, "districts": false, "constituencies": false, "title": {"en": "", "hi": ""}, "places": [{"en": "", "hi": "", "lat": 0, "lon": 0}]} | null}`,
     },
     {
       role: "user",

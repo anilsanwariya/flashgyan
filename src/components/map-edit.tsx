@@ -47,7 +47,8 @@ export function MapEdit({
     ...(raj
       ? ([
           ["canals", "Canals"],
-          ["districts", "Districts (33, before 2023)"],
+          ["districts", "Districts (41)"],
+          ["constituencies", "Assembly constituencies (200)"],
           ["protected", "National parks and sanctuaries"],
         ] as [keyof MapSpec, string][])
       : []),
@@ -310,7 +311,11 @@ function PlaceFinder({
                   <span className="font-medium">{f.en}</span>
                   {f.hi && <span lang="hi">{f.hi}</span>}
                   <span className="text-xs text-muted-foreground">
-                    {PLACE_KIND_NAMES[f.kind] ?? f.kind} · {f.lat.toFixed(2)}, {f.lon.toFixed(2)}
+                    {PLACE_KIND_NAMES[f.kind] ?? f.kind}
+                    {f.admin
+                      ? ` · ${f.admin.district.en} district${f.admin.constituency ? ` · AC ${f.admin.constituency.n} ${f.admin.constituency.en}${f.admin.constituency.res ? ` (${f.admin.constituency.res})` : ""}` : ""}`
+                      : ""}{" "}
+                    · {f.lat.toFixed(2)}, {f.lon.toFixed(2)}
                   </span>
                 </button>
               </li>

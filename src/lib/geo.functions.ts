@@ -28,8 +28,10 @@ export const findMapPlaces = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    const { searchPlaces } = await import("@/lib/geo-places");
-    return searchPlaces(data.query, data.near ?? null, 12);
+    const { searchPlaces, adminOf } = await import("@/lib/geo-places");
+    const found = await searchPlaces(data.query, data.near ?? null, 12);
+    // Rajasthan's places say their district and assembly constituency.
+    return Promise.all(found.map(async (p) => ({ ...p, admin: await adminOf(p.lat, p.lon) })));
   });
 
 // A map drawn as it prints (for the editors' previews).
