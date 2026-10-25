@@ -6,7 +6,8 @@
 // dots, listed beside the map. Server only: the outlines are large.
 import { INDIA_MAP, RAJASTHAN_MAP, type MapProjection } from "@/lib/ca-map-data";
 import { RIVERS } from "@/lib/notes-map-data";
-import { RAJ_CANALS, RAJ_DISTRICTS, RAJ_PROTECTED, RAJ_RIVERS, type GeoLine } from "@/lib/geo-data";
+import { RAJ_CANALS, RAJ_PROTECTED, RAJ_RIVERS, type GeoLine } from "@/lib/geo-data";
+import { RAJ_CONSTITUENCIES, RAJ_DISTRICTS } from "@/lib/geo-admin";
 import type { Bi } from "@/lib/current-affairs";
 import { MAP_CSS, type MapPlace as NotePlace, type MapSpec as NoteMap } from "@/lib/map-spec";
 
@@ -129,6 +130,7 @@ export function noteMapSvg(m: NoteMap, lang: Lang, accent: string): string {
   let labels = "";
   // District names go last: rivers and canals matter more.
   const distLabels: [number, number, string][] = [];
+  const acLabels: [number, number, string][] = [];
   if (!india && m.districts) {
     for (const d of RAJ_DISTRICTS) {
       const dp = path(d.rings);
@@ -136,6 +138,20 @@ export function noteMapSvg(m: NoteMap, lang: Lang, accent: string): string {
       layers += `<path d="${dp}" fill="none" stroke="#c4c8d0" stroke-width="${sw(0.8)}"/>`;
       const [x, y] = project(pr, d.at[0], d.at[1]);
       if (inside([x, y], -20 * k)) distLabels.push([x, y, lang === "hi" ? d.hi : d.en]);
+    }
+  }
+  // Assembly constituencies: thin lines and their numbers (the list beside
+  // the map names the places; a student reads the number off the map).
+  if (!india && m.constituencies) {
+    const ap = path(RAJ_CONSTITUENCIES.flatMap((c) => c.rings));
+    if (ap) layers += `<path d="${ap}" fill="none" stroke="#c9a3d4" stroke-width="${sw(0.6)}"/>`;
+    // The whole state has too many to read: there, only the seats the
+    // map's places are in.
+    const hit = (c: (typeof RAJ_CONSTITUENCIES)[number]) =>
+      places.some((p) => c.rings.some((r) => inRing(r, p.lon, p.lat)));
+    for (const c of RAJ_CONSTITUENCIES) {
+      const [x, y] = project(pr, c.at[0], c.at[1]);
+      if (inside([x, y], -10 * k) && (k <= 0.6 || hit(c))) acLabels.push([x, y, String(c.n)]);
     }
   }
   if (!india && m.protected) {
@@ -174,6 +190,21 @@ export function noteMapSvg(m: NoteMap, lang: Lang, accent: string): string {
     }
   }
   for (const [x, y, t] of distLabels) labels += label(x, y, t, "nm-dist", 12);
+  // A seat's number moves a little off a place's dot rather than go.
+  for (const [x, y, t] of acLabels)
+    for (const [dx, dy] of [
+      [0, 0],
+      [0, 16],
+      [0, -14],
+      [16, 4],
+      [-16, 4],
+    ]) {
+      const l = label(x + dx * k, y + dy * k, t, "nm-ac", 9);
+      if (l) {
+        labels += l;
+        break;
+      }
+    }
   const dots = places
     .map((p, i) => {
       const [x, y] = project(pr, p.lon, p.lat);
@@ -183,6 +214,16 @@ export function noteMapSvg(m: NoteMap, lang: Lang, accent: string): string {
   const nx = vx + vw - 14 * k;
   const ny = vy + 18 * k;
   return `<svg viewBox="${box}" class="nm" role="img" aria-label="${esc(pick(m.title, lang))}"><defs><clipPath id="nm-clip"><rect x="${(vx - pad).toFixed(1)}" y="${(vy - pad).toFixed(1)}" width="${(vw + 2 * pad).toFixed(1)}" height="${(vh + 2 * pad).toFixed(1)}"/></clipPath></defs><rect x="${(vx - pad).toFixed(1)}" y="${(vy - pad).toFixed(1)}" width="${(vw + 2 * pad).toFixed(1)}" height="${(vh + 2 * pad).toFixed(1)}" fill="#fbfaf7"/><g clip-path="url(#nm-clip)">${base}${layers}${labels}${dots}</g><g transform="translate(${nx.toFixed(1)},${ny.toFixed(1)}) scale(${k.toFixed(3)})"><path d="M0,-14 L6,4 L0,0 L-6,4 Z" fill="#1f2430"/><text y="17" text-anchor="middle" class="nm-n">N</text></g></svg>`;
+}
+
+function inRing(ring: [number, number][], lon: number, lat: number) {
+  let hit = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) hit = !hit;
+  }
+  return hit;
 }
 
 // The map with its numbered places listed beside it.

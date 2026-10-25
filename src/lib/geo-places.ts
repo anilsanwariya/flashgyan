@@ -242,3 +242,31 @@ export async function checkMapPlaces<
   );
   return { ...m, places };
 }
+
+// Which of Rajasthan's 41 districts and 200 assembly constituencies a
+// position is in (null outside Rajasthan).
+type Ring = [number, number][];
+const inRing = (ring: Ring, lon: number, lat: number) => {
+  let hit = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) hit = !hit;
+  }
+  return hit;
+};
+export type AdminArea = {
+  district: { en: string; hi: string };
+  constituency: { n: number; en: string; hi: string; res: string } | null;
+};
+export async function adminOf(lat: number, lon: number): Promise<AdminArea | null> {
+  if (!inRajasthan({ lat, lon })) return null;
+  const { RAJ_DISTRICTS, RAJ_CONSTITUENCIES } = await import("@/lib/geo-admin");
+  const d = RAJ_DISTRICTS.find((x) => x.rings.some((r) => inRing(r, lon, lat)));
+  if (!d) return null;
+  const c = RAJ_CONSTITUENCIES.find((x) => x.rings.some((r) => inRing(r, lon, lat)));
+  return {
+    district: { en: d.en, hi: d.hi },
+    constituency: c ? { n: c.n, en: c.en, hi: c.hi, res: c.res } : null,
+  };
+}

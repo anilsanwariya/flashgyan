@@ -19,6 +19,7 @@ export type MapSpec = {
   rivers: boolean;
   // Rajasthan maps only.
   districts?: boolean;
+  constituencies?: boolean;
   protected?: boolean;
   canals?: boolean;
   title: Bi;
@@ -82,6 +83,7 @@ export function normalizeMap(v: unknown): MapSpec | null {
     ...(region === "rajasthan"
       ? {
           districts: m.districts === true,
+          constituencies: m.constituencies === true,
           protected: m.protected === true,
           canals: m.canals === true,
         }
@@ -123,6 +125,7 @@ export const MAP_CSS = `
 .nm .nm-river { font-size: 15px; fill: #1d4ed8; font-style: italic; text-anchor: middle; paint-order: stroke; stroke: #fbfaf7; stroke-width: 4px; }
 .nm .nm-canal { font-size: 15px; fill: #0e7490; font-style: italic; text-anchor: middle; paint-order: stroke; stroke: #fbfaf7; stroke-width: 4px; }
 .nm .nm-dist { font-size: 12px; fill: #8a8f9c; text-anchor: middle; paint-order: stroke; stroke: #fbfaf7; stroke-width: 3px; letter-spacing: .02em; }
+.nm .nm-ac { font-size: 9px; fill: #8b5e9b; text-anchor: middle; paint-order: stroke; stroke: #fbfaf7; stroke-width: 2.5px; }
 .nm .nm-num { font-size: 11px; font-weight: 700; fill: #fff; }
 .nm .nm-n { font-size: 12px; font-weight: 700; fill: #1f2430; }
 .nmap-title { font-weight: 700; margin-bottom: 1.5mm; }
