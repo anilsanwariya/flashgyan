@@ -239,6 +239,13 @@
       "when": 1792888584269,
       "tag": "0033_syllabus",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792891966969,
+      "tag": "0034_master_outlines",
+      "breakpoints": true
     }
   ]
 }
