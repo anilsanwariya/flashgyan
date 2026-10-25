@@ -2573,6 +2573,101 @@ export type Database = {
         }
         Relationships: []
       }
+      syllabus_exams: {
+        Row: {
+          body: string
+          created_at: string
+          error: string | null
+          id: string
+          name: string
+          notified_on: string | null
+          pages: number
+          pages_done: number
+          scheme: Json | null
+          stage: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          body?: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          name: string
+          notified_on?: string | null
+          pages?: number
+          pages_done?: number
+          scheme?: Json | null
+          stage?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          name?: string
+          notified_on?: string | null
+          pages?: number
+          pages_done?: number
+          scheme?: Json | null
+          stage?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      syllabus_nodes: {
+        Row: {
+          created_at: string
+          exam_id: string
+          id: string
+          kind: string
+          marks: number | null
+          page: number | null
+          position: number
+          section: string
+          text_en: string
+          text_hi: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          exam_id: string
+          id?: string
+          kind?: string
+          marks?: number | null
+          page?: number | null
+          position?: number
+          section?: string
+          text_en?: string
+          text_hi?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          exam_id?: string
+          id?: string
+          kind?: string
+          marks?: number | null
+          page?: number | null
+          position?: number
+          section?: string
+          text_en?: string
+          text_hi?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "syllabus_nodes_exam_id_fkey"
+            columns: ["exam_id"]
+            isOneToOne: false
+            referencedRelation: "syllabus_exams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           id: string
