@@ -51,6 +51,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { MasterOutlines } from "@/components/master-outlines";
+import { NotesBooks } from "@/components/notes-books";
 
 // The PDFs chosen on this device, kept while the page is open so reading
 // goes on after the exam is made.
@@ -59,7 +60,7 @@ const chosen = new Map<string, Files>();
 
 export function SyllabusPanel() {
   const [open, setOpen] = useState<string | null>(null);
-  const [tab, setTab] = useState<"official" | "outlines">("official");
+  const [tab, setTab] = useState<"official" | "outlines" | "books">("official");
   if (open) return <SyllabusView id={open} onBack={() => setOpen(null)} />;
   return (
     <div className="space-y-4">
@@ -72,6 +73,7 @@ export function SyllabusPanel() {
           [
             ["official", "Official syllabi"],
             ["outlines", "Master outlines"],
+            ["books", "Notes books"],
           ] as const
         ).map(([k, label]) => (
           <button
@@ -86,7 +88,13 @@ export function SyllabusPanel() {
           </button>
         ))}
       </div>
-      {tab === "official" ? <SyllabusList onOpen={setOpen} /> : <MasterOutlines />}
+      {tab === "official" ? (
+        <SyllabusList onOpen={setOpen} />
+      ) : tab === "outlines" ? (
+        <MasterOutlines />
+      ) : (
+        <NotesBooks />
+      )}
     </div>
   );
 }

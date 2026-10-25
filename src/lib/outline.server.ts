@@ -62,9 +62,12 @@ const shortHead = (s: string) => {
 
 // Every official line (of a section, or all), with its exam, where it sits
 // in its syllabus, and the topics it's linked to.
-async function officialLines(section?: string): Promise<(OutlineLine & { section: string })[]> {
+async function officialLines(
+  section?: string,
+): Promise<(OutlineLine & { section: string; stage: SyllabusExam["stage"] })[]> {
   const exams = await all<SyllabusExam>("syllabus_exams", "id,name,stage");
   const names = new Map(exams.map((e) => [e.id, examTitle(e)]));
+  const stages = new Map(exams.map((e) => [e.id, e.stage]));
   // In a steady order: exam by exam (Prelims before Mains), as printed.
   const STAGE_ORDER = { prelims: 0, mains: 1, single: 2 } as const;
   const rank = new Map(
@@ -89,7 +92,7 @@ async function officialLines(section?: string): Promise<(OutlineLine & { section
   );
   const linked = new Map<string, string[]>();
   for (const l of links) linked.set(l.node_id, [...(linked.get(l.node_id) ?? []), l.topic_id]);
-  const out: (OutlineLine & { section: string })[] = [];
+  const out: (OutlineLine & { section: string; stage: SyllabusExam["stage"] })[] = [];
   let exam = "";
   let path: SyllabusNode[] = [];
   for (const n of nodes) {
@@ -111,9 +114,17 @@ async function officialLines(section?: string): Promise<(OutlineLine & { section
       text_hi: n.text_hi,
       topics: linked.get(n.id) ?? [],
       section: n.section,
+      stage: stages.get(n.exam_id) ?? "single",
     });
   }
   return out;
+}
+
+// A section's outline and its official lines (with each line's stage), for
+// the notes books' front pages.
+export async function sectionOutline(section: string) {
+  const [topics, lines] = await Promise.all([sectionTopics(section), officialLines(section)]);
+  return { topics, lines };
 }
 
 async function sectionTopics(section: string): Promise<MasterTopic[]> {
