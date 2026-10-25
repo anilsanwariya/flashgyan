@@ -39,6 +39,7 @@ export type AdminSectionId =
   | "flashcards"
   | "mcq"
   | "mcqPractice"
+  | "cardStudio"
   | "saathi"
   | "saathiAnswers"
   | "ca.daily"
@@ -93,6 +94,12 @@ export const ADMIN_GROUPS: { label: string; sections: SectionDef[] }[] = [
         label: "MCQ practice",
         icon: Target,
         description: "Practice questions with instant feedback.",
+      },
+      {
+        id: "cardStudio",
+        label: "Card studio",
+        icon: Layers,
+        description: "Make decks from several books: proofread, chunk and download.",
       },
     ],
   },
