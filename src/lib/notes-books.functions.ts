@@ -105,3 +105,35 @@ export const previewNotesBook = createServerFn({ method: "POST" })
       }),
     };
   });
+
+// ---------- The planner ----------
+
+async function planner() {
+  return import("@/lib/notes-plan.server");
+}
+
+export const getNotesPlan = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await planner()).getPlan(data.id);
+  });
+
+// The next topics checked against the knowledge base.
+export const planNotesStep = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id,
+        redo: z.array(id).max(50).optional(),
+        since: z.string().datetime().optional(),
+        skip: z.array(id).max(2000).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await planner()).planStep(data.id, data);
+  });
