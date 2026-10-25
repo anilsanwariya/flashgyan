@@ -2166,6 +2166,102 @@ export type Database = {
         }
         Relationships: []
       }
+      notes_drafts: {
+        Row: {
+          book_id: string
+          content: Json
+          passages: Json
+          status: string
+          topic_id: string
+          updated_at: string
+          written_at: string
+        }
+        Insert: {
+          book_id: string
+          content?: Json
+          passages?: Json
+          status?: string
+          topic_id: string
+          updated_at?: string
+          written_at?: string
+        }
+        Update: {
+          book_id?: string
+          content?: Json
+          passages?: Json
+          status?: string
+          topic_id?: string
+          updated_at?: string
+          written_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notes_drafts_book_id_fkey"
+            columns: ["book_id"]
+            isOneToOne: false
+            referencedRelation: "notes_books"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_drafts_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "master_topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notes_topic_plans: {
+        Row: {
+          book_id: string
+          checked_at: string
+          coverage: string
+          map: Json | null
+          missing: string
+          sig: string
+          sources: Json
+          topic_id: string
+          upload: Json
+        }
+        Insert: {
+          book_id: string
+          checked_at?: string
+          coverage?: string
+          map?: Json | null
+          missing?: string
+          sig?: string
+          sources?: Json
+          topic_id: string
+          upload?: Json
+        }
+        Update: {
+          book_id?: string
+          checked_at?: string
+          coverage?: string
+          map?: Json | null
+          missing?: string
+          sig?: string
+          sources?: Json
+          topic_id?: string
+          upload?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notes_topic_plans_book_id_fkey"
+            columns: ["book_id"]
+            isOneToOne: false
+            referencedRelation: "notes_books"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_topic_plans_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "master_topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
