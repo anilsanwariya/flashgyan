@@ -35,6 +35,7 @@ import { subjectName } from "@/lib/exam-papers";
 import { prepareImage, toBase64 } from "@/lib/ca-image-file";
 import { CoverPreview } from "@/components/ca-cover-designer";
 import { NotesPlanner } from "@/components/notes-planner";
+import { NotesWriter } from "@/components/notes-writer";
 import { Badge, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,7 +55,7 @@ function BookList({ onOpen }: { onOpen: (id: string) => void }) {
   const qc = useQueryClient();
   const listFn = useServerFn(listNotesBooks);
   const createFn = useServerFn(createNotesBook);
-  const q = useQuery({ queryKey: ["notesBooks"], queryFn: () => listFn() });
+  const q = useQuery({ queryKey: ["notesBooks"], queryFn: () => listFn(), refetchOnMount: true });
   const [section, setSection] = useState("");
   const [stage, setStage] = useState<NotesStage>("prelims");
   const [busy, setBusy] = useState(false);
@@ -199,12 +200,16 @@ function BookView({ id, onBack }: { id: string; onBack: () => void }) {
   const getFn = useServerFn(getNotesBook);
   const saveFn = useServerFn(saveNotesBook);
   const deleteFn = useServerFn(deleteNotesBook);
-  const q = useQuery({ queryKey: ["notesBook", id], queryFn: () => getFn({ data: { id } }) });
+  const q = useQuery({
+    queryKey: ["notesBook", id],
+    queryFn: () => getFn({ data: { id } }),
+    refetchOnMount: true,
+  });
   const [cover, setCover] = useState<NotesCover | null>(null);
   const [front, setFront] = useState<NotesFront | null>(null);
   // Bumped to reset the text boxes (after Discard).
   const [resetKey, setResetKey] = useState(0);
-  const [tab, setTab] = useState<"plan" | "cover" | "front">("plan");
+  const [tab, setTab] = useState<"plan" | "notes" | "cover" | "front">("plan");
   const [saving, setSaving] = useState(false);
   const book = q.data;
   useEffect(() => {
@@ -305,6 +310,7 @@ function BookView({ id, onBack }: { id: string; onBack: () => void }) {
         {(
           [
             ["plan", "Planner"],
+            ["notes", "Notes"],
             ["cover", "Cover"],
             ["front", "Front pages"],
           ] as const
@@ -323,6 +329,8 @@ function BookView({ id, onBack }: { id: string; onBack: () => void }) {
       </div>
       {tab === "plan" ? (
         <NotesPlanner id={id} stage={book.stage} />
+      ) : tab === "notes" ? (
+        <NotesWriter id={id} stage={book.stage} />
       ) : tab === "cover" ? (
         <CoverEditor
           key={`c${resetKey}`}
@@ -368,7 +376,7 @@ function BookView({ id, onBack }: { id: string; onBack: () => void }) {
 
 // ====================== Shared fields ======================
 
-function LangToggle({ lang, onChange }: { lang: Lang; onChange: (l: Lang) => void }) {
+export function LangToggle({ lang, onChange }: { lang: Lang; onChange: (l: Lang) => void }) {
   return (
     <div role="radiogroup" aria-label="Preview language" className="flex gap-1">
       {(["hi", "en"] as const).map((l) => (
@@ -387,7 +395,7 @@ function LangToggle({ lang, onChange }: { lang: Lang; onChange: (l: Lang) => voi
   );
 }
 
-function Step({
+export function Step({
   n,
   title,
   hint,
@@ -413,7 +421,7 @@ function Step({
 }
 
 // A Hindi and an English field side by side.
-function BiField({
+export function BiField({
   label,
   value,
   onChange,
@@ -460,7 +468,7 @@ const fromLines = (hi: string, en: string): Bi[] => {
 };
 
 // A list, one item a line, the Hindi and English lines in the same order.
-function BiLines({
+export function BiLines({
   label,
   value,
   onChange,
@@ -667,7 +675,7 @@ function Preview({
 }
 
 // Several pages, scaled to the box's width, scrolled inside a tall box.
-function PagesPreview({ html }: { html: string }) {
+export function PagesPreview({ html }: { html: string }) {
   const box = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const [w, setW] = useState(300);
@@ -726,7 +734,11 @@ function CoverEditor({
 }) {
   const listFn = useServerFn(listNotesBooks);
   const getFn = useServerFn(getNotesBook);
-  const books = useQuery({ queryKey: ["notesBooks"], queryFn: () => listFn() });
+  const books = useQuery({
+    queryKey: ["notesBooks"],
+    queryFn: () => listFn(),
+    refetchOnMount: true,
+  });
   const set = (p: Partial<NotesCover>) => onChange({ ...cover, ...p });
   const subject: Bi = { en: section, hi: subjectName(section, "hi") };
   const others = (books.data?.books ?? []).filter((b) => b.id !== id);
