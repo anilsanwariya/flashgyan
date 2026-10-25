@@ -2136,6 +2136,36 @@ export type Database = {
         }
         Relationships: []
       }
+      notes_books: {
+        Row: {
+          cover: Json
+          created_at: string
+          front: Json
+          id: string
+          section: string
+          stage: string
+          updated_at: string
+        }
+        Insert: {
+          cover?: Json
+          created_at?: string
+          front?: Json
+          id?: string
+          section: string
+          stage: string
+          updated_at?: string
+        }
+        Update: {
+          cover?: Json
+          created_at?: string
+          front?: Json
+          id?: string
+          section?: string
+          stage?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
