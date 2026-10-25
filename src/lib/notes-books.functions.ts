@@ -3,6 +3,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { BookSummary } from "@/lib/notes-books.server";
+import { NOTE_PART_KEYS, type NotePart } from "@/lib/notes-write";
+import { VISUAL_TYPES, type VisualType } from "@/lib/ca-visuals";
 
 export type { BookSummary };
 
@@ -176,10 +178,113 @@ export const getBookNote = createServerFn({ method: "POST" })
 
 export const saveBookNote = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => topic.extend({ content: draft }).parse(d))
+  .inputValidator((d: unknown) =>
+    topic.extend({ content: draft, label: z.string().max(120).optional() }).parse(d),
+  )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    return (await writer()).saveNote(data.id, data.topic, data.content);
+    return (await writer()).saveNote(data.id, data.topic, data.content, data.label);
+  });
+
+// The whole topic written again: from its passages (with any added) or a
+// new search, with the editor's note.
+export const rewriteBookNote = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    topic.extend({ fresh: z.boolean(), note: z.string().max(500).optional() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await writer()).rewriteTopic(data.id, data.topic, data);
+  });
+
+// One part written again (not saved until the editor keeps it).
+export const rewriteNotePart = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    topic
+      .extend({
+        part: z.enum(NOTE_PART_KEYS as [NotePart, ...NotePart[]]),
+        note: z.string().max(500).default(""),
+        content: draft.optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await writer()).rewritePart(data.id, data.topic, data.part, data.note, data.content);
+  });
+
+// A visual made from the notes (not saved until the editor keeps it).
+export const previewNoteVisual = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    topic
+      .extend({
+        slot: z.number().int().min(1).max(4),
+        type: z.enum(VISUAL_TYPES as [VisualType, ...VisualType[]]).optional(),
+        note: z.string().max(300).optional(),
+        facts: z.array(z.number().int().min(0).max(100)).min(2).max(30).optional(),
+        content: draft.optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    const { id: book, topic: t, content, ...opts } = data;
+    return (await writer()).previewNoteVisual(book, t, opts, content);
+  });
+
+// The knowledge base searched again, in the editor's words.
+export const findNotePassages = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    topic.extend({ query: z.string().trim().min(3).max(500) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await writer()).findPassages(data.id, data.topic, data.query);
+  });
+
+// Passages added to the topic: found ones, or the editor's own material.
+export const addNotePassages = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    topic
+      .extend({
+        items: z
+          .array(
+            z.object({
+              title: z.string().max(200),
+              subject: z.string().max(80),
+              content: z.string().trim().min(20).max(20000),
+            }),
+          )
+          .min(1)
+          .max(10),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await writer()).addPassages(data.id, data.topic, data.items);
+  });
+
+// An earlier version, to look at or go back to.
+export const getNoteVersion = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => topic.extend({ at: z.string().max(40) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await writer()).noteVersion(data.id, data.topic, data.at);
+  });
+
+export const restoreBookNote = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => topic.extend({ at: z.string().max(40) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await writer()).restoreNote(data.id, data.topic, data.at);
   });
 
 export const setBookNoteStatus = createServerFn({ method: "POST" })

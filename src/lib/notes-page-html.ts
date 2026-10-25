@@ -2,8 +2,18 @@
 // topic's notes (Prelims or Mains parts), its map, its past questions, and
 // at the chapter's end the sources it used. In the review copy, lines written
 // by the AI without a passage carry ◇ until the editor checks them; the
-// student copy shows no source marks. Server only (the maps' outlines).
-import type { Bi } from "@/lib/current-affairs";
+// student copy shows no source marks. Images and visuals print as in the
+// magazine. Server only (the maps' outlines).
+import type { Bi, CaContent } from "@/lib/current-affairs";
+import {
+  imagesHtml,
+  MEDIA_IMAGE_CSS,
+  MEDIA_PLACE_CSS,
+  printedPlaces,
+  sideImagesHtml,
+  visualsHtml,
+} from "@/lib/current-affairs-html";
+import { pointsToShow, VISUAL_CSS } from "@/lib/ca-visuals";
 import type { NotesStage } from "@/lib/notes-books";
 import type { NoteContent, NotePoint } from "@/lib/notes-write";
 import { noteMapHtml, NOTE_MAP_CSS } from "@/lib/notes-map";
@@ -30,6 +40,8 @@ const T = {
     keyPoints: "Key points",
     trap: "Exam trap",
     pyq: "Previous year question",
+    pyqs: "Previous year questions",
+    dyk: "Did you know?",
     answer: "Answer",
     revise: "Quick revision",
     keywords: "Keywords to use",
@@ -50,6 +62,8 @@ const T = {
     keyPoints: "मुख्य बिंदु",
     trap: "परीक्षा में भ्रम",
     pyq: "पिछले वर्ष का प्रश्न",
+    pyqs: "पिछले वर्षों के प्रश्न",
+    dyk: "क्या आप जानते हैं?",
     answer: "उत्तर",
     revise: "त्वरित पुनरावृत्ति",
     keywords: "उपयोगी मुख्य शब्द",
@@ -66,7 +80,14 @@ const T = {
 };
 const OPT = { en: ["a", "b", "c", "d"], hi: ["अ", "ब", "स", "द"] };
 
-export type TopicPyq = { exam: string; q: Bi; options: Bi[]; correct: number | null };
+// Mains questions have no options; their marks show beside the exam.
+export type TopicPyq = {
+  exam: string;
+  q: Bi;
+  options: Bi[];
+  correct: number | null;
+  marks?: number | null;
+};
 
 export type TopicPage = {
   topic_id: string;
@@ -94,6 +115,46 @@ const mark = (p: { src: number[]; ok?: boolean }, review: boolean) =>
 
 function points(xs: NotePoint[], lang: Lang, review: boolean): string {
   return `<ul class="points">${xs.map((p) => `<li>${rich(p.text, lang)}${mark(p, review)}</li>`).join("")}</ul>`;
+}
+
+// The key points (less those a visual shows) with the visuals above,
+// beside and below them, as in a magazine story.
+function pointsWithVisuals(
+  c: NoteContent,
+  heading: string,
+  lang: Lang,
+  review: boolean,
+  accent: string,
+): string {
+  const shown = pointsToShow(c);
+  const placed = printedPlaces(c as unknown as CaContent, shown.length > 0);
+  const pair = !!c.visual_pair;
+  const list = shown.length ? points(shown, lang, review) : "";
+  const beside = visualsHtml(placed, "beside", false, accent, lang);
+  const above = visualsHtml(placed, "above", pair, accent, lang);
+  const below = visualsHtml(placed, "below", pair, accent, lang);
+  if (!list && !above && !beside && !below) return "";
+  return `${list && heading ? `<h3>${esc(heading)}</h3>` : ""}${above}${
+    beside && list
+      ? `<div class="pts-beside">${list}<div class="pts-visuals">${beside}</div></div>`
+      : list
+  }${below}`;
+}
+
+function pyqHtml(q: TopicPyq, lang: Lang): string {
+  const L = T[lang];
+  const tag = q.marks ? `${q.exam} · ${q.marks}` : q.exam;
+  return `<div class="pyq"><div class="pyq-q"><span class="pyq-tag">${esc(tag)}</span> ${esc(pick(q.q, lang))}</div>${
+    q.options.length
+      ? `<ol class="pyq-opts">${q.options
+          .map((o, i) => `<li><span class="o">(${OPT[lang][i]})</span> ${esc(pick(o, lang))}</li>`)
+          .join("")}</ol>${
+          q.correct
+            ? `<div class="pyq-a">${esc(L.answer)}: (${OPT[lang][q.correct - 1]}) ${esc(pick(q.options[q.correct - 1], lang))}</div>`
+            : ""
+        }`
+      : ""
+  }</div>`;
 }
 
 export function topicHtml(
@@ -138,28 +199,26 @@ export function topicHtml(
           `<p class="${cls}">${rich(d.text, lang)}${d.source ? ` <span class="cite">(${esc(d.source)})</span>` : ""}${mark(d, review)}</p>`,
       )
       .join("");
+  const dyk = c.dyk.length
+    ? `<div class="dyk"><div class="dyk-label">${esc(L.dyk)}</div><ul>${c.dyk.map((d) => `<li>${rich(d.text, lang)}${mark(d, review)}</li>`).join("")}</ul></div>`
+    : "";
+  const images = imagesHtml(c.images, lang);
+  const pyqs = t.pyqs.length
+    ? `<div><h3>${esc(t.pyqs.length > 1 ? L.pyqs : L.pyq)}</h3>${t.pyqs.map((q) => pyqHtml(q, lang)).join("")}</div>`
+    : "";
   let body = "";
   if (stage === "prelims") {
-    const pyq = t.pyqs[0];
     const right = [
-      pyq
-        ? `<div><h3>${esc(L.pyq)}</h3><div class="pyq"><div class="pyq-q"><span class="pyq-tag">${esc(pyq.exam)}</span> ${esc(pick(pyq.q, lang))}</div><ol class="pyq-opts">${pyq.options
-            .map(
-              (o, i) => `<li><span class="o">(${OPT[lang][i]})</span> ${esc(pick(o, lang))}</li>`,
-            )
-            .join(
-              "",
-            )}</ol>${pyq.correct ? `<div class="pyq-a">${esc(L.answer)}: (${OPT[lang][pyq.correct - 1]}) ${esc(pick(pyq.options[pyq.correct - 1], lang))}</div>` : ""}</div></div>`
-        : "",
+      pyqs,
       c.oneliners.length
         ? `<div><h3>${esc(L.revise)}</h3><dl class="oneliners">${c.oneliners.map((o) => `<div><dt>${esc(pick(o.q, lang))}</dt><dd>${esc(pick(o.a, lang))}</dd></div>`).join("")}</dl></div>`
         : "",
     ].filter(Boolean);
-    body = `${intro}${defs}${c.points.length ? h3(L.keyPoints) + points(c.points, lang, review) : ""}${table}${map}${
+    body = `${intro}${defs}${images}${pointsWithVisuals(c, L.keyPoints, lang, review, accent)}${table}${map}${
       pick(c.trap, lang)
         ? `<div class="trap"><span class="trap-label">⚠ ${esc(L.trap)}</span> ${rich(c.trap, lang)}</div>`
         : ""
-    }${right.length ? `<div class="${right.length === 2 ? "two" : ""}">${right.join("")}</div>` : ""}`;
+    }${dyk}${right.length ? `<div class="${right.length === 2 ? "two" : ""}">${right.join("")}</div>` : ""}`;
   } else {
     const total = c.plan.reduce((n, p) => n + p.words, 0);
     const tail = [
@@ -179,7 +238,7 @@ export function topicHtml(
       c.keywords.length
         ? `<div class="kw"><b>${esc(L.keywords)}:</b> <span class="chips">${c.keywords.map((k) => `<span class="chip">${esc(pick(k, lang))}</span>`).join("")}</span></div>`
         : ""
-    }${defs}${c.points.length ? points(c.points, lang, review) : ""}${table}${map}${c.sections
+    }${defs}${images}${pointsWithVisuals(c, "", lang, review, accent)}${table}${map}${c.sections
       .map((s) => h3(pick(s.heading, lang)) + points(s.points, lang, review))
       .join("")}${
       c.official.length
@@ -190,9 +249,9 @@ export function topicHtml(
             )
             .join("")
         : ""
-    }${tail.length ? `<div class="${tail.length === 2 ? "two" : ""}">${tail.join("")}</div>` : ""}`;
+    }${dyk}${pyqs}${tail.length ? `<div class="${tail.length === 2 ? "two" : ""}">${tail.join("")}</div>` : ""}`;
   }
-  return `<section class="tp" data-topic="${esc(t.topic_id)}">${t.parent ? `<div class="topic-line">${esc(pick(t.parent, lang))}</div>` : ""}<h1 class="tp-title">${esc(t.number)} ${esc(pick(t.name, lang))}</h1>${meta}${body}</section>`;
+  return `<section class="tp" data-topic="${esc(t.topic_id)}">${t.parent ? `<div class="topic-line">${esc(pick(t.parent, lang))}</div>` : ""}<h1 class="tp-title">${esc(t.number)} ${esc(pick(t.name, lang))}</h1>${meta}${sideImagesHtml(c.images, lang)}${body}</section>`;
 }
 
 export function chapterHtml(
@@ -217,6 +276,16 @@ export const reviewNote = (lang: Lang) => `<p class="review-note">${esc(T[lang].
 
 export const NOTES_PAGE_CSS = `
 ${NOTE_MAP_CSS}
+${MEDIA_PLACE_CSS}
+${MEDIA_IMAGE_CSS}
+${VISUAL_CSS("$ACCENT")}
+.tp { display: flow-root; }
+.tp .images, .tp .visual, .tp .v-pair, .tp .pts-beside { clear: both; margin-bottom: 2.5mm; }
+.pts-beside .points { margin-top: 0; }
+.dyk { margin: 0 0 3mm; padding: 2mm 3mm; border-radius: 1.5mm; background: #f6f3ff; border-left: 1mm solid $ACCENT; break-inside: avoid; }
+.dyk-label { font-weight: 700; color: $ACCENT; font-size: 0.92em; }
+.dyk ul { margin: 0.5mm 0 0; padding-left: 4.5mm; }
+.pyq + .pyq { margin-top: 2mm; padding-top: 2mm; border-top: 0.3mm dotted #c9ccd4; }
 .chapter { break-before: page; }
 .ch-open { border-bottom: 0.8mm solid $ACCENT; padding-bottom: 3mm; margin-bottom: 6mm; }
 .ch-no { font-size: 10pt; color: $ACCENT; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; }

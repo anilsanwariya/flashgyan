@@ -382,7 +382,7 @@ function figureHtml(i: CaImage, lang: Lang, style: string, lines: number, credit
 const usableImages = (images: CaImage[] | undefined) =>
   (images ?? []).filter((i) => safeUrl(i.url) && i.w > 0 && i.h > 0);
 
-function imagesHtml(images: CaImage[] | undefined, lang: Lang): string {
+export function imagesHtml(images: CaImage[] | undefined, lang: Lang): string {
   const usable = usableImages(images).filter((i) => !isSideImage(i));
   if (!usable.length) return "";
   const rows = imageRows(usable).map((row) => {
@@ -417,7 +417,7 @@ function imagesHtml(images: CaImage[] | undefined, lang: Lang): string {
 
 // Images beside the story's text (portraits and squares save space this
 // way): floated at the top of the story, the text running down beside them.
-function sideImagesHtml(images: CaImage[] | undefined, lang: Lang): string {
+export function sideImagesHtml(images: CaImage[] | undefined, lang: Lang): string {
   return usableImages(images)
     .filter(isSideImage)
     .map((i) => {
@@ -446,7 +446,7 @@ export function printedPlaces(c: CaContent, hasPoints: boolean) {
 
 // The story's visuals in one place, in order; paired two to a row when the
 // editor chose it and both fit at half width.
-function visualsHtml(
+export function visualsHtml(
   list: ReturnType<typeof printedPlaces>,
   place: VisualPlace,
   pair: boolean,
@@ -584,6 +584,31 @@ function itemHtml(
 </article>`;
 }
 
+// Visuals beside, above and below the key points, and the image rows and
+// side images (shared with the notes books).
+export const MEDIA_PLACE_CSS = `
+.visual + .points, .v-pair + .points, .visual + .pts-beside, .v-pair + .pts-beside { margin-top: 2.5mm; }
+.pts-beside { display: grid; grid-template-columns: 1fr 1fr; gap: 3.5mm; align-items: start; }
+.pts-beside > .points { margin-top: 0; min-width: 0; }
+.pts-visuals { min-width: 0; display: flex; flex-direction: column; gap: 2.5mm; }
+.pts-visuals .visual { margin-top: 0 !important; }
+.pts-beside + .visual, .pts-beside + .v-pair { margin-top: 2.5mm; }
+.visual + .visual, .visual + .v-pair, .v-pair + .visual, .v-pair + .v-pair, .points + .visual, .points + .v-pair { margin-top: 2.5mm; }
+`;
+export const MEDIA_IMAGE_CSS = `
+.images { margin-top: 2.5mm; }
+.img-row { display: flex; gap: ${GAP_MM}mm; align-items: flex-start; margin: 0 auto 2mm; break-inside: avoid; }
+.img-row figure { margin: 0; min-width: 0; }
+.img-row img { display: block; width: 100%; height: auto; border-radius: 1.5mm; background: #f1f5f9; object-fit: cover; }
+.img-side { margin: 2mm 0 2mm; break-inside: avoid; }
+.img-side.right { float: right; clear: right; margin-left: 4mm; }
+.img-side.left { float: left; clear: left; margin-right: 4mm; }
+.img-side img { display: block; width: 100%; height: auto; border-radius: 1.5mm; background: #f1f5f9; object-fit: cover; }
+.img-side figcaption { margin-top: 1mm; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; font-size: 8pt; line-height: 1.35; color: #64748b; }
+.img-credit { margin-top: .6mm; font-size: 6.8pt; line-height: 1.3; height: 1.3em; color: #94a3b8; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.img-row figcaption { margin-top: 1mm; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; font-size: 8pt; line-height: 1.35; color: #64748b; }
+`;
+
 const CSS = (accent: string) => `
 @page { size: A4; margin: 14mm 12mm 16mm; }
 * { box-sizing: border-box; }
@@ -669,13 +694,7 @@ body { margin: 0; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; 
 .sub-title { break-after: avoid; margin: 5mm 0 3mm; padding: 1.5mm 3mm; font-size: 12pt; color: ${accent}; border-left: 3px solid ${accent}; background: #f8fafc; border-radius: 0 2mm 2mm 0; }
 .rev-cat { display: flex; align-items: center; gap: 2mm; font-size: 10pt; color: ${accent}; margin: 4mm 0 2mm; break-after: avoid; text-transform: uppercase; letter-spacing: .06em; }
 .rev { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.visual + .points, .v-pair + .points, .visual + .pts-beside, .v-pair + .pts-beside { margin-top: 2.5mm; }
-.pts-beside { display: grid; grid-template-columns: 1fr 1fr; gap: 3.5mm; align-items: start; }
-.pts-beside > .points { margin-top: 0; min-width: 0; }
-.pts-visuals { min-width: 0; display: flex; flex-direction: column; gap: 2.5mm; }
-.pts-visuals .visual { margin-top: 0 !important; }
-.pts-beside + .visual, .pts-beside + .v-pair { margin-top: 2.5mm; }
-.visual + .visual, .visual + .v-pair, .v-pair + .visual, .v-pair + .v-pair, .points + .visual, .points + .v-pair { margin-top: 2.5mm; }
+${MEDIA_PLACE_CSS}
 .rev td { padding: 1.6mm 2.5mm; border-bottom: 1px solid #e5e7eb; vertical-align: top; font-size: 9.2pt; }
 .rev tr { break-inside: avoid; }
 .rev .rn { width: 7mm; font-weight: 700; color: ${accent}; }
@@ -740,21 +759,11 @@ table.medals.board td:not(:nth-child(2)), table.medals.board th:not(:nth-child(2
 .rep-qs { margin-top: 3mm; }
 .rep-ans { margin: 0 0 2mm 6mm; font-size: 8.5pt; color: #475569; }
 .rev .ans { font-weight: 700; color: ${accent}; }
-.images { margin-top: 2.5mm; }
-.img-row { display: flex; gap: ${GAP_MM}mm; align-items: flex-start; margin: 0 auto 2mm; break-inside: avoid; }
-.img-row figure { margin: 0; min-width: 0; }
-.img-row img { display: block; width: 100%; height: auto; border-radius: 1.5mm; background: #f1f5f9; object-fit: cover; }
 .item { display: flow-root; }
-.img-side { margin: 2mm 0 2mm; break-inside: avoid; }
-.img-side.right { float: right; clear: right; margin-left: 4mm; }
-.img-side.left { float: left; clear: left; margin-right: 4mm; }
-.img-side img { display: block; width: 100%; height: auto; border-radius: 1.5mm; background: #f1f5f9; object-fit: cover; }
-.img-side figcaption { margin-top: 1mm; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; font-size: 8pt; line-height: 1.35; color: #64748b; }
 .item .box { display: flow-root; }
 .img-side.left ~ .bi ul { list-style-position: inside; padding-left: 0; }
 .images, .item .visual { clear: both; }
-.img-credit { margin-top: .6mm; font-size: 6.8pt; line-height: 1.3; height: 1.3em; color: #94a3b8; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.img-row figcaption { margin-top: 1mm; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; font-size: 8pt; line-height: 1.35; color: #64748b; }
+${MEDIA_IMAGE_CSS}
 ${VISUAL_CSS(accent)}
 ${COVER_CSS}
 `;

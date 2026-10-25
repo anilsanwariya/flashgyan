@@ -29,7 +29,7 @@ import {
   Workflow,
   Hash,
 } from "lucide-react";
-import { previewCaVisual, type CaItem } from "@/lib/current-affairs.functions";
+import { previewCaVisual } from "@/lib/current-affairs.functions";
 import {
   MAX_VISUALS,
   storyVisuals,
@@ -109,6 +109,21 @@ function VisualFrame({ visual }: { visual: Visual }) {
   );
 }
 
+// What the visuals are made from: a story (made by its id on the server),
+// or other material (a notes topic) with its own maker.
+export type VisualMaker = (opts: {
+  slot: number;
+  type?: VisualType;
+  note?: string;
+  facts?: number[];
+}) => Promise<{ visual: Visual; covers: number[] }>;
+export type VisualSubject = {
+  id: string;
+  headline: string;
+  facts: { text: string }[];
+  make?: VisualMaker;
+};
+
 // What the picker is making: a new visual, or one in place of visual n.
 type Target = { kind: "new" } | { kind: "replace"; index: number };
 
@@ -118,7 +133,7 @@ export function StoryVisuals({
   busy,
   onSave,
 }: {
-  item: CaItem;
+  item: VisualSubject;
   content: CaContent;
   busy: boolean;
   onSave: (patch: Partial<CaContent>) => Promise<void>;
@@ -366,7 +381,7 @@ export function PickedPointsVisual({
   onClose,
   onSave,
 }: {
-  item: CaItem;
+  item: VisualSubject;
   content: CaContent;
   facts: number[];
   onClose: () => void;
@@ -424,7 +439,7 @@ function VisualPicker({
   onClose,
   onKeep,
 }: {
-  item: CaItem;
+  item: VisualSubject;
   slot: number;
   current: Visual | null;
   // Only these key points (0-based), which leave the text.
@@ -443,16 +458,14 @@ function VisualPicker({
   const make = async () => {
     setMaking(true);
     try {
+      const opts = {
+        slot,
+        ...(facts ? { facts } : {}),
+        ...(type === "auto" ? {} : { type }),
+        ...(note.trim() ? { note: note.trim() } : {}),
+      };
       setMade(
-        await previewFn({
-          data: {
-            id: item.id,
-            slot,
-            ...(facts ? { facts } : {}),
-            ...(type === "auto" ? {} : { type }),
-            ...(note.trim() ? { note: note.trim() } : {}),
-          },
-        }),
+        item.make ? await item.make(opts) : await previewFn({ data: { id: item.id, ...opts } }),
       );
     } catch (e) {
       toast.error(errorText(e, "Couldn't make the visual"));
@@ -476,7 +489,7 @@ function VisualPicker({
           <DialogDescription>
             {facts
               ? "Pick the kind of visual. SAATHI builds it from these points only; once you keep it, they leave the text."
-              : "Pick the kind of visual. SAATHI builds it from this story's facts only."}
+              : `Pick the kind of visual. SAATHI builds it from ${item.make ? "these notes" : "this story's facts"} only.`}
           </DialogDescription>
         </DialogHeader>
         {!made ? (
@@ -854,7 +867,7 @@ function VisualEditor({
   onClose,
   onSave,
 }: {
-  item: CaItem;
+  item: VisualSubject;
   visual: Visual;
   covers: number[];
   onClose: () => void;

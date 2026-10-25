@@ -227,7 +227,11 @@ function visualTexts(v: Visual): string[] {
 }
 
 // Numbers in the visual that are not in the facts (or the headline).
-export function unverifiedNumbers(v: Visual, facts: CaFact[], headline = ""): string[] {
+export function unverifiedNumbers(
+  v: Visual,
+  facts: Pick<CaFact, "text">[],
+  headline = "",
+): string[] {
   const allowed = new Set(numbersIn([headline, ...facts.map((f) => f.text)].join("\n")));
   const bad = new Set<string>();
   for (const t of visualTexts(v)) for (const n of numbersIn(t)) if (!allowed.has(n)) bad.add(n);
@@ -522,7 +526,7 @@ export function cleanVisual(v: unknown): { visual: Visual | null; problem: strin
 // The facts (0-based) the visual shows, as SAATHI listed them (1-based). A
 // fact only counts when every number in it is also in the visual, so a
 // figure is never hidden from the text without being shown.
-export function coveredFacts(v: Visual, listed: unknown, facts: CaFact[]): number[] {
+export function coveredFacts(v: Visual, listed: unknown, facts: Pick<CaFact, "text">[]): number[] {
   const shown = new Set(visualTexts(v).flatMap(numbersIn));
   const out = new Set<number>();
   for (const x of list(listed)) {

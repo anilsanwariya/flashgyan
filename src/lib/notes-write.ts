@@ -2,12 +2,15 @@
 // knowledge base passages, in both languages, in the parts of the approved
 // Layout A (Prelims: points, definitions, a table, an exam trap, one-liners;
 // Mains: keywords, sections, data, official text, an answer plan and a
-// practice question; a map when the topic needs one). Every point cites the
+// practice question; a map when the topic needs one; "Did you know" facts).
+// The editor adds images and visuals like a magazine story's, picks the past
+// questions shown, and can have any one part written again. Every point cites the
 // passages it came from; anything not from a passage is marked (◇) and must
 // be checked or replaced before the topic is approved. Definitions are word
 // for word from a passage. Pure helpers, shared by the server, the admin
 // panel and tests.
-import type { Bi } from "@/lib/current-affairs";
+import type { Bi, CaImage, ImageEdit, ImageLayout } from "@/lib/current-affairs";
+import { cleanVisual, type Visual } from "@/lib/ca-visuals";
 import type { NotesStage } from "@/lib/notes-books";
 import type { MapNeed } from "@/lib/notes-plan";
 
@@ -29,7 +32,24 @@ export type NoteMap = {
   places: NotePlace[];
 };
 
-export type NoteContent = {
+// A story's visual slots (the magazine's editor works on them as they are):
+// up to four visuals, the key points each one shows (left out of the text),
+// and where each prints.
+export type NoteVisualSlots = {
+  visual?: Visual | null;
+  visual_covers?: number[];
+  visual2?: Visual | null;
+  visual2_covers?: number[];
+  visual3?: Visual | null;
+  visual3_covers?: number[];
+  visual4?: Visual | null;
+  visual4_covers?: number[];
+  visual_below?: boolean[];
+  visual_beside?: boolean[];
+  visual_pair?: boolean;
+};
+
+export type NoteContent = NoteVisualSlots & {
   intro: NotePoint;
   definitions: NoteDefinition[];
   points: NotePoint[];
@@ -43,6 +63,10 @@ export type NoteContent = {
   plan: { part: Bi; words: number }[];
   practice: Bi;
   map: NoteMap | null;
+  dyk: NotePoint[];
+  images: CaImage[];
+  // The past questions printed (none chosen: the first that fits).
+  pyq_ids: string[];
 };
 
 export type DraftStatus = "draft" | "approved";
@@ -61,10 +85,16 @@ export const EMPTY_CONTENT: NoteContent = {
   plan: [],
   practice: { en: "", hi: "" },
   map: null,
+  dyk: [],
+  images: [],
+  pyq_ids: [],
 };
 
 export const WRITE_PASSAGES = 8;
 export const MAX_PLACES = 12;
+export const MAX_NOTE_IMAGES = 8;
+export const MAX_DYK = 4;
+export const MAX_PYQS = 3;
 
 // ---------- Cleaning ----------
 
@@ -97,6 +127,89 @@ const sourced = (v: unknown, count: number): NoteSourced => {
   return { ...p, source: str(o.source, 160) };
 };
 
+const httpsUrl = (v: unknown) =>
+  typeof v === "string" && /^https:\/\/[^\s"'<>]+$/.test(v) ? v : "";
+const LAYOUTS: ImageLayout[] = ["row", "own", "right", "left"];
+const unit = (v: unknown) => Math.max(0, Math.min(1, Number(v) || 0));
+
+function cleanImage(v: unknown): CaImage | null {
+  const o = (v ?? {}) as Record<string, unknown>;
+  const url = httpsUrl(o.url);
+  const w = Number(o.w);
+  const h = Number(o.h);
+  if (!url || !(w > 0) || !(h > 0)) return null;
+  const orig = (o.original ?? null) as Record<string, unknown> | null;
+  const e = (o.edit ?? null) as Record<string, unknown> | null;
+  const crop = (e?.crop ?? {}) as Record<string, unknown>;
+  const credit = str(o.credit, 120);
+  return {
+    url,
+    path: str(o.path, 300),
+    w,
+    h,
+    ...(o.caption ? { caption: bi(o.caption, 300) } : {}),
+    ...(credit ? { credit } : {}),
+    ...(LAYOUTS.includes(o.layout as ImageLayout) ? { layout: o.layout as ImageLayout } : {}),
+    ...(orig && httpsUrl(orig.url) && Number(orig.w) > 0 && Number(orig.h) > 0
+      ? {
+          original: {
+            url: httpsUrl(orig.url),
+            path: str(orig.path, 300),
+            w: Number(orig.w),
+            h: Number(orig.h),
+          },
+        }
+      : {}),
+    ...(e
+      ? {
+          edit: {
+            rotate: ([0, 90, 180, 270].includes(Number(e.rotate))
+              ? Number(e.rotate)
+              : 0) as ImageEdit["rotate"],
+            flip: e.flip === true,
+            straighten: Math.max(-45, Math.min(45, Number(e.straighten) || 0)),
+            crop: {
+              x: unit(crop.x),
+              y: unit(crop.y),
+              w: unit(crop.w ?? 1) || 1,
+              h: unit(crop.h ?? 1) || 1,
+            },
+          },
+        }
+      : {}),
+  };
+}
+
+const SLOTS = [
+  ["visual", "visual_covers"],
+  ["visual2", "visual2_covers"],
+  ["visual3", "visual3_covers"],
+  ["visual4", "visual4_covers"],
+] as const;
+
+// The visuals, checked as the magazine checks them; `points` is the number
+// of key points (a visual can stand in for some of them).
+function visualSlots(o: Record<string, unknown>, points: number): NoteVisualSlots {
+  const out: NoteVisualSlots = {};
+  const below: boolean[] = [];
+  const beside: boolean[] = [];
+  SLOTS.forEach(([key, coversKey], i) => {
+    const v = o[key] ? cleanVisual(o[key]).visual : null;
+    out[key] = v;
+    out[coversKey] = v
+      ? [...new Set(list(o[coversKey]).map(Number))].filter(
+          (x) => Number.isInteger(x) && x >= 0 && x < points,
+        )
+      : [];
+    below.push(!!v && list(o.visual_below)[i] === true);
+    beside.push(!!v && list(o.visual_beside)[i] === true);
+  });
+  out.visual_below = below;
+  out.visual_beside = beside;
+  out.visual_pair = o.visual_pair === true;
+  return out;
+}
+
 // What the AI wrote or the editor saved, cleaned. `count` is the number of
 // passages (source numbers beyond it are dropped).
 export function normalizeContent(v: unknown, count: number): NoteContent {
@@ -118,7 +231,12 @@ export function normalizeContent(v: unknown, count: number): NoteContent {
         .filter((p) => filled(p.name) && Number.isFinite(p.lat) && Number.isFinite(p.lon))
         .slice(0, MAX_PLACES)
     : [];
+  const points = list(o.points)
+    .map((x) => point(x, count))
+    .filter((p) => filled(p.text))
+    .slice(0, 20);
   return {
+    ...visualSlots(o, points.length),
     intro: point(o.intro, count, 1200),
     definitions: list(o.definitions)
       .map((x) => {
@@ -132,10 +250,7 @@ export function normalizeContent(v: unknown, count: number): NoteContent {
       })
       .filter((d) => filled(d.term) && filled(d.text))
       .slice(0, 4),
-    points: list(o.points)
-      .map((x) => point(x, count))
-      .filter((p) => filled(p.text))
-      .slice(0, 20),
+    points,
     table:
       t && head.length >= 2
         ? {
@@ -205,6 +320,21 @@ export function normalizeContent(v: unknown, count: number): NoteContent {
             places,
           }
         : null,
+    dyk: list(o.dyk)
+      .map((x) => point(x, count, 400))
+      .filter((p) => filled(p.text))
+      .slice(0, MAX_DYK),
+    images: list(o.images)
+      .map(cleanImage)
+      .filter((x): x is CaImage => !!x)
+      .slice(0, MAX_NOTE_IMAGES),
+    pyq_ids: [
+      ...new Set(
+        list(o.pyq_ids).filter(
+          (x): x is string => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x),
+        ),
+      ),
+    ].slice(0, MAX_PYQS),
   };
 }
 
@@ -241,6 +371,7 @@ export function unchecked(c: NoteContent): number {
     ...c.definitions.map((d) => ({ src: d.src, filled: true })),
     ...c.data.map((d) => ({ ...d, filled: true })),
     ...c.official.map((d) => ({ ...d, filled: true })),
+    ...c.dyk.map((d) => ({ ...d, filled: true })),
   ];
   return lines.filter((l) => l.filled && !l.src.length && !l.ok).length;
 }
@@ -255,6 +386,7 @@ export function usedSources(c: NoteContent, passages: NotePassage[]): string[] {
     ...(c.table?.src ?? []),
     ...c.data.flatMap((d) => d.src),
     ...c.official.flatMap((d) => d.src),
+    ...c.dyk.flatMap((d) => d.src),
   ]);
   return [...new Set(passages.filter((p) => ks.has(p.k)).map((p) => p.title))];
 }
@@ -269,6 +401,7 @@ const STAGE: Record<NotesStage, string> = {
 - "table": when facts compare well side by side (dams, places, years…), a small table; else null.
 - "trap": one fact students often confuse (e.g. two similar names or "longest" vs "longest wholly within").
 - "oneliners": 3 quick-revision question/answer pairs.
+- "dyk": 1–2 "Did you know?" facts: surprising, memorable and exam-useful.
 - Leave "keywords", "sections", "data", "official", "plan" and "practice" empty.`,
   mains: `This is the MAINS book: analytical, answer-ready. Write:
 - "intro": 2–3 sentences of context that can open an answer.
@@ -279,8 +412,15 @@ const STAGE: Record<NotesStage, string> = {
 - "official": text from the Constitution, an Act or a policy, with its source, only from the passages.
 - "plan": how to split a 150-word answer on this topic across its parts (words per part).
 - "practice": one Mains-style question on the topic with marks and word limit.
+- "dyk": 0–2 "Did you know?" facts that make an answer stand out.
 - Leave "trap" and "oneliners" empty; "points" may hold any other key facts.`,
 };
+
+const MAP_ASK = `{"region": "rajasthan" or "india", "rivers": true when rivers must show, "title": {"en","hi"}, "places": up to ${MAX_PLACES} places to mark (towns, dams, peaks, lakes, sanctuaries…), each {"en","hi","lat","lon"} with accurate coordinates}`;
+
+const RULES = (section: string) =>
+  `You write the study notes of "${section}" for Rajasthan's competitive exams (RPSC, RSSB), in English and Hindi together: the same content in both, Hindi in clear standard Devanagari as used in Rajasthan's exams.
+Write ONLY from the passages given (our knowledge base of NCERT, NIOS, IGNOU and board books, official documents and Acts). After every item give "src": the numbers of the passages it comes from. If an important fact is not in any passage, you may add it with "src": [] only when you are sure of it; it will be checked by the editor. Never invent figures, dates or names.`;
 
 export function writeMessages(
   stage: NotesStage,
@@ -299,14 +439,13 @@ export function writeMessages(
   return [
     {
       role: "system",
-      content: `You write the study notes of "${section}" for Rajasthan's competitive exams (RPSC, RSSB), in English and Hindi together: the same content in both, Hindi in clear standard Devanagari as used in Rajasthan's exams.
-Write ONLY from the passages given (our knowledge base of NCERT, NIOS, IGNOU and board books, official documents and Acts). After every item give "src": the numbers of the passages it comes from. If an important fact is not in any passage, you may add it with "src": [] only when you are sure of it; it will be checked by the editor. Never invent figures, dates or names.
+      content: `${RULES(section)}
 ${STAGE[stage]}
-- "map": when the topic needs a map, {"region": "rajasthan" or "india", "rivers": true when rivers must show, "title": {"en","hi"}, "places": up to ${MAX_PLACES} places to mark (towns, dams, peaks, lakes, sanctuaries…), each {"en","hi","lat","lon"} with accurate coordinates}; else null.
+- "map": when the topic needs a map, ${MAP_ASK}; else null.
 Keep each item short. Do not repeat the same fact in two places.
 ${hindiGuide}
 Reply with JSON only, in this shape:
-{"intro": {"en": "", "hi": "", "src": [1]}, "definitions": [{"term": {"en": "", "hi": ""}, "text": {"en": "", "hi": ""}, "src": [2]}], "points": [{"en": "", "hi": "", "src": [1]}], "table": {"caption": {"en": "", "hi": ""}, "head": [{"en": "", "hi": ""}], "rows": [[{"en": "", "hi": ""}]], "src": [1]} or null, "trap": {"en": "", "hi": ""}, "oneliners": [{"q": {"en": "", "hi": ""}, "a": {"en": "", "hi": ""}}], "keywords": [{"en": "", "hi": ""}], "sections": [{"heading": {"en": "", "hi": ""}, "points": [{"en": "", "hi": "", "src": [1]}]}], "data": [{"en": "", "hi": "", "source": "", "src": [1]}], "official": [{"en": "", "hi": "", "source": "", "src": [1]}], "plan": [{"part": {"en": "", "hi": ""}, "words": 30}], "practice": {"en": "", "hi": ""}, "map": null}`,
+{"intro": {"en": "", "hi": "", "src": [1]}, "definitions": [{"term": {"en": "", "hi": ""}, "text": {"en": "", "hi": ""}, "src": [2]}], "points": [{"en": "", "hi": "", "src": [1]}], "table": {"caption": {"en": "", "hi": ""}, "head": [{"en": "", "hi": ""}], "rows": [[{"en": "", "hi": ""}]], "src": [1]} or null, "trap": {"en": "", "hi": ""}, "oneliners": [{"q": {"en": "", "hi": ""}, "a": {"en": "", "hi": ""}}], "keywords": [{"en": "", "hi": ""}], "sections": [{"heading": {"en": "", "hi": ""}, "points": [{"en": "", "hi": "", "src": [1]}]}], "data": [{"en": "", "hi": "", "source": "", "src": [1]}], "official": [{"en": "", "hi": "", "source": "", "src": [1]}], "plan": [{"part": {"en": "", "hi": ""}, "words": 30}], "practice": {"en": "", "hi": ""}, "dyk": [{"en": "", "hi": "", "src": [1]}], "map": null}`,
     },
     {
       role: "user",
@@ -350,4 +489,158 @@ export function parseNotes(raw: string, passages: NotePassage[]): NoteContent | 
   if (!o) return null;
   const c = checkDefinitions(normalizeContent(o, passages.length), passages);
   return filled(c.intro.text) || c.points.length || c.sections.length ? c : null;
+}
+
+// ---------- One part again ----------
+
+// The parts the editor can have written again, what each is and its shape.
+export const NOTE_PARTS = {
+  intro: {
+    label: "Opening",
+    ask: "2–3 sentences placing the topic (Mains: context that can open an answer)",
+    shape: '{"intro": {"en": "", "hi": "", "src": [1]}}',
+  },
+  definitions: {
+    label: "Definitions",
+    ask: "0–2 key terms, each quoted WORD FOR WORD from a passage (copy the sentence exactly), only when a passage defines the term",
+    shape:
+      '{"definitions": [{"term": {"en": "", "hi": ""}, "text": {"en": "", "hi": ""}, "src": [2]}]}',
+  },
+  points: {
+    label: "Key points",
+    ask: "6–12 key facts (names, places, dates, figures, lists), each one line, the key word in **bold**",
+    shape: '{"points": [{"en": "", "hi": "", "src": [1]}]}',
+  },
+  sections: {
+    label: "Sections",
+    ask: "3–5 parts with a heading each (e.g. features, significance, problems, way forward), 2–5 points each, the key word in **bold**",
+    shape:
+      '{"sections": [{"heading": {"en": "", "hi": ""}, "points": [{"en": "", "hi": "", "src": [1]}]}]}',
+  },
+  table: {
+    label: "Table",
+    ask: "a small table of facts that compare well side by side (2–5 columns, up to 10 rows), or null",
+    shape:
+      '{"table": {"caption": {"en": "", "hi": ""}, "head": [{"en": "", "hi": ""}], "rows": [[{"en": "", "hi": ""}]], "src": [1]}}',
+  },
+  trap: {
+    label: "Exam trap",
+    ask: 'one fact students often confuse (two similar names, "longest" vs "longest wholly within"…)',
+    shape: '{"trap": {"en": "", "hi": ""}}',
+  },
+  oneliners: {
+    label: "Quick revision",
+    ask: "3–6 quick-revision question/answer pairs, answers of a few words",
+    shape: '{"oneliners": [{"q": {"en": "", "hi": ""}, "a": {"en": "", "hi": ""}}]}',
+  },
+  dyk: {
+    label: "Did you know",
+    ask: '1–3 "Did you know?" facts: surprising, memorable and exam-useful',
+    shape: '{"dyk": [{"en": "", "hi": "", "src": [1]}]}',
+  },
+  keywords: {
+    label: "Keywords",
+    ask: "4–8 terms to use in answers",
+    shape: '{"keywords": [{"en": "", "hi": ""}]}',
+  },
+  data: {
+    label: "Data",
+    ask: 'figures with their year and source (e.g. "Census 2011"), only from the passages',
+    shape: '{"data": [{"en": "", "hi": "", "source": "", "src": [1]}]}',
+  },
+  official: {
+    label: "Official text",
+    ask: "text from the Constitution, an Act or a policy, with its source, only from the passages",
+    shape: '{"official": [{"en": "", "hi": "", "source": "", "src": [1]}]}',
+  },
+  plan: {
+    label: "Answer plan",
+    ask: "how to split a 150-word answer on this topic across its parts (words per part)",
+    shape: '{"plan": [{"part": {"en": "", "hi": ""}, "words": 30}]}',
+  },
+  practice: {
+    label: "Practice question",
+    ask: "one Mains-style question on the topic with marks and word limit",
+    shape: '{"practice": {"en": "", "hi": ""}}',
+  },
+  map: {
+    label: "Map",
+    ask: `a map for the topic: ${MAP_ASK}`,
+    shape:
+      '{"map": {"region": "rajasthan", "rivers": false, "title": {"en": "", "hi": ""}, "places": [{"en": "", "hi": "", "lat": 0, "lon": 0}]}}',
+  },
+} as const;
+export type NotePart = keyof typeof NOTE_PARTS;
+export const NOTE_PART_KEYS = Object.keys(NOTE_PARTS) as NotePart[];
+
+// One part written again, knowing the rest of the notes (not to repeat
+// them), with the editor's note ("add the dams of the Chambal").
+export function partMessages(
+  section: string,
+  topic: { number: string; path: string; name: Bi },
+  part: NotePart,
+  current: NoteContent,
+  passages: NotePassage[],
+  note: string,
+  hindiGuide: string,
+): ChatMessage[] {
+  const info = NOTE_PARTS[part];
+  const others = [
+    ...current.points.map((p) => p.text.en || p.text.hi),
+    ...current.sections.flatMap((x) => x.points.map((p) => p.text.en || p.text.hi)),
+  ].filter(Boolean);
+  return [
+    {
+      role: "system",
+      content: `${RULES(section)}
+Write again ONE part of a topic's notes, "${part}": ${info.ask}.
+Keep each item short. Do not repeat what the rest of the notes already say.
+${hindiGuide}
+Reply with JSON only, in this shape: ${info.shape}`,
+    },
+    {
+      role: "user",
+      content: [
+        `Topic ${topic.number}: ${topic.path}${topic.name.hi ? ` | ${topic.name.hi}` : ""}`,
+        `The part now:\n${JSON.stringify((current as Record<string, unknown>)[part] ?? null)}`,
+        part !== "points" && part !== "sections" && others.length
+          ? `The notes' key points (for context):\n${others.map((x) => `- ${x}`).join("\n")}`
+          : "",
+        note.trim() ? `The editor's note: ${note.trim()}` : "",
+        passages.length
+          ? `Passages:\n${passages.map((p) => `[${p.k}] ${p.title}:\n${p.content}`).join("\n\n")}`
+          : 'Passages: none. Write only what you are sure of, all with "src": [].',
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    },
+  ];
+}
+
+// The part the AI wrote, cleaned as a whole note is; null when missing.
+export function parsePart(
+  raw: string,
+  part: NotePart,
+  current: NoteContent,
+  passages: NotePassage[],
+): Partial<NoteContent> | null {
+  const o = parseJson<Record<string, unknown>>(raw);
+  if (!o || !(part in o)) return null;
+  let c = normalizeContent({ ...current, [part]: o[part] }, passages.length);
+  if (part === "definitions") c = checkDefinitions(c, passages);
+  // New key points: the visuals no longer stand in for any of them.
+  if (part === "points")
+    return { points: c.points, ...Object.fromEntries(SLOTS.map(([, k]) => [k, []])) };
+  return { [part]: c[part] } as Partial<NoteContent>;
+}
+
+// The notes as facts for a visual: the key points first (a visual made from
+// them can stand in for them), then the sections' points and the data.
+export function noteFacts(c: NoteContent): { text: string }[] {
+  const t = (b: Bi) => (b.en || b.hi).replace(/\*\*/g, "");
+  return [
+    ...c.points.map((p) => ({ text: t(p.text) })),
+    ...c.sections.flatMap((x) => x.points.map((p) => ({ text: t(p.text) }))),
+    ...c.data.map((d) => ({ text: `${t(d.text)}${d.source ? ` (${d.source})` : ""}` })),
+  ];
 }
