@@ -1871,6 +1871,50 @@ export type Database = {
         }
         Relationships: []
       }
+      master_topics: {
+        Row: {
+          created_at: string
+          id: string
+          level: string
+          name_en: string
+          name_hi: string
+          parent_id: string | null
+          position: number
+          section: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          level?: string
+          name_en?: string
+          name_hi?: string
+          parent_id?: string | null
+          position?: number
+          section: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          level?: string
+          name_en?: string
+          name_hi?: string
+          parent_id?: string | null
+          position?: number
+          section?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "master_topics_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "master_topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       mcq_practice_questions: {
         Row: {
           answer: number
@@ -2617,6 +2661,39 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      syllabus_links: {
+        Row: {
+          created_at: string
+          node_id: string
+          topic_id: string
+        }
+        Insert: {
+          created_at?: string
+          node_id: string
+          topic_id: string
+        }
+        Update: {
+          created_at?: string
+          node_id?: string
+          topic_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "syllabus_links_node_id_fkey"
+            columns: ["node_id"]
+            isOneToOne: false
+            referencedRelation: "syllabus_nodes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "syllabus_links_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "master_topics"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       syllabus_nodes: {
         Row: {
