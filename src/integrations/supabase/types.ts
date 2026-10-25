@@ -1523,6 +1523,7 @@ export type Database = {
           exam_date: string | null
           id: string
           key_added: boolean
+          kind: string
           lessons: Json
           mcq_test_id: string | null
           pages: number
@@ -1545,6 +1546,7 @@ export type Database = {
           exam_date?: string | null
           id?: string
           key_added?: boolean
+          kind?: string
           lessons?: Json
           mcq_test_id?: string | null
           pages?: number
@@ -1567,6 +1569,7 @@ export type Database = {
           exam_date?: string | null
           id?: string
           key_added?: boolean
+          kind?: string
           lessons?: Json
           mcq_test_id?: string | null
           pages?: number
@@ -1606,11 +1609,16 @@ export type Database = {
           extra_hi: string
           id: string
           key_note: string
+          marks: number | null
+          master_topic_id: string | null
           match: string | null
           match_note: string | null
           matched_item: string | null
+          model_answer: string
+          model_source: string
           options: Json
           paper_id: string
+          part: string
           q_no: number
           question_en: string
           question_hi: string
@@ -1618,8 +1626,10 @@ export type Database = {
           subject_section: string
           topic_en: string
           topic_hi: string
+          unit: string
           updated_at: string
           verified: boolean
+          word_limit: number | null
         }
         Insert: {
           ai_check?: Json | null
@@ -1636,11 +1646,16 @@ export type Database = {
           extra_hi?: string
           id?: string
           key_note?: string
+          marks?: number | null
+          master_topic_id?: string | null
           match?: string | null
           match_note?: string | null
           matched_item?: string | null
+          model_answer?: string
+          model_source?: string
           options?: Json
           paper_id: string
+          part?: string
           q_no: number
           question_en?: string
           question_hi?: string
@@ -1648,8 +1663,10 @@ export type Database = {
           subject_section?: string
           topic_en?: string
           topic_hi?: string
+          unit?: string
           updated_at?: string
           verified?: boolean
+          word_limit?: number | null
         }
         Update: {
           ai_check?: Json | null
@@ -1666,11 +1683,16 @@ export type Database = {
           extra_hi?: string
           id?: string
           key_note?: string
+          marks?: number | null
+          master_topic_id?: string | null
           match?: string | null
           match_note?: string | null
           matched_item?: string | null
+          model_answer?: string
+          model_source?: string
           options?: Json
           paper_id?: string
+          part?: string
           q_no?: number
           question_en?: string
           question_hi?: string
@@ -1678,10 +1700,19 @@ export type Database = {
           subject_section?: string
           topic_en?: string
           topic_hi?: string
+          unit?: string
           updated_at?: string
           verified?: boolean
+          word_limit?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "exam_questions_master_topic_id_fkey"
+            columns: ["master_topic_id"]
+            isOneToOne: false
+            referencedRelation: "master_topics"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "exam_questions_matched_item_fkey"
             columns: ["matched_item"]
