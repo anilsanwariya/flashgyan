@@ -11,6 +11,13 @@
 // panel and tests.
 import type { Bi, CaImage, ImageEdit, ImageLayout } from "@/lib/current-affairs";
 import { cleanVisual, type Visual } from "@/lib/ca-visuals";
+import {
+  MAX_PLACES,
+  normalizeMap,
+  uncheckedPlaces,
+  type MapPlace,
+  type MapSpec,
+} from "@/lib/map-spec";
 import type { NotesStage } from "@/lib/notes-books";
 import type { MapNeed } from "@/lib/notes-plan";
 
@@ -24,13 +31,8 @@ export type NotePoint = { text: Bi; src: number[]; ok?: boolean };
 export type NoteSourced = { text: Bi; source: string; src: number[]; ok?: boolean };
 export type NoteDefinition = { term: Bi; text: Bi; source: string; src: number[] };
 export type NoteTable = { caption: Bi; head: Bi[]; rows: Bi[][]; src: number[] };
-export type NotePlace = { name: Bi; lat: number; lon: number };
-export type NoteMap = {
-  region: "rajasthan" | "india";
-  rivers: boolean;
-  title: Bi;
-  places: NotePlace[];
-};
+export type NotePlace = MapPlace;
+export type NoteMap = MapSpec;
 
 // A story's visual slots (the magazine's editor works on them as they are):
 // up to four visuals, the key points each one shows (left out of the text),
@@ -91,7 +93,7 @@ export const EMPTY_CONTENT: NoteContent = {
 };
 
 export const WRITE_PASSAGES = 8;
-export const MAX_PLACES = 12;
+export { MAX_PLACES };
 export const MAX_NOTE_IMAGES = 8;
 export const MAX_DYK = 4;
 export const MAX_PYQS = 3;
@@ -220,17 +222,6 @@ export function normalizeContent(v: unknown, count: number): NoteContent {
         .map((h) => bi(h, 80))
         .slice(0, 5)
     : [];
-  const m = (o.map ?? null) as Record<string, unknown> | null;
-  const places = m
-    ? list(m.places)
-        .map((x) => {
-          const p = (x ?? {}) as Record<string, unknown>;
-          const name = p.name && typeof p.name === "object" ? bi(p.name, 60) : bi(p, 60);
-          return { name, lat: Number(p.lat), lon: Number(p.lon) };
-        })
-        .filter((p) => filled(p.name) && Number.isFinite(p.lat) && Number.isFinite(p.lon))
-        .slice(0, MAX_PLACES)
-    : [];
   const points = list(o.points)
     .map((x) => point(x, count))
     .filter((p) => filled(p.text))
@@ -311,15 +302,7 @@ export function normalizeContent(v: unknown, count: number): NoteContent {
       .filter((r) => filled(r.part))
       .slice(0, 6),
     practice: bi(o.practice, 400),
-    map:
-      m && places.length
-        ? {
-            region: m.region === "india" ? "india" : "rajasthan",
-            rivers: m.rivers === true,
-            title: bi(m.title, 100),
-            places,
-          }
-        : null,
+    map: normalizeMap(o.map),
     dyk: list(o.dyk)
       .map((x) => point(x, count, 400))
       .filter((p) => filled(p.text))
@@ -362,7 +345,8 @@ export function checkDefinitions(c: NoteContent, passages: NotePassage[]): NoteC
   };
 }
 
-// The lines written by the AI (no passage) that the editor hasn't checked.
+// The lines written by the AI (no passage) that the editor hasn't checked,
+// and the map's places the AI placed that aren't in the place list.
 export function unchecked(c: NoteContent): number {
   const lines: { src: number[]; ok?: boolean; filled: boolean }[] = [
     { ...c.intro, filled: filled(c.intro.text) },
@@ -373,7 +357,7 @@ export function unchecked(c: NoteContent): number {
     ...c.official.map((d) => ({ ...d, filled: true })),
     ...c.dyk.map((d) => ({ ...d, filled: true })),
   ];
-  return lines.filter((l) => l.filled && !l.src.length && !l.ok).length;
+  return lines.filter((l) => l.filled && !l.src.length && !l.ok).length + uncheckedPlaces(c.map);
 }
 
 // The passages a topic's notes use (for the chapter's sources list).

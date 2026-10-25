@@ -27,6 +27,7 @@ import {
   Image as ImageIcon,
   Library,
   ListChecks,
+  Map as MapIcon,
   MoreHorizontal,
   Paperclip,
   Plus,
@@ -73,6 +74,8 @@ import { HistoryChip } from "@/components/ca-history-panel";
 import { OfficialChip } from "@/components/ca-official-panel";
 import { PickedPointsVisual, StoryVisuals } from "@/components/ca-story-visuals";
 import { MaterialPanel } from "@/components/ca-story-material";
+import { StoryMap } from "@/components/ca-story-map";
+import { uncheckedPlaces } from "@/lib/map-spec";
 import { BiLine, IconButton, Part, StaticConnect, type Lang } from "@/components/ca-story-review";
 import { Badge, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
@@ -102,6 +105,7 @@ type TabId =
   | "points"
   | "images"
   | "visuals"
+  | "map"
   | "static"
   | "factbite"
   | "questions"
@@ -286,6 +290,13 @@ export function StoryEditor({
       label: "Visuals",
       icon: BarChart3,
       count: storyVisuals(c).length,
+    },
+    {
+      id: "map",
+      label: "Map",
+      icon: MapIcon,
+      count: c?.map?.places.length,
+      warn: !!c && uncheckedPlaces(c.map) > 0 && `${uncheckedPlaces(c.map)} place(s) to check`,
     },
     {
       id: "static",
@@ -563,6 +574,13 @@ export function StoryEditor({
                     hint="Up to four per story, each above, beside or below the key points. Rebuild one as the type you pick, or edit its text and numbers."
                   >
                     <StoryVisuals item={item} content={c!} busy={busy} onSave={save} />
+                  </Section>
+                ) : tab === "map" ? (
+                  <Section
+                    title="Map"
+                    hint="A map of the places in the story, printed after the key points. SAATHI suggests one; places are checked against the place list (Survey of India names, dams, parks, headquarters)."
+                  >
+                    <StoryMap key={item.id} item={item} content={c!} lang={lang} onSave={save} />
                   </Section>
                 ) : tab === "static" ? (
                   <Section

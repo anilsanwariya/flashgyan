@@ -141,6 +141,7 @@ export const contentSchema = z.object({
   quick: z.object({ q: bi, a: bi }).nullable().optional(),
   hide_summary: z.boolean().optional(),
   hide_why: z.boolean().optional(),
+  map: z.unknown().optional(),
   images: z
     .array(
       z.object({
@@ -542,10 +543,23 @@ export const updateCaItem = createServerFn({ method: "POST" })
         patch.content[key] = clean.visual;
       }
     }
+    if (patch.content && "map" in patch.content) {
+      const { normalizeMap } = await import("@/lib/map-spec");
+      patch.content.map = normalizeMap(patch.content.map);
+    }
     const save = () =>
       s.updateItem(id, patch as Parameters<Awaited<ReturnType<typeof server>>["updateItem"]>[1]);
     // Text edits are kept in the story's history; moving or dropping isn't.
     return patch.content ? s.asEdit(id, save) : save();
+  });
+
+// A map for the story, suggested from its facts (nothing saved).
+export const suggestCaMap = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).suggestStoryMap(data.id);
   });
 
 // More Fact Bite entries to choose from (nothing saved).

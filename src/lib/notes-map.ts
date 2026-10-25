@@ -1,12 +1,14 @@
-// The notes' maps: Rajasthan (with its neighbours' borders) or India, from
-// the magazine's outlines (DataMeet, following the Survey of India boundary),
-// with India's rivers when the topic needs them (Natural Earth) and the
-// topic's places as numbered dots, listed beside the map. Server only: the
-// outlines are large.
+// The maps of the notes and the magazine's stories: Rajasthan (with its
+// neighbours' borders) or India, from the magazine's outlines (DataMeet,
+// following the Survey of India boundary), with the layers the map asks for
+// (Rajasthan: India-WRIS rivers, the main canals, the 33 districts, the
+// protected areas; India: Natural Earth's rivers) and the places as numbered
+// dots, listed beside the map. Server only: the outlines are large.
 import { INDIA_MAP, RAJASTHAN_MAP, type MapProjection } from "@/lib/ca-map-data";
 import { RIVERS } from "@/lib/notes-map-data";
+import { RAJ_CANALS, RAJ_DISTRICTS, RAJ_PROTECTED, RAJ_RIVERS, type GeoLine } from "@/lib/geo-data";
 import type { Bi } from "@/lib/current-affairs";
-import type { NoteMap, NotePlace } from "@/lib/notes-write";
+import { MAP_CSS, type MapPlace as NotePlace, type MapSpec as NoteMap } from "@/lib/map-spec";
 
 type Lang = "en" | "hi";
 
@@ -77,27 +79,101 @@ export function noteMapSvg(m: NoteMap, lang: Lang, accent: string): string {
   const base = india
     ? `<path d="${INDIA_MAP.states}" fill="none" stroke="#cbd5e1" stroke-width="${sw(0.6)}"/><path d="${INDIA_MAP.outline}" fill="#f8fafc" fill-opacity=".6" stroke="#334155" stroke-width="${sw(1)}"/>`
     : `<path d="${RAJASTHAN_MAP.outline}" fill="${accent}" fill-opacity=".07" stroke="none"/><path d="${(neighbours ??= reproject(INDIA_MAP.states, INDIA_MAP.projection, RAJASTHAN_MAP.projection))}" fill="none" stroke="#b8bcc6" stroke-width="${sw(1)}" stroke-dasharray="${sw(5)} ${sw(3)}"/><path d="${RAJASTHAN_MAP.outline}" fill="none" stroke="${accent}" stroke-width="${sw(1.6)}"/>`;
-  let rivers = "";
+  const inside = ([x, y]: [number, number], margin: number) =>
+    x >= vx - margin && y >= vy - margin && x <= vx + vw + margin && y <= vy + vh + margin;
+  const path = (lines: GeoLine[]) =>
+    lines
+      .map((l) => l.map(([lon, lat]) => project(pr, lon, lat)))
+      .filter((l) => l.some((q) => inside(q, 40 * k)))
+      .map((l) => "M" + l.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join("L"))
+      .join("");
+  // Labels never overlap: each claims its box (the places' dots first).
+  const taken: [number, number, number, number][] = places.map((p) => {
+    const [x, y] = project(pr, p.lon, p.lat);
+    return [x - 11 * k, y - 11 * k, x + 11 * k, y + 11 * k];
+  });
+  const claim = (x: number, y: number, text: string, size: number) => {
+    const w = text.length * size * (lang === "hi" ? 0.5 : 0.55);
+    const box: [number, number, number, number] = [x - w / 2, y - size, x + w / 2, y + size * 0.25];
+    if (taken.some((b) => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1]))
+      return false;
+    taken.push(box);
+    return true;
+  };
+  const label = (x: number, y: number, text: string, cls: string, size: number) =>
+    claim(x, y, text, size * k)
+      ? `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" class="${cls}" style="font-size:${(size * k).toFixed(2)}px;stroke-width:${(size * 0.27 * k).toFixed(2)}px">${esc(text)}</text>`
+      : "";
+  // A name along a line's longest part in view (the middle, else a little
+  // either side when that spot is taken).
+  const lineLabel = (lines: GeoLine[], text: string, cls: string, size = 15) => {
+    const longest = lines
+      .map((l) => l.map(([lon, lat]) => project(pr, lon, lat)).filter((q) => inside(q, -10 * k)))
+      .sort((a, b) => b.length - a.length)[0];
+    if (!longest || longest.length < 3) return "";
+    for (const f of [0.5, 0.35, 0.65, 0.2, 0.8]) {
+      const [x, y] = longest[Math.floor((longest.length - 1) * f)];
+      const t = label(x, y - 5 * k, text, cls, size);
+      if (t) return t;
+    }
+    return "";
+  };
+  // Rivers the map is about (named in its title or places) always show.
+  const named = (r: { en: string; hi: string }) => {
+    const text = [m.title.en, m.title.hi, ...m.places.flatMap((p) => [p.name.en, p.name.hi])]
+      .join(" ")
+      .toLowerCase();
+    return text.includes(r.en.toLowerCase()) || (!!r.hi && text.includes(r.hi));
+  };
+  let layers = "";
   let labels = "";
-  if (m.rivers) {
-    const inside = ([x, y]: [number, number], margin: number) =>
-      x >= vx - margin && y >= vy - margin && x <= vx + vw + margin && y <= vy + vh + margin;
-    for (const r of RIVERS) {
-      const segs = r.lines
-        .map((l) => l.map(([lon, lat]) => project(pr, lon, lat)))
-        .filter((l) => l.some((q) => inside(q, 40 * k)));
-      if (!segs.length) continue;
-      rivers += `<path d="${segs.map((l) => "M" + l.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join("L")).join("")}" fill="none" stroke="#2563eb" stroke-width="${sw(india ? 1.2 : 1.8)}" stroke-linejoin="round" stroke-linecap="round"/>`;
-      // The name at the middle of its longest part in view.
-      const longest = segs
-        .map((l) => l.filter((q) => inside(q, -10 * k)))
-        .sort((a, b) => b.length - a.length)[0];
-      if (longest && longest.length >= 3) {
-        const [x, y] = longest[Math.floor(longest.length / 2)];
-        labels += `<text x="${x.toFixed(1)}" y="${(y - 5 * k).toFixed(1)}" class="nm-river" style="font-size:${(15 * k).toFixed(2)}px;stroke-width:${(4 * k).toFixed(2)}px">${esc(lang === "hi" ? r.hi : r.en)}</text>`;
-      }
+  // District names go last: rivers and canals matter more.
+  const distLabels: [number, number, string][] = [];
+  if (!india && m.districts) {
+    for (const d of RAJ_DISTRICTS) {
+      const dp = path(d.rings);
+      if (!dp) continue;
+      layers += `<path d="${dp}" fill="none" stroke="#c4c8d0" stroke-width="${sw(0.8)}"/>`;
+      const [x, y] = project(pr, d.at[0], d.at[1]);
+      if (inside([x, y], -20 * k)) distLabels.push([x, y, lang === "hi" ? d.hi : d.en]);
     }
   }
+  if (!india && m.protected) {
+    for (const a of RAJ_PROTECTED) {
+      const ap = path(a.rings);
+      if (ap)
+        layers += `<path d="${ap}Z" fill="#16a34a" fill-opacity=".16" stroke="#15803d" stroke-width="${sw(0.6)}"/>`;
+    }
+  }
+  if (m.rivers) {
+    // Rajasthan's main rivers always; tributaries closer in; the rest
+    // closer still, or when the map names them (named ones first).
+    const shown = (india ? RIVERS.map((r) => ({ ...r, tier: 1 as const })) : RAJ_RIVERS)
+      .map((r) => ({ ...r, tier: r.tier ?? 1, key: named(r) }))
+      .filter((r) => r.key || r.tier === 1 || (r.tier === 2 && k <= 0.6) || k <= 0.35)
+      .sort((a, b) => Number(b.key) - Number(a.key) || a.tier - b.tier);
+    for (const r of shown) {
+      const rp = path(r.lines);
+      if (!rp) continue;
+      const width = r.key ? 2.2 : india ? 1.2 : r.tier === 1 ? 1.5 : 1;
+      layers += `<path d="${rp}" fill="none" stroke="#2563eb" stroke-opacity="${r.key || r.tier === 1 ? 1 : 0.75}" stroke-width="${sw(width)}" stroke-linejoin="round" stroke-linecap="round"/>`;
+      labels += lineLabel(
+        r.lines,
+        lang === "hi" ? r.hi : r.en,
+        "nm-river",
+        r.tier === 1 || r.key ? 15 : 12.5,
+      );
+    }
+  }
+  if (!india && m.canals) {
+    for (const c of RAJ_CANALS) {
+      const cp = path(c.lines);
+      if (!cp) continue;
+      layers += `<path d="${cp}" fill="none" stroke="#0891b2" stroke-width="${sw(1.6)}" stroke-dasharray="${sw(6)} ${sw(3)}"/>`;
+      labels += lineLabel(c.lines, lang === "hi" ? c.hi : c.en, "nm-canal");
+    }
+  }
+  for (const [x, y, t] of distLabels) labels += label(x, y, t, "nm-dist", 12);
   const dots = places
     .map((p, i) => {
       const [x, y] = project(pr, p.lon, p.lat);
@@ -106,26 +182,19 @@ export function noteMapSvg(m: NoteMap, lang: Lang, accent: string): string {
     .join("");
   const nx = vx + vw - 14 * k;
   const ny = vy + 18 * k;
-  return `<svg viewBox="${box}" class="nm" role="img" aria-label="${esc(pick(m.title, lang))}"><defs><clipPath id="nm-clip"><rect x="${(vx - pad).toFixed(1)}" y="${(vy - pad).toFixed(1)}" width="${(vw + 2 * pad).toFixed(1)}" height="${(vh + 2 * pad).toFixed(1)}"/></clipPath></defs><rect x="${(vx - pad).toFixed(1)}" y="${(vy - pad).toFixed(1)}" width="${(vw + 2 * pad).toFixed(1)}" height="${(vh + 2 * pad).toFixed(1)}" fill="#fbfaf7"/><g clip-path="url(#nm-clip)">${base}${rivers}${labels}${dots}</g><g transform="translate(${nx.toFixed(1)},${ny.toFixed(1)}) scale(${k.toFixed(3)})"><path d="M0,-14 L6,4 L0,0 L-6,4 Z" fill="#1f2430"/><text y="17" text-anchor="middle" class="nm-n">N</text></g></svg>`;
+  return `<svg viewBox="${box}" class="nm" role="img" aria-label="${esc(pick(m.title, lang))}"><defs><clipPath id="nm-clip"><rect x="${(vx - pad).toFixed(1)}" y="${(vy - pad).toFixed(1)}" width="${(vw + 2 * pad).toFixed(1)}" height="${(vh + 2 * pad).toFixed(1)}"/></clipPath></defs><rect x="${(vx - pad).toFixed(1)}" y="${(vy - pad).toFixed(1)}" width="${(vw + 2 * pad).toFixed(1)}" height="${(vh + 2 * pad).toFixed(1)}" fill="#fbfaf7"/><g clip-path="url(#nm-clip)">${base}${layers}${labels}${dots}</g><g transform="translate(${nx.toFixed(1)},${ny.toFixed(1)}) scale(${k.toFixed(3)})"><path d="M0,-14 L6,4 L0,0 L-6,4 Z" fill="#1f2430"/><text y="17" text-anchor="middle" class="nm-n">N</text></g></svg>`;
 }
 
 // The map with its numbered places listed beside it.
-export function noteMapHtml(m: NoteMap, lang: Lang, accent: string): string {
+// In a review copy, places the AI placed that aren't in the place list
+// carry ◇ until the editor checks them.
+export function noteMapHtml(m: NoteMap, lang: Lang, accent: string, review = false): string {
   const places = m.places.filter((p) => onMap(m, p));
-  return `<figure class="nmap"><div class="nmap-svg">${noteMapSvg(m, lang, accent)}</div><div class="nmap-side"><ol class="nmap-list">${places.map((p, i) => `<li><span class="dn">${i + 1}</span>${esc(pick(p.name, lang))}</li>`).join("")}</ol><div class="nmap-credit">${
+  const mark = (p: NotePlace) =>
+    review && p.src === "ai" ? `<sup class="ai" title="Position not checked">◇</sup>` : "";
+  return `<figure class="nmap"><div class="nmap-svg">${noteMapSvg(m, lang, accent)}</div><div class="nmap-side"><ol class="nmap-list">${places.map((p, i) => `<li><span class="dn">${i + 1}</span>${esc(pick(p.name, lang))}${mark(p)}</li>`).join("")}</ol><div class="nmap-credit">${
     lang === "hi" ? "मानचित्र पैमाने पर नहीं" : "Map not to scale"
   }</div></div></figure>`;
 }
 
-export const NOTE_MAP_CSS = `
-.nmap { display: grid; grid-template-columns: 50% 1fr; gap: 4mm; align-items: start; margin: 1mm 0 3mm; break-inside: avoid; }
-.nmap-svg svg { display: block; width: 100%; height: auto; border-radius: 1mm; }
-.nm text { font-family: var(--body); }
-.nm .nm-river { font-size: 15px; fill: #1d4ed8; font-style: italic; text-anchor: middle; paint-order: stroke; stroke: #fbfaf7; stroke-width: 4px; }
-.nm .nm-num { font-size: 11px; font-weight: 700; fill: #fff; }
-.nm .nm-n { font-size: 12px; font-weight: 700; fill: #1f2430; }
-.nmap-title { font-weight: 700; margin-bottom: 1.5mm; }
-.nmap-list { list-style: none; padding: 0; margin: 0; font-size: 9.2pt; columns: 1; }
-.nmap-list li { display: flex; align-items: center; gap: 1.5mm; padding: 0.6mm 0; }
-.nmap-credit { font-size: 7pt; color: #6b7080; margin-top: 2mm; }
-`;
+export const NOTE_MAP_CSS = MAP_CSS;

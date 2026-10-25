@@ -32,6 +32,7 @@ import type { CaFeature } from "@/lib/ca-feature";
 import type { CaReport } from "@/lib/ca-docs";
 import { CARD_LABELS, SCHEME_GROUPS, schemeGroup } from "@/lib/ca-blueprint";
 import type { Geo } from "@/lib/ca-map";
+import { MAP_CSS, type MapSpec } from "@/lib/map-spec";
 import type { Earlier } from "@/lib/ca-schemes";
 import type { EventBlock } from "@/lib/ca-events";
 import { indexRows, type TopicIndex } from "@/lib/ca-index";
@@ -578,6 +579,7 @@ function itemHtml(
       : points
   }
   ${visualsHtml(placed, "below", !!c.visual_pair, accent, lang)}
+  ${storyMapHtml(c.map, lang, accent)}
   ${why}
   ${background}
   ${dykBox}
@@ -764,6 +766,11 @@ table.medals.board td:not(:nth-child(2)), table.medals.board th:not(:nth-child(2
 .img-side.left ~ .bi ul { list-style-position: inside; padding-left: 0; }
 .images, .item .visual { clear: both; }
 ${MEDIA_IMAGE_CSS}
+${MAP_CSS}
+.story-map { clear: both; margin-top: 2.5mm; break-inside: avoid; }
+.story-map .map-title { font-weight: 700; color: ${accent}; font-size: 9.5pt; margin-bottom: 1mm; }
+.story-map .dn { display: inline-flex; align-items: center; justify-content: center; width: 4.2mm; height: 4.2mm; border-radius: 50%; background: ${accent}; color: #fff; font-size: 6.5pt; font-weight: 700; margin-right: 1mm; flex: none; }
+.map-ph { border: 1px dashed #cbd5e1; border-radius: 2mm; padding: 3mm; color: #64748b; font-size: 9pt; }
 ${VISUAL_CSS(accent)}
 ${COVER_CSS}
 `;
@@ -1007,7 +1014,29 @@ ${mains ? `<h3 class="part">${t.partB}</h3>${mains}` : ""}
 ${key ? `<h3 class="part">${t.key}</h3><table class="answers">${key}</table>` : ""}</section>`;
 }
 
-export function renderMagazine(opts: {
+// Draws a story's map (server only: the outlines are large); without it, as
+// in the editor's preview, a note stands in for the map. Set for the one
+// render it's given to.
+let storyMap: ((m: MapSpec, lang: Lang, accent: string) => string) | null = null;
+
+function storyMapHtml(m: MapSpec | null | undefined, lang: Lang, accent: string): string {
+  if (!m || (!m.places.length && !m.rivers && !m.districts && !m.protected && !m.canals)) return "";
+  const title = pick(m.title, lang);
+  const head = title ? `<div class="map-title">${esc(title)}</div>` : "";
+  if (storyMap) return `<div class="story-map">${head}${storyMap(m, lang, accent)}</div>`;
+  return `<div class="story-map map-ph">${head}${esc(lang === "hi" ? `मानचित्र: ${m.places.length} स्थान (पत्रिका में बनेगा)` : `Map: ${m.places.length} place(s), drawn in the issue`)}</div>`;
+}
+
+export function renderMagazine(opts: Parameters<typeof renderMagazineInner>[0]): string {
+  storyMap = opts.storyMap ?? null;
+  try {
+    return renderMagazineInner(opts);
+  } finally {
+    storyMap = null;
+  }
+}
+
+function renderMagazineInner(opts: {
   kind: "daily" | "monthly";
   period: string;
   // The issue's language: the Hindi issue or the English issue.
@@ -1027,6 +1056,8 @@ export function renderMagazine(opts: {
   // Monthly only: draws the "Places in News" maps from its stories' numbers
   // and locations (the server has the outlines).
   placeMaps?: (dots: { n: number; geo: Geo }[], lang: Lang, accent: string) => string;
+  // Draws the stories' own maps.
+  storyMap?: (m: MapSpec, lang: Lang, accent: string) => string;
   // Monthly only: the month's report pages (those included), printed in
   // "Schemes, Policies & Reports".
   reports?: CaReport[];

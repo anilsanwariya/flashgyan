@@ -2,6 +2,7 @@
 // check facts against their sources, merge duplicate stories, apply
 // corrections and schedule posts. No database or network access here.
 
+import type { MapSpec } from "@/lib/map-spec";
 import { EVENT_FIELD, parseRawEvent, roundupNote, type RawEvent } from "@/lib/ca-events";
 import type { Binding, CoverPreset, DailyLayout, MagazineAd } from "@/lib/ca-covers";
 import { unverifiedNumbers, type Visual } from "@/lib/ca-visuals";
@@ -196,6 +197,9 @@ export type CaContent = {
   // (the text is kept, so it can be put back).
   hide_summary?: boolean;
   hide_why?: boolean;
+  // A map of the story's places (Rajasthan or India), printed after the
+  // key points.
+  map?: MapSpec | null;
 };
 
 export type CaQuick = { q: Bi; a: Bi };

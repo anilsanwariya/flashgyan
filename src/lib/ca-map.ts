@@ -9,9 +9,20 @@ import {
   RAJASTHAN_MAP,
   type MapProjection,
 } from "@/lib/ca-map-data";
+import { RAJ_DISTRICTS, RAJ_RIVERS, type GeoLine } from "@/lib/geo-data";
+import { RIVERS } from "@/lib/notes-map-data";
+import { normalizeMap, type MapSpec } from "@/lib/map-spec";
 
 export type GeoRegion = "rajasthan" | "india" | "world";
-export type Geo = { lat: number; lon: number; region: GeoRegion };
+// place: the place's name (from the AI); checked: its position is the place
+// list's, not the AI's.
+export type Geo = {
+  lat: number;
+  lon: number;
+  region: GeoRegion;
+  place?: string;
+  checked?: boolean;
+};
 
 type ChatMessage = { role: "system" | "user"; content: string };
 type Bi = { en: string; hi: string };
@@ -64,10 +75,26 @@ function mapSvg(
 ): string {
   const m = which === "rajasthan" ? RAJASTHAN_MAP : INDIA_MAP;
   const p = m.projection;
+  // Light context: Rajasthan's districts and main rivers, or India's rivers.
+  const path = (lines: GeoLine[]) =>
+    lines
+      .map(
+        (l) =>
+          "M" +
+          l
+            .map(([lon, lat]) => project(p, lat, lon))
+            .map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`)
+            .join("L"),
+      )
+      .join("");
+  const context =
+    which === "rajasthan"
+      ? `<path d="${path(RAJ_DISTRICTS.flatMap((d) => d.rings))}" fill="none" stroke="#dde1e7" stroke-width=".7"/><path d="${path(RAJ_RIVERS.filter((r) => r.tier === 1).flatMap((r) => r.lines))}" fill="none" stroke="#93b4f5" stroke-width="1.2" stroke-linejoin="round"/>`
+      : `<path d="${path(RIVERS.flatMap((r) => r.lines))}" fill="none" stroke="#a9c1f4" stroke-width=".8" stroke-linejoin="round"/>`;
   const base =
     which === "rajasthan"
-      ? `<path d="${RAJASTHAN_MAP.outline}" fill="#f8fafc" stroke="${accent}" stroke-width="1.6"/>`
-      : `<path d="${INDIA_MAP.states}" fill="none" stroke="#cbd5e1" stroke-width=".6"/><path d="${INDIA_MAP.rajasthan}" fill="${accent}" fill-opacity=".08" stroke="${accent}" stroke-width=".8"/><path d="${INDIA_MAP.outline}" fill="none" stroke="#334155" stroke-width="1"/>`;
+      ? `<path d="${RAJASTHAN_MAP.outline}" fill="#f8fafc" stroke="none"/><clipPath id="pm-raj"><path d="${RAJASTHAN_MAP.outline}"/></clipPath><g clip-path="url(#pm-raj)">${context}</g><path d="${RAJASTHAN_MAP.outline}" fill="none" stroke="${accent}" stroke-width="1.6"/>`
+      : `<path d="${INDIA_MAP.states}" fill="none" stroke="#cbd5e1" stroke-width=".6"/><path d="${INDIA_MAP.rajasthan}" fill="${accent}" fill-opacity=".08" stroke="${accent}" stroke-width=".8"/>${context}<path d="${INDIA_MAP.outline}" fill="none" stroke="#334155" stroke-width="1"/>`;
   const marks = dots
     .map(({ n, geo }) => {
       const [x, y] = project(p, geo.lat, geo.lon);
@@ -98,7 +125,7 @@ export function placeMaps(
       : "",
   ].filter(Boolean);
   if (!maps.length) return "";
-  return `<div class="pmaps">${maps.join("")}</div><p class="pmap-credit">${MAP_CREDIT}</p>`;
+  return `<div class="pmaps">${maps.join("")}</div><p class="pmap-credit">${MAP_CREDIT}; rivers: India-WRIS, Natural Earth; districts: 2011 Census (33)</p>`;
 }
 
 // ---------- Where the places are (AI) ----------
@@ -107,8 +134,8 @@ export function geoMessages(places: { headline: string; facts: string[] }[]): Ch
   return [
     {
       role: "system",
-      content: `You locate places in the news for a map in a current affairs magazine. For each numbered story, give the place it is about: its latitude and longitude in decimal degrees (the town, lake, sanctuary, site or region's centre), and its region: "rajasthan" if it is in Rajasthan, "india" if elsewhere in India, "world" if outside India. Give a location only when you are sure of it; leave out a story whose place you cannot locate.
-Reply with JSON only: [{"n": story number, "lat": number, "lon": number, "region": "rajasthan" | "india" | "world"}]`,
+      content: `You locate places in the news for a map in a current affairs magazine. For each numbered story, give the place it is about: its name as commonly written in English (e.g. "Bisalpur Dam", "Ranthambore National Park", "Jodhpur"), its latitude and longitude in decimal degrees (the town, lake, sanctuary, site or region's centre), and its region: "rajasthan" if it is in Rajasthan, "india" if elsewhere in India, "world" if outside India. Give a location only when you are sure of it; leave out a story whose place you cannot locate.
+Reply with JSON only: [{"n": story number, "place": "name", "lat": number, "lon": number, "region": "rajasthan" | "india" | "world"}]`,
     },
     {
       role: "user",
@@ -142,7 +169,45 @@ export function parseGeo(raw: string, count: number): Map<number, Geo> {
     if (!Number.isInteger(i) || i < 0 || i >= count || out.has(i)) continue;
     if (region !== "rajasthan" && region !== "india" && region !== "world") continue;
     const geo = checkGeo({ lat: Number(o.lat), lon: Number(o.lon), region });
-    if (geo) out.set(i, geo);
+    const place = typeof o.place === "string" ? o.place.trim().slice(0, 80) : "";
+    if (geo) out.set(i, place ? { ...geo, place } : geo);
   }
   return out;
+}
+
+// ---------- A story's own map (AI) ----------
+
+// A map for one story: the places it is about, with the layers that help
+// (rivers for a dam or a river story, protected areas for wildlife…).
+export function storyMapMessages(
+  headline: string,
+  facts: string[],
+  hindiGuide: string,
+): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: `You plan a small map for a news story in a bilingual (Hindi and English) current affairs magazine for Rajasthan's competitive exams. Mark the places the story is about (towns, districts' headquarters, dams, lakes, sanctuaries, forts, sites), at most 8, each with its name in English and Hindi and accurate latitude and longitude. Use "rajasthan" when every place is in Rajasthan, else "india". Turn on the layers that help a student: "rivers" for rivers, dams and floods; "canals" for canals and irrigation; "protected" for wildlife, parks and sanctuaries; "districts" when districts matter. Give a short title in both languages. If the story has no place worth mapping, reply {"map": null}.${hindiGuide}
+Reply with JSON only: {"map": {"region": "rajasthan" | "india", "rivers": false, "canals": false, "protected": false, "districts": false, "title": {"en": "", "hi": ""}, "places": [{"en": "", "hi": "", "lat": 0, "lon": 0}]} | null}`,
+    },
+    {
+      role: "user",
+      content: `Headline: ${headline}\n\nFacts:\n${facts.map((f, i) => `${i + 1}. ${f}`).join("\n")}`,
+    },
+  ];
+}
+
+// The AI's map, cleaned (places marked as the AI's, to be checked against
+// the place list); null when there is none.
+export function parseStoryMap(raw: string): MapSpec | null {
+  const text = raw.replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
+  let o: unknown;
+  try {
+    o = JSON.parse(text.slice(Math.max(0, text.indexOf("{"))));
+  } catch {
+    return null;
+  }
+  const map = normalizeMap((o as { map?: unknown } | null)?.map);
+  if (!map || !map.places.length) return null;
+  return { ...map, places: map.places.map((p) => ({ ...p, src: "ai" as const })) };
 }
