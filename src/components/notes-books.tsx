@@ -34,6 +34,7 @@ import type { Bi } from "@/lib/current-affairs";
 import { subjectName } from "@/lib/exam-papers";
 import { prepareImage, toBase64 } from "@/lib/ca-image-file";
 import { CoverPreview } from "@/components/ca-cover-designer";
+import { NotesPlanner } from "@/components/notes-planner";
 import { Badge, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -203,7 +204,7 @@ function BookView({ id, onBack }: { id: string; onBack: () => void }) {
   const [front, setFront] = useState<NotesFront | null>(null);
   // Bumped to reset the text boxes (after Discard).
   const [resetKey, setResetKey] = useState(0);
-  const [tab, setTab] = useState<"cover" | "front">("cover");
+  const [tab, setTab] = useState<"plan" | "cover" | "front">("plan");
   const [saving, setSaving] = useState(false);
   const book = q.data;
   useEffect(() => {
@@ -303,6 +304,7 @@ function BookView({ id, onBack }: { id: string; onBack: () => void }) {
       >
         {(
           [
+            ["plan", "Planner"],
             ["cover", "Cover"],
             ["front", "Front pages"],
           ] as const
@@ -319,7 +321,9 @@ function BookView({ id, onBack }: { id: string; onBack: () => void }) {
           </button>
         ))}
       </div>
-      {tab === "cover" ? (
+      {tab === "plan" ? (
+        <NotesPlanner id={id} stage={book.stage} />
+      ) : tab === "cover" ? (
         <CoverEditor
           key={`c${resetKey}`}
           id={id}
