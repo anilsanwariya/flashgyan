@@ -34,7 +34,11 @@ export function NotesPlanner({ id, stage }: { id: string; stage: NotesStage }) {
   const qc = useQueryClient();
   const getFn = useServerFn(getNotesPlan);
   const stepFn = useServerFn(planNotesStep);
-  const q = useQuery({ queryKey: ["notesPlan", id], queryFn: () => getFn({ data: { id } }) });
+  const q = useQuery({
+    queryKey: ["notesPlan", id],
+    queryFn: () => getFn({ data: { id } }),
+    refetchOnMount: true,
+  });
   const [busy, setBusy] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [sort, setSort] = useState<"outline" | "priority">("outline");

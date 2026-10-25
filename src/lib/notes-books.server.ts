@@ -177,7 +177,7 @@ export async function bookData(book: Pick<NotesBook, "section" | "stage">): Prom
   };
 }
 
-async function context(book: NotesBook): Promise<BookContext> {
+export async function bookContext(book: NotesBook): Promise<BookContext> {
   const year = new Date(book.created_at || Date.now()).getFullYear();
   const settings = await getMagazineSettings().catch(() => null);
   return {
@@ -208,5 +208,5 @@ export async function bookHtml(
   const data = onlyCover
     ? { chapters: [], coverage: [], pyq: pyqAnalysis([], new Map(), []) }
     : await bookData(book);
-  return bookFrontHtml(book, lang, await context(book), data, parts);
+  return bookFrontHtml(book, lang, await bookContext(book), data, parts);
 }

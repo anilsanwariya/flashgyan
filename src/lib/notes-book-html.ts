@@ -411,8 +411,8 @@ export const FRONT_PARTS: { id: FrontPart; name: string }[] = [
   { id: "sources", name: "Sources" },
 ];
 
-// The cover and front pages (or some of them) as one document.
-export function bookFrontHtml(
+// The cover and front pages (or some of them), as the body of a document.
+export function bookFrontBody(
   book: NotesBook,
   lang: Lang,
   ctx: BookContext,
@@ -429,12 +429,32 @@ export function bookFrontHtml(
     pyq: () => pyqPage(data, lang),
     sources: () => sourcesPage(book.front, lang),
   };
-  const body = parts.map((p) => make[p]()).join("\n");
-  const accent = book.cover.color;
+  return parts.map((p) => make[p]()).join("\n");
+}
+
+// The cover and front pages (or some of them) as one document.
+export function bookFrontHtml(
+  book: NotesBook,
+  lang: Lang,
+  ctx: BookContext,
+  data: BookData,
+  parts: FrontPart[] = FRONT_PARTS.map((p) => p.id),
+): string {
+  const body = bookFrontBody(book, lang, ctx, data, parts);
+  return notesDoc(
+    body,
+    lang,
+    book.cover.color,
+    parts.length === 1 && parts[0] === "cover" ? "one" : "",
+  );
+}
+
+// A whole document in the notes' styles (the topic pages add their own).
+export function notesDoc(body: string, lang: Lang, accent: string, cls = "", css = ""): string {
   return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"/><meta name="viewport" content="width=794"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="${NOTES_FONTS}" rel="stylesheet"/>
-<style>${NOTES_CSS.replace(/\$ACCENT/g, accent)}</style></head><body class="${lang}${parts.length === 1 && parts[0] === "cover" ? " one" : ""}">${body}</body></html>`;
+<style>${(NOTES_CSS + css).replace(/\$ACCENT/g, accent)}</style></head><body class="${lang}${cls ? ` ${cls}` : ""}">${body}</body></html>`;
 }
 
 export const NOTES_FONTS =
