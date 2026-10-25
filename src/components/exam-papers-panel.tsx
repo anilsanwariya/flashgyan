@@ -29,6 +29,7 @@ import {
   Search,
   ShieldAlert,
   Trash2,
+  ListTree,
 } from "lucide-react";
 import {
   applyExamKey,
@@ -40,6 +41,7 @@ import {
   getExamPaper,
   publishExamPaper,
   unpublishExamPaper,
+  linkExamTopics,
   importExamPapers,
   listExamPapers,
   readExamPaperPage,
@@ -58,6 +60,8 @@ import {
   EXCEL_COLUMNS,
   OPTION_COUNT,
   SHEET_COLUMNS,
+  WRITTEN_COLUMNS,
+  type PaperKind,
   keyForSeries,
   keyFromRows,
   normSeries,
@@ -308,6 +312,7 @@ function PaperList({ onOpen }: { onOpen: (id: string) => void }) {
 
 function PaperBadges({ p }: { p: PaperSummary }) {
   const reading = p.source === "pdf" && p.pages > 0 && p.pages_done < p.pages;
+  const written = p.kind === "subjective";
   return (
     <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
       {p.status === "published" ? (
@@ -319,9 +324,10 @@ function PaperBadges({ p }: { p: PaperSummary }) {
         {p.questions}
         {p.questions_total ? ` of ${p.questions_total}` : ""} questions
       </Badge>
+      {written && <Badge tone="primary">Written (Mains)</Badge>}
       {p.questions > 0 && p.status !== "published" && (
         <Badge tone={p.verified === p.questions ? "good" : "muted"}>
-          {p.verified} of {p.questions} verified · {p.explained} explained
+          {p.verified} of {p.questions} verified{written ? "" : ` · ${p.explained} explained`}
         </Badge>
       )}
       {reading && (
@@ -329,7 +335,7 @@ function PaperBadges({ p }: { p: PaperSummary }) {
           Read {p.pages_done} of {p.pages} pages
         </Badge>
       )}
-      {p.key_added ? (
+      {written ? null : p.key_added ? (
         <Badge tone="good">
           Key: {p.answered} answers{p.deleted ? `, ${p.deleted} deleted` : ""}
         </Badge>
@@ -359,6 +365,8 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
   const [paperFile, setPaperFile] = useState<File | null>(null);
   const [keyFile, setKeyFile] = useState<File | null>(null);
   const [series, setSeries] = useState("");
+  // MCQs, or written answers (Mains).
+  const [kind, setKind] = useState<PaperKind>("objective");
   // The series a key has, when it needs the paper's.
   const [keySeries, setKeySeries] = useState<string[] | null>(null);
   const [busy, setBusy] = useState("");
@@ -406,7 +414,7 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
         if (!meta.exam) throw new Error("Give the exam's name.");
         const { pdfPageCount } = await import("@/lib/exam-pdf");
         const pages = await pdfPageCount(paperFile);
-        const paper = await createFn({ data: { meta, pages } });
+        const paper = await createFn({ data: { meta, pages, kind } });
         id = paper.id;
         pending.set(id, paperFile);
         toast.success(`Paper added: reading its ${pages} pages`);
@@ -454,6 +462,36 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
       className="space-y-3 rounded-2xl border border-border bg-card p-4"
     >
       <h3 className="font-semibold">Add a paper</h3>
+      <div
+        role="radiogroup"
+        aria-label="Paper type"
+        className="inline-flex rounded-lg border border-border p-0.5 text-sm"
+      >
+        {(
+          [
+            ["objective", "Objective (MCQ)"],
+            ["subjective", "Written (Mains)"],
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            role="radio"
+            aria-checked={kind === k}
+            onClick={() => setKind(k)}
+            className={`rounded-md px-3 py-1.5 ${kind === k ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {kind === "subjective" && (
+        <p className="text-xs text-muted-foreground">
+          A Mains paper: its questions with their unit, part, marks and word limit. Add model
+          answers (kept for learning only, never shown to students) on each question, or import them
+          from Excel with the columns {WRITTEN_COLUMNS.join(", ")}.
+        </p>
+      )}
       <div className="grid gap-2 sm:grid-cols-2">
         <Input
           aria-label="Exam name"
@@ -528,7 +566,7 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
             used.
           </span>
         </label>
-        <label className="space-y-1 text-sm">
+        <label className={`space-y-1 text-sm ${kind === "subjective" ? "hidden" : ""}`}>
           <span className="font-medium">Answer key (optional)</span>
           <Input
             type="file"
@@ -608,7 +646,10 @@ type Filter =
   | "verified"
   | "noexpl"
   | "key"
-  | "flagged";
+  | "flagged"
+  | "nomodel"
+  | "notopic";
+type Topics = Record<string, { name_en: string; name_hi: string; section: string }>;
 type Lang = "both" | "hi" | "en";
 
 function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
@@ -721,7 +762,10 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
   const unread = paper.source === "pdf" && paper.pages > 0 && paper.pages_done < paper.pages;
   const answered = questions.filter((x) => x.correct).length;
   const deleted = questions.filter((x) => x.deleted).length;
-  const toCheck = questions.filter((x) => questionGaps(x).length);
+  // A Mains paper: written answers, no options or key.
+  const written = paper.kind === "subjective";
+  const topics: Topics = data!.topics ?? {};
+  const toCheck = questions.filter((x) => questionGaps(x, written).length);
   const shown = questions
     .filter((x) =>
       filter === "answer"
@@ -729,7 +773,7 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
         : filter === "deleted"
           ? x.deleted
           : filter === "check"
-            ? questionGaps(x).length > 0
+            ? questionGaps(x, written).length > 0
             : filter === "ca"
               ? x.ca
               : filter === "unverified"
@@ -742,7 +786,11 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
                       ? !!x.key_note
                       : filter === "flagged"
                         ? flagged(x)
-                        : true,
+                        : filter === "nomodel"
+                          ? !x.model_answer
+                          : filter === "notopic"
+                            ? !x.master_topic_id && !x.deleted
+                            : true,
     )
     .filter((x) => !subject || (x.subject_section || "—") === subject);
   // The subject sections in this paper, with their counts.
@@ -852,7 +900,12 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
             {questions.length}
             {paper.questions_total ? ` of ${paper.questions_total}` : ""} questions
           </Badge>
-          {paper.key_added ? (
+          {written ? (
+            <Badge tone="muted">
+              Written ·{" "}
+              {questions.filter((x) => !x.deleted).reduce((n, x) => n + (x.marks ?? 0), 0)} marks
+            </Badge>
+          ) : paper.key_added ? (
             <Badge tone="good">
               {answered} answers{deleted ? `, ${deleted} deleted` : ""}
             </Badge>
@@ -890,7 +943,7 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
             </div>
           )
         )}
-        <label className="flex flex-wrap items-center gap-2 text-sm">
+        <label className={`flex flex-wrap items-center gap-2 text-sm ${written ? "hidden" : ""}`}>
           <KeyRound className="h-4 w-4 text-primary" />
           <span className="font-medium">
             {paper.key_added ? "Answer key added" : "Add the answer key"}
@@ -969,27 +1022,56 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
         />
         <div role="radiogroup" aria-label="Show questions" className="flex flex-wrap gap-1">
           {(
-            [
-              ["all", `All (${questions.length})`],
-              ["answer", `No answer (${questions.filter((x) => !x.correct && !x.deleted).length})`],
-              ["deleted", `Deleted (${deleted})`],
-              ["check", `To check (${toCheck.length})`],
-              ...(questions.some((x) => x.ca)
-                ? [["ca", `Current affairs (${questions.filter((x) => x.ca).length})`]]
-                : []),
-              ["unverified", `Not verified (${questions.filter((x) => !x.verified).length})`],
-              ["verified", `Verified (${questions.filter((x) => x.verified).length})`],
-              [
-                "noexpl",
-                `No explanation (${questions.filter((x) => !x.explanation_en && !x.explanation_hi).length})`,
-              ],
-              ...(questions.some((x) => x.key_note)
-                ? [["key", `Check the key (${questions.filter((x) => x.key_note).length})`]]
-                : []),
-              ...(questions.some(flagged)
-                ? [["flagged", `AI flagged (${questions.filter(flagged).length})`]]
-                : []),
-            ] as [Filter, string][]
+            (written
+              ? [
+                  ["all", `All (${questions.length})`],
+                  ["check", `To check (${toCheck.length})`],
+                  ["unverified", `Not verified (${questions.filter((x) => !x.verified).length})`],
+                  ["verified", `Verified (${questions.filter((x) => x.verified).length})`],
+                  [
+                    "nomodel",
+                    `No model answer (${questions.filter((x) => !x.model_answer).length})`,
+                  ],
+                  [
+                    "notopic",
+                    `Not in an outline (${questions.filter((x) => !x.master_topic_id && !x.deleted).length})`,
+                  ],
+                  ...(questions.some(flagged)
+                    ? [["flagged", `AI flagged (${questions.filter(flagged).length})`]]
+                    : []),
+                ]
+              : [
+                  ["all", `All (${questions.length})`],
+                  [
+                    "answer",
+                    `No answer (${questions.filter((x) => !x.correct && !x.deleted).length})`,
+                  ],
+                  ["deleted", `Deleted (${deleted})`],
+                  ["check", `To check (${toCheck.length})`],
+                  ...(questions.some((x) => x.ca)
+                    ? [["ca", `Current affairs (${questions.filter((x) => x.ca).length})`]]
+                    : []),
+                  ["unverified", `Not verified (${questions.filter((x) => !x.verified).length})`],
+                  ["verified", `Verified (${questions.filter((x) => x.verified).length})`],
+                  [
+                    "noexpl",
+                    `No explanation (${questions.filter((x) => !x.explanation_en && !x.explanation_hi).length})`,
+                  ],
+                  ...(questions.some((x) => x.key_note)
+                    ? [["key", `Check the key (${questions.filter((x) => x.key_note).length})`]]
+                    : []),
+                  ...(questions.some(flagged)
+                    ? [["flagged", `AI flagged (${questions.filter(flagged).length})`]]
+                    : []),
+                  ...(questions.some((x) => x.master_topic_id)
+                    ? [
+                        [
+                          "notopic",
+                          `Not in an outline (${questions.filter((x) => !x.master_topic_id && !x.deleted).length})`,
+                        ],
+                      ]
+                    : []),
+                ]) as [Filter, string][]
           ).map(([k, label]) => (
             <button
               key={k}
@@ -1041,6 +1123,8 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
               q={x}
               lang={lang}
               locked={published}
+              written={written}
+              topic={x.master_topic_id ? topics[x.master_topic_id] : undefined}
               story={x.matched_item ? data!.stories[x.matched_item] : undefined}
               onChanged={refresh}
             />
@@ -1172,12 +1256,18 @@ function QuestionCard({
   story,
   locked,
   flagsLocked = locked,
+  written = false,
+  topic,
   onChanged,
 }: {
   q: ExamQuestion;
   lang: Lang;
   story?: { date: string; headline: string; status: string };
   locked?: boolean;
+  // A Mains question: marks and a word limit, no options.
+  written?: boolean;
+  // The master outline's topic it's filed under.
+  topic?: Topics[string];
   // The AI check's suggested option can be used (the cards' own buttons).
   flagsLocked?: boolean;
   onChanged: () => Promise<unknown>;
@@ -1185,7 +1275,7 @@ function QuestionCard({
   const [editing, setEditing] = useState(false);
   const updateFn = useServerFn(updateExamQuestion);
   const removeFn = useServerFn(deleteExamQuestion);
-  const gaps = questionGaps(q);
+  const gaps = questionGaps(q, written);
   const show = (l: "en" | "hi") => lang === "both" || lang === l;
   const setVerified = (verified: boolean) =>
     void updateFn({ data: { id: q.id, patch: { verified } } })
@@ -1211,7 +1301,19 @@ function QuestionCard({
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-semibold">Q{q.q_no}</span>
         {q.deleted && <Badge tone="bad">Deleted</Badge>}
-        {!q.deleted && !q.correct && <Badge tone="muted">No answer</Badge>}
+        {!written && !q.deleted && !q.correct && <Badge tone="muted">No answer</Badge>}
+        {written && (q.unit || q.part || q.marks || q.word_limit) ? (
+          <span className="text-xs text-muted-foreground" data-written>
+            {[
+              q.unit,
+              q.part,
+              q.marks ? `${q.marks} marks` : "",
+              q.word_limit ? `${q.word_limit} words` : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+        ) : null}
         {gaps.length > 0 && <Badge tone="warn">Check: {gaps.join(", ")}</Badge>}
         {q.ca !== null && <Badge>{q.ca ? "Current affairs" : "Static"}</Badge>}
         {q.match && <Badge tone={MATCH_TONE[q.match]}>{MATCH_TEXT[q.match]}</Badge>}
@@ -1232,6 +1334,16 @@ function QuestionCard({
             {q.topic_en || q.topic_hi
               ? ` · ${lang === "hi" ? q.topic_hi || q.topic_en : q.topic_en || q.topic_hi}`
               : ""}
+          </span>
+        )}
+        {topic && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"
+            data-master-topic
+            title={`Master outline: ${topic.section}`}
+          >
+            <ListTree className="h-3 w-3" />
+            {lang === "hi" ? topic.name_hi || topic.name_en : topic.name_en || topic.name_hi}
           </span>
         )}
         {!locked && (
@@ -1266,7 +1378,12 @@ function QuestionCard({
         )}
       </div>
       {editing ? (
-        <QuestionEditor q={q} onDone={() => setEditing(false)} onSaved={onChanged} />
+        <QuestionEditor
+          q={q}
+          written={written}
+          onDone={() => setEditing(false)}
+          onSaved={onChanged}
+        />
       ) : (
         <>
           {(["hi", "en"] as const).filter(show).map((l) => {
@@ -1280,23 +1397,25 @@ function QuestionCard({
                 {extra && (
                   <p className="whitespace-pre-line break-words text-muted-foreground">{extra}</p>
                 )}
-                <ol className="grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
-                  {q.options.map((o, i) => (
-                    <li
-                      key={i}
-                      className={`break-words ${q.correct === i + 1 ? "font-semibold text-green-700 dark:text-green-400" : ""}`}
-                    >
-                      ({i + 1}) {o[l] || "—"}{" "}
-                      {q.correct === i + 1 && (
-                        <Check className="inline h-3.5 w-3.5" aria-label="correct" />
-                      )}
-                    </li>
-                  ))}
-                </ol>
+                {!written && (
+                  <ol className="grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
+                    {q.options.map((o, i) => (
+                      <li
+                        key={i}
+                        className={`break-words ${q.correct === i + 1 ? "font-semibold text-green-700 dark:text-green-400" : ""}`}
+                      >
+                        ({i + 1}) {o[l] || "—"}{" "}
+                        {q.correct === i + 1 && (
+                          <Check className="inline h-3.5 w-3.5" aria-label="correct" />
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                )}
               </div>
             );
           })}
-          <Explanation q={q} lang={lang} />
+          {written ? <ModelAnswer q={q} /> : <Explanation q={q} lang={lang} />}
           <AiFlags q={q} locked={flagsLocked} onChanged={onChanged} />
           {q.match && (
             <p className="text-xs text-muted-foreground">
@@ -1321,12 +1440,28 @@ function QuestionCard({
   );
 }
 
+// A Mains question's model answer: for learning only, never shown to students.
+function ModelAnswer({ q }: { q: ExamQuestion }) {
+  if (!q.model_answer) return <p className="text-xs text-muted-foreground">No model answer yet.</p>;
+  return (
+    <details className="rounded-xl border border-border bg-muted/40 p-2" data-model-answer>
+      <summary className="cursor-pointer text-xs font-medium">
+        Model answer{q.model_source ? ` · ${q.model_source}` : ""}{" "}
+        <span className="font-normal text-muted-foreground">(private, for learning only)</span>
+      </summary>
+      <p className="mt-1 whitespace-pre-line break-words text-sm">{q.model_answer}</p>
+    </details>
+  );
+}
+
 function QuestionEditor({
   q,
+  written = false,
   onDone,
   onSaved,
 }: {
   q: ExamQuestion;
+  written?: boolean;
   onDone: () => void;
   onSaved: () => Promise<unknown>;
 }) {
@@ -1343,8 +1478,15 @@ function QuestionEditor({
     subject_section: q.subject_section ?? "",
     topic_en: q.topic_en ?? "",
     topic_hi: q.topic_hi ?? "",
+    unit: q.unit ?? "",
+    part: q.part ?? "",
+    marks: q.marks == null ? "" : String(q.marks),
+    word_limit: q.word_limit == null ? "" : String(q.word_limit),
+    model_answer: q.model_answer ?? "",
+    model_source: q.model_source ?? "",
   });
   const [busy, setBusy] = useState(false);
+  const num = (v: string) => (/^\d+$/.test(v.trim()) ? Number(v.trim()) : null);
   // Saved only when changed (and only after the migration).
   const subjectChanged =
     f.subject_section !== (q.subject_section ?? "") ||
@@ -1367,11 +1509,22 @@ function QuestionEditor({
               question_hi: f.question_hi,
               extra_en: f.extra_en,
               extra_hi: f.extra_hi,
-              options: f.options,
-              deleted: f.answer === "deleted",
-              correct: /^[1-4]$/.test(f.answer) ? Number(f.answer) : null,
-              explanation_en: f.explanation_en,
-              explanation_hi: f.explanation_hi,
+              ...(written
+                ? {
+                    unit: f.unit,
+                    part: f.part,
+                    marks: num(f.marks),
+                    word_limit: num(f.word_limit),
+                    model_answer: f.model_answer,
+                    model_source: f.model_source,
+                  }
+                : {
+                    options: f.options,
+                    deleted: f.answer === "deleted",
+                    correct: /^[1-4]$/.test(f.answer) ? Number(f.answer) : null,
+                    explanation_en: f.explanation_en,
+                    explanation_hi: f.explanation_hi,
+                  }),
               ...(subjectChanged
                 ? { subject_section: f.subject_section, topic_en: f.topic_en, topic_hi: f.topic_hi }
                 : {}),
@@ -1416,40 +1569,93 @@ function QuestionEditor({
           onChange={(e) => setF({ ...f, extra_en: e.target.value })}
           placeholder="Statements / lists (if any)"
         />
-        {Array.from({ length: OPTION_COUNT }, (_, i) => (
-          <div key={i} className="contents" data-option-row={i + 1}>
+        {written && (
+          <>
             <Input
-              aria-label={`Option ${i + 1} (Hindi)`}
-              value={f.options[i]?.hi ?? ""}
-              onChange={(e) => setOption(i, "hi", e.target.value)}
-              placeholder={`विकल्प ${i + 1}`}
+              aria-label="Unit"
+              placeholder="Unit (e.g. Unit I)"
+              value={f.unit}
+              maxLength={120}
+              onChange={(e) => setF({ ...f, unit: e.target.value })}
             />
             <Input
-              aria-label={`Option ${i + 1} (English)`}
-              value={f.options[i]?.en ?? ""}
-              onChange={(e) => setOption(i, "en", e.target.value)}
-              placeholder={`Option ${i + 1}`}
+              aria-label="Part"
+              placeholder="Part (e.g. Part A)"
+              value={f.part}
+              maxLength={120}
+              onChange={(e) => setF({ ...f, part: e.target.value })}
             />
-          </div>
-        ))}
-        <Textarea
-          aria-label="Explanation (Hindi)"
-          rows={6}
-          value={f.explanation_hi}
-          onChange={(e) => setF({ ...f, explanation_hi: e.target.value })}
-          placeholder="व्याख्या"
-        />
-        <Textarea
-          aria-label="Explanation (English)"
-          rows={6}
-          value={f.explanation_en}
-          onChange={(e) => setF({ ...f, explanation_en: e.target.value })}
-          placeholder="Explanation"
-        />
+            <Input
+              aria-label="Marks"
+              inputMode="numeric"
+              placeholder="Marks"
+              value={f.marks}
+              onChange={(e) => setF({ ...f, marks: e.target.value })}
+            />
+            <Input
+              aria-label="Word limit"
+              inputMode="numeric"
+              placeholder="Word limit"
+              value={f.word_limit}
+              onChange={(e) => setF({ ...f, word_limit: e.target.value })}
+            />
+            <Textarea
+              aria-label="Model answer"
+              rows={8}
+              value={f.model_answer}
+              onChange={(e) => setF({ ...f, model_answer: e.target.value })}
+              placeholder="Model answer (private, for learning only; never shown to students)"
+              className="sm:col-span-2"
+            />
+            <Input
+              aria-label="Model answer source"
+              placeholder="Source (e.g. the coaching institute)"
+              value={f.model_source}
+              maxLength={160}
+              onChange={(e) => setF({ ...f, model_source: e.target.value })}
+            />
+          </>
+        )}
+        {!written &&
+          Array.from({ length: OPTION_COUNT }, (_, i) => (
+            <div key={i} className="contents" data-option-row={i + 1}>
+              <Input
+                aria-label={`Option ${i + 1} (Hindi)`}
+                value={f.options[i]?.hi ?? ""}
+                onChange={(e) => setOption(i, "hi", e.target.value)}
+                placeholder={`विकल्प ${i + 1}`}
+              />
+              <Input
+                aria-label={`Option ${i + 1} (English)`}
+                value={f.options[i]?.en ?? ""}
+                onChange={(e) => setOption(i, "en", e.target.value)}
+                placeholder={`Option ${i + 1}`}
+              />
+            </div>
+          ))}
+        {!written && (
+          <>
+            <Textarea
+              aria-label="Explanation (Hindi)"
+              rows={6}
+              value={f.explanation_hi}
+              onChange={(e) => setF({ ...f, explanation_hi: e.target.value })}
+              placeholder="व्याख्या"
+            />
+            <Textarea
+              aria-label="Explanation (English)"
+              rows={6}
+              value={f.explanation_en}
+              onChange={(e) => setF({ ...f, explanation_en: e.target.value })}
+              placeholder="Explanation"
+            />
+          </>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <select
           aria-label="Correct option"
+          hidden={written}
           value={f.answer}
           onChange={(e) => setF({ ...f, answer: e.target.value })}
           className="h-9 rounded-md border border-input bg-background px-2 text-sm"
@@ -1602,7 +1808,9 @@ function Proofread({
   const reviewFn = useServerFn(reviewExamPaper);
   const publishFn = useServerFn(publishExamPaper);
   const unpublishFn = useServerFn(unpublishExamPaper);
+  const linkFn = useServerFn(linkExamTopics);
   const [busy, setBusy] = useState<string | null>(null);
+  const written = paper.kind === "subjective";
   const [cards, setCards] = useState(false);
   const stop = useRef(false);
   const published = paper.status === "published";
@@ -1615,6 +1823,42 @@ function Proofread({
   const toReview = questions.filter((q) => !checkedNow(q)).length;
   const flaggedCount = questions.filter(flagged).length;
   const reviewed = questions.length - toReview;
+  // Questions to file under the master outlines' topics (sorted by subject first).
+  const toLink = questions.filter((q) => !q.deleted && !q.master_topic_id).length;
+  const linkable = questions.filter(
+    (q) => !q.deleted && !q.master_topic_id && q.subject_section,
+  ).length;
+
+  async function link() {
+    stop.current = false;
+    const skip: string[] = [];
+    let done = 0;
+    let noOutline: string[] = [];
+    try {
+      for (;;) {
+        setBusy(`Linking to the outlines… ${done} of ${linkable}`);
+        const r: Awaited<ReturnType<typeof linkFn>> = await linkFn({
+          data: { id: paper.id, skip },
+        });
+        done += r.done;
+        skip.push(...r.missed);
+        noOutline = r.noOutline;
+        await onChanged();
+        if (r.left === 0 || stop.current || (!r.done && !r.missed.length)) break;
+      }
+      const left = linkable - done;
+      toast.success(
+        `${done} questions linked to outline topics` +
+          (left > 0 ? ` · ${left} not placed` : "") +
+          (noOutline.length ? ` · no outline yet for ${noOutline.join(", ")}` : ""),
+      );
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't link them"));
+    } finally {
+      setBusy(null);
+      await onChanged();
+    }
+  }
 
   async function review(redo: string[] = []) {
     stop.current = false;
@@ -1669,6 +1913,25 @@ function Proofread({
   }
 
   async function publish() {
+    if (written) {
+      if (
+        !confirm(
+          `Publish “${paper.exam}”? Its questions are used by the other features (model answers stay private).`,
+        )
+      )
+        return;
+      setBusy("Publishing…");
+      try {
+        await publishFn({ data: { id: paper.id, minutes: 10 } });
+        toast.success("Published");
+      } catch (e) {
+        toast.error(errorText(e, "Couldn't publish"));
+      } finally {
+        setBusy(null);
+        await onChanged();
+      }
+      return;
+    }
     const def = Math.max(10, Math.round(usable * 1.2));
     const m = prompt(
       `Publish “${paper.exam}”? It becomes a test for students (${usable} questions with explanations) and is used by the other features. Time for the test, in minutes:`,
@@ -1716,15 +1979,26 @@ function Proofread({
         <h3 className="font-semibold">Proofread and publish</h3>
         {published ? <Badge tone="good">Published</Badge> : <Badge tone="muted">Draft</Badge>}
         <span className="text-sm text-muted-foreground" data-testid="proof-counts">
-          {verified} of {questions.length} verified · {explained} explained
+          {verified} of {questions.length} verified ·{" "}
+          {written
+            ? `${questions.filter((q) => q.model_answer).length} with model answers`
+            : `${explained} explained`}
           {general ? ` · ${general} from general knowledge` : ""}
           {reviewed ? ` · ${flaggedCount} flagged by the AI check` : ""}
         </span>
       </div>
-      {published ? (
+      {written && !published ? (
         <p className="text-sm text-muted-foreground">
-          Students can take it as a test, and the other features use it. Unpublish it to make
-          changes.
+          Run the AI check: it sorts the questions into subject sections and topics and flags
+          language mistakes. Add model answers on each question (private, for learning only). Then
+          link the questions to the master outlines, verify every question and publish it.
+        </p>
+      ) : published ? (
+        <p className="text-sm text-muted-foreground">
+          {written
+            ? "The other features use it, and its questions can still be linked to the outlines."
+            : "Students can take it as a test, and the other features use it."}{" "}
+          Unpublish it to make other changes.
         </p>
       ) : (
         <p className="text-sm text-muted-foreground">
@@ -1737,7 +2011,9 @@ function Proofread({
       {busy && (
         <p role="status" className="flex items-center gap-2 text-sm text-primary">
           <RefreshCw className="h-4 w-4 animate-spin" /> {busy}
-          {(busy.startsWith("Writing explanations") || busy.startsWith("Checking and")) && (
+          {(busy.startsWith("Writing explanations") ||
+            busy.startsWith("Checking and") ||
+            busy.startsWith("Linking")) && (
             <Button size="sm" variant="ghost" onClick={() => (stop.current = true)}>
               Stop
             </Button>
@@ -1745,7 +2021,7 @@ function Proofread({
         </p>
       )}
       <div className="flex flex-wrap gap-2">
-        {!published && (
+        {!published && !written && (
           <Button
             size="sm"
             variant="outline"
@@ -1768,6 +2044,20 @@ function Proofread({
             {toReview ? `AI check & subjects (${toReview})` : "All checked"}
           </Button>
         )}
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!!busy || !linkable}
+          title={
+            toLink && !linkable
+              ? "Run the AI check first: questions are linked within their subject section"
+              : "File each question under its master outline topic (an AI request per 20 questions)"
+          }
+          onClick={() => void link()}
+        >
+          <ListTree className="mr-1 h-4 w-4" />
+          {toLink ? `Link to outlines (${linkable})` : "All linked"}
+        </Button>
         <Button
           size="sm"
           variant="outline"
@@ -1796,6 +2086,7 @@ function Proofread({
           questions={questions}
           lang={lang}
           locked={published}
+          written={written}
           busy={!!busy}
           onRedo={(id) => explain([id])}
           onRecheck={(id) => review([id])}
@@ -1944,6 +2235,7 @@ function ProofCards({
   questions,
   lang: lang0,
   locked,
+  written = false,
   busy,
   onRedo,
   onRecheck,
@@ -1953,6 +2245,7 @@ function ProofCards({
   questions: ExamQuestion[];
   lang: Lang;
   locked: boolean;
+  written?: boolean;
   busy: boolean;
   onRedo: (id: string) => Promise<void>;
   onRecheck: (id: string) => Promise<void>;
@@ -2096,6 +2389,7 @@ function ProofCards({
               <QuestionEditor
                 key={q.id}
                 q={q}
+                written={written}
                 onDone={() => setEditing(false)}
                 onSaved={onChanged}
               />
@@ -2107,6 +2401,7 @@ function ProofCards({
                   lang={lang}
                   locked
                   flagsLocked={locked}
+                  written={written}
                   onChanged={onChanged}
                 />
               </ol>
@@ -2125,7 +2420,7 @@ function ProofCards({
               {q.key_note} Set the right option in Edit, or verify if the key is right.
             </p>
           )}
-          {q && !q.explanation_en && !q.explanation_hi && (
+          {q && !written && !q.explanation_en && !q.explanation_hi && (
             <p className="mt-2 text-sm text-muted-foreground">No explanation yet.</p>
           )}
         </div>
@@ -2150,15 +2445,17 @@ function ProofCards({
             >
               <Pencil className="mr-1 h-4 w-4" /> {editing ? "Close editor" : "Edit"}
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={saving || busy}
-              onClick={() => void onRedo(q.id)}
-            >
-              <Sparkles className="mr-1 h-4 w-4" />
-              {q.explanation_en || q.explanation_hi ? "Explain again" : "Explain"}
-            </Button>
+            {!written && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={saving || busy}
+                onClick={() => void onRedo(q.id)}
+              >
+                <Sparkles className="mr-1 h-4 w-4" />
+                {q.explanation_en || q.explanation_hi ? "Explain again" : "Explain"}
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"

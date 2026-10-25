@@ -38,6 +38,10 @@ import {
   parsePage,
   type ExamPaper,
   type ExamQuestion,
+  type PaperKind,
+  type WrittenContext,
+  parseWrittenPage,
+  writtenPageMessages,
   type ImportedPaper,
   type KeyEntry,
   type QuestionDraft,
@@ -93,12 +97,23 @@ async function selectQuestions(paperId: string, qNos?: number[]) {
     if (qNos) x = x.in("q_no", qNos);
     return x.order("q_no");
   };
-  let r = await q(QUESTION_COLS + CHECK_COLS);
+  let r = await q(QUESTION_COLS + CHECK_COLS + MAINS_COLS);
+  const mains = !missingMains(r.error);
+  if (!mains) r = await q(QUESTION_COLS + CHECK_COLS);
   const ready = !missingCheck(r.error);
   if (!ready) r = await q(QUESTION_COLS);
   fail(r.error);
-  return { ready, questions: ((r.data ?? []) as unknown[]).map(readQuestion) };
+  return { ready, mains, questions: ((r.data ?? []) as unknown[]).map(readQuestion) };
 }
+
+// After the mains_papers migration: written questions and master topics.
+const MAINS_COLS = ",unit,part,marks,word_limit,model_answer,model_source,master_topic_id";
+const missingMains = (e: { message: string } | null) =>
+  !!e &&
+  /unit|part|marks|word_limit|model_answer|model_source|master_topic_id|kind/.test(e.message);
+export const MAINS_NOT_READY =
+  "Mains papers and topic links need a database update: run the latest migration (mains_papers) in Lovable or the SQL editor.";
+const isWritten = (p: { kind?: string }) => p.kind === "subjective";
 
 function readQuestion(r: unknown): ExamQuestion {
   const q = r as ExamQuestion;
@@ -112,8 +127,9 @@ function readQuestion(r: unknown): ExamQuestion {
   };
 }
 
-const incomplete = (q: ExamQuestion) =>
-  !q.question_en || !q.question_hi || q.options.some((o) => !o.en || !o.hi);
+// A written (Mains) question has no options.
+const incomplete = (q: ExamQuestion, written = false) =>
+  !q.question_en || !q.question_hi || (!written && q.options.some((o) => !o.en || !o.hi));
 
 // ---------- Papers ----------
 
@@ -126,6 +142,7 @@ export async function listPapers(): Promise<{ ready: boolean; papers: PaperSumma
   fail(error);
   const papers = (data ?? []) as unknown as ExamPaper[];
   const stats = new Map<string, Omit<PaperSummary, keyof ExamPaper>>();
+  const writtenIds = new Set(papers.filter(isWritten).map((p) => p.id));
   for (const p of papers)
     stats.set(p.id, {
       questions: 0,
@@ -153,7 +170,7 @@ export async function listPapers(): Promise<{ ready: boolean; papers: PaperSumma
       s.questions++;
       if (q.correct) s.answered++;
       if (q.deleted) s.deleted++;
-      if (incomplete(q)) s.incomplete++;
+      if (incomplete(q, writtenIds.has(q.paper_id))) s.incomplete++;
       if (q.ca) s.ca++;
       if (q.match === "covered") s.covered++;
       if (q.match === "low") s.low++;
@@ -198,13 +215,15 @@ export async function createPaper(
   meta: PaperMeta,
   source: "pdf" | "excel",
   pages = 0,
+  kind: PaperKind = "objective",
 ): Promise<ExamPaper> {
   const row = cleanMeta(meta);
   if (!row.exam) throw new Error("Give the exam's name.");
   const { data, error } = await from("exam_papers")
-    .insert({ ...row, source, pages } as never)
+    .insert({ ...row, source, pages, ...(kind === "subjective" ? { kind } : {}) } as never)
     .select("*")
     .single();
+  if (kind === "subjective" && missingMains(error)) throw new Error(MAINS_NOT_READY);
   if (missing(error)) throw new Error(PAPERS_NOT_READY);
   fail(error);
   return data as unknown as ExamPaper;
@@ -244,13 +263,23 @@ export async function getPaper(
 // before merged (a question cut across two pages). The answer key is kept.
 export async function saveQuestions(paperId: string, drafts: QuestionDraft[], replace = false) {
   if (!drafts.length) return;
-  const { ready, questions: old0 } = await selectQuestions(
+  const {
+    ready,
+    mains,
+    questions: old0,
+  } = await selectQuestions(
     paperId,
     drafts.map((d) => d.q_no),
   );
   const had = new Map(old0.map((q) => [q.q_no, q]));
   // Subjects and topics from the sheet (kept otherwise).
   const subjects = ready && drafts.some((d) => d.subject_section || d.topic_en || d.topic_hi);
+  // A written question's unit, part, marks, word limit and model answer.
+  const written =
+    mains &&
+    drafts.some(
+      (d) => d.unit || d.part || d.marks || d.word_limit || d.model_answer || d.model_source,
+    );
   const rows = drafts.map((d) => {
     const old = had.get(d.q_no);
     const q = old && !replace ? mergeQuestion(old, d) : d;
@@ -278,6 +307,16 @@ export async function saveQuestions(paperId: string, drafts: QuestionDraft[], re
             topic_hi: d.topic_hi ?? old?.topic_hi ?? "",
           }
         : {}),
+      ...(written
+        ? {
+            unit: d.unit ?? old?.unit ?? "",
+            part: d.part ?? old?.part ?? "",
+            marks: d.marks ?? old?.marks ?? null,
+            word_limit: d.word_limit ?? old?.word_limit ?? null,
+            model_answer: d.model_answer ?? old?.model_answer ?? "",
+            model_source: d.model_source ?? old?.model_source ?? "",
+          }
+        : {}),
       updated_at: now(),
     };
   });
@@ -292,9 +331,10 @@ export async function readPaperPage(
   pages: number,
   image: SaathiImage,
 ): Promise<{ questions: number[]; paper: boolean }> {
-  const read = parsePage(
-    await saathiComplete(apiKey(), pageMessages(page, pages), undefined, [image]),
-  );
+  const { data: kindRow } = await from("exam_papers").select("*").eq("id", paperId).single();
+  const read = isWritten((kindRow ?? {}) as { kind?: string })
+    ? await readWrittenPage(paperId, page, pages, image)
+    : parsePage(await saathiComplete(apiKey(), pageMessages(page, pages), undefined, [image]));
   await saveQuestions(paperId, read.questions);
   const { data } = await from("exam_papers")
     .select("pages_done,paper_code,questions_total,series")
@@ -322,6 +362,26 @@ export async function readPaperPage(
     ).error,
   );
   return { questions: read.questions.map((q) => q.q_no), paper: !!read.paper };
+}
+
+// A written (Mains) paper's page: the unit, part, marks and word limit
+// carried on from the questions read before.
+async function readWrittenPage(paperId: string, page: number, pages: number, image: SaathiImage) {
+  const { questions } = await selectQuestions(paperId);
+  const last = questions.at(-1);
+  const context: WrittenContext | null = last
+    ? {
+        unit: last.unit ?? "",
+        part: last.part ?? "",
+        marks: last.marks ?? null,
+        words: last.word_limit ?? null,
+        last: last.q_no,
+      }
+    : null;
+  return parseWrittenPage(
+    await saathiComplete(apiKey(), writtenPageMessages(page, pages, context), undefined, [image]),
+    context,
+  );
 }
 
 // ---------- The answer key ----------
@@ -408,6 +468,8 @@ export async function importPapers(
         exam_date: meta.exam_date,
       },
       "excel",
+      0,
+      p.kind ?? "objective",
     );
     ids.push(paper.id);
     for (let i = 0; i < p.questions.length; i += 200)
@@ -445,20 +507,40 @@ export async function updateQuestion(
       | "subject_section"
       | "topic_en"
       | "topic_hi"
+      | "unit"
+      | "part"
+      | "marks"
+      | "word_limit"
+      | "model_answer"
+      | "model_source"
+      | "master_topic_id"
     >
   >,
 ) {
-  await assertDraft({ question: id });
-  // The subject and topic: no need to verify again.
+  // A model answer or outline topic changes nothing students see: allowed on
+  // a published paper too.
+  const privateOnly = Object.keys(patch).every((k) =>
+    ["model_answer", "model_source", "master_topic_id"].includes(k),
+  );
+  if (!privateOnly) await assertDraft({ question: id });
+  // The subject, topic, model answer and outline topic: no need to verify
+  // again.
   const sorted: Record<string, unknown> = {};
   if (patch.subject_section !== undefined)
     sorted.subject_section = subjectSection(patch.subject_section);
   for (const k of ["topic_en", "topic_hi"] as const)
     if (patch[k] !== undefined) sorted[k] = String(patch[k]).trim().slice(0, 80);
+  if (patch.model_answer !== undefined)
+    sorted.model_answer = String(patch.model_answer).trim().slice(0, 20000);
+  if (patch.model_source !== undefined)
+    sorted.model_source = String(patch.model_source).trim().slice(0, 200);
+  if (patch.master_topic_id !== undefined) sorted.master_topic_id = patch.master_topic_id;
   if (Object.keys(sorted).length) {
     const { error } = await from("exam_questions")
       .update({ ...sorted, updated_at: now() } as never)
       .eq("id", id);
+    if (missingMains(error) && /model_|master_topic/.test(error!.message))
+      throw new Error(MAINS_NOT_READY);
     if (missingCheck(error)) throw new Error(CHECK_NOT_READY);
     fail(error);
     const rest = Object.keys(patch).filter((k) => !(k in sorted));
@@ -474,6 +556,9 @@ export async function updateQuestion(
     "explanation_hi",
   ] as const)
     if (patch[k] !== undefined) row[k] = String(patch[k]).trim().slice(0, 6000);
+  for (const k of ["unit", "part"] as const)
+    if (patch[k] !== undefined) row[k] = String(patch[k]).trim().slice(0, 60);
+  for (const k of ["marks", "word_limit"] as const) if (patch[k] !== undefined) row[k] = patch[k];
   // A change to the question or its explanation needs verifying again; the
   // key's note is settled once the key is set by hand.
   const changed =
@@ -550,7 +635,8 @@ export async function explainStep(
   redo: string[] = [],
 ): Promise<{ done: number; left: number; total: number }> {
   await assertDraft({ paper: paperId });
-  const { questions } = await getPaper(paperId);
+  const { paper, questions } = await getPaper(paperId);
+  if (isWritten(paper)) throw new Error("A written paper has model answers, not explanations.");
   const wanted = (q: ExamQuestion) =>
     redo.length ? redo.includes(q.id) : !q.explanation_en && !q.explanation_hi;
   const todo = questions.filter(wanted);
@@ -646,8 +732,9 @@ export async function reviewStep(
   redo: string[] = [],
 ): Promise<{ done: number; left: number; total: number }> {
   await assertDraft({ paper: paperId });
-  const { data: p, error } = await from("exam_papers").select("exam").eq("id", paperId).single();
+  const { data: p, error } = await from("exam_papers").select("*").eq("id", paperId).single();
   fail(error);
+  const written = isWritten(p as unknown as { kind?: string });
   const { ready, questions } = await selectQuestions(paperId);
   if (!ready) throw new Error(CHECK_NOT_READY);
   const wanted = (q: ExamQuestion) => (redo.length ? redo.includes(q.id) : !checkedNow(q));
@@ -668,6 +755,7 @@ export async function reviewStep(
           deleted: q.deleted,
           explanation_en: q.explanation_en,
           explanation_hi: q.explanation_hi,
+          written: written ? { marks: q.marks ?? null, words: q.word_limit ?? null } : null,
         })),
         (p as unknown as { exam: string }).exam,
       ),
@@ -713,6 +801,17 @@ export async function publishPaper(paperId: string, minutes?: number) {
   if (!questions.length) throw new Error("This paper has no questions.");
   const left = questions.filter((q) => !q.verified).length;
   if (left) throw new Error(`${left} question${left === 1 ? " isn't" : "s aren't"} verified yet.`);
+  // A written paper: for the notes and the other features, no students' test.
+  if (isWritten(paper)) {
+    fail(
+      (
+        await from("exam_papers")
+          .update({ status: "published", published_at: now(), updated_at: now() } as never)
+          .eq("id", paperId)
+      ).error,
+    );
+    return (await getPaper(paperId)).paper;
+  }
   const usable = questions.filter((q) => !q.deleted && q.correct);
   const join = (a: string, b: string) => (a && b && a !== b ? `${a}\n${b}` : a || b);
   const { data: first } = await from("mcq_tests")

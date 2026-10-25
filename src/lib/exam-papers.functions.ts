@@ -50,6 +50,12 @@ const draft = z.object({
   subject_section: z.string().max(80).optional(),
   topic_en: z.string().max(80).optional(),
   topic_hi: z.string().max(80).optional(),
+  unit: z.string().max(60).optional(),
+  part: z.string().max(60).optional(),
+  marks: z.number().int().min(0).max(1000).nullable().optional(),
+  word_limit: z.number().int().min(0).max(5000).nullable().optional(),
+  model_answer: z.string().max(20000).optional(),
+  model_source: z.string().max(200).optional(),
 });
 const keyEntry = z.object({
   q_no: z.number().int().min(1).max(1000),
@@ -80,17 +86,28 @@ export const getExamPaper = createServerFn({ method: "POST" })
     const stories = await s.matchedStories(
       got.questions.map((q) => q.matched_item).filter((x): x is string => !!x),
     );
-    return { ...got, stories, lessons: await s.lessonsInUse() };
+    // The master outline's topics the questions are filed under.
+    const ids = [
+      ...new Set(got.questions.map((q) => q.master_topic_id).filter((x): x is string => !!x)),
+    ];
+    const topics = ids.length ? await (await import("@/lib/outline.server")).topicNames(ids) : {};
+    return { ...got, stories, topics, lessons: await s.lessonsInUse() };
   });
 
 export const createExamPaper = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({ meta, pages: z.number().int().min(0).max(500) }).parse(d),
+    z
+      .object({
+        meta,
+        pages: z.number().int().min(0).max(500),
+        kind: z.enum(["objective", "subjective"]).optional(),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    return (await server()).createPaper(data.meta, "pdf", data.pages);
+    return (await server()).createPaper(data.meta, "pdf", data.pages, data.kind);
   });
 
 export const updateExamPaper = createServerFn({ method: "POST" })
@@ -162,6 +179,7 @@ export const importExamPapers = createServerFn({ method: "POST" })
               exam: z.string().trim().max(200),
               subject: z.string().trim().max(200),
               questions: z.array(draft).max(1000),
+              kind: z.enum(["objective", "subjective"]).optional(),
             }),
           )
           .max(50),
@@ -198,6 +216,13 @@ export const updateExamQuestion = createServerFn({ method: "POST" })
           subject_section: z.string().max(80).optional(),
           topic_en: z.string().max(80).optional(),
           topic_hi: z.string().max(80).optional(),
+          unit: z.string().max(60).optional(),
+          part: z.string().max(60).optional(),
+          marks: z.number().int().min(0).max(1000).nullable().optional(),
+          word_limit: z.number().int().min(0).max(5000).nullable().optional(),
+          model_answer: z.string().max(20000).optional(),
+          model_source: z.string().max(200).optional(),
+          master_topic_id: id.nullable().optional(),
         }),
       })
       .parse(d),
@@ -246,6 +271,17 @@ export const explainExamPaper = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return (await server()).explainStep(data.id, data.redo ?? []);
+  });
+
+// A paper's questions filed under the master outlines' topics, a batch at a
+// time.
+export const linkExamTopics = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id, skip: z.array(id).max(1000).optional() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    const { linkPaperTopics } = await import("@/lib/outline.server");
+    return linkPaperTopics(data.id, data.skip ?? []);
   });
 
 // Subjects, topics and the AI check, a batch at a time.

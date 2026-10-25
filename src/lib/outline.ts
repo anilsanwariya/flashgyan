@@ -227,3 +227,45 @@ export function numbering(topics: MasterTopic[]): Map<string, string> {
   walk(null, "");
   return out;
 }
+
+// ---------- Past questions on the outline ----------
+
+// Questions linked per AI call.
+export const QUESTION_LINK_BATCH = 20;
+
+export function questionTopicMessages(
+  section: string,
+  outline: string,
+  questions: { n: number; text: string }[],
+): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: `You file previous-year exam questions (RPSC, RSSB, UPSC; objective and written) under the master outline of a study-notes book for one subject, so each topic shows the questions asked on it. For each question give the outline item (T number) it asks about, at the most specific level (a subtopic when one fits, else its topic, else the chapter); null only if nothing in the outline is about it.
+Reply with JSON only: [{"n": question number, "topic": 12}]`,
+    },
+    {
+      role: "user",
+      content: `Subject: ${section}\n\nOutline:\n${outline}\n\nQuestions:\n${questions
+        .map((q) => `Q${q.n}. ${q.text}`)
+        .join("\n")}`,
+    },
+  ];
+}
+
+// The T number for each question (by its number), when given.
+export function parseQuestionTopics(
+  raw: string,
+  nums: number[],
+  topicCount: number,
+): Map<number, number> {
+  const list = parseJson<unknown>(raw.slice(Math.max(0, raw.indexOf("["))));
+  const out = new Map<number, number>();
+  for (const x of Array.isArray(list) ? list : []) {
+    const o = (x ?? {}) as Record<string, unknown>;
+    const n = Number(String(o.n).replace(/^Q/i, ""));
+    const t = Number(String(o.topic).replace(/^T/i, ""));
+    if (nums.includes(n) && Number.isInteger(t) && t >= 1 && t <= topicCount) out.set(n, t);
+  }
+  return out;
+}

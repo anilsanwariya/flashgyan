@@ -29,6 +29,8 @@ export type ExamPaper = {
   published_at: string | null;
   // The students' test made from it when published.
   mcq_test_id: string | null;
+  // After the mains_papers migration: MCQs, or written answers (Mains).
+  kind?: PaperKind;
   created_at: string;
   updated_at: string;
 };
@@ -65,6 +67,20 @@ export type ExamQuestion = {
   topic_en?: string;
   topic_hi?: string;
   ai_check?: AiCheck | null;
+} & Written;
+
+export type PaperKind = "objective" | "subjective";
+// A written (Mains) question: where it sits, its marks and word limit, and a
+// model answer kept for learning only (never shown to students); and, for
+// any question, the master outline's topic it asks about.
+export type Written = {
+  unit?: string;
+  part?: string;
+  marks?: number | null;
+  word_limit?: number | null;
+  model_answer?: string;
+  model_source?: string;
+  master_topic_id?: string | null;
 };
 
 // ---------- Subjects and the AI check ----------
@@ -189,6 +205,8 @@ export function reviewMessages(
     deleted: boolean;
     explanation_en: string;
     explanation_hi: string;
+    // A written (Mains) question: its marks and word limit.
+    written?: { marks: number | null; words: number | null } | null;
   }[],
   examName: string,
 ): ChatMessage[] {
@@ -204,15 +222,16 @@ For each question:
    - "explanation": the explanation argues for another option, or states a wrong fact, or doesn't explain the question;
    - "language": the Hindi and English versions of the question or options don't say the same thing (a different number, name, negation or option order);
    - "question": the text or an option is garbled, cut off, misspelt so as to change the meaning, or two options are the same.
-Be strict but fair: no issues for style, wording or small spelling slips. A question deleted by the key needs no key check. Use well-established knowledge; when unsure, don't raise an issue.
+Be strict but fair: no issues for style, wording or small spelling slips. A question deleted by the key needs no key check. A written (Mains) question has no options, key or explanation: check only "language" and "question". Use well-established knowledge; when unsure, don't raise an issue.
 Reply with JSON only: [{"n": question number, "subject": "...", "topic": {"en": "...", "hi": "..."}, "issues": [{"kind": "...", "note": "..."}], "suggest": option number or null}]`,
     },
     {
       role: "user",
       content: `Exam: ${examName}\n\n${qs
-        .map(
-          (q) =>
-            `Question ${q.n}\nEnglish: ${q.question_en || "(none)"}\n${q.options_en.map((o, i) => `  (${i + 1}) ${o}`).join("\n")}\nHindi: ${q.question_hi || "(none)"}\n${q.options_hi.map((o, i) => `  (${i + 1}) ${o}`).join("\n")}\n${q.deleted ? "Deleted by the answer key." : `Correct option given: ${q.correct ?? "none"}`}\nExplanation (English): ${q.explanation_en || "(none yet)"}\nExplanation (Hindi): ${q.explanation_hi || "(none yet)"}`,
+        .map((q) =>
+          q.written
+            ? `Question ${q.n} (written answer${q.written.marks ? `, ${q.written.marks} marks` : ""}${q.written.words ? `, ${q.written.words} words` : ""})\nEnglish: ${q.question_en || "(none)"}\nHindi: ${q.question_hi || "(none)"}`
+            : `Question ${q.n}\nEnglish: ${q.question_en || "(none)"}\n${q.options_en.map((o, i) => `  (${i + 1}) ${o}`).join("\n")}\nHindi: ${q.question_hi || "(none)"}\n${q.options_hi.map((o, i) => `  (${i + 1}) ${o}`).join("\n")}\n${q.deleted ? "Deleted by the answer key." : `Correct option given: ${q.correct ?? "none"}`}\nExplanation (English): ${q.explanation_en || "(none yet)"}\nExplanation (Hindi): ${q.explanation_hi || "(none yet)"}`,
         )
         .join("\n\n---\n\n")}`,
     },
@@ -275,7 +294,7 @@ export type QuestionDraft = {
   subject_section?: string;
   topic_en?: string;
   topic_hi?: string;
-};
+} & Written;
 
 export const OPTION_COUNT = 4;
 
@@ -381,7 +400,7 @@ export const SHEET_COLUMNS = [
 ] as const;
 
 export function paperSheetRows(
-  paper: Pick<ExamPaper, "exam" | "subject">,
+  paper: Pick<ExamPaper, "exam" | "subject" | "kind">,
   questions: Pick<
     ExamQuestion,
     | "q_no"
@@ -399,8 +418,10 @@ export function paperSheetRows(
     | "subject_section"
     | "topic_en"
     | "topic_hi"
+    | keyof Written
   >[],
-): Record<(typeof SHEET_COLUMNS)[number], string | number>[] {
+): Record<string, string | number>[] {
+  if (paper.kind === "subjective") return writtenSheetRows(paper, questions);
   return [...questions]
     .sort((a, b) => a.q_no - b.q_no)
     .flatMap((q) =>
@@ -434,6 +455,56 @@ export function paperSheetRows(
               : "General knowledge"
             : q.explanation_source,
         };
+      }),
+    );
+}
+
+// A written (Mains) paper's sheet: no options or key; its unit, part, marks,
+// word limit and model answer instead.
+export const WRITTEN_COLUMNS = [
+  "S. No.",
+  "Exam name",
+  "Subject",
+  "Subject section",
+  "Topic",
+  "Unit",
+  "Part",
+  "Question",
+  "Marks",
+  "Word limit",
+  "Model answer",
+  "Model answer source",
+] as const;
+
+function writtenSheetRows(
+  paper: Pick<ExamPaper, "exam" | "subject">,
+  questions: (Pick<
+    ExamQuestion,
+    "q_no" | "question_en" | "question_hi" | "subject_section" | "topic_en" | "topic_hi"
+  > &
+    Written)[],
+): Record<string, string | number>[] {
+  return [...questions]
+    .sort((a, b) => a.q_no - b.q_no)
+    .flatMap((q) =>
+      (["en", "hi"] as const).map((lang) => {
+        const hi = lang === "hi";
+        const row: Record<(typeof WRITTEN_COLUMNS)[number], string | number> = {
+          "S. No.": `${hi ? "H" : "E"}-${q.q_no}`,
+          "Exam name": paper.exam,
+          Subject: paper.subject,
+          "Subject section": subjectName(q.subject_section ?? "", lang),
+          Topic: (hi ? q.topic_hi : q.topic_en) ?? "",
+          Unit: q.unit ?? "",
+          Part: q.part ?? "",
+          Question: hi ? q.question_hi : q.question_en,
+          Marks: q.marks ?? "",
+          "Word limit": q.word_limit ?? "",
+          // The model answer once, with the English row.
+          "Model answer": hi ? "" : (q.model_answer ?? ""),
+          "Model answer source": hi ? "" : (q.model_source ?? ""),
+        };
+        return row;
       }),
     );
 }
@@ -542,7 +613,25 @@ const EXTRA_KEYS: Record<string, "answer" | "explanation" | "source"> = {
   source: "source",
 };
 
-export type ImportedPaper = { exam: string; subject: string; questions: QuestionDraft[] };
+// A written (Mains) paper's columns.
+const WRITTEN_KEYS: Record<string, "unit" | "part" | "marks" | "words" | "model" | "modelSource"> =
+  {
+    unit: "unit",
+    part: "part",
+    marks: "marks",
+    wordlimit: "words",
+    words: "words",
+    modelanswer: "model",
+    modelanswersource: "modelSource",
+  };
+
+export type ImportedPaper = {
+  exam: string;
+  subject: string;
+  questions: QuestionDraft[];
+  // Written answers (no options, marks given).
+  kind?: PaperKind;
+};
 
 // Papers from a workbook's sheets (in the columns above; one sheet per
 // language, or both languages' rows in one sheet). A sheet named Hindi (or
@@ -562,11 +651,14 @@ export function rowsToPapers(
     for (const raw of sheet.rows) {
       const row: Partial<Record<(typeof EXCEL_COLUMNS)[number], string>> = {};
       const extra: Partial<Record<"answer" | "explanation" | "source", string>> = {};
+      const written: Partial<Record<(typeof WRITTEN_KEYS)[string], string>> = {};
       for (const [h, v] of Object.entries(raw)) {
         const col = COLUMN_KEYS[key(h)];
         if (col) row[col] = String(v ?? "").trim();
         const x = EXTRA_KEYS[key(h)];
         if (x) extra[x] = String(v ?? "").trim();
+        const w = WRITTEN_KEYS[key(h)];
+        if (w) written[w] = String(v ?? "").trim();
       }
       const qNo = Number(String(row["Question No."] ?? "").replace(/[^\d]/g, ""));
       const question = row.Question ?? "";
@@ -608,6 +700,13 @@ export function rowsToPapers(
       if (extra.explanation)
         q[lang === "hi" ? "explanation_hi" : "explanation_en"] = extra.explanation;
       if (row["Subject section"]) q.subject_section = subjectSection(row["Subject section"]);
+      const int = (v?: string) => (v && /^\d+(\.0+)?$/.test(v) ? Number(v) : undefined);
+      if (written.unit) q.unit = written.unit.slice(0, 60);
+      if (written.part) q.part = written.part.slice(0, 60);
+      if (int(written.marks)) q.marks = int(written.marks);
+      if (int(written.words)) q.word_limit = int(written.words);
+      if (written.model) q.model_answer = written.model.slice(0, 20000);
+      if (written.modelSource) q.model_source = written.modelSource.slice(0, 200);
       if (row.Topic) q[lang === "hi" ? "topic_hi" : "topic_en"] = row.Topic.slice(0, 80);
       if (extra.source) {
         const general = /^(general knowledge|सामान्य ज्ञान)$/i.test(extra.source);
@@ -627,6 +726,12 @@ export function rowsToPapers(
   return [...papers.values()].map((p) => ({
     ...p,
     questions: p.questions.sort((a, b) => a.q_no - b.q_no),
+    // No options anywhere, and marks given: a written (Mains) paper.
+    kind:
+      p.questions.some((q) => q.marks) &&
+      p.questions.every((q) => q.options.every((o) => !o.en && !o.hi))
+        ? ("subjective" as const)
+        : ("objective" as const),
   }));
 }
 
@@ -709,6 +814,81 @@ export function parsePage(raw: string): PageRead {
   return { paper, questions };
 }
 
+// ---------- Reading a written (Mains) paper's page ----------
+
+// Where the page before left off: the unit and part, and their marks and
+// word limit (printed once, above a part's questions).
+export type WrittenContext = {
+  unit: string;
+  part: string;
+  marks: number | null;
+  words: number | null;
+  last: number;
+};
+
+export function writtenPageMessages(
+  page: number,
+  pages: number,
+  context: WrittenContext | null,
+): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: `You read pages of Indian competitive exam Mains (written answer) question papers (RPSC, UPSC and similar) into data. Questions are printed in English and in Hindi, under Unit and Part headings; a part's note says how many words to answer in and how many marks each question carries (e.g. "Answer in 15 words each. Each question carries 2 marks").
+For every question on this page give: its number as printed; its text in English and in Hindi exactly as printed (a question with parts (a), (b)… or an "OR" choice: all of it, each part on its own line); its unit and part (e.g. "Unit-I", "Part-A"); its marks and word limit. A question with no unit, part, marks or words printed on this page has those of the part it continues (given below). A question cut off at the bottom: give the part on this page with "partial": true. Leave out instructions, rough-work pages, headers and page numbers.
+On the cover page (no questions), give the paper's details instead: the exam, subject or paper name, paper code, total marks and number of questions.
+Reply with JSON only: {"paper": {"exam": "...", "subject": "...", "paper_code": "...", "series": "", "questions": number} or null, "questions": [{"n": number, "en": "...", "hi": "...", "unit": "Unit-I", "part": "Part-A", "marks": 2, "words": 15, "partial": false}]}`,
+    },
+    {
+      role: "user",
+      content: `Page ${page} of ${pages}.${
+        context
+          ? `\nThe questions before this page ended at question ${context.last}, in ${[context.unit, context.part].filter(Boolean).join(", ") || "the paper"}${context.marks ? `, ${context.marks} marks each` : ""}${context.words ? `, in ${context.words} words` : ""}.`
+          : ""
+      }`,
+    },
+  ];
+}
+
+export function parseWrittenPage(raw: string, context: WrittenContext | null): PageRead {
+  const read = parsePage(raw);
+  const o = parseJson<Record<string, unknown>>(raw);
+  const list = Array.isArray(o?.questions) ? (o!.questions as Record<string, unknown>[]) : [];
+  const int = (v: unknown) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 && n <= 1000 ? Math.round(n) : null;
+  };
+  let ctx = context;
+  const questions: QuestionDraft[] = [];
+  for (const q of list) {
+    const n = Number(q.n);
+    if (!Number.isInteger(n) || n < 1 || n > 1000) continue;
+    const en = str(typeof q.en === "string" ? q.en : (q.en as { question?: string })?.question);
+    const hi = str(typeof q.hi === "string" ? q.hi : (q.hi as { question?: string })?.question);
+    if (!en && !hi) continue;
+    ctx = {
+      unit: str(q.unit, 60) || ctx?.unit || "",
+      part: str(q.part, 60) || ctx?.part || "",
+      marks: int(q.marks) ?? ctx?.marks ?? null,
+      words: int(q.words) ?? ctx?.words ?? null,
+      last: n,
+    };
+    questions.push({
+      q_no: n,
+      question_en: en,
+      question_hi: hi,
+      extra_en: "",
+      extra_hi: "",
+      options: Array.from({ length: OPTION_COUNT }, () => ({ en: "", hi: "" })),
+      unit: ctx.unit,
+      part: ctx.part,
+      marks: ctx.marks,
+      word_limit: ctx.words,
+    });
+  }
+  return { paper: read.paper, questions };
+}
+
 // A question read again (the rest of a question cut off at a page's end, or
 // its other language): what was empty is filled in, longer text is kept.
 export function mergeQuestion<T extends QuestionDraft>(had: T, fresh: QuestionDraft): T {
@@ -727,10 +907,12 @@ export function mergeQuestion<T extends QuestionDraft>(had: T, fresh: QuestionDr
 }
 
 // What is still missing in a question (for the editor to check).
-export function questionGaps(q: QuestionDraft): string[] {
+export function questionGaps(q: QuestionDraft, subjective = false): string[] {
   const gaps: string[] = [];
   if (!q.question_en) gaps.push("English question");
   if (!q.question_hi) gaps.push("Hindi question");
+  // A written question has no options; its marks are what to check.
+  if (subjective) return q.marks ? gaps : [...gaps, "marks"];
   const missing = q.options.filter((o) => !o.en || !o.hi).length;
   if (q.options.length < OPTION_COUNT || missing) gaps.push("options");
   return gaps;
