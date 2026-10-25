@@ -267,6 +267,13 @@
       "when": 1792911030958,
       "tag": "0037_notes_drafts",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1792916092179,
+      "tag": "0038_notes_draft_versions",
+      "breakpoints": true
     }
   ]
 }
