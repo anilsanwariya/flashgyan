@@ -1729,6 +1729,178 @@ export type Database = {
           },
         ]
       }
+      flash_cards: {
+        Row: {
+          app_id: string | null
+          back: string
+          back_hint: string
+          card_order: number | null
+          chunk: number | null
+          created_at: string
+          error: boolean
+          error_type: string
+          ex: Json
+          front: string
+          history: Json
+          id: string
+          is_revealed: boolean
+          own: Json
+          pos: number
+          prompt: string | null
+          removed: boolean
+          sources: Json
+          topic_id: string
+          updated_at: string
+          verified: boolean
+          word_key: string | null
+        }
+        Insert: {
+          app_id?: string | null
+          back?: string
+          back_hint?: string
+          card_order?: number | null
+          chunk?: number | null
+          created_at?: string
+          error?: boolean
+          error_type?: string
+          ex?: Json
+          front?: string
+          history?: Json
+          id?: string
+          is_revealed?: boolean
+          own?: Json
+          pos?: number
+          prompt?: string | null
+          removed?: boolean
+          sources?: Json
+          topic_id: string
+          updated_at?: string
+          verified?: boolean
+          word_key?: string | null
+        }
+        Update: {
+          app_id?: string | null
+          back?: string
+          back_hint?: string
+          card_order?: number | null
+          chunk?: number | null
+          created_at?: string
+          error?: boolean
+          error_type?: string
+          ex?: Json
+          front?: string
+          history?: Json
+          id?: string
+          is_revealed?: boolean
+          own?: Json
+          pos?: number
+          prompt?: string | null
+          removed?: boolean
+          sources?: Json
+          topic_id?: string
+          updated_at?: string
+          verified?: boolean
+          word_key?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flash_cards_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "flash_topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      flash_templates: {
+        Row: {
+          columns: Json
+          created_at: string
+          examples: Json
+          id: string
+          key: string
+          name: string
+          prompt: string
+          sort: number
+          updated_at: string
+          word_key: string
+        }
+        Insert: {
+          columns?: Json
+          created_at?: string
+          examples?: Json
+          id?: string
+          key: string
+          name: string
+          prompt?: string
+          sort?: number
+          updated_at?: string
+          word_key?: string
+        }
+        Update: {
+          columns?: Json
+          created_at?: string
+          examples?: Json
+          id?: string
+          key?: string
+          name?: string
+          prompt?: string
+          sort?: number
+          updated_at?: string
+          word_key?: string
+        }
+        Relationships: []
+      }
+      flash_topics: {
+        Row: {
+          books: Json
+          chunks: Json
+          columns: Json
+          created_at: string
+          id: string
+          locked_at: string | null
+          name: string
+          prompt: string
+          template_id: string | null
+          updated_at: string
+          word_key: string
+        }
+        Insert: {
+          books?: Json
+          chunks?: Json
+          columns?: Json
+          created_at?: string
+          id?: string
+          locked_at?: string | null
+          name: string
+          prompt?: string
+          template_id?: string | null
+          updated_at?: string
+          word_key?: string
+        }
+        Update: {
+          books?: Json
+          chunks?: Json
+          columns?: Json
+          created_at?: string
+          id?: string
+          locked_at?: string | null
+          name?: string
+          prompt?: string
+          template_id?: string | null
+          updated_at?: string
+          word_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flash_topics_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "flash_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       flashcard_decks: {
         Row: {
           created_at: string
