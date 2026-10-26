@@ -24,6 +24,7 @@ import {
   Smartphone,
   Download,
   FileUp,
+  GitCompare,
   KeyRound,
   Lock,
   Pencil,
@@ -116,7 +117,7 @@ import {
 } from "@/lib/flash-merge";
 import { BOOK_FILE_TYPES, isBookFile } from "@/lib/flash-read";
 import { StudentPreview } from "@/components/flash-studio-preview";
-import { AppImportDialog } from "@/components/flash-studio-import";
+import { AppImportDialog, CompareWithApp } from "@/components/flash-studio-import";
 import { Badge, PageTabs, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -2742,6 +2743,7 @@ function ChunksTab({
   const [sizes, setSizes] = useState(() => suggestSizes(waiting.length, 100).join(", "));
   const [busy, setBusy] = useState(false);
   const [chunkPreview, setChunkPreview] = useState<number | null>(null);
+  const [comparing, setComparing] = useState(false);
   const [report, setReport] = useState<IdMatch | null>(null);
   const idRef = useRef<HTMLInputElement>(null);
   useEffect(
@@ -2964,6 +2966,14 @@ function ChunksTab({
             >
               <Download className="mr-1 h-4 w-4" /> All chunks (.zip)
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              title="See which cards differ between the studio and the app before uploading"
+              onClick={() => setComparing(true)}
+            >
+              <GitCompare className="mr-1 h-4 w-4" /> Compare with the app
+            </Button>
             <Button size="sm" variant="outline" onClick={() => idRef.current?.click()}>
               <KeyRound className="mr-1 h-4 w-4" /> Add the app&apos;s ids
             </Button>
@@ -3067,6 +3077,14 @@ function ChunksTab({
               );
             })}
           </ul>
+          {comparing && (
+            <CompareWithApp
+              topic={topic}
+              cards={cards}
+              onChanged={onChanged}
+              onClose={() => setComparing(false)}
+            />
+          )}
           {chunkPreview !== null && (
             <StudentPreview
               topic={topic}

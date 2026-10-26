@@ -2294,3 +2294,49 @@ export async function bookText(
   }
   return { passages };
 }
+
+// ---------- The app's text taken back ----------
+
+export type AppText = {
+  id: string;
+  front: string;
+  back: string;
+  prompt: string;
+  back_hint: string;
+  // By column id: the columns in the app's file.
+  ex: Record<string, string>;
+};
+
+// Cards given the app's text (it was edited in the app): the old text kept
+// in each card's history; verified marks as they are.
+export async function takeAppText(
+  topicId: string,
+  items: AppText[],
+): Promise<{ changed: number; cards: FlashCard[] }> {
+  const { topic, cards } = await getTopic(topicId);
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  const edits: { id: string; patch: Row }[] = [];
+  for (const it of items) {
+    const c = byId.get(it.id);
+    if (!c || c.removed) continue;
+    const ex = { ...c.ex };
+    for (const [k, v] of Object.entries(it.ex)) {
+      if (v.trim()) ex[k] = v;
+      else delete ex[k];
+    }
+    edits.push({
+      id: c.id,
+      patch: {
+        front: it.front,
+        back: it.back,
+        prompt: it.prompt && it.prompt !== topic.prompt ? it.prompt : null,
+        back_hint: it.back_hint,
+        ex: normalizeEx(ex),
+        // Columns the AI wrote and the app changed are the editor's now.
+        own: c.own.filter((o) => (c.ex[o] ?? "") === (ex[o] ?? "")),
+      },
+    });
+  }
+  const out = await writeEdits(topicId, edits);
+  return { changed: out.length, cards: out };
+}
