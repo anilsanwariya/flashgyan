@@ -787,6 +787,12 @@ export function parseSheet(rows: unknown[][]): ParsedSheet {
     }
     if (cards.length) problems.push("No header row: read as number | word | answer | book.");
   }
+  // A sheet of the editor's own (order, prompt, front, back, explanation_…):
+  // its cards in its order, which is also their place in the sheet.
+  if (at >= 0 && cards.some((c) => c.order !== null) && cards.every((c) => c.sheet === null)) {
+    cards.sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity));
+    for (const c of cards) if (c.book_order === null) c.book_order = c.order;
+  }
   const counts = new Map<string, number>();
   for (const c of cards) if (c.prompt.trim()) counts.set(c.prompt, (counts.get(c.prompt) ?? 0) + 1);
   const prompt = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";

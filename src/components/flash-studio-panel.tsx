@@ -808,9 +808,11 @@ function CardsTab({
       </div>
       {!cards.length && (
         <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-          Add each book: a Word file, a PDF or pasted text is read by the AI into cards; an Excel
-          sheet is added as it is (a finished sheet with sheet and order columns can keep its chunks
-          and numbers).
+          Add each book&apos;s Excel sheet with the columns <code>order</code>, <code>prompt</code>,{" "}
+          <code>front</code>, <code>back</code> and any <code>explanation_…</code> columns (a{" "}
+          <code>Book</code> column is optional; otherwise you name the book when adding it). A
+          finished sheet with sheet and order columns keeps its chunks and numbers. Word files, PDFs
+          and pasted text can also be read by the AI.
         </p>
       )}
       <ul className="space-y-2">
