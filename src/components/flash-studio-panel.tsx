@@ -21,6 +21,7 @@ import {
   ClipboardPaste,
   Copy,
   Eye,
+  Smartphone,
   Download,
   FileUp,
   KeyRound,
@@ -113,6 +114,7 @@ import {
   type SortKey,
 } from "@/lib/flash-merge";
 import { BOOK_FILE_TYPES, isBookFile } from "@/lib/flash-read";
+import { StudentPreview } from "@/components/flash-studio-preview";
 import { Badge, PageTabs, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1919,6 +1921,7 @@ function CardDialog({
   const fillFn = useServerFn(fillFlashExplanations);
   const [c, setC] = useState(card);
   const [busy, setBusy] = useState(false);
+  const [student, setStudent] = useState(false);
   // The card changed outside (saved, or the AI check ran in the
   // background): edits not saved yet stay, the check's findings come in.
   const shown = useRef(card);
@@ -2240,6 +2243,22 @@ function CardDialog({
             )}
           </div>
           <HistoryButton card={c} onRestore={(v) => setC({ ...c, ...v })} />
+          <Button
+            variant="ghost"
+            size="sm"
+            title="The card as students see it in the app (with your edits)"
+            onClick={() => setStudent(true)}
+          >
+            <Smartphone className="mr-1 h-4 w-4" /> Student view
+          </Button>
+          {student && (
+            <StudentPreview
+              topic={topic}
+              cards={[c]}
+              title="Student view"
+              onClose={() => setStudent(false)}
+            />
+          )}
           {!c.removed && (
             <Button
               variant="ghost"
@@ -2604,6 +2623,7 @@ function ChunksTab({
   const [target, setTarget] = useState(100);
   const [sizes, setSizes] = useState(() => suggestSizes(waiting.length, 100).join(", "));
   const [busy, setBusy] = useState(false);
+  const [chunkPreview, setChunkPreview] = useState<number | null>(null);
   const [report, setReport] = useState<IdMatch | null>(null);
   const idRef = useRef<HTMLInputElement>(null);
   useEffect(
@@ -2909,6 +2929,15 @@ function ChunksTab({
                     <Badge tone="good">no changes since download</Badge>
                   )}
                   <span className="ml-auto flex gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      aria-label={`Preview chunk ${ch.n}`}
+                      disabled={!inChunk.length}
+                      onClick={() => setChunkPreview(ch.n)}
+                    >
+                      <Smartphone className="mr-1 h-4 w-4" /> Preview
+                    </Button>
                     <Button size="sm" variant="outline" onClick={() => void download(ch.n)}>
                       <Download className="mr-1 h-4 w-4" /> .xlsx
                     </Button>
@@ -2920,6 +2949,16 @@ function ChunksTab({
               );
             })}
           </ul>
+          {chunkPreview !== null && (
+            <StudentPreview
+              topic={topic}
+              cards={live
+                .filter((c) => c.chunk === chunkPreview)
+                .sort((a, b) => (a.card_order ?? 0) - (b.card_order ?? 0))}
+              title={`Chunk ${chunkPreview} as students see it`}
+              onClose={() => setChunkPreview(null)}
+            />
+          )}
           {removed.length > 0 && (
             <div className="rounded-xl border border-amber-300 bg-amber-50/50 p-3 text-sm dark:bg-amber-950/20">
               <div className="font-medium">Removed here: delete these in the app too</div>
