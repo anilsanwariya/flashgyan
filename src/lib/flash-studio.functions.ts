@@ -151,13 +151,15 @@ export const importFlashSheet = createServerFn({ method: "POST" })
         columns: z.array(z.string().max(80)).max(30),
         prompt: z.string().max(1000),
         book: z.string().max(30),
+        name: z.string().max(200).optional(),
+        replace: id.optional(),
         keep_numbers: z.boolean(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    return (await server()).importSheet(data.topic_id, data, data.keep_numbers);
+    return (await server()).importSheet(data.topic_id, data, data.keep_numbers, data.replace);
   });
 
 export const saveFlashCard = createServerFn({ method: "POST" })
@@ -359,4 +361,29 @@ export const makeFlashSplitCards = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return (await server()).makeSplitCards(data.topic_id, data.ids);
+  });
+
+export const resetFlashChunks = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ topic_id: id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).resetChunks(data.topic_id);
+  });
+
+export const setFlashExplanation = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        topic_id: id,
+        column: z.string().max(20),
+        from: z.array(z.string().max(20000)).min(1).max(500),
+        to: z.string().max(20000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).setExplanation(data.topic_id, data.column, data.from, data.to);
   });

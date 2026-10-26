@@ -349,3 +349,113 @@ export function parseCheck(
     }))
     .filter((f) => ns.has(f.n) && f.note);
 }
+
+// ---------- Views ----------
+
+export type SortKey = "order" | "front" | "back" | "book" | `ex:${string}`;
+
+// Cards sorted by the topic's order (numbers, then as added), front, back,
+// book or one explanation column, alphabetically (Hindi and English).
+export function sortCards(cards: FlashCard[], key: SortKey, desc = false): FlashCard[] {
+  const text = (c: FlashCard) =>
+    key === "front"
+      ? c.front
+      : key === "back"
+        ? c.back
+        : key === "book"
+          ? `${c.sources[0]?.book ?? ""}\u0000${String(c.sources[0]?.pos ?? 0).padStart(8, "0")}`
+          : key.startsWith("ex:")
+            ? (c.ex[key.slice(3)] ?? "")
+            : "";
+  const dir = desc ? -1 : 1;
+  return [...cards].sort((a, b) => {
+    if (key === "order")
+      return dir * ((a.card_order ?? Infinity) - (b.card_order ?? Infinity) || a.pos - b.pos);
+    const x = text(a).trim();
+    const y = text(b).trim();
+    // Empty ones last either way.
+    if (!x || !y) return Number(!x) - Number(!y);
+    return dir * x.localeCompare(y, "hi") || a.pos - b.pos;
+  });
+}
+
+// The version of a card a book gives (its own, or one merged into it).
+export function versionFor(c: FlashCard, book: string): Version | null {
+  return versionsOf(c).find((v) => v.book === book) ?? null;
+}
+
+// ---------- The same explanation in other words ----------
+
+const grams = (s: string) => {
+  const t = s.normalize("NFC").replace(/[\s\p{P}]+/gu, "");
+  const out = new Set<string>();
+  for (let i = 0; i < t.length - 1; i++) out.add(t.slice(i, i + 2));
+  if (t.length === 1) out.add(t);
+  return out;
+};
+
+// How alike two texts are (0–1, by their letter pairs).
+export function likeness(a: string, b: string): number {
+  const x = grams(a);
+  const y = grams(b);
+  if (!x.size || !y.size) return 0;
+  let both = 0;
+  for (const g of x) if (y.has(g)) both++;
+  return both / (x.size + y.size - both);
+}
+
+export type Wording = { text: string; cards: string[] };
+export type WordingGroup = { wordings: Wording[]; cards: number };
+
+// A column's wordings that say much the same thing, grouped (each group
+// two or more different wordings), the largest first.
+export function wordingGroups(cards: FlashCard[], column: string, alike = 0.5): WordingGroup[] {
+  const by = new Map<string, string[]>();
+  for (const c of cards) {
+    if (c.removed) continue;
+    const t = (c.ex[column] ?? "").trim();
+    if (t) by.set(t, [...(by.get(t) ?? []), c.id]);
+  }
+  const all = [...by]
+    .map(([text, ids]) => ({ text, cards: ids }))
+    .sort((a, b) => b.cards.length - a.cards.length);
+  const groups: Wording[][] = [];
+  for (const w of all) {
+    const g = groups.find((list) => likeness(list[0].text, w.text) >= alike);
+    if (g) g.push(w);
+    else groups.push([w]);
+  }
+  return groups
+    .filter((g) => g.length > 1)
+    .map((wordings) => ({ wordings, cards: wordings.reduce((n, w) => n + w.cards.length, 0) }))
+    .sort((a, b) => b.cards - a.cards);
+}
+
+// ---------- A sheet's status ----------
+
+export type SheetStatus = {
+  // Its own cards now in the topic, and its versions merged into other
+  // books' cards.
+  cards: number;
+  mergedIn: number;
+  verified: number;
+  errors: number;
+  noExplanation: number;
+  numbered: number;
+  removed: number;
+};
+
+export function sheetStatus(src: string, cards: FlashCard[], columns: FlashColumn[]): SheetStatus {
+  const own = cards.filter((c) => c.sources[0]?.src === src);
+  const live = own.filter((c) => !c.removed);
+  return {
+    cards: live.length,
+    mergedIn: cards.filter((c) => !c.removed && c.sources.slice(1).some((s) => s.src === src))
+      .length,
+    verified: live.filter((c) => c.verified).length,
+    errors: live.filter((c) => c.error).length,
+    noExplanation: columns.length ? live.filter((c) => emptyColumns(c, columns).length).length : 0,
+    numbered: live.filter((c) => c.card_order !== null).length,
+    removed: own.length - live.length,
+  };
+}
