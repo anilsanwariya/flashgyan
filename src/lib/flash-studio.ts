@@ -608,6 +608,8 @@ export type FlashSourceRow = {
   kind: "word" | "pdf" | "text";
   total: number;
   done: number;
+  // The parts (or pages) read, 1-based.
+  parts: number[];
   cards: number;
   todos: { where: string; text: string }[];
   error: string | null;

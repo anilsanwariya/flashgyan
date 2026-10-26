@@ -277,6 +277,7 @@ export const readFlashSource = createServerFn({ method: "POST" })
     z
       .object({
         id,
+        part: z.number().int().min(1).max(5000).optional(),
         image: z
           .object({ media_type: z.literal("image/jpeg"), data: z.string().max(12_000_000) })
           .optional(),
@@ -285,7 +286,7 @@ export const readFlashSource = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    return (await server()).readSourceStep(data.id, data.image);
+    return (await server()).readSourceStep(data.id, data.part, data.image);
   });
 
 export const deleteFlashSource = createServerFn({ method: "POST" })

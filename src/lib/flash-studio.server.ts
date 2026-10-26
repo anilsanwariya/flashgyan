@@ -2,7 +2,7 @@
 // into a topic, numbering its chunks once, and keeping the app's ids.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { saathiComplete, type SaathiImage } from "../../supabase/functions/_shared/saathi-core.ts";
-import { parseRead, readMessages, type ReadContext, type Todo } from "@/lib/flash-read";
+import { parseReply, readMessages, type ReadResult, type Todo } from "@/lib/flash-read";
 import * as M from "@/lib/flash-merge";
 import * as S from "@/lib/flash-split";
 import {
@@ -494,6 +494,13 @@ export async function saveAppIds(
 
 // ---------- Reading books with the AI ----------
 
+// The parts (or pages) already read, 1-based. Older rows kept a count.
+const partsDone = (r: Row): number[] => {
+  const ctx = (r.context ?? {}) as { parts?: unknown };
+  if (Array.isArray(ctx.parts)) return ctx.parts.filter((n): n is number => typeof n === "number");
+  return Array.from({ length: Number(r.done) || 0 }, (_, i) => i + 1);
+};
+
 const readSource = (r: Row): FlashSourceRow => ({
   id: String(r.id),
   topic_id: String(r.topic_id),
@@ -503,17 +510,21 @@ const readSource = (r: Row): FlashSourceRow => ({
     ? r.kind
     : "text") as FlashSourceRow["kind"],
   total: Number(r.total) || 0,
-  done: Number(r.done) || 0,
+  done: partsDone(r).length,
+  parts: partsDone(r),
   cards: Number(r.cards) || 0,
   todos: Array.isArray(r.todos) ? (r.todos as FlashSourceRow["todos"]) : [],
   error: typeof r.error === "string" ? r.error : null,
   created_at: String(r.created_at),
 });
 
+const SOURCE_COLS =
+  "id,topic_id,book,name,kind,total,done,cards,todos,error,context,created_at,updated_at";
+
 // The books read into a topic (none before the flash_sources migration).
 export async function listSources(topicId: string): Promise<FlashSourceRow[]> {
   const { data, error } = await from("flash_sources")
-    .select("id,topic_id,book,name,kind,total,done,cards,todos,error,created_at")
+    .select(SOURCE_COLS)
     .eq("topic_id", topicId)
     .order("created_at");
   if (missing(error)) return [];
@@ -521,7 +532,12 @@ export async function listSources(topicId: string): Promise<FlashSourceRow[]> {
   return ((data ?? []) as Row[]).map(readSource);
 }
 
-// A book to read: a Word file or pasted text in pieces, or a PDF's page
+// Each part's cards get positions of their own (part × 1000 on from the
+// book's start), so parts read at the same time still sort in the book's
+// order.
+const PART_SPAN = 1000;
+
+// A book to read: a Word file or pasted text in parts, or a PDF's page
 // count (its pages are sent one at a time). Its book joins the topic's.
 export async function addSource(
   topicId: string,
@@ -546,6 +562,17 @@ export async function addSource(
         { code: book, name: "", color: BOOK_COLORS[topic.books.length % BOOK_COLORS.length] },
       ],
     });
+  // After every card and every other book's reserved positions.
+  const { data: last } = await from("flash_cards")
+    .select("pos")
+    .eq("topic_id", topicId)
+    .order("pos", { ascending: false })
+    .limit(1);
+  const { data: others } = await from("flash_sources").select("context").eq("topic_id", topicId);
+  const base = Math.max(
+    ((last ?? []) as Row[])[0] ? Number(((last ?? []) as Row[])[0].pos) + 1 : 0,
+    ...((others ?? []) as Row[]).map((o) => Number((o.context as { end?: number })?.end) || 0),
+  );
   const { data, error } = await from("flash_sources")
     .insert({
       topic_id: topicId,
@@ -555,8 +582,9 @@ export async function addSource(
       pieces: s.kind === "pdf" ? [] : s.pieces,
       total,
       todos: s.todos.slice(0, 500),
+      context: { parts: [], base, end: base + total * PART_SPAN },
     } as never)
-    .select("id,topic_id,book,name,kind,total,done,cards,todos,error,created_at")
+    .select(SOURCE_COLS)
     .single();
   fail(error);
   return readSource(data as unknown as Row);
@@ -568,17 +596,40 @@ function apiKey(): string {
   return key;
 }
 
-// The next piece (or the given PDF page) read by the AI into cards, added
-// to the topic in the book's order.
+// Changes a book's row only if no one else changed it meanwhile (parts are
+// read three at a time), trying again on a clash.
+async function updateSource(id: string, change: (r: Row) => Row): Promise<Row> {
+  for (let i = 0; i < 8; i++) {
+    const { data, error } = await from("flash_sources").select(SOURCE_COLS).eq("id", id).single();
+    fail(error);
+    const row = data as unknown as Row;
+    const { data: saved, error: e2 } = await from("flash_sources")
+      .update({ ...change(row), updated_at: now() } as never)
+      .eq("id", id)
+      .eq("updated_at", String(row.updated_at))
+      .select(SOURCE_COLS);
+    fail(e2);
+    if (((saved ?? []) as Row[]).length) return ((saved ?? []) as Row[])[0];
+    await new Promise((ok) => setTimeout(ok, 50 + Math.random() * 150));
+  }
+  throw new Error("The book is busy; try again");
+}
+
+// One part (or the given PDF page; by default the first not read yet)
+// read by the AI into cards, kept in the book's order. When the last part
+// is in, the cards are numbered in the book's order.
 export async function readSourceStep(
   sourceId: string,
+  part?: number,
   image?: SaathiImage,
 ): Promise<FlashSourceRow & { added: number }> {
   const { data, error } = await from("flash_sources").select("*").eq("id", sourceId).single();
   fail(error);
   const row = data as unknown as Row;
   const src = readSource(row);
-  if (src.done >= src.total) return { ...src, added: 0 };
+  const n =
+    part ?? Array.from({ length: src.total }, (_, i) => i + 1).find((x) => !src.parts.includes(x));
+  if (!n || n > src.total || src.parts.includes(n)) return { ...src, added: 0 };
   const topic = await topicRow(src.topic_id);
   let deck = {
     name: topic.name,
@@ -598,57 +649,47 @@ export async function readSourceStep(
         examples: readTemplate(t as unknown as Row).examples,
       };
   }
-  const ctx0 = (row.context ?? {}) as Partial<ReadContext>;
-  const context: ReadContext = {
-    heading: String(ctx0.heading ?? ""),
-    rule: String(ctx0.rule ?? ""),
-  };
-  const part = src.done + 1;
   let input: Parameters<typeof readMessages>[2];
   if (src.kind === "pdf") {
     if (!image) throw new Error("Choose the PDF again to go on reading it");
-    input = { page: part, pages: src.total };
+    input = { page: n, pages: src.total };
   } else {
     const pieces = Array.isArray(row.pieces) ? (row.pieces as string[]) : [];
-    input = { text: String(pieces[src.done] ?? ""), part, parts: src.total };
+    input = { text: String(pieces[n - 1] ?? ""), part: n, parts: src.total };
   }
-  let read;
+  const where = src.kind === "pdf" ? `Page ${n}` : `Part ${n}`;
+  let read: ReadResult;
   try {
-    read = parseRead(
+    read = parseReply(
       await saathiComplete(
         apiKey(),
-        readMessages(deck, src.book, input, context),
+        readMessages(deck, src.book, input),
         undefined,
         image ? [image] : undefined,
       ),
       topic.columns,
-      context,
+      { heading: "", rule: "" },
     );
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     await from("flash_sources")
-      .update({ error: message, updated_at: now() } as never)
+      .update({ error: `${where}: ${message}`.slice(0, 500) } as never)
       .eq("id", sourceId);
-    throw e;
+    throw new Error(`${where}: ${message}`);
   }
-  const { data: last } = await from("flash_cards")
-    .select("pos")
-    .eq("topic_id", src.topic_id)
-    .order("pos", { ascending: false })
-    .limit(1);
-  const start = ((last ?? []) as Row[])[0] ? Number(((last ?? []) as Row[])[0].pos) + 1 : 0;
+  const base = Number((row.context as { base?: number })?.base) || 0;
   await insertCards(
     read.cards.map((c, i) => ({
       topic_id: src.topic_id,
-      pos: start + i,
+      pos: base + (n - 1) * PART_SPAN + i,
       front: c.front,
       back: c.back,
       ex: c.ex,
       sources: [
         {
           book: src.book,
-          pos: src.cards + i + 1,
-          page: src.kind === "pdf" ? part : null,
+          pos: (n - 1) * PART_SPAN + i + 1,
+          page: src.kind === "pdf" ? n : null,
           heading: c.heading,
           rule: c.rule,
           ...(c.note ? { note: c.note } : {}),
@@ -657,23 +698,36 @@ export async function readSourceStep(
       ],
     })),
   );
-  const where = src.kind === "pdf" ? `Page ${part}` : `Part ${part}`;
-  const todos = [...src.todos, ...read.notes.map((text) => ({ where, text }))].slice(0, 500);
-  const { data: saved, error: e2 } = await from("flash_sources")
-    .update({
-      done: part,
-      cards: src.cards + read.cards.length,
-      context: read.context,
-      todos,
+  const saved = await updateSource(sourceId, (r) => {
+    const parts = [...new Set([...partsDone(r), n])].sort((a, b) => a - b);
+    const todos = Array.isArray(r.todos) ? (r.todos as Todo[]) : [];
+    return {
+      context: { ...((r.context ?? {}) as object), parts },
+      done: parts.length,
+      cards: (Number(r.cards) || 0) + read.cards.length,
+      todos: [...todos, ...read.notes.map((text) => ({ where, text }))].slice(0, 500),
       error: null,
-      updated_at: now(),
-    } as never)
-    .eq("id", sourceId)
-    .select("id,topic_id,book,name,kind,total,done,cards,todos,error,created_at")
-    .single();
-  fail(e2);
+    };
+  });
+  const out = readSource(saved);
+  // All read: the cards numbered 1, 2, 3… in the book's order.
+  if (out.done >= out.total) {
+    const cards = (await topicCards(src.topic_id))
+      .filter((c) => c.sources[0]?.src === sourceId)
+      .sort((a, b) => a.pos - b.pos);
+    const rows = cards.map((c, i) => ({
+      id: c.id,
+      topic_id: c.topic_id,
+      sources: [{ ...c.sources[0], pos: i + 1 }, ...c.sources.slice(1)],
+    }));
+    for (let i = 0; i < rows.length; i += 500)
+      fail(
+        (await from("flash_cards").upsert(rows.slice(i, i + 500) as never, { onConflict: "id" }))
+          .error,
+      );
+  }
   await touch(src.topic_id);
-  return { ...readSource(saved as unknown as Row), added: read.cards.length };
+  return { ...out, added: read.cards.length };
 }
 
 // A book taken out again: its cards not yet numbered go with it (numbered
