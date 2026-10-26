@@ -80,13 +80,37 @@ export function BooksPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openFile]);
 
+  // Parts (or pages) read three at a time; one that fails doesn't stop the
+  // rest, and is listed to try again.
+  const [failed, setFailed] = useState<Record<string, { part: number; error: string }[]>>({});
   const run = async (src: FlashSourceRow) => {
     if (running) return;
     stop.current = false;
     setRunning(src.id);
-    let done = src.done;
+    const done = new Set(src.parts);
     let cards = src.cards;
+    const errors: { part: number; error: string }[] = [];
+    const inFlight = new Set<Promise<void>>();
+    const send = (part: number, image?: { media_type: "image/jpeg"; data: string }) => {
+      const job = readFn({ data: { id: src.id, part, ...(image ? { image } : {}) } })
+        .then((r) => {
+          r.parts.forEach((p) => done.add(p));
+          cards = Math.max(cards, r.cards);
+          setProgress((p) => ({ ...p, [src.id]: { done: done.size, cards } }));
+          onChanged();
+        })
+        .catch((e) => {
+          errors.push({ part, error: errorText(e, "The AI couldn't read it") });
+        })
+        .finally(() => inFlight.delete(job));
+      inFlight.add(job);
+    };
+    // Waits while three are on their way.
+    const room = async () => {
+      while (inFlight.size >= 3) await Promise.race(inFlight);
+    };
     try {
+      setFailed((f) => ({ ...f, [src.id]: [] }));
       if (src.kind === "pdf") {
         const file = pdfFiles.get(src.id);
         if (!file) {
@@ -95,26 +119,29 @@ export function BooksPanel({
           return;
         }
         const { eachPageImage } = await import("@/lib/exam-pdf");
-        await eachPageImage(file, done + 1, async (_page, _pages, image) => {
+        const first =
+          Array.from({ length: src.total }, (_, i) => i + 1).find((p) => !done.has(p)) ??
+          src.total + 1;
+        await eachPageImage(file, first, async (page, _pages, image) => {
           if (stop.current) return false;
-          const r = await readFn({ data: { id: src.id, image } });
-          done = r.done;
-          cards = r.cards;
-          setProgress((p) => ({ ...p, [src.id]: { done, cards } }));
-          onChanged();
+          if (done.has(page)) return;
+          await room();
+          send(page, image);
         });
       } else {
-        while (done < src.total && !stop.current) {
-          const r = await readFn({ data: { id: src.id } });
-          done = r.done;
-          cards = r.cards;
-          setProgress((p) => ({ ...p, [src.id]: { done, cards } }));
-          onChanged();
+        for (let part = 1; part <= src.total && !stop.current; part++) {
+          if (done.has(part)) continue;
+          await room();
+          send(part);
         }
       }
-      if (done >= src.total) toast.success(`${src.book}: ${cards} cards read`);
+      await Promise.all(inFlight);
+      setFailed((f) => ({ ...f, [src.id]: errors.sort((a, b) => a.part - b.part) }));
+      if (errors.length)
+        toast.error(`${src.book}: ${errors.length} part(s) not read; try them again`);
+      else if (done.size >= src.total) toast.success(`${src.book}: ${cards} cards read`);
     } catch (e) {
-      toast.error(errorText(e, "The AI couldn't read this part; go on to try it again"));
+      toast.error(errorText(e, "Reading stopped"));
     } finally {
       setRunning(null);
       onChanged();
@@ -153,11 +180,7 @@ export function BooksPanel({
                       <Badge tone="warn">{s.todos.length} to check</Badge>
                     </button>
                   )}
-                  {s.error && !running && (
-                    <Badge tone="bad" title={s.error}>
-                      Stopped
-                    </Badge>
-                  )}
+
                   {!finished &&
                     (running === s.id ? (
                       <Button size="sm" variant="outline" onClick={() => (stop.current = true)}>
@@ -200,6 +223,34 @@ export function BooksPanel({
                     style={{ width: `${s.total ? Math.round((done / s.total) * 100) : 0}%` }}
                   />
                 </div>
+                {(failed[s.id]?.length ?? 0) > 0 && running !== s.id && (
+                  <div className="space-y-1 rounded-lg bg-red-50/60 p-2 text-xs dark:bg-red-950/20">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <b>
+                        {failed[s.id]!.length} {s.kind === "pdf" ? "page" : "part"}
+                        {failed[s.id]!.length === 1 ? "" : "s"} not read
+                      </b>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7"
+                        onClick={() => void run(s)}
+                      >
+                        <Play className="mr-1 h-3.5 w-3.5" /> Try them again
+                      </Button>
+                    </div>
+                    <ul className="space-y-0.5">
+                      {failed[s.id]!.slice(0, 5).map((f) => (
+                        <li key={f.part}>{f.error}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {!failed[s.id]?.length && s.error && running !== s.id && !finished && (
+                  <div className="text-xs text-red-700 dark:text-red-400">
+                    Last error: {s.error}
+                  </div>
+                )}
                 {openTodos === s.id && (
                   <ul
                     className="space-y-1 rounded-lg bg-amber-50/60 p-2 text-xs dark:bg-amber-950/20"
@@ -324,7 +375,7 @@ function SourceDialog({
           <p>
             {pending.kind === "pdf"
               ? `${pending.pages} pages. The AI reads each page as an image, so scans and PDFs whose Hindi copies out garbled both work.`
-              : `${pending.chars.toLocaleString("en-IN")} characters in ${pending.pieces.length} parts. The AI reads one part at a time, keeping the heading and rule each example sits under.`}
+              : `${pending.chars.toLocaleString("en-IN")} characters in ${pending.pieces.length} parts. The AI reads three parts at a time; each part carries the heading and rule its examples sit under.`}
           </p>
           <p className="text-muted-foreground">
             Every example becomes a card in the {topic.columns.length ? "deck type's" : "topic's"}{" "}
