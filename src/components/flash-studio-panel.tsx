@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   ArrowDown,
   ArrowLeft,
+  ArrowRight,
   ArrowUp,
   BadgeCheck,
   ClipboardPaste,
@@ -41,6 +42,7 @@ import {
   listFlashTopics,
   numberFlashCards,
   saveFlashAppIds,
+  markFlashDownloaded,
   saveFlashCard,
   saveFlashTemplate,
   updateFlashTopic,
@@ -50,7 +52,10 @@ import {
 import {
   BOOK_COLORS,
   ERROR_TYPES,
+  chunkChanges,
   chunkFileName,
+  inLetters,
+  lettersOf,
   chunkRows,
   lastNumbers,
   newColumnId,
@@ -586,7 +591,9 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
         <h1 className="min-w-0 flex-1 truncate text-xl font-semibold">{topic.name}</h1>
         <span className="basis-full text-sm text-muted-foreground sm:basis-auto">
           {live.length} cards · {live.filter((c) => c.verified).length} verified
-          {topic.chunks.length ? ` · ${topic.chunks.length} chunks` : ""}
+          {topic.chunks.length
+            ? ` · ${topic.chunks.length} chunk${topic.chunks.length === 1 ? "" : "s"}`
+            : ""}
         </span>
       </div>
       <PageTabs
@@ -662,6 +669,8 @@ function CardsTab({
   const [query, setQuery] = useState("");
   const [shown, setShown] = useState(60);
   const [editing, setEditing] = useState<FlashCard | null>(null);
+  // Proofreading: the cards shown, one after another.
+  const [proof, setProof] = useState<{ ids: string[]; i: number } | null>(null);
   const [importing, setImporting] = useState<{ file: string; sheet: ParsedSheet } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [bookFile, setBookFile] = useState<File | null>(null);
@@ -759,13 +768,26 @@ function CardsTab({
           />
         </div>
       </div>
-      <ProofTools
-        topic={topic}
-        cards={cards}
-        shownIds={list.map((c) => c.id)}
-        onChanged={onChanged}
-        onCards={onCard}
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          disabled={!list.length}
+          onClick={() => {
+            const ids = list.map((c) => c.id);
+            const first = list.findIndex((c) => !c.verified);
+            setProof({ ids, i: Math.max(0, first) });
+          }}
+        >
+          <BadgeCheck className="mr-1 h-4 w-4" /> Proofread ({list.length})
+        </Button>
+        <ProofTools
+          topic={topic}
+          cards={cards}
+          shownIds={list.map((c) => c.id)}
+          onChanged={onChanged}
+          onCards={onCard}
+        />
+      </div>
       <div className="flex flex-wrap gap-1">
         {FILTERS.map((f) => (
           <button
@@ -857,7 +879,7 @@ function CardsTab({
           Show more ({list.length - shown} left)
         </Button>
       )}
-      {editing && (
+      {editing && !proof && (
         <CardDialog
           topic={topic}
           card={editing}
@@ -868,6 +890,32 @@ function CardsTab({
           }}
           onGone={() => {
             setEditing(null);
+            onChanged();
+          }}
+        />
+      )}
+      {proof && cards.find((c) => c.id === proof.ids[proof.i]) && (
+        <CardDialog
+          topic={topic}
+          card={cards.find((c) => c.id === proof.ids[proof.i])!}
+          nav={{
+            index: proof.i,
+            total: proof.ids.length,
+            prev: () => setProof((p) => (p && p.i > 0 ? { ...p, i: p.i - 1 } : p)),
+            next: () =>
+              setProof((p) => {
+                if (!p) return p;
+                if (p.i + 1 >= p.ids.length) {
+                  toast.success("End of the list");
+                  return null;
+                }
+                return { ...p, i: p.i + 1 };
+              }),
+          }}
+          onClose={() => setProof(null)}
+          onSaved={(c) => onCard(c)}
+          onGone={() => {
+            setProof((p) => (p ? { ids: p.ids.filter((id) => id !== p.ids[p.i]), i: p.i } : p));
             onChanged();
           }}
         />
@@ -1020,15 +1068,20 @@ function ImportDialog({
   );
 }
 
+type Nav = { index: number; total: number; prev: () => void; next: () => void };
+
 function CardDialog({
   topic,
   card,
+  nav,
   onClose,
   onSaved,
   onGone,
 }: {
   topic: FlashTopic;
   card: FlashCard;
+  // Proofreading: this card's place in the list, and moving along it.
+  nav?: Nav;
   onClose: () => void;
   onSaved: (c: FlashCard) => void;
   onGone: () => void;
@@ -1051,6 +1104,41 @@ function CardDialog({
       setBusy(false);
     }
   };
+  const changed = JSON.stringify(c) !== JSON.stringify(card);
+  const saveAndVerify = async () => {
+    const ok = await save({ ...textPatch, verified: true });
+    if (ok && nav) nav.next();
+  };
+  const go = async (move: () => void) => {
+    // Edits aren't lost moving on: saved first.
+    if (changed && !(await save(textPatch))) return;
+    move();
+  };
+  // Keys: Alt+→ / Alt+← next and previous, Ctrl+Enter save and verify,
+  // Ctrl+S save.
+  const keys = useRef<(e: KeyboardEvent) => void>(() => {});
+  keys.current = (e: KeyboardEvent) => {
+    if (busy) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key === "Enter") {
+      e.preventDefault();
+      void saveAndVerify();
+    } else if (mod && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      void save(textPatch);
+    } else if (nav && e.altKey && e.key === "ArrowRight") {
+      e.preventDefault();
+      void go(nav.next);
+    } else if (nav && e.altKey && e.key === "ArrowLeft") {
+      e.preventDefault();
+      void go(nav.prev);
+    }
+  };
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => keys.current(e);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
   const textPatch = {
     front: c.front,
     back: c.back,
@@ -1081,9 +1169,35 @@ function CardDialog({
       <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>
+            {nav ? `Proofreading ${nav.index + 1} of ${nav.total} · ` : ""}
             {c.card_order !== null ? `Card #${c.card_order} · chunk ${c.chunk}` : "Card"}
           </DialogTitle>
         </DialogHeader>
+        {nav && (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7"
+              disabled={busy || nav.index === 0}
+              onClick={() => void go(nav.prev)}
+            >
+              <ArrowLeft className="mr-1 h-3.5 w-3.5" /> Previous
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7"
+              disabled={busy}
+              onClick={() => void go(nav.next)}
+            >
+              Next <ArrowRight className="ml-1 h-3.5 w-3.5" />
+            </Button>
+            <span>
+              Keys: Alt+← / Alt+→ previous / next · Ctrl+Enter save, verify and next · Ctrl+S save
+            </span>
+          </div>
+        )}
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">
             {c.sources.length
@@ -1242,10 +1356,12 @@ function CardDialog({
               disabled={busy}
               variant={c.verified ? "outline" : "default"}
               className={c.verified ? "" : "bg-emerald-600 hover:bg-emerald-700"}
-              onClick={() => void save({ ...textPatch, verified: !c.verified })}
+              onClick={() =>
+                c.verified ? void save({ ...textPatch, verified: false }) : void saveAndVerify()
+              }
             >
               <BadgeCheck className="mr-1 h-4 w-4" />
-              {c.verified ? "Not verified" : "Save and verify"}
+              {c.verified ? "Not verified" : nav ? "Save, verify and next" : "Save and verify"}
             </Button>
             {!c.removed && (
               <Button
@@ -1294,9 +1410,17 @@ function ChunksTab({
 }) {
   const numberFn = useServerFn(numberFlashCards);
   const idsFn = useServerFn(saveFlashAppIds);
+  const markFn = useServerFn(markFlashDownloaded);
   const qc = useQueryClient();
   const live = cards.filter((c) => !c.removed);
-  const waiting = live.filter((c) => c.card_order === null);
+  const unnumbered = live.filter((c) => c.card_order === null);
+  // An alphabetical range (a chapter like A–E) numbered now, the rest later.
+  const letters = useMemo(() => lettersOf(unnumbered), [unnumbered]);
+  const [range, setRange] = useState<{ from: string; to: string } | null>(null);
+  const waiting = range
+    ? unnumbered.filter((c) => inLetters(c.front, range.from, range.to))
+    : unnumbered;
+  const changes = useMemo(() => chunkChanges(topic, cards), [topic, cards]);
   const [target, setTarget] = useState(100);
   const [sizes, setSizes] = useState(() => suggestSizes(waiting.length, 100).join(", "));
   const [busy, setBusy] = useState(false);
@@ -1325,6 +1449,15 @@ function ChunksTab({
   const removed = cards.filter((c) => c.removed && c.card_order !== null);
   const unverified = waiting.filter((c) => !c.verified).length;
   const flagged = waiting.filter((c) => c.error).length;
+  // Chunks downloaded for the app: their time kept, so later edits show.
+  const downloaded = async (ns: number[]) => {
+    try {
+      await markFn({ data: { topic_id: topic.id, chunks: ns } });
+      onChanged();
+    } catch {
+      // The file is saved; only the "changed since" mark is missed.
+    }
+  };
   const download = async (chunk: number, work = false) => {
     const rows = chunkRows(topic, cards, chunk, work);
     saveBytes(
@@ -1332,10 +1465,27 @@ function ChunksTab({
       await xlsxBytes(rows),
       XLSX_TYPE,
     );
+    if (!work) await downloaded([chunk]);
   };
+  const zipOf = async (ns: number[], name: string) => {
+    const files = await Promise.all(
+      ns.map(async (n) => ({
+        name: `${chunkFileName(topic.name, n)}.xlsx`,
+        data: await xlsxBytes(chunkRows(topic, cards, n)),
+      })),
+    );
+    saveBytes(name, zipFiles(files), "application/zip");
+    await downloaded(ns);
+  };
+  const changedChunks = topic.chunks
+    .filter((ch) => {
+      const x = changes.get(ch.n);
+      return x && !x.never && (x.changed.length || x.removed.length);
+    })
+    .map((ch) => ch.n);
   return (
     <div className="space-y-4">
-      {waiting.length > 0 && (
+      {unnumbered.length > 0 && (
         <section className="space-y-3 rounded-xl border border-border p-3">
           <h2 className="flex items-center gap-2 font-semibold">
             <Shuffle className="h-4 w-4" />
@@ -1348,6 +1498,57 @@ function ChunksTab({
             {after.order + 1}. After this a card&apos;s number and chunk never change.
             {topic.chunks.length > 0 && " Chunks already made stay as they are."}
           </p>
+          {letters.length > 1 && (
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={!!range}
+                  onChange={(e) =>
+                    setRange(
+                      e.target.checked
+                        ? { from: letters[0].letter, to: letters[letters.length - 1].letter }
+                        : null,
+                    )
+                  }
+                />
+                Only the cards starting with
+              </label>
+              {range && (
+                <>
+                  <select
+                    aria-label="From letter"
+                    value={range.from}
+                    onChange={(e) => setRange({ ...range, from: e.target.value })}
+                    className="h-8 rounded-md border border-input bg-background px-2"
+                  >
+                    {letters.map((l) => (
+                      <option key={l.letter} value={l.letter}>
+                        {l.letter} ({l.count})
+                      </option>
+                    ))}
+                  </select>
+                  to
+                  <select
+                    aria-label="To letter"
+                    value={range.to}
+                    onChange={(e) => setRange({ ...range, to: e.target.value })}
+                    className="h-8 rounded-md border border-input bg-background px-2"
+                  >
+                    {letters.map((l) => (
+                      <option key={l.letter} value={l.letter}>
+                        {l.letter} ({l.count})
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-muted-foreground">
+                    {waiting.length} of {unnumbered.length} cards; the rest wait for their own
+                    range.
+                  </span>
+                </>
+              )}
+            </div>
+          )}
           {(unverified > 0 || flagged > 0) && (
             <p className="text-sm text-amber-700 dark:text-amber-400">
               {unverified > 0 && `${unverified} not verified. `}
@@ -1383,7 +1584,7 @@ function ChunksTab({
               : `The sizes add up to ${sum}; they need to add up to ${waiting.length}.`}
           </p>
           <Button
-            disabled={!valid || busy}
+            disabled={!valid || busy || !waiting.length}
             onClick={async () => {
               if (
                 !confirm(
@@ -1394,8 +1595,16 @@ function ChunksTab({
               setBusy(true);
               try {
                 const seed = Math.floor(Math.random() * 2 ** 31);
-                await numberFn({ data: { topic_id: topic.id, sizes: parsed, seed } });
+                await numberFn({
+                  data: {
+                    topic_id: topic.id,
+                    sizes: parsed,
+                    seed,
+                    ...(range ? { only: waiting.map((c) => c.id) } : {}),
+                  },
+                });
                 toast.success("Numbered");
+                setRange(null);
                 await qc.invalidateQueries({ queryKey: ["flashTopics"] });
                 onChanged();
               } catch (e) {
@@ -1413,23 +1622,27 @@ function ChunksTab({
         <section className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="font-semibold">Chunks</h2>
+            {changedChunks.length > 0 && (
+              <Button
+                size="sm"
+                className="ml-auto"
+                onClick={() =>
+                  void zipOf(changedChunks, `${chunkFileName(topic.name, null)} (changed).zip`)
+                }
+              >
+                <Download className="mr-1 h-4 w-4" /> Changed chunks ({changedChunks.join(", ")})
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"
-              className="ml-auto"
-              onClick={async () => {
-                const files = await Promise.all(
-                  topic.chunks.map(async (ch) => ({
-                    name: `${chunkFileName(topic.name, ch.n)}.xlsx`,
-                    data: await xlsxBytes(chunkRows(topic, cards, ch.n)),
-                  })),
-                );
-                saveBytes(
+              className={changedChunks.length ? "" : "ml-auto"}
+              onClick={() =>
+                void zipOf(
+                  topic.chunks.map((ch) => ch.n),
                   `${chunkFileName(topic.name, null)}.zip`,
-                  zipFiles(files),
-                  "application/zip",
-                );
-              }}
+                )
+              }
             >
               <Download className="mr-1 h-4 w-4" /> All chunks (.zip)
             </Button>
@@ -1477,8 +1690,14 @@ function ChunksTab({
             {topic.chunks.map((ch) => {
               const inChunk = live.filter((c) => c.chunk === ch.n);
               const withId = inChunk.filter((c) => c.app_id).length;
+              const x = changes.get(ch.n);
+              const edited = (x?.changed.length ?? 0) + (x?.removed.length ?? 0);
               return (
-                <li key={ch.n} className="flex flex-wrap items-center gap-x-3 gap-y-1 p-3 text-sm">
+                <li
+                  key={ch.n}
+                  data-chunk={ch.n}
+                  className="flex flex-wrap items-center gap-x-3 gap-y-1 p-3 text-sm"
+                >
                   <span className="font-medium">Chunk {ch.n}</span>
                   <span className="text-muted-foreground">
                     {ch.from}–{ch.to} · {inChunk.length} cards
@@ -1487,6 +1706,28 @@ function ChunksTab({
                     {withId}/{inChunk.length} app ids
                   </Badge>
                   {inChunk.some((c) => c.error) && <Badge tone="bad">has cards to recheck</Badge>}
+                  {x?.never ? (
+                    <Badge>not downloaded yet</Badge>
+                  ) : edited ? (
+                    <Badge
+                      tone="warn"
+                      title={[
+                        ...(x?.changed ?? []).map(
+                          (c) => `#${c.card_order} ${c.front.split("\n")[0]}`,
+                        ),
+                        ...(x?.removed ?? []).map((c) => `#${c.card_order} removed`),
+                      ].join("\n")}
+                    >
+                      {edited} changed since download:{" "}
+                      {[...(x?.changed ?? []), ...(x?.removed ?? [])]
+                        .slice(0, 6)
+                        .map((c) => `#${c.card_order}`)
+                        .join(", ")}
+                      {edited > 6 ? "…" : ""}
+                    </Badge>
+                  ) : (
+                    <Badge tone="good">no changes since download</Badge>
+                  )}
                   <span className="ml-auto flex gap-1">
                     <Button size="sm" variant="outline" onClick={() => void download(ch.n)}>
                       <Download className="mr-1 h-4 w-4" /> .xlsx
