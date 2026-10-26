@@ -88,6 +88,7 @@ import {
   AiReview,
   BulkBar,
   FindReplace,
+  RecentlyDeleted,
   HistoryButton,
   QuickChecks,
 } from "@/components/flash-studio-tools";
@@ -875,6 +876,7 @@ function CardsTab({
   const [merging, setMerging] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [finding, setFinding] = useState(false);
+  const [trash, setTrash] = useState(false);
   const books = new Map(topic.books.map((b) => [b.code, b]));
   const bookCodes = useMemo(
     () => [...new Set([...topic.books.map((b) => b.code), ...cards.flatMap((c) => booksOf(c))])],
@@ -1073,6 +1075,7 @@ function CardsTab({
           setMerging={setMerging}
           onReview={() => setReviewing(true)}
           onFind={() => setFinding(true)}
+          onTrash={() => setTrash(true)}
           onChanged={onChanged}
           onCards={onCard}
         />
@@ -1337,6 +1340,9 @@ function CardsTab({
         <Button variant="outline" size="sm" onClick={() => setShown(shown + 120)}>
           Show more ({list.length - shown} left)
         </Button>
+      )}
+      {trash && (
+        <RecentlyDeleted topic={topic} onChanged={onChanged} onClose={() => setTrash(false)} />
       )}
       {finding && (
         <FindReplace

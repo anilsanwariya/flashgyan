@@ -12,6 +12,7 @@ import {
   Eye,
   ListChecks,
   SearchCode,
+  Trash2,
   Server,
   Replace,
   ScanSearch,
@@ -189,6 +190,7 @@ export function ProofTools({
   setMerging,
   onReview,
   onFind,
+  onTrash,
   onChanged,
   onCards,
 }: {
@@ -202,6 +204,8 @@ export function ProofTools({
   // Every AI fix in the topic, in one list.
   onReview: () => void;
   onFind: () => void;
+  // The cards deleted in the last 30 days.
+  onTrash: () => void;
   onChanged: () => void;
   onCards: (c: FlashCard[]) => void;
 }) {
@@ -406,6 +410,11 @@ export function ProofTools({
                 </DropdownMenuItem>
               </>
             )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onTrash}>
+              <Trash2 className="mr-2 h-4 w-4 shrink-0" />
+              {item("Recently deleted", "Cards deleted in the last 30 days, to put back")}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       }

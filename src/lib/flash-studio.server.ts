@@ -473,7 +473,7 @@ export async function deleteCard(id: string): Promise<"deleted" | "removed"> {
   fail(error);
   const card = readCard(data as unknown as Row);
   if (card.card_order === null) {
-    fail((await from("flash_cards").delete().eq("id", id)).error);
+    await deleteKept([id], "deleted");
     await countFor(card.sources[0]?.src, "deleted");
     await touch(card.topic_id);
     return "deleted";
@@ -841,14 +841,7 @@ async function removeOwn(sourceId: string, free: FlashCard[]) {
     );
   const kept = new Set(promote.map((r) => r.id));
   const drop = free.filter((c) => !kept.has(c.id)).map((c) => c.id);
-  for (let i = 0; i < drop.length; i += 200)
-    fail(
-      (
-        await from("flash_cards")
-          .delete()
-          .in("id", drop.slice(i, i + 200))
-      ).error,
-    );
+  await deleteKept(drop, "its sheet removed or replaced");
 }
 
 const sameSource = (a: FlashCard["sources"][number], b: FlashCard["sources"][number] | null) =>
@@ -1341,14 +1334,7 @@ async function countFor(src: string | undefined, what: "deleted" | "merged") {
 export async function resetChunks(topicId: string): Promise<{ cards: number; removed: number }> {
   const cards = await topicCards(topicId);
   const removed = cards.filter((c) => c.removed).map((c) => c.id);
-  for (let i = 0; i < removed.length; i += 200)
-    fail(
-      (
-        await from("flash_cards")
-          .delete()
-          .in("id", removed.slice(i, i + 200))
-      ).error,
-    );
+  await deleteKept(removed, "removed, then the chunks were reset");
   const rows = cards
     .filter((c) => !c.removed && (c.card_order !== null || c.chunk !== null || c.app_id))
     .map((c) => ({
@@ -1463,18 +1449,31 @@ export async function bulkCards(
   topicId: string,
   ids: string[],
   action: BulkAction,
-): Promise<{ changed: number; deleted: number; removed: number; cards: FlashCard[] }> {
+): Promise<{
+  changed: number;
+  deleted: number;
+  removed: number;
+  cards: FlashCard[];
+  // Cards deleted (in the bin) and numbered cards removed.
+  deletedIds?: string[];
+  removedIds?: string[];
+}> {
   const { topic, cards } = await getTopic(topicId);
   const want = new Set(ids);
   const chosen = cards.filter((c) => want.has(c.id) && !c.removed);
   if (action === "delete") {
-    let deleted = 0;
-    let removed = 0;
-    for (const c of chosen) {
-      if ((await deleteCard(c.id)) === "deleted") deleted++;
-      else removed++;
-    }
-    return { changed: 0, deleted, removed, cards: [] };
+    const deletedIds: string[] = [];
+    const removedIds: string[] = [];
+    for (const c of chosen)
+      ((await deleteCard(c.id)) === "deleted" ? deletedIds : removedIds).push(c.id);
+    return {
+      changed: 0,
+      deleted: deletedIds.length,
+      removed: removedIds.length,
+      cards: [],
+      deletedIds,
+      removedIds,
+    };
   }
   const edits: { id: string; patch: Row }[] = [];
   if (action === "verify" || action === "unverify")
@@ -2054,4 +2053,127 @@ export async function replaceText(
     [...patches].map(([id, patch]) => ({ id, patch })),
   );
   return { changed: out.length, skipped, cards: out };
+}
+
+// ---------- Recently deleted ----------
+
+// Cards deleted, each kept whole in the bin for 30 days first (before the
+// bin's migration: deleted without being kept).
+async function deleteKept(ids: string[], why: string) {
+  for (let i = 0; i < ids.length; i += 200) {
+    const part = ids.slice(i, i + 200);
+    const { data, error } = await from("flash_cards").select("*").in("id", part);
+    fail(error);
+    const rows = ((data ?? []) as Row[]).map((r) => ({
+      id: r.id,
+      topic_id: r.topic_id,
+      card: r,
+      why,
+      deleted_at: now(),
+    }));
+    if (rows.length) {
+      const { error: e2 } = await from("flash_trash").upsert(rows as never, { onConflict: "id" });
+      if (e2 && !/flash_trash/.test(e2.message)) fail(e2);
+    }
+    fail((await from("flash_cards").delete().in("id", part)).error);
+  }
+}
+
+export type TrashItem = {
+  id: string;
+  front: string;
+  back: string;
+  why: string;
+  deleted_at: string;
+};
+
+// The topic's bin (those over 30 days old emptied out first).
+export async function listTrash(topicId: string): Promise<TrashItem[]> {
+  const cut = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const old = await from("flash_trash").delete().eq("topic_id", topicId).lt("deleted_at", cut);
+  if (old.error && /flash_trash/.test(old.error.message)) return [];
+  fail(old.error);
+  const { data, error } = await from("flash_trash")
+    .select("id,card,why,deleted_at")
+    .eq("topic_id", topicId)
+    .order("deleted_at", { ascending: false })
+    .limit(2000);
+  fail(error);
+  return ((data ?? []) as Row[]).map((r) => {
+    const c = (r.card ?? {}) as Row;
+    return {
+      id: String(r.id),
+      front: String(c.front ?? ""),
+      back: String(c.back ?? ""),
+      why: String(r.why ?? ""),
+      deleted_at: String(r.deleted_at),
+    };
+  });
+}
+
+// Cards back from the bin, as they were.
+export async function restoreTrash(topicId: string, ids: string[]): Promise<{ restored: number }> {
+  let restored = 0;
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await from("flash_trash")
+      .select("id,card")
+      .eq("topic_id", topicId)
+      .in("id", ids.slice(i, i + 200));
+    fail(error);
+    const rows: Row[] = ((data ?? []) as Row[]).map((r) => ({
+      ...(r.card as Row),
+      updated_at: now(),
+    }));
+    if (!rows.length) continue;
+    fail(
+      (
+        await from("flash_cards").upsert(rows as never, {
+          onConflict: "id",
+          ignoreDuplicates: true,
+        })
+      ).error,
+    );
+    fail(
+      (
+        await from("flash_trash")
+          .delete()
+          .in(
+            "id",
+            rows.map((r) => String(r.id)),
+          )
+      ).error,
+    );
+    restored += rows.length;
+  }
+  await touch(topicId);
+  return { restored };
+}
+
+// ---------- Undo ----------
+
+export type CardState = Pick<
+  FlashCard,
+  | "id"
+  | "front"
+  | "back"
+  | "ex"
+  | "own"
+  | "verified"
+  | "error"
+  | "error_type"
+  | "note"
+  | "ai"
+  | "removed"
+>;
+
+// Cards put back as they were before an action (their text and marks).
+export async function restoreStates(
+  topicId: string,
+  states: CardState[],
+): Promise<{ changed: number; cards: FlashCard[] }> {
+  const out = await writeEdits(
+    topicId,
+    states.map(({ id, ...patch }) => ({ id, patch: { ...patch, ex: normalizeEx(patch.ex) } })),
+  );
+  return { changed: out.length, cards: out };
 }

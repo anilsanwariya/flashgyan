@@ -1,16 +1,20 @@
 // The card studio's tools for many cards and for one: the bar of actions
-// on the ticked cards, every AI fix in one list, a card's quick checks
+// on the ticked cards, every AI fix in one list, find and replace, the
+// recently deleted cards, a card's quick checks
 // (problems found without the AI, with their safe fixes) and its history
 // (earlier texts to restore).
 import { useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { BadgeCheck, History, ScanSearch, Sparkles, Trash2, Wand2, X } from "lucide-react";
 import {
   bulkFlashCards,
   checkFlashCards,
   getFlashCardHistory,
+  listFlashTrash,
   replaceFlashText,
+  restoreFlashTrash,
   resolveFlashAi,
 } from "@/lib/flash-studio.functions";
 import {
@@ -29,6 +33,7 @@ import {
   type FindMatch,
   type FindOptions,
 } from "@/lib/flash-find";
+import { useUndo } from "@/lib/flash-undo";
 import { Badge, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -53,6 +58,7 @@ export function BulkBar({
 }) {
   const bulkFn = useServerFn(bulkFlashCards);
   const checkFn = useServerFn(checkFlashCards);
+  const undo = useUndo(topic.id, onCards, onChanged);
   const running = useStudioJob();
   const [busy, setBusy] = useState(false);
   const live = cards.filter((c) => !c.removed);
@@ -62,13 +68,22 @@ export function BulkBar({
   const run = async (action: Action, done: (r: Awaited<ReturnType<typeof bulkFn>>) => string) => {
     setBusy(true);
     try {
+      const before = live;
       const r = await bulkFn({ data: { topic_id: topic.id, ids: live.map((c) => c.id), action } });
       if (r.cards.length) onCards(r.cards);
       if (action === "delete") {
         onChanged();
         onClear();
+        // Unnumbered cards went to the bin; numbered ones were only removed.
+        const removed = new Set(r.removedIds ?? []);
+        undo(done(r), {
+          deleted: r.deletedIds ?? [],
+          before: before.filter((c) => removed.has(c.id)),
+        });
+      } else {
+        const changed = new Set(r.cards.map((c) => c.id));
+        undo(done(r), { before: before.filter((c) => changed.has(c.id)) });
       }
-      toast.success(done(r));
     } catch (e) {
       toast.error(errorText(e, "Couldn't do it"));
     } finally {
@@ -367,6 +382,7 @@ export function AiReview({
   onClose: () => void;
 }) {
   const resolveFn = useServerFn(resolveFlashAi);
+  const undo = useUndo(topic.id, onCards, () => {});
   const [type, setType] = useState("");
   const [off, setOff] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -396,11 +412,14 @@ export function AiReview({
     if (!picks.length) return;
     setBusy(true);
     try {
+      const ids = new Set(picks.map((p) => p.id));
+      const before = cards.filter((c) => ids.has(c.id));
       const r = await resolveFn({ data: { topic_id: topic.id, picks, apply } });
       onCards(r.cards);
       setOff(new Set());
-      toast.success(
+      undo(
         `${picks.length} fix${picks.length === 1 ? "" : "es"} ${apply ? "applied" : "dismissed"} on ${r.changed} card${r.changed === 1 ? "" : "s"}`,
+        { before },
       );
     } catch (e) {
       toast.error(errorText(e, "Couldn't do it"));
@@ -573,6 +592,7 @@ export function FindReplace({
   onClose: () => void;
 }) {
   const replaceFn = useServerFn(replaceFlashText);
+  const undo = useUndo(topic.id, onCards, () => {});
   const [o, setO] = useState<FindOptions>({
     find: "",
     replace: "",
@@ -751,9 +771,12 @@ export function FindReplace({
                     })),
                   },
                 });
+                const changed = new Set(r.cards.map((c) => c.id));
+                const before = cards.filter((c) => changed.has(c.id));
                 onCards(r.cards);
-                toast.success(
+                undo(
                   `Replaced in ${r.changed} card${r.changed === 1 ? "" : "s"}${r.skipped ? `; ${r.skipped} changed meanwhile, left` : ""}`,
+                  { before },
                 );
                 setOff(new Set());
               } catch (e) {
@@ -766,6 +789,134 @@ export function FindReplace({
             Replace in {cardsTouched} card{cardsTouched === 1 ? "" : "s"}
           </Button>
         </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// The topic's cards deleted in the last 30 days, to tick and put back.
+export function RecentlyDeleted({
+  topic,
+  onChanged,
+  onClose,
+}: {
+  topic: FlashTopic;
+  onChanged: () => void;
+  onClose: () => void;
+}) {
+  const listFn = useServerFn(listFlashTrash);
+  const restoreFn = useServerFn(restoreFlashTrash);
+  const q = useQuery({
+    queryKey: ["flashTrash", topic.id],
+    queryFn: () => listFn({ data: { topic_id: topic.id } }),
+  });
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const items = q.data ?? [];
+  const restore = async (ids: string[]) => {
+    setBusy(true);
+    try {
+      const r = await restoreFn({ data: { topic_id: topic.id, ids } });
+      setPicked(new Set());
+      await q.refetch();
+      onChanged();
+      toast.success(`${r.restored} card${r.restored === 1 ? "" : "s"} put back`);
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't put them back"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const when = (at: string) => {
+    const days = Math.floor((Date.now() - new Date(at).getTime()) / 86_400_000);
+    return days < 1 ? "today" : days === 1 ? "yesterday" : `${days} days ago`;
+  };
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent
+        className="flex max-h-[92dvh] flex-col gap-0 p-0 sm:max-w-3xl"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <DialogHeader className="space-y-1 border-b border-border px-5 pb-3 pr-12 pt-4 text-left">
+          <DialogTitle className="text-base">Recently deleted ({items.length})</DialogTitle>
+          <p className="text-xs text-muted-foreground">
+            Deleted cards stay here for 30 days. Put back, a card comes back as it was.
+          </p>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3" aria-label="Deleted cards">
+          {q.isLoading ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
+          ) : q.error ? (
+            <p className="py-6 text-center text-sm text-destructive">
+              {errorText(q.error, "Couldn't load them")}
+            </p>
+          ) : !items.length ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              Nothing deleted in the last 30 days.
+            </p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {items.map((t) => (
+                <li key={t.id} data-trash={t.id} className="flex items-start gap-3 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    aria-label={`Tick ${t.front.split("\n")[0]}`}
+                    checked={picked.has(t.id)}
+                    onChange={(e) => {
+                      const next = new Set(picked);
+                      if (e.target.checked) next.add(t.id);
+                      else next.delete(t.id);
+                      setPicked(next);
+                    }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium" lang="hi">
+                      {t.front.split("\n")[0]}
+                    </div>
+                    <div className="truncate text-muted-foreground" lang="hi">
+                      {t.back}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {when(t.deleted_at)}
+                      {t.why && t.why !== "deleted" ? ` · ${t.why}` : ""}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => void restore([t.id])}
+                  >
+                    Put back
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        {items.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-border px-5 py-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                setPicked(
+                  picked.size === items.length ? new Set() : new Set(items.map((t) => t.id)),
+                )
+              }
+            >
+              {picked.size === items.length ? "Untick all" : "Tick all"}
+            </Button>
+            <Button
+              className="ml-auto"
+              disabled={busy || !picked.size}
+              onClick={() => void restore([...picked])}
+            >
+              Put back {picked.size || ""} ticked
+            </Button>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

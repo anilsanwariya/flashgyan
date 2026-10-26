@@ -35,6 +35,28 @@ const book = z.object({
   color: z.string().max(20),
 });
 const big = z.string().max(20000);
+// A card's AI check record (the fixes it suggests, what was done with them).
+const aiShape = z
+  .object({
+    at: z.string().max(40),
+    sig: z.string().max(40),
+    fixes: z
+      .array(
+        z.object({
+          field: z.string().max(30),
+          from: big,
+          to: big,
+          type: z.string().max(60),
+          note: z.string().max(500),
+        }),
+      )
+      .max(20),
+    done: z
+      .array(z.object({ type: z.string().max(60), applied: z.boolean(), at: z.string().max(40) }))
+      .max(100)
+      .default([]),
+  })
+  .nullable();
 const sheetCard = z.object({
   front: big,
   back: big,
@@ -182,33 +204,7 @@ export const saveFlashCard = createServerFn({ method: "POST" })
             error_type: z.string().max(200),
             verified: z.boolean(),
             note: z.string().max(2000),
-            ai: z
-              .object({
-                at: z.string().max(40),
-                sig: z.string().max(40),
-                fixes: z
-                  .array(
-                    z.object({
-                      field: z.string().max(30),
-                      from: big,
-                      to: big,
-                      type: z.string().max(60),
-                      note: z.string().max(500),
-                    }),
-                  )
-                  .max(20),
-                done: z
-                  .array(
-                    z.object({
-                      type: z.string().max(60),
-                      applied: z.boolean(),
-                      at: z.string().max(40),
-                    }),
-                  )
-                  .max(100)
-                  .default([]),
-              })
-              .nullable(),
+            ai: aiShape,
           })
           .partial(),
       })
@@ -562,4 +558,54 @@ export const replaceFlashText = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return (await server()).replaceText(data.topic_id, data.edits, data.reverify);
+  });
+
+export const listFlashTrash = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ topic_id: id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).listTrash(data.topic_id);
+  });
+
+export const restoreFlashTrash = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ topic_id: id, ids: z.array(id).min(1).max(5000) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).restoreTrash(data.topic_id, data.ids);
+  });
+
+export const restoreFlashStates = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        topic_id: id,
+        states: z
+          .array(
+            z.object({
+              id,
+              front: big,
+              back: big,
+              ex: z.record(z.string().max(20), big),
+              own: z.array(z.string().max(20)).max(30),
+              verified: z.boolean(),
+              error: z.boolean(),
+              error_type: z.string().max(200),
+              note: z.string().max(2000),
+              ai: aiShape,
+              removed: z.boolean(),
+            }),
+          )
+          .min(1)
+          .max(5000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).restoreStates(data.topic_id, data.states);
   });
