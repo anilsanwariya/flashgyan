@@ -512,3 +512,35 @@ export const otherFlashTopicWords = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await server()).otherTopicWords(data.topic_id);
   });
+
+export const startFlashServerJob = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        topic_id: id,
+        kind: z.enum(["check", "fill"]),
+        ids: z.array(id).min(1).max(5000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).startServerJob(data.topic_id, data.kind, data.ids);
+  });
+
+export const listFlashServerJobs = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ topic_id: id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).listServerJobs(data.topic_id);
+  });
+
+export const stopFlashServerJob = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).stopServerJob(data.id);
+  });

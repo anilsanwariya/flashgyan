@@ -1841,3 +1841,177 @@ export async function otherTopicWords(
   }
   return [...found].map(([key, m]) => ({ key, topics: [...m.values()] }));
 }
+
+// ---------- AI jobs on the server (with the browser closed) ----------
+
+export type FlashJob = {
+  id: string;
+  topic_id: string;
+  kind: "check" | "fill";
+  total: number;
+  done: number;
+  found: number;
+  status: "queued" | "running" | "done" | "stopped" | "failed";
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+const JOB_COLS = "id,topic_id,kind,total,done,found,status,error,created_at,updated_at";
+const JOBS_NOT_READY =
+  "AI jobs on the server need a database update: run the latest migration (flash_jobs) in Lovable or the SQL editor.";
+const jobFail = (e: { message: string } | null) => {
+  if (e && /flash_jobs/.test(e.message)) throw new Error(JOBS_NOT_READY);
+  fail(e);
+};
+const readJob = (r: Row): FlashJob => ({
+  id: String(r.id),
+  topic_id: String(r.topic_id),
+  kind: r.kind === "fill" ? "fill" : "check",
+  total: Number(r.total) || 0,
+  done: Number(r.done) || 0,
+  found: Number(r.found) || 0,
+  status: (["queued", "running", "done", "stopped", "failed"].includes(String(r.status))
+    ? r.status
+    : "queued") as FlashJob["status"],
+  error: typeof r.error === "string" ? r.error : null,
+  created_at: String(r.created_at),
+  updated_at: String(r.updated_at),
+});
+
+// A job queued for the server: the cards that need it now (not verified
+// and not read as they are, for the check; with empty explanations, for
+// the fill). One of each kind a topic at a time.
+export async function startServerJob(
+  topicId: string,
+  kind: "check" | "fill",
+  ids: string[],
+): Promise<FlashJob> {
+  const { topic, cards } = await getTopic(topicId);
+  const want = new Set(ids);
+  const todo = cards
+    .filter(
+      (c) =>
+        want.has(c.id) &&
+        !c.removed &&
+        (kind === "check" ? needsCheck(c) : M.emptyColumns(c, topic.columns).length > 0),
+    )
+    .map((c) => c.id);
+  if (!todo.length) throw new Error("Nothing to do: every card asked for is done already");
+  const { data: running, error: e0 } = await from("flash_jobs")
+    .select("id")
+    .eq("topic_id", topicId)
+    .eq("kind", kind)
+    .in("status", ["queued", "running"]);
+  jobFail(e0);
+  if ((running ?? []).length)
+    throw new Error("This topic already has that job on the server: stop it or wait for it");
+  const { data, error } = await from("flash_jobs")
+    .insert({ topic_id: topicId, kind, ids: todo, total: todo.length } as never)
+    .select(JOB_COLS)
+    .single();
+  jobFail(error);
+  return readJob(data as unknown as Row);
+}
+
+export async function listServerJobs(topicId: string): Promise<FlashJob[]> {
+  const { data, error } = await from("flash_jobs")
+    .select(JOB_COLS)
+    .eq("topic_id", topicId)
+    .order("created_at", { ascending: false })
+    .limit(5);
+  // Before the migration: no jobs.
+  if (error && /flash_jobs/.test(error.message)) return [];
+  fail(error);
+  return ((data ?? []) as Row[]).map(readJob);
+}
+
+export async function stopServerJob(id: string): Promise<FlashJob> {
+  const { data, error } = await from("flash_jobs")
+    .update({ status: "stopped", locked_until: null, updated_at: now() } as never)
+    .eq("id", id)
+    .in("status", ["queued", "running"])
+    .select(JOB_COLS)
+    .maybeSingle();
+  jobFail(error);
+  if (!data) throw new Error("The job had already finished");
+  return readJob(data as unknown as Row);
+}
+
+// One step of the oldest job waiting: its next few batches, side by side
+// (the check reads 20 cards a batch, the fill 10). A job claims itself for
+// two minutes so two ticks don't run it at once. Three failures in a row
+// stop it with the error.
+export async function jobStep(batches = 3): Promise<FlashJob | null> {
+  const at = now();
+  const { data: waiting, error } = await from("flash_jobs")
+    .select("*")
+    .in("status", ["queued", "running"])
+    .or(`locked_until.is.null,locked_until.lt.${at}`)
+    .order("created_at")
+    .limit(1);
+  if (error && /flash_jobs/.test(error.message)) return null;
+  fail(error);
+  const row = ((waiting ?? []) as Row[])[0];
+  if (!row) return null;
+  // Claimed only if no other tick claimed it since.
+  const { data: claimed, error: e2 } = await from("flash_jobs")
+    .update({
+      status: "running",
+      locked_until: new Date(Date.now() + 120_000).toISOString(),
+      updated_at: at,
+    } as never)
+    .eq("id", String(row.id))
+    .eq("updated_at", String(row.updated_at))
+    .select("*")
+    .maybeSingle();
+  fail(e2);
+  if (!claimed) return null;
+  const job = claimed as unknown as Row;
+  const ids = (Array.isArray(job.ids) ? job.ids : []).map(String);
+  const size = job.kind === "fill" ? 10 : 20;
+  const parts: string[][] = [];
+  for (let i = 0; i < Math.min(ids.length, size * batches); i += size)
+    parts.push(ids.slice(i, i + size));
+  const topicId = String(job.topic_id);
+  const results = await Promise.allSettled(
+    parts.map((p) =>
+      job.kind === "fill"
+        ? fillExplanations(topicId, p).then((r) => r.filled)
+        : checkCards(topicId, p).then((r) => r.flagged),
+    ),
+  );
+  const ok = results
+    .map((r, i) => ({ r, ids: parts[i] }))
+    .filter((x) => x.r.status === "fulfilled");
+  const failed = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+  const doneIds = new Set(ok.flatMap((x) => x.ids));
+  const left = ids.filter((id) => !doneIds.has(id));
+  const fails = failed && !ok.length ? (Number(job.fails) || 0) + 1 : 0;
+  const status = !left.length ? "done" : fails >= 3 ? "failed" : "running";
+  const { data: saved, error: e3 } = await from("flash_jobs")
+    .update({
+      ids: left,
+      done: (Number(job.done) || 0) + doneIds.size,
+      found:
+        (Number(job.found) || 0) +
+        ok.reduce((n, x) => n + ((x.r as PromiseFulfilledResult<number>).value || 0), 0),
+      fails,
+      status,
+      error: failed
+        ? String(failed.reason instanceof Error ? failed.reason.message : failed.reason).slice(
+            0,
+            500,
+          )
+        : null,
+      locked_until: null,
+      updated_at: now(),
+    } as never)
+    .eq("id", String(job.id))
+    // Stopped meanwhile: stays stopped (its progress is kept).
+    .eq("status", "running")
+    .select(JOB_COLS)
+    .maybeSingle();
+  fail(e3);
+  return saved ? readJob(saved as unknown as Row) : null;
+}
