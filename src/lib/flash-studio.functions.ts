@@ -457,3 +457,50 @@ export const resolveFlashAi = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await server()).resolveAi(data.topic_id, data.picks, data.apply);
   });
+
+export const replaceFlashSheet = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        topic_id: id,
+        source_id: id,
+        cards: z.array(sheetCard).min(1).max(5000),
+        columns: z.array(z.string().max(80)).max(30),
+        book: z.string().max(30),
+        name: z.string().max(200).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).replaceSheet(data.topic_id, data.source_id, data);
+  });
+
+export const applyFlashWorking = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        topic_id: id,
+        rows: z
+          .array(
+            z.object({
+              id: z.union([id, z.literal("")]),
+              book: z.string().max(30),
+              front: big,
+              back: big,
+              ex: z.record(z.string().max(20), big),
+              verified: z.boolean().nullable(),
+              note: z.string().max(2000).nullable(),
+            }),
+          )
+          .min(1)
+          .max(5000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).applyWorking(data.topic_id, data.rows);
+  });

@@ -90,7 +90,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { SheetsTab } from "@/components/flash-studio-sheets";
+import { ReplaceDialog, SheetsTab, WorkingDialog } from "@/components/flash-studio-sheets";
+import { parseWorking, workingRows, type WorkingRow } from "@/lib/flash-sheets";
 import { ProofTools, Versions } from "@/components/flash-studio-proof";
 import {
   booksOf,
@@ -620,9 +621,21 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
     sheet: ParsedSheet;
     replace?: FlashSourceRow;
   } | null>(null);
+  // A working sheet coming back (whole topic, with card ids).
+  const [working, setWorking] = useState<{
+    file: string;
+    rows: WorkingRow[];
+    unknown: string[];
+  } | null>(null);
   const pickSheet = async (file: File, replace?: FlashSourceRow) => {
     try {
-      const sheet = parseSheet(await readRows(file));
+      const rows = await readRows(file);
+      const back = q.data && parseWorking(rows, q.data.topic.columns);
+      if (back) {
+        if (!back.rows.length) throw new Error("No cards found in the working sheet");
+        return setWorking({ file: file.name, rows: back.rows, unknown: back.unknown });
+      }
+      const sheet = parseSheet(rows);
       if (!sheet.cards.length) throw new Error("No cards found in the sheet");
       setImporting({ file: file.name, sheet, replace });
     } catch (err) {
@@ -694,12 +707,47 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
           cards={cards}
           sources={sources}
           onAdd={(f, replace) => void pickSheet(f, replace)}
+          onDownloadWorking={async () =>
+            saveBytes(
+              `${topic.name} - working.xlsx`,
+              await xlsxBytes(workingRows(cards, topic.columns)),
+              XLSX_TYPE,
+            )
+          }
           onChanged={reload}
         />
       )}
       {tab === "chunks" && <ChunksTab topic={topic} cards={cards} onChanged={reload} />}
       {tab === "settings" && <SettingsTab topic={topic} onChanged={reload} />}
-      {importing && (
+      {importing?.replace?.kind === "sheet" && (
+        <ReplaceDialog
+          topic={topic}
+          cards={cards}
+          file={importing.file}
+          sheet={importing.sheet}
+          replace={importing.replace}
+          onClose={() => setImporting(null)}
+          onDone={() => {
+            setImporting(null);
+            void reload();
+          }}
+        />
+      )}
+      {working && (
+        <WorkingDialog
+          topic={topic}
+          cards={cards}
+          file={working.file}
+          rows={working.rows}
+          unknownCols={working.unknown}
+          onClose={() => setWorking(null)}
+          onDone={() => {
+            setWorking(null);
+            void reload();
+          }}
+        />
+      )}
+      {importing && importing.replace?.kind !== "sheet" && (
         <ImportDialog
           topic={topic}
           hasNumbers={cards.some((c) => c.card_order !== null) || topic.chunks.length > 0}

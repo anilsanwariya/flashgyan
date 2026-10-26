@@ -5,6 +5,7 @@ import { saathiComplete, type SaathiImage } from "../../supabase/functions/_shar
 import { parseReply, readMessages, type ReadResult, type Todo } from "@/lib/flash-read";
 import * as M from "@/lib/flash-merge";
 import * as L from "@/lib/flash-lint";
+import * as SH from "@/lib/flash-sheets";
 import * as S from "@/lib/flash-split";
 import {
   DEFAULT_TEMPLATES,
@@ -32,6 +33,7 @@ import {
   type FlashTemplate,
   type FlashSourceRow,
   type FlashTopic,
+  type FlashVariant,
   type IdMatch,
   type SheetCard,
   type WordKey,
@@ -785,6 +787,31 @@ export async function deleteSource(sourceId: string): Promise<{ deleted: number;
   // books' versions merged into it goes to the next book's version instead.
   const own = cards.filter((c) => c.sources[0]?.src === sourceId);
   const free = own.filter((c) => c.card_order === null);
+  await removeOwn(sourceId, free);
+  // Its versions merged into other books' cards are taken out of them.
+  const strip = cards
+    .filter((c) => c.sources[0]?.src !== sourceId)
+    .map((c) => ({
+      id: c.id,
+      topic_id: c.topic_id,
+      sources: c.sources.filter((s) => s.src !== sourceId),
+      variants: c.variants.filter((v) => v.source?.src !== sourceId),
+      updated_at: now(),
+    }));
+  for (let i = 0; i < strip.length; i += 500)
+    fail(
+      (await from("flash_cards").upsert(strip.slice(i, i + 500) as never, { onConflict: "id" }))
+        .error,
+    );
+  fail((await from("flash_sources").delete().eq("id", sourceId)).error);
+  await touch(topicId);
+  return { deleted: free.length, kept: own.length - free.length };
+}
+
+// A sheet's own cards (not numbered) taken out: one holding other books'
+// versions merged into it goes to the next book's version, the rest are
+// deleted.
+async function removeOwn(sourceId: string, free: FlashCard[]) {
   const promote = free
     .map((c) => {
       const variants = c.variants.filter((v) => v.source?.src !== sourceId);
@@ -822,24 +849,6 @@ export async function deleteSource(sourceId: string): Promise<{ deleted: number;
           .in("id", drop.slice(i, i + 200))
       ).error,
     );
-  // Its versions merged into other books' cards are taken out of them.
-  const strip = cards
-    .filter((c) => c.sources[0]?.src !== sourceId)
-    .map((c) => ({
-      id: c.id,
-      topic_id: c.topic_id,
-      sources: c.sources.filter((s) => s.src !== sourceId),
-      variants: c.variants.filter((v) => v.source?.src !== sourceId),
-      updated_at: now(),
-    }));
-  for (let i = 0; i < strip.length; i += 500)
-    fail(
-      (await from("flash_cards").upsert(strip.slice(i, i + 500) as never, { onConflict: "id" }))
-        .error,
-    );
-  fail((await from("flash_sources").delete().eq("id", sourceId)).error);
-  await touch(topicId);
-  return { deleted: free.length, kept: own.length - free.length };
 }
 
 const sameSource = (a: FlashCard["sources"][number], b: FlashCard["sources"][number] | null) =>
@@ -1601,4 +1610,196 @@ export async function resolveAi(
   const without = edits.filter((e) => !("front" in e.patch));
   const out = [...(await writeEdits(topicId, withText)), ...(await writeEdits(topicId, without))];
   return { changed: out.length, cards: out };
+}
+
+// ---------- A book's sheet replaced, card by card ----------
+
+// The topic's columns and books with any the sheet brings added.
+function growTopic(topic: FlashTopic, titles: string[], codes: string[]) {
+  const columns = [...topic.columns];
+  const idOf = new Map(columns.map((c) => [c.title.trim(), c.id]));
+  for (const title of titles) {
+    const t = title.trim();
+    if (!t || idOf.has(t)) continue;
+    const id = newColumnId(columns);
+    columns.push({ id, title: t, hint: "" });
+    idOf.set(t, id);
+  }
+  const books = [...topic.books];
+  for (const code of codes)
+    if (code && !books.some((b) => b.code === code))
+      books.push({ code, name: "", color: BOOK_COLORS[books.length % BOOK_COLORS.length] });
+  return { columns, books, idOf };
+}
+
+export type ReplaceResult = {
+  same: number;
+  changed: number;
+  added: number;
+  gone: number;
+  // Gone from the sheet but numbered (in the app): kept.
+  kept: number;
+};
+
+// The sheet `sourceId` replaced by a new version: rows matched to its cards
+// (and its versions merged into other books' cards) by their word. The same
+// stay as they are, with their merges and verified marks; changed ones get
+// the new text (old text kept in their history) and need verifying again;
+// new rows are added; rows gone are taken out (numbered cards stay).
+export async function replaceSheet(
+  topicId: string,
+  sourceId: string,
+  sheet: { cards: SheetCard[]; columns: string[]; book: string; name?: string },
+): Promise<ReplaceResult> {
+  const { topic, cards } = await getTopic(topicId);
+  const codes = [...new Set(sheet.cards.map((c) => (c.book || sheet.book).trim()).filter(Boolean))];
+  const { columns, books, idOf } = growTopic(topic, sheet.columns, codes);
+  const plan = SH.planReplace(cards, sourceId, sheet.cards, idOf);
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  const textEdits = new Map<string, Row>();
+  // Cards whose merged versions change or go: their versions, by place.
+  const versions = new Map<string, (FlashVariant | null)[]>();
+  const versionsOf = (id: string) => {
+    if (!versions.has(id)) versions.set(id, [...byId.get(id)!.variants]);
+    return versions.get(id)!;
+  };
+  for (const ch of plan.changed) {
+    if (ch.variant === null)
+      textEdits.set(ch.id, {
+        front: ch.after.front,
+        back: ch.after.back,
+        ex: ch.after.ex,
+        verified: false,
+      });
+    else {
+      const vs = versionsOf(ch.id);
+      vs[ch.variant] = { ...vs[ch.variant]!, ...ch.after };
+    }
+  }
+  const goneOwn: FlashCard[] = [];
+  let kept = 0;
+  for (const g of plan.gone) {
+    if (g.variant !== null) versionsOf(g.id)[g.variant] = null;
+    else if (g.numbered) kept++;
+    else goneOwn.push(byId.get(g.id)!);
+  }
+  const edits: { id: string; patch: Row }[] = [...textEdits].map(([id, patch]) => ({ id, patch }));
+  for (const [id, vs] of versions) {
+    const c = byId.get(id)!;
+    const goneSrc = c.variants.filter((_, i) => vs[i] === null).map((v) => v.source);
+    edits.push({
+      id,
+      patch: {
+        ...(textEdits.get(id) ?? {}),
+        variants: vs.filter((v) => v !== null),
+        sources: c.sources.filter((s) => !goneSrc.some((g) => sameSource(s, g ?? null))),
+      },
+    });
+  }
+  // One write per card (a card may have both kinds of change).
+  const merged = new Map<string, Row>();
+  for (const e of edits) merged.set(e.id, { ...(merged.get(e.id) ?? {}), ...e.patch });
+  await writeEdits(
+    topicId,
+    [...merged].map(([id, patch]) => ({ id, patch })),
+  );
+  await removeOwn(sourceId, goneOwn);
+  const start = cards.reduce((m, c) => Math.max(m, c.pos + 1), 0);
+  await insertCards(
+    plan.added.map((i, k) => {
+      const c = sheet.cards[i];
+      const book = (c.book || sheet.book).trim();
+      return {
+        topic_id: topicId,
+        pos: start + k,
+        prompt: c.prompt && c.prompt !== topic.prompt ? c.prompt : null,
+        front: c.front,
+        back: c.back,
+        back_hint: c.back_hint,
+        is_revealed: c.is_revealed,
+        word_key: c.word_key || null,
+        ex: SH.sheetEx(c, idOf),
+        sources: [{ book, pos: c.book_order, src: sourceId }],
+        error: c.error,
+        error_type: c.error_type,
+      };
+    }),
+  );
+  fail(
+    (
+      await from("flash_topics")
+        .update({ columns, books, updated_at: now() } as never)
+        .eq("id", topicId)
+    ).error,
+  );
+  await updateSource(sourceId, (r) => ({
+    name: (sheet.name ?? String(r.name ?? "")).slice(0, 200),
+    cards: sheet.cards.length,
+    context: { ...((r.context ?? {}) as Row), rows: sheet.cards.length },
+  }));
+  await touch(topicId);
+  return {
+    same: plan.same,
+    changed: plan.changed.length,
+    added: plan.added.length,
+    gone: plan.gone.length - kept,
+    kept,
+  };
+}
+
+// ---------- The working sheet back ----------
+
+export type WorkingResult = { same: number; changed: number; added: number; unknown: number };
+
+// A working sheet's edits made on the cards they name (old text kept in
+// each card's history); rows without a card id added as new cards.
+export async function applyWorking(topicId: string, rows: SH.WorkingRow[]): Promise<WorkingResult> {
+  const { topic, cards } = await getTopic(topicId);
+  const plan = SH.planWorking(cards, rows);
+  const edits = plan.changed
+    .map((ch) => ({ id: ch.id, patch: SH.workingPatch(ch.before, ch.after) as Row }))
+    .filter((e) => Object.keys(e.patch).length);
+  // A bulk write has one set of keys: text edits and mark-only edits apart.
+  await writeEdits(
+    topicId,
+    edits.filter((e) => "front" in e.patch),
+  );
+  await writeEdits(
+    topicId,
+    edits.filter((e) => !("front" in e.patch)),
+  );
+  if (plan.added.length) {
+    const { books } = growTopic(
+      topic,
+      [],
+      plan.added.map((r) => r.book),
+    );
+    const start = cards.reduce((m, c) => Math.max(m, c.pos + 1), 0);
+    await insertCards(
+      plan.added.map((r, k) => ({
+        topic_id: topicId,
+        pos: start + k,
+        front: r.front,
+        back: r.back,
+        ex: Object.fromEntries(Object.entries(r.ex).filter(([, v]) => v.trim())),
+        sources: r.book ? [{ book: r.book, pos: null }] : [],
+        verified: r.verified === true,
+        note: r.note ?? "",
+      })),
+    );
+    fail(
+      (
+        await from("flash_topics")
+          .update({ books, updated_at: now() } as never)
+          .eq("id", topicId)
+      ).error,
+    );
+  }
+  await touch(topicId);
+  return {
+    same: plan.same,
+    changed: edits.length,
+    added: plan.added.length,
+    unknown: plan.unknown.length,
+  };
 }
