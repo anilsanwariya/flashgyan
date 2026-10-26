@@ -22,6 +22,8 @@ import {
   cardSig,
   needsCheck,
   fieldText,
+  doneOf,
+  type AiFix,
   planNumbers,
   wordKeyOf,
   BOOK_COLORS,
@@ -1161,7 +1163,7 @@ export async function checkCards(
     return {
       id: c.id,
       topic_id: topicId,
-      ai: { at, sig: cardSig(c), fixes },
+      ai: { at, sig: cardSig(c), fixes, done: c.ai?.done ?? [] },
       error: fixes.length ? true : c.error,
       error_type: fixes.length ? fixes[0].type : c.error_type,
       note: fixes.length ? `AI: ${fixes.map((f) => f.note).join("; ")}`.slice(0, 2000) : c.note,
@@ -1495,7 +1497,12 @@ export async function bulkCards(
         patch: {
           ...next,
           own,
-          ai: { ...c.ai!, fixes: left, sig: cardSig(next) },
+          ai: {
+            ...c.ai!,
+            fixes: left,
+            sig: cardSig(next),
+            done: [...c.ai!.done, ...doneOf(usable, true)].slice(-100),
+          },
           ...(clear ? { note: "", error: false, error_type: "" } : {}),
         },
       });
@@ -1531,4 +1538,67 @@ export async function cardHistory(id: string): Promise<CardVersion[]> {
       ex: normalizeEx(o.ex),
     };
   });
+}
+
+// ---------- The AI's fixes, many at once ----------
+
+// Fixes picked from the topic's list (each by card, field and suggested
+// text, so a list shown before a new check can't touch the wrong one),
+// applied or dismissed. A card with none left loses the AI's note and its
+// recheck mark; one whose text changed counts as read as it now is.
+export async function resolveAi(
+  topicId: string,
+  picks: { id: string; field: string; to: string }[],
+  apply: boolean,
+): Promise<{ changed: number; cards: FlashCard[] }> {
+  const cards = await topicCards(topicId);
+  const want = new Map<string, { field: string; to: string }[]>();
+  for (const p of picks) want.set(p.id, [...(want.get(p.id) ?? []), p]);
+  const edits: { id: string; patch: Row }[] = [];
+  for (const c of cards) {
+    const mine = want.get(c.id);
+    if (!mine || !c.ai || c.removed) continue;
+    const hit = (f: AiFix) => mine.some((p) => p.field === f.field && p.to === f.to);
+    const chosen = c.ai.fixes.filter(hit);
+    if (!chosen.length) continue;
+    const left = c.ai.fixes.filter((f) => !hit(f));
+    const next = { front: c.front, back: c.back, ex: { ...c.ex } };
+    let own = c.own;
+    const used = apply ? chosen.filter((f) => f.to && f.field) : [];
+    for (const f of used) {
+      if (f.field === "front") next.front = f.to;
+      else if (f.field === "back") next.back = f.to;
+      else {
+        next.ex[f.field.slice(3)] = f.to;
+        own = own.filter((o) => `ex:${o}` !== f.field);
+      }
+    }
+    const clear = !left.length && c.note.startsWith("AI:");
+    const ai = {
+      ...c.ai,
+      fixes: left,
+      sig: used.length ? cardSig(next) : c.ai.sig,
+      done: [
+        ...c.ai.done,
+        ...doneOf(used, true),
+        ...doneOf(
+          chosen.filter((f) => !used.includes(f)),
+          false,
+        ),
+      ].slice(-100),
+    };
+    edits.push({
+      id: c.id,
+      patch: {
+        ...(used.length ? { ...next, own } : {}),
+        ai,
+        ...(clear ? { note: "", error: false, error_type: "" } : {}),
+      },
+    });
+  }
+  // Text and no-text edits written apart (a bulk write has one set of keys).
+  const withText = edits.filter((e) => "front" in e.patch);
+  const without = edits.filter((e) => !("front" in e.patch));
+  const out = [...(await writeEdits(topicId, withText)), ...(await writeEdits(topicId, without))];
+  return { changed: out.length, cards: out };
 }

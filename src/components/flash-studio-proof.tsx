@@ -10,6 +10,7 @@ import {
   ChevronDown,
   Combine,
   Eye,
+  ListChecks,
   Replace,
   ScanSearch,
   Sparkles,
@@ -182,6 +183,7 @@ export function ProofTools({
   shownIds,
   merging,
   setMerging,
+  onReview,
   onChanged,
   onCards,
 }: {
@@ -192,6 +194,8 @@ export function ProofTools({
   // The merge dialog, open from here or from the topic's progress.
   merging: boolean;
   setMerging: (open: boolean) => void;
+  // Every AI fix in the topic, in one list.
+  onReview: () => void;
   onChanged: () => void;
   onCards: (c: FlashCard[]) => void;
 }) {
@@ -208,6 +212,7 @@ export function ProofTools({
   const live = cards.filter((c) => !c.removed && shown.has(c.id));
   const needFill = live.filter((c) => emptyColumns(c, topic.columns).length).map((c) => c.id);
   const needCheck = live.filter(needsCheck).map((c) => c.id);
+  const withFixes = cards.reduce((n, c) => n + (c.removed ? 0 : (c.ai?.fixes.length ?? 0)), 0);
   const words = kind ? live.reduce((n, c) => n + wordsOf(c.back).length, 0) : 0;
   const fill = () =>
     runStudioJob({
@@ -336,6 +341,13 @@ export function ProofTools({
                 )}
               </DropdownMenuItem>
             )}
+            <DropdownMenuItem disabled={!withFixes} onSelect={onReview}>
+              <ListChecks className="mr-2 h-4 w-4 shrink-0" />
+              {item(
+                `Review AI suggestions (${withFixes})`,
+                "Every fix in the topic in one list: tick, apply or dismiss",
+              )}
+            </DropdownMenuItem>
             {topic.columns.length > 0 && (
               <>
                 <DropdownMenuSeparator />

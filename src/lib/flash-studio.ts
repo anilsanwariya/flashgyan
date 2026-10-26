@@ -73,7 +73,11 @@ export type AiFix = { field: string; from: string; to: string; type: string; not
 
 // The AI check's last look at a card: when, a fingerprint of the text it
 // read (changed text means it hasn't seen the card as it is), and its fixes.
-export type FlashAi = { at: string; sig: string; fixes: AiFix[] };
+// What the editor did with a fix: applied or dismissed (kept across
+// checks, to tell how often the AI is right).
+export type AiDone = { type: string; applied: boolean; at: string };
+
+export type FlashAi = { at: string; sig: string; fixes: AiFix[]; done: AiDone[] };
 
 export type FlashCard = {
   id: string;
@@ -145,8 +149,38 @@ export function normalizeAi(v: unknown): FlashAi | null {
         note: str(x.note, 500),
       };
     }),
+    done: (Array.isArray(o.done) ? o.done : []).slice(-100).map((d) => {
+      const x = (d ?? {}) as Record<string, unknown>;
+      return { type: str(x.type, 60), applied: x.applied === true, at: str(x.at, 40) };
+    }),
   };
 }
+
+// How often the editor took the AI check's fixes: in all, and by kind.
+export function aiStats(cards: Pick<FlashCard, "ai" | "removed">[]) {
+  const by = new Map<string, { applied: number; dismissed: number }>();
+  let applied = 0;
+  let dismissed = 0;
+  for (const c of cards)
+    for (const d of c.ai?.done ?? []) {
+      const t = by.get(d.type) ?? { applied: 0, dismissed: 0 };
+      if (d.applied) {
+        applied++;
+        t.applied++;
+      } else {
+        dismissed++;
+        t.dismissed++;
+      }
+      by.set(d.type, t);
+    }
+  return { applied, dismissed, by };
+}
+
+// The fixes resolved, as kept in a card's record.
+export const doneOf = (fixes: AiFix[], applied: boolean): AiDone[] => {
+  const at = new Date().toISOString();
+  return fixes.map((f) => ({ type: f.type || "Other", applied, at }));
+};
 
 // The text of a card's field ("front", "back", "ex:<id>").
 export const fieldText = (c: Pick<FlashCard, "front" | "back" | "ex">, field: string) =>

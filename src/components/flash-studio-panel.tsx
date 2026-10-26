@@ -66,6 +66,7 @@ import {
   parseSheet,
   suggestSizes,
   cardSig,
+  doneOf,
   fieldText,
   type AiFix,
   type FlashBook,
@@ -81,7 +82,7 @@ import {
 import { zipFiles } from "@/lib/zip";
 import { BooksPanel } from "@/components/flash-studio-books";
 import { StudioJobBar } from "@/components/flash-studio-jobs";
-import { BulkBar, HistoryButton, QuickChecks } from "@/components/flash-studio-tools";
+import { AiReview, BulkBar, HistoryButton, QuickChecks } from "@/components/flash-studio-tools";
 import { lintCard, lintTopic, numberingOf, spellingVariants, type Lint } from "@/lib/flash-lint";
 import {
   DropdownMenu,
@@ -810,6 +811,7 @@ function CardsTab({
   const [desc, setDesc] = useState(false);
   const [view, setView] = useState<"list" | "table">("list");
   const [merging, setMerging] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
   const books = new Map(topic.books.map((b) => [b.code, b]));
   const bookCodes = useMemo(
     () => [...new Set([...topic.books.map((b) => b.code), ...cards.flatMap((c) => booksOf(c))])],
@@ -916,6 +918,7 @@ function CardsTab({
         sheets={sources.length}
         onFilter={pick}
         onMerge={() => setMerging(true)}
+        onReview={() => setReviewing(true)}
         onProof={() =>
           startProof(
             sortCards(
@@ -994,6 +997,7 @@ function CardsTab({
           shownIds={list.map((c) => c.id)}
           merging={merging}
           setMerging={setMerging}
+          onReview={() => setReviewing(true)}
           onChanged={onChanged}
           onCards={onCard}
         />
@@ -1243,6 +1247,25 @@ function CardsTab({
           Show more ({list.length - shown} left)
         </Button>
       )}
+      {reviewing && (
+        <AiReview
+          topic={topic}
+          cards={cards}
+          onCards={onCard}
+          onOpen={(c) => {
+            const withFixes = cards.filter((x) => !x.removed && x.ai?.fixes.length);
+            setReviewing(false);
+            setProof({
+              ids: withFixes.map((x) => x.id),
+              i: Math.max(
+                0,
+                withFixes.findIndex((x) => x.id === c.id),
+              ),
+            });
+          }}
+          onClose={() => setReviewing(false)}
+        />
+      )}
       {picked.size > 0 && (
         <BulkBar
           topic={topic}
@@ -1310,6 +1333,7 @@ function TopicProgress({
   sheets,
   onFilter,
   onMerge,
+  onReview,
   onProof,
   onAdd,
   onTab,
@@ -1319,6 +1343,7 @@ function TopicProgress({
   sheets: number;
   onFilter: (f: Filter) => void;
   onMerge: () => void;
+  onReview: () => void;
   onProof: () => void;
   onAdd: () => void;
   onTab: (t: TopicTab) => void;
@@ -1330,6 +1355,7 @@ function TopicProgress({
     ? live.filter((c) => emptyColumns(c, topic.columns).length).length
     : 0;
   const dups = useMemo(() => groupDuplicates(cards).length, [cards]);
+  const fixes = live.reduce((n, c) => n + (c.ai?.fixes.length ?? 0), 0);
   const pct = live.length ? Math.round((verified / live.length) * 100) : 0;
   const next: { text: string; action: string; go: () => void } | null = !live.length
     ? { text: "Add each book's Excel sheet.", action: "Add a sheet", go: onAdd }
@@ -1392,6 +1418,7 @@ function TopicProgress({
       <div className="-mx-1 flex flex-wrap gap-1">
         {stat("sheets", sheets, () => onTab("sheets"))}
         {dups > 0 && stat("words to merge", dups, onMerge, "text-amber-700 dark:text-amber-400")}
+        {fixes > 0 && stat("AI suggestions", fixes, onReview, "text-amber-700 dark:text-amber-400")}
         {topic.columns.length > 0 && stat("empty explanations", missing, () => onFilter("missing"))}
         {errors > 0 && stat("to recheck", errors, () => onFilter("errors"), "text-destructive")}
         {stat("not verified", live.length - verified, () => onFilter("unverified"))}
@@ -2096,12 +2123,21 @@ function AiSuggestions({
       : field.startsWith("ex:")
         ? `explanation_${topic.columns.find((col) => col.id === field.slice(3))?.title ?? "?"}`
         : "the card";
-  const settle = (next: FlashCard, left: AiFix[]): FlashCard => {
+  // `took`: the fixes taken (applied, or a pointer marked done); `not`:
+  // those dismissed. Both kept in the card's record.
+  const settle = (next: FlashCard, left: AiFix[], took: AiFix[], not: AiFix[]): FlashCard => {
     const done = !left.length && next.note.startsWith("AI:");
     return {
       ...next,
       // The card as it now reads counts as checked.
-      ai: next.ai ? { ...next.ai, fixes: left, sig: cardSig(next) } : null,
+      ai: next.ai
+        ? {
+            ...next.ai,
+            fixes: left,
+            sig: cardSig(next),
+            done: [...next.ai.done, ...doneOf(took, true), ...doneOf(not, false)].slice(-100),
+          }
+        : null,
       ...(done ? { note: "", error: false, error_type: "" } : {}),
     };
   };
@@ -2115,21 +2151,26 @@ function AiSuggestions({
             ex: { ...card.ex, [f.field.slice(3)]: f.to },
             own: card.own.filter((o) => `ex:${o}` !== f.field),
           };
+  const canApply = (f: AiFix) => !!f.to && !!f.field;
   const apply = (i: number) =>
     onChange(
       settle(
         put(c, fixes[i]),
         fixes.filter((_, k) => k !== i),
+        [fixes[i]],
+        [],
       ),
     );
+  // A pointer (no text to apply) marked done counts as taken.
   const dismiss = (i: number) =>
     onChange(
       settle(
         c,
         fixes.filter((_, k) => k !== i),
+        canApply(fixes[i]) ? [] : [fixes[i]],
+        canApply(fixes[i]) ? [fixes[i]] : [],
       ),
     );
-  const canApply = (f: AiFix) => !!f.to && !!f.field;
   return (
     <section
       aria-label="AI suggestions"
@@ -2153,6 +2194,8 @@ function AiSuggestions({
                   settle(
                     next,
                     fixes.filter((f) => !canApply(f)),
+                    fixes.filter(canApply),
+                    [],
                   ),
                 );
               }}
@@ -2160,7 +2203,12 @@ function AiSuggestions({
               Apply all
             </Button>
           )}
-          <Button size="sm" variant="ghost" className="h-7" onClick={() => onChange(settle(c, []))}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7"
+            onClick={() => onChange(settle(c, [], [], fixes))}
+          >
             Dismiss all
           </Button>
         </span>

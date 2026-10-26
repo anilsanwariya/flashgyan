@@ -1,12 +1,24 @@
 // The card studio's tools for many cards and for one: the bar of actions
-// on the ticked cards, a card's quick checks (problems found without the
-// AI, with their safe fixes) and its history (earlier texts to restore).
+// on the ticked cards, every AI fix in one list, a card's quick checks
+// (problems found without the AI, with their safe fixes) and its history
+// (earlier texts to restore).
 import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { BadgeCheck, History, ScanSearch, Sparkles, Trash2, Wand2, X } from "lucide-react";
-import { bulkFlashCards, checkFlashCards, getFlashCardHistory } from "@/lib/flash-studio.functions";
-import { needsCheck, type FlashCard, type FlashTopic } from "@/lib/flash-studio";
+import {
+  bulkFlashCards,
+  checkFlashCards,
+  getFlashCardHistory,
+  resolveFlashAi,
+} from "@/lib/flash-studio.functions";
+import {
+  aiStats,
+  needsCheck,
+  type AiFix,
+  type FlashCard,
+  type FlashTopic,
+} from "@/lib/flash-studio";
 import { LINT_LABELS, applyLints, lintCard, type Lint } from "@/lib/flash-lint";
 import { runStudioJob, useStudioJob } from "@/lib/flash-jobs";
 import { Badge, errorText } from "@/components/ca-ui";
@@ -328,5 +340,212 @@ export function HistoryButton({
         </Dialog>
       )}
     </>
+  );
+}
+
+// Every AI fix in the topic in one list, to tick and apply or dismiss
+// together; with how often the editor has taken the AI's fixes so far.
+export function AiReview({
+  topic,
+  cards,
+  onCards,
+  onOpen,
+  onClose,
+}: {
+  topic: FlashTopic;
+  cards: FlashCard[];
+  onCards: (c: FlashCard[]) => void;
+  onOpen: (c: FlashCard) => void;
+  onClose: () => void;
+}) {
+  const resolveFn = useServerFn(resolveFlashAi);
+  const [type, setType] = useState("");
+  const [off, setOff] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [shown, setShown] = useState(80);
+  const key = (c: FlashCard, f: AiFix) => `${c.id}|${f.field}|${f.to}`;
+  const rows = cards
+    .filter((c) => !c.removed && c.ai?.fixes.length)
+    .flatMap((c) => c.ai!.fixes.map((f) => ({ card: c, fix: f })))
+    .filter((r) => !type || r.fix.type === type);
+  const types = [...new Set(cards.flatMap((c) => c.ai?.fixes.map((f) => f.type) ?? []))].sort();
+  const ticked = rows.filter((r) => !off.has(key(r.card, r.fix)));
+  const stats = aiStats(cards);
+  const total = stats.applied + stats.dismissed;
+  const pct = (a: number, d: number) => (a + d ? Math.round((a / (a + d)) * 100) : 0);
+  const label = (field: string) =>
+    field === "front" || field === "back"
+      ? field
+      : field.startsWith("ex:")
+        ? (topic.columns.find((col) => `ex:${col.id}` === field)?.title ?? "?")
+        : "card";
+  const run = async (apply: boolean) => {
+    const picks = (apply ? ticked.filter((r) => r.fix.to && r.fix.field) : ticked).map((r) => ({
+      id: r.card.id,
+      field: r.fix.field,
+      to: r.fix.to,
+    }));
+    if (!picks.length) return;
+    setBusy(true);
+    try {
+      const r = await resolveFn({ data: { topic_id: topic.id, picks, apply } });
+      onCards(r.cards);
+      setOff(new Set());
+      toast.success(
+        `${picks.length} fix${picks.length === 1 ? "" : "es"} ${apply ? "applied" : "dismissed"} on ${r.changed} card${r.changed === 1 ? "" : "s"}`,
+      );
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't do it"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const canApply = ticked.filter((r) => r.fix.to && r.fix.field).length;
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent
+        className="flex max-h-[92dvh] flex-col gap-0 p-0 sm:max-w-4xl"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <DialogHeader className="space-y-2 border-b border-border px-5 pb-3 pr-12 pt-4 text-left">
+          <DialogTitle className="text-base">AI suggestions ({rows.length})</DialogTitle>
+          <div className="text-xs text-muted-foreground" aria-label="AI accuracy">
+            {total ? (
+              <>
+                So far you applied <b>{stats.applied}</b> and dismissed <b>{stats.dismissed}</b> of
+                the AI&apos;s fixes: <b>{pct(stats.applied, stats.dismissed)}%</b> taken.{" "}
+                {[...stats.by]
+                  .sort((a, b) => b[1].applied + b[1].dismissed - (a[1].applied + a[1].dismissed))
+                  .map(
+                    ([t, v]) =>
+                      `${t} ${pct(v.applied, v.dismissed)}% of ${v.applied + v.dismissed}`,
+                  )
+                  .join(" · ")}
+              </>
+            ) : (
+              "How often you take the AI's fixes shows here once you apply or dismiss some."
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <select
+              aria-label="Kind"
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2"
+            >
+              <option value="">Every kind</option>
+              {types.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+            <label className="flex items-center gap-1.5 text-xs">
+              <input
+                type="checkbox"
+                checked={rows.length > 0 && ticked.length === rows.length}
+                onChange={(e) =>
+                  setOff(
+                    e.target.checked ? new Set() : new Set(rows.map((r) => key(r.card, r.fix))),
+                  )
+                }
+              />
+              Tick all
+            </label>
+          </div>
+        </DialogHeader>
+        <div className="flex-1 overflow-y-auto px-5 py-3">
+          {!rows.length && (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              No AI suggestions waiting.
+            </p>
+          )}
+          <ul className="space-y-1.5">
+            {rows.slice(0, shown).map(({ card: c, fix: f }) => {
+              const k = key(c, f);
+              return (
+                <li
+                  key={k}
+                  data-fix={c.front}
+                  className="grid grid-cols-[auto_1fr] gap-2 rounded-lg border border-border p-2 text-sm"
+                >
+                  <input
+                    type="checkbox"
+                    aria-label={`Tick the fix on ${c.front.split("\n")[0]}`}
+                    className="mt-1 h-4 w-4"
+                    checked={!off.has(k)}
+                    onChange={(e) =>
+                      setOff((p) => {
+                        const n = new Set(p);
+                        if (e.target.checked) n.delete(k);
+                        else n.add(k);
+                        return n;
+                      })
+                    }
+                  />
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                      <button
+                        type="button"
+                        className="font-medium underline-offset-2 hover:underline"
+                        lang="hi"
+                        onClick={() => onOpen(c)}
+                      >
+                        {c.front.split("\n")[0] || "—"}
+                      </button>
+                      <Badge tone="warn">{f.type}</Badge>
+                      <span className="text-muted-foreground" lang="hi">
+                        {label(f.field)} · {f.note}
+                      </span>
+                    </div>
+                    {f.to ? (
+                      <div className="grid gap-1 sm:grid-cols-2" lang="hi">
+                        <div className="whitespace-pre-wrap rounded bg-red-500/10 px-2 py-0.5 text-red-800 line-through decoration-red-400/60 dark:text-red-300">
+                          {f.from || "—"}
+                        </div>
+                        <div className="whitespace-pre-wrap rounded bg-emerald-500/10 px-2 py-0.5 text-emerald-800 dark:text-emerald-300">
+                          {f.to}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground">
+                        Only pointed out: no text to apply.
+                      </div>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          {rows.length > shown && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              onClick={() => setShown(shown + 200)}
+            >
+              Show more ({rows.length - shown} left)
+            </Button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 border-t border-border px-5 py-2.5">
+          <span className="text-xs text-muted-foreground">{ticked.length} ticked</span>
+          <Button
+            className="ml-auto bg-emerald-600 hover:bg-emerald-700"
+            disabled={busy || !canApply}
+            onClick={() => void run(true)}
+          >
+            Apply ticked ({canApply})
+          </Button>
+          <Button
+            variant="outline"
+            disabled={busy || !ticked.length}
+            onClick={() => void run(false)}
+          >
+            Dismiss ticked ({ticked.length})
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

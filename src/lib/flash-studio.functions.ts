@@ -197,6 +197,16 @@ export const saveFlashCard = createServerFn({ method: "POST" })
                     }),
                   )
                   .max(20),
+                done: z
+                  .array(
+                    z.object({
+                      type: z.string().max(60),
+                      applied: z.boolean(),
+                      at: z.string().max(40),
+                    }),
+                  )
+                  .max(100)
+                  .default([]),
               })
               .nullable(),
           })
@@ -427,4 +437,23 @@ export const getFlashCardHistory = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return (await server()).cardHistory(data.id);
+  });
+
+export const resolveFlashAi = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        topic_id: id,
+        apply: z.boolean(),
+        picks: z
+          .array(z.object({ id, field: z.string().max(30), to: big }))
+          .min(1)
+          .max(3000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).resolveAi(data.topic_id, data.picks, data.apply);
   });
