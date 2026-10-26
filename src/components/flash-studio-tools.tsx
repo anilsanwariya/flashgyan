@@ -1,15 +1,30 @@
 // The card studio's tools for many cards and for one: the bar of actions
-// on the ticked cards, every AI fix in one list, a card's quick checks
+// on the ticked cards, every AI fix in one list, find and replace, the
+// recently deleted cards, a card's quick checks
 // (problems found without the AI, with their safe fixes) and its history
 // (earlier texts to restore).
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { BadgeCheck, History, ScanSearch, Sparkles, Trash2, Wand2, X } from "lucide-react";
+import {
+  BadgeCheck,
+  BookOpen,
+  History,
+  ScanSearch,
+  Sparkles,
+  Trash2,
+  Wand2,
+  X,
+} from "lucide-react";
 import {
   bulkFlashCards,
   checkFlashCards,
+  getFlashBookText,
   getFlashCardHistory,
+  listFlashTrash,
+  replaceFlashText,
+  restoreFlashTrash,
   resolveFlashAi,
 } from "@/lib/flash-studio.functions";
 import {
@@ -21,6 +36,14 @@ import {
 } from "@/lib/flash-studio";
 import { LINT_LABELS, applyLints, lintCard, type Lint } from "@/lib/flash-lint";
 import { runStudioJob, useStudioJob } from "@/lib/flash-jobs";
+import {
+  findMatches,
+  findPattern,
+  markMatches,
+  type FindMatch,
+  type FindOptions,
+} from "@/lib/flash-find";
+import { useUndo } from "@/lib/flash-undo";
 import { Badge, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -45,6 +68,7 @@ export function BulkBar({
 }) {
   const bulkFn = useServerFn(bulkFlashCards);
   const checkFn = useServerFn(checkFlashCards);
+  const undo = useUndo(topic.id, onCards, onChanged);
   const running = useStudioJob();
   const [busy, setBusy] = useState(false);
   const live = cards.filter((c) => !c.removed);
@@ -54,13 +78,22 @@ export function BulkBar({
   const run = async (action: Action, done: (r: Awaited<ReturnType<typeof bulkFn>>) => string) => {
     setBusy(true);
     try {
+      const before = live;
       const r = await bulkFn({ data: { topic_id: topic.id, ids: live.map((c) => c.id), action } });
       if (r.cards.length) onCards(r.cards);
       if (action === "delete") {
         onChanged();
         onClear();
+        // Unnumbered cards went to the bin; numbered ones were only removed.
+        const removed = new Set(r.removedIds ?? []);
+        undo(done(r), {
+          deleted: r.deletedIds ?? [],
+          before: before.filter((c) => removed.has(c.id)),
+        });
+      } else {
+        const changed = new Set(r.cards.map((c) => c.id));
+        undo(done(r), { before: before.filter((c) => changed.has(c.id)) });
       }
-      toast.success(done(r));
     } catch (e) {
       toast.error(errorText(e, "Couldn't do it"));
     } finally {
@@ -359,6 +392,7 @@ export function AiReview({
   onClose: () => void;
 }) {
   const resolveFn = useServerFn(resolveFlashAi);
+  const undo = useUndo(topic.id, onCards, () => {});
   const [type, setType] = useState("");
   const [off, setOff] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -388,11 +422,14 @@ export function AiReview({
     if (!picks.length) return;
     setBusy(true);
     try {
+      const ids = new Set(picks.map((p) => p.id));
+      const before = cards.filter((c) => ids.has(c.id));
       const r = await resolveFn({ data: { topic_id: topic.id, picks, apply } });
       onCards(r.cards);
       setOff(new Set());
-      toast.success(
+      undo(
         `${picks.length} fix${picks.length === 1 ? "" : "es"} ${apply ? "applied" : "dismissed"} on ${r.changed} card${r.changed === 1 ? "" : "s"}`,
+        { before },
       );
     } catch (e) {
       toast.error(errorText(e, "Couldn't do it"));
@@ -547,5 +584,428 @@ export function AiReview({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Find and replace across the topic: what to find (with its spelling
+// variants, as a whole word), where; every match previewed (before → after)
+// to tick, then replaced (each card's old text kept in its history).
+export function FindReplace({
+  topic,
+  cards,
+  onCards,
+  onClose,
+}: {
+  topic: FlashTopic;
+  cards: FlashCard[];
+  onCards: (c: FlashCard[]) => void;
+  onClose: () => void;
+}) {
+  const replaceFn = useServerFn(replaceFlashText);
+  const undo = useUndo(topic.id, onCards, () => {});
+  const [o, setO] = useState<FindOptions>({
+    find: "",
+    replace: "",
+    where: "all",
+    variants: true,
+    wholeWord: false,
+  });
+  const [reverify, setReverify] = useState(false);
+  const [off, setOff] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [shown, setShown] = useState(100);
+  const matches = useMemo(() => findMatches(cards, topic.columns, o), [cards, topic.columns, o]);
+  const re = useMemo(() => findPattern(o), [o]);
+  const key = (m: FindMatch) => `${m.id}|${m.field}`;
+  const ticked = matches.filter((m) => !off.has(key(m)));
+  const front = new Map(cards.map((c) => [c.id, c.front.split("\n")[0]]));
+  const label = (field: string) =>
+    field === "front" || field === "back"
+      ? field
+      : (topic.columns.find((c) => `ex:${c.id}` === field)?.title ?? "?");
+  const set = (p: Partial<FindOptions>) => {
+    setO({ ...o, ...p });
+    setOff(new Set());
+    setShown(100);
+  };
+  const places = ticked.reduce((n, m) => n + m.count, 0);
+  const cardsTouched = new Set(ticked.map((m) => m.id)).size;
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="flex max-h-[92dvh] flex-col gap-0 p-0 sm:max-w-3xl">
+        <DialogHeader className="space-y-2 border-b border-border px-5 pb-3 pr-12 pt-4 text-left">
+          <DialogTitle className="text-base">Find and replace</DialogTitle>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input
+              aria-label="Find"
+              lang="hi"
+              autoFocus
+              placeholder="Find"
+              value={o.find}
+              onChange={(e) => set({ find: e.target.value })}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+            />
+            <input
+              aria-label="Replace with"
+              lang="hi"
+              placeholder="Replace with (empty: take it out)"
+              value={o.replace}
+              onChange={(e) => set({ replace: e.target.value })}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+            <select
+              aria-label="Where"
+              value={o.where}
+              onChange={(e) => set({ where: e.target.value })}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+            >
+              <option value="all">Every field</option>
+              <option value="front">front</option>
+              <option value="back">back</option>
+              {topic.columns.length > 0 && <option value="ex">Every explanation</option>}
+              {topic.columns.map((c) => (
+                <option key={c.id} value={`ex:${c.id}`}>
+                  explanation_{c.title}
+                </option>
+              ))}
+            </select>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={o.variants}
+                onChange={(e) => set({ variants: e.target.checked })}
+              />
+              Spelling variants too (nukta, ँ / ं)
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={o.wholeWord}
+                onChange={(e) => set({ wholeWord: e.target.checked })}
+              />
+              Whole word only
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={reverify}
+                onChange={(e) => setReverify(e.target.checked)}
+              />
+              Changed cards need verifying again
+            </label>
+          </div>
+        </DialogHeader>
+        <div className="flex-1 overflow-y-auto px-5 py-3">
+          {o.find.trim() && !matches.length && (
+            <p className="py-6 text-center text-sm text-muted-foreground">Not found.</p>
+          )}
+          <ul className="space-y-1.5" lang="hi">
+            {matches.slice(0, shown).map((m) => (
+              <li
+                key={key(m)}
+                data-match={front.get(m.id)}
+                className="grid grid-cols-[auto_1fr] gap-2 rounded-lg border border-border p-2 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  aria-label={`Replace in ${front.get(m.id)} ${label(m.field)}`}
+                  className="mt-1 h-4 w-4"
+                  checked={!off.has(key(m))}
+                  onChange={(e) =>
+                    setOff((p) => {
+                      const n = new Set(p);
+                      if (e.target.checked) n.delete(key(m));
+                      else n.add(key(m));
+                      return n;
+                    })
+                  }
+                />
+                <div className="min-w-0 space-y-1">
+                  <div className="text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">{front.get(m.id)}</span> ·{" "}
+                    {label(m.field)}
+                    {m.count > 1 ? ` · ${m.count} places` : ""}
+                  </div>
+                  <div className="grid gap-1 sm:grid-cols-2">
+                    <div className="whitespace-pre-wrap rounded bg-muted/50 px-2 py-0.5">
+                      {markMatches(m.before, re).map(([t, hit], i) =>
+                        hit ? (
+                          <mark key={i} className="rounded bg-amber-300/60 px-0.5 text-inherit">
+                            {t}
+                          </mark>
+                        ) : (
+                          <span key={i}>{t}</span>
+                        ),
+                      )}
+                    </div>
+                    <div className="whitespace-pre-wrap rounded bg-emerald-500/10 px-2 py-0.5">
+                      {m.after || "—"}
+                    </div>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {matches.length > shown && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              onClick={() => setShown(shown + 300)}
+            >
+              Show more ({matches.length - shown} left)
+            </Button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 border-t border-border px-5 py-2.5">
+          <span className="text-xs text-muted-foreground">
+            {matches.length ? `${places} places in ${cardsTouched} cards ticked` : ""}
+          </span>
+          <Button
+            className="ml-auto"
+            disabled={busy || !ticked.length}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                const r = await replaceFn({
+                  data: {
+                    topic_id: topic.id,
+                    reverify,
+                    edits: ticked.map((m) => ({
+                      id: m.id,
+                      field: m.field,
+                      before: m.before,
+                      after: m.after,
+                    })),
+                  },
+                });
+                const changed = new Set(r.cards.map((c) => c.id));
+                const before = cards.filter((c) => changed.has(c.id));
+                onCards(r.cards);
+                undo(
+                  `Replaced in ${r.changed} card${r.changed === 1 ? "" : "s"}${r.skipped ? `; ${r.skipped} changed meanwhile, left` : ""}`,
+                  { before },
+                );
+                setOff(new Set());
+              } catch (e) {
+                toast.error(errorText(e, "Couldn't replace"));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Replace in {cardsTouched} card{cardsTouched === 1 ? "" : "s"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// The topic's cards deleted in the last 30 days, to tick and put back.
+export function RecentlyDeleted({
+  topic,
+  onChanged,
+  onClose,
+}: {
+  topic: FlashTopic;
+  onChanged: () => void;
+  onClose: () => void;
+}) {
+  const listFn = useServerFn(listFlashTrash);
+  const restoreFn = useServerFn(restoreFlashTrash);
+  const q = useQuery({
+    queryKey: ["flashTrash", topic.id],
+    queryFn: () => listFn({ data: { topic_id: topic.id } }),
+  });
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const items = q.data ?? [];
+  const restore = async (ids: string[]) => {
+    setBusy(true);
+    try {
+      const r = await restoreFn({ data: { topic_id: topic.id, ids } });
+      setPicked(new Set());
+      await q.refetch();
+      onChanged();
+      toast.success(`${r.restored} card${r.restored === 1 ? "" : "s"} put back`);
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't put them back"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const when = (at: string) => {
+    const days = Math.floor((Date.now() - new Date(at).getTime()) / 86_400_000);
+    return days < 1 ? "today" : days === 1 ? "yesterday" : `${days} days ago`;
+  };
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent
+        className="flex max-h-[92dvh] flex-col gap-0 p-0 sm:max-w-3xl"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <DialogHeader className="space-y-1 border-b border-border px-5 pb-3 pr-12 pt-4 text-left">
+          <DialogTitle className="text-base">Recently deleted ({items.length})</DialogTitle>
+          <p className="text-xs text-muted-foreground">
+            Deleted cards stay here for 30 days. Put back, a card comes back as it was.
+          </p>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3" aria-label="Deleted cards">
+          {q.isLoading ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
+          ) : q.error ? (
+            <p className="py-6 text-center text-sm text-destructive">
+              {errorText(q.error, "Couldn't load them")}
+            </p>
+          ) : !items.length ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              Nothing deleted in the last 30 days.
+            </p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {items.map((t) => (
+                <li key={t.id} data-trash={t.id} className="flex items-start gap-3 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    aria-label={`Tick ${t.front.split("\n")[0]}`}
+                    checked={picked.has(t.id)}
+                    onChange={(e) => {
+                      const next = new Set(picked);
+                      if (e.target.checked) next.add(t.id);
+                      else next.delete(t.id);
+                      setPicked(next);
+                    }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium" lang="hi">
+                      {t.front.split("\n")[0]}
+                    </div>
+                    <div className="truncate text-muted-foreground" lang="hi">
+                      {t.back}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {when(t.deleted_at)}
+                      {t.why && t.why !== "deleted" ? ` · ${t.why}` : ""}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => void restore([t.id])}
+                  >
+                    Put back
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        {items.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-border px-5 py-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                setPicked(
+                  picked.size === items.length ? new Set() : new Set(items.map((t) => t.id)),
+                )
+              }
+            >
+              {picked.size === items.length ? "Untick all" : "Tick all"}
+            </Button>
+            <Button
+              className="ml-auto"
+              disabled={busy || !picked.size}
+              onClick={() => void restore([...picked])}
+            >
+              Put back {picked.size || ""} ticked
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// What the books say about a card, beside an explanation the AI wrote from
+// its own knowledge: the card's books' text where its word is, then
+// SAATHI's closest passages; the word marked in each.
+export function BookText({ topicId, card }: { topicId: string; card: FlashCard }) {
+  const textFn = useServerFn(getFlashBookText);
+  const [open, setOpen] = useState(false);
+  const q = useQuery({
+    queryKey: ["flashBookText", card.id],
+    queryFn: () => textFn({ data: { topic_id: topicId, card_id: card.id } }),
+    enabled: open,
+    staleTime: 10 * 60_000,
+  });
+  const word = card.front.split("\n")[0].trim();
+  const re = useMemo(() => findPattern({ find: word, variants: true, wholeWord: false }), [word]);
+  if (!open)
+    return (
+      <Button
+        size="sm"
+        variant="ghost"
+        className="mt-0.5 h-7 px-2 text-xs"
+        onClick={() => setOpen(true)}
+      >
+        <BookOpen className="mr-1 h-3.5 w-3.5" /> Check it against the book
+      </Button>
+    );
+  const list = q.data?.passages ?? [];
+  return (
+    <div
+      className="mt-1 space-y-2 rounded-lg border border-amber-200 bg-amber-50/40 p-2 text-sm dark:border-amber-900 dark:bg-amber-950/10"
+      aria-label="Book text"
+    >
+      <div className="flex items-center gap-2 text-xs font-medium">
+        <BookOpen className="h-3.5 w-3.5" /> What the books say
+        <Button
+          size="icon"
+          variant="ghost"
+          className="ml-auto h-6 w-6"
+          aria-label="Hide the book text"
+          onClick={() => setOpen(false)}
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      {q.isLoading ? (
+        <p className="text-xs text-muted-foreground">Looking in the books…</p>
+      ) : q.error ? (
+        <p className="text-xs text-destructive">{errorText(q.error, "Couldn't look it up")}</p>
+      ) : !list.length ? (
+        <p className="text-xs text-muted-foreground">
+          Nothing found for this word in its books or in SAATHI&apos;s knowledge base.
+        </p>
+      ) : (
+        list.map((p, i) => (
+          <div key={i} data-passage={p.from}>
+            <div className="mb-0.5 text-xs text-muted-foreground">
+              {p.from === "book" ? `Your book: ${p.label}` : `SAATHI: ${p.label}`}
+            </div>
+            <p
+              className="max-h-48 overflow-y-auto whitespace-pre-wrap text-[13px] leading-relaxed"
+              lang="hi"
+            >
+              {markMatches(p.text, re).map(([t, hit], k) =>
+                hit ? (
+                  <mark key={k} className="rounded bg-amber-200 px-0.5 dark:bg-amber-700/60">
+                    {t}
+                  </mark>
+                ) : (
+                  <span key={k}>{t}</span>
+                ),
+              )}
+            </p>
+          </div>
+        ))
+      )}
+    </div>
   );
 }

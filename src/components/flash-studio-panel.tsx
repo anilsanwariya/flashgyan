@@ -21,6 +21,7 @@ import {
   ClipboardPaste,
   Copy,
   Eye,
+  Smartphone,
   Download,
   FileUp,
   KeyRound,
@@ -84,7 +85,15 @@ import {
 import { zipFiles } from "@/lib/zip";
 import { BooksPanel } from "@/components/flash-studio-books";
 import { ServerJobsBar, StudioJobBar } from "@/components/flash-studio-jobs";
-import { AiReview, BulkBar, HistoryButton, QuickChecks } from "@/components/flash-studio-tools";
+import {
+  AiReview,
+  BulkBar,
+  BookText,
+  FindReplace,
+  RecentlyDeleted,
+  HistoryButton,
+  QuickChecks,
+} from "@/components/flash-studio-tools";
 import { lintCard, lintTopic, numberingOf, spellingVariants, type Lint } from "@/lib/flash-lint";
 import {
   DropdownMenu,
@@ -106,6 +115,7 @@ import {
   type SortKey,
 } from "@/lib/flash-merge";
 import { BOOK_FILE_TYPES, isBookFile } from "@/lib/flash-read";
+import { StudentPreview } from "@/components/flash-studio-preview";
 import { Badge, PageTabs, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -868,6 +878,8 @@ function CardsTab({
   const [view, setView] = useState<"list" | "table">("list");
   const [merging, setMerging] = useState(false);
   const [reviewing, setReviewing] = useState(false);
+  const [finding, setFinding] = useState(false);
+  const [trash, setTrash] = useState(false);
   const books = new Map(topic.books.map((b) => [b.code, b]));
   const bookCodes = useMemo(
     () => [...new Set([...topic.books.map((b) => b.code), ...cards.flatMap((c) => booksOf(c))])],
@@ -1065,6 +1077,8 @@ function CardsTab({
           merging={merging}
           setMerging={setMerging}
           onReview={() => setReviewing(true)}
+          onFind={() => setFinding(true)}
+          onTrash={() => setTrash(true)}
           onChanged={onChanged}
           onCards={onCard}
         />
@@ -1329,6 +1343,17 @@ function CardsTab({
         <Button variant="outline" size="sm" onClick={() => setShown(shown + 120)}>
           Show more ({list.length - shown} left)
         </Button>
+      )}
+      {trash && (
+        <RecentlyDeleted topic={topic} onChanged={onChanged} onClose={() => setTrash(false)} />
+      )}
+      {finding && (
+        <FindReplace
+          topic={topic}
+          cards={cards}
+          onCards={onCard}
+          onClose={() => setFinding(false)}
+        />
       )}
       {reviewing && (
         <AiReview
@@ -1897,6 +1922,7 @@ function CardDialog({
   const fillFn = useServerFn(fillFlashExplanations);
   const [c, setC] = useState(card);
   const [busy, setBusy] = useState(false);
+  const [student, setStudent] = useState(false);
   // The card changed outside (saved, or the AI check ran in the
   // background): edits not saved yet stay, the check's findings come in.
   const shown = useRef(card);
@@ -2145,6 +2171,7 @@ function CardDialog({
                   book; editing it makes it yours.
                 </p>
               )}
+              {c.own.includes(col.id) && <BookText topicId={topic.id} card={card} />}
               {col.hint && <p className="mt-0.5 text-xs text-muted-foreground">{col.hint}</p>}
             </div>
           ))}
@@ -2218,6 +2245,22 @@ function CardDialog({
             )}
           </div>
           <HistoryButton card={c} onRestore={(v) => setC({ ...c, ...v })} />
+          <Button
+            variant="ghost"
+            size="sm"
+            title="The card as students see it in the app (with your edits)"
+            onClick={() => setStudent(true)}
+          >
+            <Smartphone className="mr-1 h-4 w-4" /> Student view
+          </Button>
+          {student && (
+            <StudentPreview
+              topic={topic}
+              cards={[c]}
+              title="Student view"
+              onClose={() => setStudent(false)}
+            />
+          )}
           {!c.removed && (
             <Button
               variant="ghost"
@@ -2582,6 +2625,7 @@ function ChunksTab({
   const [target, setTarget] = useState(100);
   const [sizes, setSizes] = useState(() => suggestSizes(waiting.length, 100).join(", "));
   const [busy, setBusy] = useState(false);
+  const [chunkPreview, setChunkPreview] = useState<number | null>(null);
   const [report, setReport] = useState<IdMatch | null>(null);
   const idRef = useRef<HTMLInputElement>(null);
   useEffect(
@@ -2887,6 +2931,15 @@ function ChunksTab({
                     <Badge tone="good">no changes since download</Badge>
                   )}
                   <span className="ml-auto flex gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      aria-label={`Preview chunk ${ch.n}`}
+                      disabled={!inChunk.length}
+                      onClick={() => setChunkPreview(ch.n)}
+                    >
+                      <Smartphone className="mr-1 h-4 w-4" /> Preview
+                    </Button>
                     <Button size="sm" variant="outline" onClick={() => void download(ch.n)}>
                       <Download className="mr-1 h-4 w-4" /> .xlsx
                     </Button>
@@ -2898,6 +2951,16 @@ function ChunksTab({
               );
             })}
           </ul>
+          {chunkPreview !== null && (
+            <StudentPreview
+              topic={topic}
+              cards={live
+                .filter((c) => c.chunk === chunkPreview)
+                .sort((a, b) => (a.card_order ?? 0) - (b.card_order ?? 0))}
+              title={`Chunk ${chunkPreview} as students see it`}
+              onClose={() => setChunkPreview(null)}
+            />
+          )}
           {removed.length > 0 && (
             <div className="rounded-xl border border-amber-300 bg-amber-50/50 p-3 text-sm dark:bg-amber-950/20">
               <div className="font-medium">Removed here: delete these in the app too</div>

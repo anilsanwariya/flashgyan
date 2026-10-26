@@ -11,6 +11,8 @@ import {
   Combine,
   Eye,
   ListChecks,
+  SearchCode,
+  Trash2,
   Server,
   Replace,
   ScanSearch,
@@ -187,6 +189,8 @@ export function ProofTools({
   merging,
   setMerging,
   onReview,
+  onFind,
+  onTrash,
   onChanged,
   onCards,
 }: {
@@ -199,6 +203,9 @@ export function ProofTools({
   setMerging: (open: boolean) => void;
   // Every AI fix in the topic, in one list.
   onReview: () => void;
+  onFind: () => void;
+  // The cards deleted in the last 30 days.
+  onTrash: () => void;
   onChanged: () => void;
   onCards: (c: FlashCard[]) => void;
 }) {
@@ -317,6 +324,10 @@ export function ProofTools({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-72">
+            <DropdownMenuItem onSelect={onFind}>
+              <SearchCode className="mr-2 h-4 w-4 shrink-0" />
+              {item("Find and replace", "A word or spelling, in every card, previewed first")}
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setMerging(true)}>
               <Combine className="mr-2 h-4 w-4 shrink-0" />
               {item(
@@ -399,6 +410,11 @@ export function ProofTools({
                 </DropdownMenuItem>
               </>
             )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onTrash}>
+              <Trash2 className="mr-2 h-4 w-4 shrink-0" />
+              {item("Recently deleted", "Cards deleted in the last 30 days, to put back")}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       }
