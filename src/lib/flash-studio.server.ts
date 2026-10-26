@@ -284,9 +284,13 @@ export type ImportResult = {
 // for a topic with no numbers yet.
 export async function importSheet(
   topicId: string,
-  sheet: { cards: SheetCard[]; columns: string[]; prompt: string; book: string },
+  sheet: { cards: SheetCard[]; columns: string[]; prompt: string; book: string; name?: string },
   keepNumbers: boolean,
+  // A sheet added before, replaced by this one (its cards not yet
+  // numbered go; numbered ones stay, their numbers being in the app).
+  replace?: string,
 ): Promise<ImportResult> {
+  if (replace) await deleteSource(replace);
   const { topic, cards } = await getTopic(topicId);
   const columns = [...topic.columns];
   const columnsAdded: string[] = [];
@@ -318,6 +322,28 @@ export async function importSheet(
       throw new Error("Every card needs a sheet and an order to keep the numbers.");
   }
   const start = cards.reduce((m, c) => Math.max(m, c.pos + 1), 0);
+  // The sheet kept as one of the topic's sources (shown in its Sheets tab).
+  const sheetBooks = [
+    ...new Set(sheet.cards.map((c) => (c.book || sheet.book).trim()).filter(Boolean)),
+  ];
+  let src: string | null = null;
+  {
+    const { data, error } = await from("flash_sources")
+      .insert({
+        topic_id: topicId,
+        book: sheetBooks.join(", ").slice(0, 60) || "—",
+        name: (sheet.name ?? "").slice(0, 200),
+        kind: "sheet",
+        total: 1,
+        done: 1,
+        cards: sheet.cards.length,
+        context: { parts: [1], rows: sheet.cards.length, deleted: 0, merged: 0 },
+      } as never)
+      .select("id")
+      .single();
+    // Before the sheet migration: added without being kept as a source.
+    if (!error) src = String((data as unknown as Row).id);
+  }
   const rows: Row[] = sheet.cards.map((c, i) => {
     const ex: Record<string, string> = {};
     for (const [title, v] of Object.entries(c.ex)) {
@@ -335,7 +361,7 @@ export async function importSheet(
       is_revealed: c.is_revealed,
       word_key: c.word_key || null,
       ex,
-      sources: book ? [{ book, pos: c.book_order }] : [],
+      sources: book || src ? [{ book, pos: c.book_order, ...(src ? { src } : {}) }] : [],
       error: c.error,
       error_type: c.error_type,
       chunk: keepNumbers ? c.sheet : null,
@@ -437,6 +463,7 @@ export async function deleteCard(id: string): Promise<"deleted" | "removed"> {
   const card = readCard(data as unknown as Row);
   if (card.card_order === null) {
     fail((await from("flash_cards").delete().eq("id", id)).error);
+    await countFor(card.sources[0]?.src, "deleted");
     await touch(card.topic_id);
     return "deleted";
   }
@@ -506,7 +533,7 @@ const readSource = (r: Row): FlashSourceRow => ({
   topic_id: String(r.topic_id),
   book: String(r.book),
   name: String(r.name ?? ""),
-  kind: (["word", "pdf", "text"].includes(String(r.kind))
+  kind: (["word", "pdf", "text", "sheet"].includes(String(r.kind))
     ? r.kind
     : "text") as FlashSourceRow["kind"],
   total: Number(r.total) || 0,
@@ -515,6 +542,9 @@ const readSource = (r: Row): FlashSourceRow => ({
   cards: Number(r.cards) || 0,
   todos: Array.isArray(r.todos) ? (r.todos as FlashSourceRow["todos"]) : [],
   error: typeof r.error === "string" ? r.error : null,
+  rows: Number((r.context as { rows?: number })?.rows) || 0,
+  deleted: Number((r.context as { deleted?: number })?.deleted) || 0,
+  merged: Number((r.context as { merged?: number })?.merged) || 0,
   created_at: String(r.created_at),
 });
 
@@ -742,7 +772,39 @@ export async function deleteSource(sourceId: string): Promise<{ deleted: number;
   const cards = (await topicCards(topicId)).filter((c) =>
     c.sources.some((s) => s.src === sourceId),
   );
-  const drop = cards.filter((c) => c.card_order === null).map((c) => c.id);
+  // Its own cards not yet numbered go; numbered ones stay. One holding other
+  // books' versions merged into it goes to the next book's version instead.
+  const own = cards.filter((c) => c.sources[0]?.src === sourceId);
+  const free = own.filter((c) => c.card_order === null);
+  const promote = free
+    .map((c) => {
+      const variants = c.variants.filter((v) => v.source?.src !== sourceId);
+      const [v, ...rest] = variants;
+      if (!v) return null;
+      return {
+        id: c.id,
+        topic_id: c.topic_id,
+        front: v.front,
+        back: v.back,
+        ex: v.ex,
+        own: [],
+        verified: false,
+        sources: [
+          ...(v.source ? [v.source] : []),
+          ...c.sources.filter((s) => s.src !== sourceId && !sameSource(s, v.source)),
+        ],
+        variants: rest,
+        updated_at: now(),
+      };
+    })
+    .filter((r) => r !== null);
+  for (let i = 0; i < promote.length; i += 500)
+    fail(
+      (await from("flash_cards").upsert(promote.slice(i, i + 500) as never, { onConflict: "id" }))
+        .error,
+    );
+  const kept = new Set(promote.map((r) => r.id));
+  const drop = free.filter((c) => !kept.has(c.id)).map((c) => c.id);
   for (let i = 0; i < drop.length; i += 200)
     fail(
       (
@@ -751,10 +813,28 @@ export async function deleteSource(sourceId: string): Promise<{ deleted: number;
           .in("id", drop.slice(i, i + 200))
       ).error,
     );
+  // Its versions merged into other books' cards are taken out of them.
+  const strip = cards
+    .filter((c) => c.sources[0]?.src !== sourceId)
+    .map((c) => ({
+      id: c.id,
+      topic_id: c.topic_id,
+      sources: c.sources.filter((s) => s.src !== sourceId),
+      variants: c.variants.filter((v) => v.source?.src !== sourceId),
+      updated_at: now(),
+    }));
+  for (let i = 0; i < strip.length; i += 500)
+    fail(
+      (await from("flash_cards").upsert(strip.slice(i, i + 500) as never, { onConflict: "id" }))
+        .error,
+    );
   fail((await from("flash_sources").delete().eq("id", sourceId)).error);
   await touch(topicId);
-  return { deleted: drop.length, kept: cards.length - drop.length };
+  return { deleted: free.length, kept: own.length - free.length };
 }
+
+const sameSource = (a: FlashCard["sources"][number], b: FlashCard["sources"][number] | null) =>
+  !!b && a.book === b.book && a.pos === b.pos && a.src === b.src && a.page === b.page;
 
 // ---------- Merging the same word from several books ----------
 
@@ -776,6 +856,7 @@ async function cardsByIds(ids: string[]): Promise<FlashCard[]> {
 async function foldInto(main: FlashCard, others: FlashCard[]) {
   if (others.some((o) => o.card_order !== null))
     throw new Error("A numbered card can't be merged into another; remove it instead");
+  for (const o of others) await countFor(o.sources[0]?.src, "merged");
   const ex = { ...main.ex };
   const own = [...main.own];
   for (const o of others)
@@ -1182,4 +1263,95 @@ export async function makeSplitCards(
   await insertCards(rows);
   await touch(target.id);
   return { topic: target, added: rows.length, ai, skipped };
+}
+
+// ---------- A sheet's counts ----------
+
+// A card of this source deleted or merged into another: counted on the
+// source, for its status.
+async function countFor(src: string | undefined, what: "deleted" | "merged") {
+  if (!src) return;
+  try {
+    await updateSource(src, (r) => {
+      const ctx = (r.context ?? {}) as Record<string, unknown>;
+      return { context: { ...ctx, [what]: (Number(ctx[what]) || 0) + 1 } };
+    });
+  } catch {
+    // The source is gone, or busy: only its count is missed.
+  }
+}
+
+// ---------- Starting the chunks again ----------
+
+// Every number, chunk and app id taken off the topic's cards (cards removed
+// after numbering go for good), so it can be finalised again. For a topic
+// chunked only to try it out: its chunks in the app no longer match.
+export async function resetChunks(topicId: string): Promise<{ cards: number; removed: number }> {
+  const cards = await topicCards(topicId);
+  const removed = cards.filter((c) => c.removed).map((c) => c.id);
+  for (let i = 0; i < removed.length; i += 200)
+    fail(
+      (
+        await from("flash_cards")
+          .delete()
+          .in("id", removed.slice(i, i + 200))
+      ).error,
+    );
+  const rows = cards
+    .filter((c) => !c.removed && (c.card_order !== null || c.chunk !== null || c.app_id))
+    .map((c) => ({
+      id: c.id,
+      topic_id: topicId,
+      chunk: null,
+      card_order: null,
+      app_id: null,
+      updated_at: now(),
+    }));
+  for (let i = 0; i < rows.length; i += 500)
+    fail(
+      (await from("flash_cards").upsert(rows.slice(i, i + 500) as never, { onConflict: "id" }))
+        .error,
+    );
+  fail(
+    (
+      await from("flash_topics")
+        .update({ chunks: [], locked_at: null, updated_at: now() } as never)
+        .eq("id", topicId)
+    ).error,
+  );
+  return { cards: rows.length, removed: removed.length };
+}
+
+// ---------- One wording for an explanation ----------
+
+// Every card whose column says one of `wordings` (the same explanation in other
+// words) given `to` instead. The editor chose it, so it is no longer marked
+// as the AI's own.
+export async function setExplanation(
+  topicId: string,
+  column: string,
+  wordings: string[],
+  to: string,
+): Promise<{ changed: number }> {
+  const want = new Set(wordings.map((f) => f.trim()));
+  const cards = (await topicCards(topicId)).filter(
+    (c) =>
+      !c.removed &&
+      want.has((c.ex[column] ?? "").trim()) &&
+      (c.ex[column] ?? "").trim() !== to.trim(),
+  );
+  const rows = cards.map((c) => ({
+    id: c.id,
+    topic_id: topicId,
+    ex: { ...c.ex, [column]: to },
+    own: c.own.filter((o) => o !== column),
+    updated_at: now(),
+  }));
+  for (let i = 0; i < rows.length; i += 500)
+    fail(
+      (await from("flash_cards").upsert(rows.slice(i, i + 500) as never, { onConflict: "id" }))
+        .error,
+    );
+  if (rows.length) await touch(topicId);
+  return { changed: rows.length };
 }

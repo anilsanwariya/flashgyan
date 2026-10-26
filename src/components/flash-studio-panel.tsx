@@ -41,6 +41,7 @@ import {
   listFlashTemplates,
   listFlashTopics,
   numberFlashCards,
+  resetFlashChunks,
   saveFlashAppIds,
   markFlashDownloaded,
   saveFlashCard,
@@ -73,8 +74,17 @@ import {
 } from "@/lib/flash-studio";
 import { zipFiles } from "@/lib/zip";
 import { BooksPanel } from "@/components/flash-studio-books";
+import { SheetsTab } from "@/components/flash-studio-sheets";
 import { ProofTools, Versions } from "@/components/flash-studio-proof";
-import { booksOf, disagreement, emptyColumns } from "@/lib/flash-merge";
+import {
+  booksOf,
+  disagreement,
+  emptyColumns,
+  groupDuplicates,
+  sortCards,
+  versionFor,
+  type SortKey,
+} from "@/lib/flash-merge";
 import { BOOK_FILE_TYPES, isBookFile } from "@/lib/flash-read";
 import { Badge, PageTabs, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
@@ -550,7 +560,7 @@ function ColumnsEditor({
 
 // ---------- One topic ----------
 
-type TopicTab = "cards" | "chunks" | "settings";
+type TopicTab = "cards" | "sheets" | "chunks" | "settings";
 
 function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
   const getFn = useServerFn(getFlashTopic);
@@ -561,6 +571,21 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
   });
   const qc = useQueryClient();
   const [tab, setTab] = useState<TopicTab>("cards");
+  // A sheet being added (or replacing one already added).
+  const [importing, setImporting] = useState<{
+    file: string;
+    sheet: ParsedSheet;
+    replace?: FlashSourceRow;
+  } | null>(null);
+  const pickSheet = async (file: File, replace?: FlashSourceRow) => {
+    try {
+      const sheet = parseSheet(await readRows(file));
+      if (!sheet.cards.length) throw new Error("No cards found in the sheet");
+      setImporting({ file: file.name, sheet, replace });
+    } catch (err) {
+      toast.error(errorText(err, "Couldn't read the sheet"));
+    }
+  };
   const reload = () => qc.invalidateQueries({ queryKey: ["flashTopic", id] });
   // A card saved: put into the list without reloading every card.
   const putCard = (card: FlashCard | FlashCard[]) => {
@@ -600,6 +625,7 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
         label="Topic"
         tabs={[
           { id: "cards", label: "Cards" },
+          { id: "sheets", label: "Sheets" },
           { id: "chunks", label: "Chunks", dot: topic.chunks.length > 0 && unnumbered > 0 },
           { id: "settings", label: "Settings" },
         ]}
@@ -613,10 +639,34 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
           sources={sources}
           onChanged={reload}
           onCard={putCard}
+          onSheet={(f) => void pickSheet(f)}
+        />
+      )}
+      {tab === "sheets" && (
+        <SheetsTab
+          topic={topic}
+          cards={cards}
+          sources={sources}
+          onAdd={(f, replace) => void pickSheet(f, replace)}
+          onChanged={reload}
         />
       )}
       {tab === "chunks" && <ChunksTab topic={topic} cards={cards} onChanged={reload} />}
       {tab === "settings" && <SettingsTab topic={topic} onChanged={reload} />}
+      {importing && (
+        <ImportDialog
+          topic={topic}
+          hasNumbers={cards.some((c) => c.card_order !== null) || topic.chunks.length > 0}
+          file={importing.file}
+          sheet={importing.sheet}
+          replace={importing.replace}
+          onClose={() => setImporting(null)}
+          onDone={() => {
+            setImporting(null);
+            void reload();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -657,12 +707,14 @@ function CardsTab({
   sources,
   onChanged,
   onCard,
+  onSheet,
 }: {
   topic: FlashTopic;
   cards: FlashCard[];
   sources: FlashSourceRow[];
   onChanged: () => void;
   onCard: (c: FlashCard | FlashCard[]) => void;
+  onSheet: (file: File) => void;
 }) {
   const addFn = useServerFn(addFlashCard);
   const [filter, setFilter] = useState<Filter>("all");
@@ -671,14 +723,39 @@ function CardsTab({
   const [editing, setEditing] = useState<FlashCard | null>(null);
   // Proofreading: the cards shown, one after another.
   const [proof, setProof] = useState<{ ids: string[]; i: number } | null>(null);
-  const [importing, setImporting] = useState<{ file: string; sheet: ParsedSheet } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [bookFile, setBookFile] = useState<File | null>(null);
   const [pasting, setPasting] = useState(false);
+  // One book's cards in its own words, or every book's merged.
+  const [book, setBook] = useState("");
+  const [sort, setSort] = useState<SortKey>("order");
+  const [desc, setDesc] = useState(false);
+  const [view, setView] = useState<"list" | "table">("list");
   const books = new Map(topic.books.map((b) => [b.code, b]));
+  const bookCodes = useMemo(
+    () => [...new Set([...topic.books.map((b) => b.code), ...cards.flatMap((c) => booksOf(c))])],
+    [cards, topic.books],
+  );
+  // Cards of the same word not merged into one yet.
+  const othersOf = useMemo(() => {
+    const m = new Map<string, FlashCard[]>();
+    for (const g of groupDuplicates(cards))
+      for (const c of g.cards)
+        m.set(
+          c.id,
+          g.cards.filter((o) => o.id !== c.id),
+        );
+    return m;
+  }, [cards]);
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return cards
+    const picked = cards
+      .filter((c) => !book || booksOf(c).includes(book))
+      .map((c) => {
+        // In one book's view a card shows that book's version.
+        const v = book ? versionFor(c, book) : null;
+        return v ? { ...c, front: v.front, back: v.back, ex: v.ex } : c;
+      })
       .filter((c) => {
         if (filter === "removed") return c.removed;
         if (c.removed) return false;
@@ -702,14 +779,30 @@ function CardsTab({
           !q ||
           `${c.front}\n${c.back}\n${Object.values(c.ex).join("\n")}`.toLowerCase().includes(q) ||
           String(c.card_order) === q,
-      )
-      .sort((a, b) => (a.card_order ?? Infinity) - (b.card_order ?? Infinity) || a.pos - b.pos);
-  }, [cards, filter, query, topic.columns]);
+      );
+    return sortCards(picked, sort, desc);
+  }, [cards, filter, query, topic.columns, book, sort, desc]);
+  const open = (shown: FlashCard) => setEditing(cards.find((c) => c.id === shown.id) ?? shown);
+  const dropFromProof = (ids: string[]) => {
+    // Merged or deleted cards leave the list; the one open stays, or the
+    // next takes its place.
+    setProof((p) => {
+      if (!p) return p;
+      const cur = p.ids[p.i];
+      const left = p.ids.filter((id) => !ids.includes(id));
+      if (!left.length) return null;
+      const i = ids.includes(cur)
+        ? p.ids.slice(0, p.i).filter((id) => !ids.includes(id)).length
+        : left.indexOf(cur);
+      return { ids: left, i: Math.min(i, left.length - 1) };
+    });
+    onChanged();
+  };
   return (
     <div className="space-y-3">
       <BooksPanel
         topic={topic}
-        sources={sources}
+        sources={sources.filter((s) => s.kind !== "sheet")}
         onChanged={onChanged}
         openFile={bookFile}
         onOpened={() => setBookFile(null)}
@@ -731,13 +824,7 @@ function CardsTab({
             e.target.value = "";
             if (!file) return;
             if (isBookFile(file)) return setBookFile(file);
-            try {
-              const sheet = parseSheet(await readRows(file));
-              if (!sheet.cards.length) throw new Error("No cards found in the sheet");
-              setImporting({ file: file.name, sheet });
-            } catch (err) {
-              toast.error(errorText(err, "Couldn't read the sheet"));
-            }
+            onSheet(file);
           }}
         />
         <Button
@@ -778,7 +865,7 @@ function CardsTab({
             setProof({ ids, i: Math.max(0, first) });
           }}
         >
-          <BadgeCheck className="mr-1 h-4 w-4" /> Proofread ({list.length})
+          <BadgeCheck className="mr-1 h-4 w-4" /> One by one ({list.length})
         </Button>
         <ProofTools
           topic={topic}
@@ -787,6 +874,68 @@ function CardsTab({
           onChanged={onChanged}
           onCards={onCard}
         />
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <select
+          aria-label="Book"
+          value={book}
+          onChange={(e) => {
+            setBook(e.target.value);
+            setShown(60);
+          }}
+          className="h-8 rounded-md border border-input bg-background px-2"
+        >
+          <option value="">All books (merged)</option>
+          {bookCodes.map((b) => (
+            <option key={b} value={b}>
+              {b}
+              {books.get(b)?.name ? ` · ${books.get(b)!.name}` : ""} only
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Sort by"
+          value={sort}
+          onChange={(e) => setSort(e.target.value as SortKey)}
+          className="h-8 rounded-md border border-input bg-background px-2"
+        >
+          <option value="order">Order (numbers, then as added)</option>
+          <option value="front">front A–Z</option>
+          <option value="back">back A–Z</option>
+          <option value="book">Book</option>
+          {topic.columns.map((col) => (
+            <option key={col.id} value={`ex:${col.id}`}>
+              explanation_{col.title} A–Z
+            </option>
+          ))}
+        </select>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-8"
+          aria-label={desc ? "Descending" : "Ascending"}
+          title={desc ? "Descending (Z–A)" : "Ascending (A–Z)"}
+          onClick={() => setDesc(!desc)}
+        >
+          {desc ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />}
+        </Button>
+        <div
+          className="ml-auto flex overflow-hidden rounded-md border border-input"
+          role="group"
+          aria-label="View"
+        >
+          {(["list", "table"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              aria-pressed={view === v}
+              onClick={() => setView(v)}
+              className={`px-3 py-1 text-xs ${view === v ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}
+            >
+              {v === "list" ? "List" : "Table"}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="flex flex-wrap gap-1">
         {FILTERS.map((f) => (
@@ -815,12 +964,15 @@ function CardsTab({
           and pasted text can also be read by the AI.
         </p>
       )}
-      <ul className="space-y-2">
-        {list.slice(0, shown).map((c) => (
+      {view === "table" && list.length > 0 && (
+        <CardTable topic={topic} cards={list.slice(0, shown)} onOpen={open} />
+      )}
+      <ul className={`space-y-2 ${view === "table" ? "hidden" : ""}`}>
+        {(view === "list" ? list.slice(0, shown) : []).map((c) => (
           <li key={c.id}>
             <button
               type="button"
-              onClick={() => setEditing(c)}
+              onClick={() => open(c)}
               className={`w-full rounded-xl border p-3 text-left hover:bg-muted/40 ${c.error ? "border-red-300" : "border-border"}`}
             >
               <div className="mb-1 flex flex-wrap items-center gap-1.5 text-xs">
@@ -857,6 +1009,24 @@ function CardsTab({
                 <div className="whitespace-pre-wrap font-medium">{c.front || "—"}</div>
                 <div className="whitespace-pre-wrap text-sm">{c.back || "—"}</div>
               </div>
+              {topic.columns.some((col) => c.ex[col.id]) && (
+                <dl
+                  className="mt-1.5 space-y-0.5 border-t border-border/60 pt-1.5 text-xs"
+                  lang="hi"
+                >
+                  {topic.columns.map((col) =>
+                    c.ex[col.id] ? (
+                      <div key={col.id} className="flex gap-1.5">
+                        <dt className="shrink-0 text-muted-foreground">{col.title}:</dt>
+                        <dd className="min-w-0 whitespace-pre-wrap">
+                          {c.own.includes(col.id) ? "◇ " : ""}
+                          {c.ex[col.id]}
+                        </dd>
+                      </div>
+                    ) : null,
+                  )}
+                </dl>
+              )}
               {(c.sources[0]?.heading || c.sources[0]?.rule || c.sources[0]?.note) && (
                 <div className="mt-1 text-xs text-muted-foreground" lang="hi">
                   {[c.sources[0].heading, c.sources[0].rule].filter(Boolean).join(" · ")}
@@ -884,7 +1054,9 @@ function CardsTab({
       {editing && !proof && (
         <CardDialog
           topic={topic}
-          card={editing}
+          card={cards.find((c) => c.id === editing.id) ?? editing}
+          others={othersOf.get(editing.id)}
+          onOthersGone={() => onChanged()}
           onClose={() => setEditing(null)}
           onSaved={(c) => {
             onCard(c);
@@ -900,6 +1072,8 @@ function CardsTab({
         <CardDialog
           topic={topic}
           card={cards.find((c) => c.id === proof.ids[proof.i])!}
+          others={othersOf.get(proof.ids[proof.i])}
+          onOthersGone={(ids) => dropFromProof(ids)}
           nav={{
             index: proof.i,
             total: proof.ids.length,
@@ -916,23 +1090,7 @@ function CardsTab({
           }}
           onClose={() => setProof(null)}
           onSaved={(c) => onCard(c)}
-          onGone={() => {
-            setProof((p) => (p ? { ids: p.ids.filter((id) => id !== p.ids[p.i]), i: p.i } : p));
-            onChanged();
-          }}
-        />
-      )}
-      {importing && (
-        <ImportDialog
-          topic={topic}
-          hasNumbers={cards.some((c) => c.card_order !== null) || topic.chunks.length > 0}
-          file={importing.file}
-          sheet={importing.sheet}
-          onClose={() => setImporting(null)}
-          onDone={() => {
-            setImporting(null);
-            onChanged();
-          }}
+          onGone={() => dropFromProof([proof.ids[proof.i]])}
         />
       )}
     </div>
@@ -964,6 +1122,7 @@ function ImportDialog({
   hasNumbers,
   file,
   sheet,
+  replace,
   onClose,
   onDone,
 }: {
@@ -971,13 +1130,15 @@ function ImportDialog({
   hasNumbers: boolean;
   file: string;
   sheet: ParsedSheet;
+  // The sheet this one replaces: its cards go first.
+  replace?: FlashSourceRow;
   onClose: () => void;
   onDone: () => void;
 }) {
   const importFn = useServerFn(importFlashSheet);
   const qc = useQueryClient();
   const needsBook = sheet.cards.some((c) => !c.book);
-  const [book, setBook] = useState("");
+  const [book, setBook] = useState(replace?.kind === "sheet" ? replace.book : "");
   const [keep, setKeep] = useState(sheet.numbered && !hasNumbers);
   const [busy, setBusy] = useState(false);
   const known = new Set(topic.columns.map((c) => c.title.trim()));
@@ -988,7 +1149,9 @@ function ImportDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add “{file}”</DialogTitle>
+          <DialogTitle>
+            {replace ? `Replace “${replace.name || replace.book}” with “${file}”` : `Add “${file}”`}
+          </DialogTitle>
         </DialogHeader>
         <div className="space-y-3 text-sm">
           <p>
@@ -996,6 +1159,13 @@ function ImportDialog({
             {books.length ? ` from ${books.join(", ")}` : ""}
             {sheet.columns.length ? ` · explanations: ${sheet.columns.join(", ")}` : ""}.
           </p>
+          {replace && (
+            <p className="rounded-lg border border-amber-300 bg-amber-50/60 p-2 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
+              The old sheet&apos;s cards are deleted first, with its versions merged into other
+              books&apos; cards. Its numbered cards stay (their numbers are in the app). Merges and
+              edits made to its cards here are lost.
+            </p>
+          )}
           {sheet.problems.map((p) => (
             <p key={p} className="text-amber-700 dark:text-amber-400">
               {p}
@@ -1047,11 +1217,13 @@ function ImportDialog({
                     columns: sheet.columns,
                     prompt: sheet.prompt,
                     book: book.trim(),
+                    name: file,
+                    replace: replace?.id,
                     keep_numbers: keep && !hasNumbers,
                   },
                 });
                 toast.success(
-                  `${r.added} cards added${r.numbered ? " with their chunks and numbers" : ""}`,
+                  `${r.added} cards ${replace ? "now in place of the old sheet's" : "added"}${r.numbered ? " with their chunks and numbers" : ""}`,
                 );
                 await qc.invalidateQueries({ queryKey: ["flashTopics"] });
                 onDone();
@@ -1062,11 +1234,71 @@ function ImportDialog({
               }
             }}
           >
-            {busy ? "Adding…" : `Add ${sheet.cards.length} cards`}
+            {busy
+              ? "Adding…"
+              : replace
+                ? `Replace with ${sheet.cards.length} cards`
+                : `Add ${sheet.cards.length} cards`}
           </Button>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Every column of the cards, one row each; a row opens its card.
+function CardTable({
+  topic,
+  cards,
+  onOpen,
+}: {
+  topic: FlashTopic;
+  cards: FlashCard[];
+  onOpen: (c: FlashCard) => void;
+}) {
+  return (
+    <div className="max-h-[75dvh] overflow-auto rounded-xl border border-border">
+      <table className="w-full min-w-[720px] border-collapse text-sm" lang="hi">
+        <thead className="sticky top-0 z-10 bg-muted text-left text-xs">
+          <tr>
+            <th className="p-2 font-medium">#</th>
+            <th className="p-2 font-medium">Book</th>
+            <th className="p-2 font-medium">front</th>
+            <th className="p-2 font-medium">back</th>
+            {topic.columns.map((col) => (
+              <th key={col.id} className="p-2 font-medium">
+                explanation_{col.title}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {cards.map((c) => (
+            <tr
+              key={c.id}
+              tabIndex={0}
+              onClick={() => onOpen(c)}
+              onKeyDown={(e) => e.key === "Enter" && onOpen(c)}
+              className={`cursor-pointer border-t border-border align-top hover:bg-muted/40 ${c.error ? "bg-red-50/60 dark:bg-red-950/20" : ""}`}
+            >
+              <td className="whitespace-nowrap p-2 text-xs text-muted-foreground">
+                {c.card_order ?? ""}
+                {c.verified && <BadgeCheck className="ml-1 inline h-3.5 w-3.5 text-emerald-600" />}
+              </td>
+              <td className="whitespace-nowrap p-2 text-xs">{booksOf(c).join(", ")}</td>
+              <td className="whitespace-pre-wrap p-2 font-medium">{c.front}</td>
+              <td className="whitespace-pre-wrap p-2">{c.back}</td>
+              {topic.columns.map((col) => (
+                <td key={col.id} className="whitespace-pre-wrap p-2 text-xs">
+                  {c.own.includes(col.id) && c.ex[col.id] ? "◇ " : ""}
+                  {c.ex[col.id] ?? ""}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -1075,15 +1307,21 @@ type Nav = { index: number; total: number; prev: () => void; next: () => void };
 function CardDialog({
   topic,
   card,
+  others,
   nav,
   onClose,
   onSaved,
   onGone,
+  onOthersGone,
 }: {
   topic: FlashTopic;
   card: FlashCard;
+  // Other books' cards of the same word, not merged into this one yet.
+  others?: FlashCard[];
   // Proofreading: this card's place in the list, and moving along it.
   nav?: Nav;
+  // Some of `others` merged into this card or deleted.
+  onOthersGone: (ids: string[]) => void;
   onClose: () => void;
   onSaved: (c: FlashCard) => void;
   onGone: () => void;
@@ -1141,6 +1379,27 @@ function CardDialog({
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, []);
+  // Swipe left / right for the next and previous card (not while in a box
+  // being typed in, where a drag selects text).
+  const touch = useRef<{ x: number; y: number } | null>(null);
+  const swipe = {
+    onTouchStart: (e: React.TouchEvent) => {
+      const el = e.target as HTMLElement;
+      touch.current = el.closest("textarea, input, select")
+        ? null
+        : { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    },
+    onTouchEnd: (e: React.TouchEvent) => {
+      const t = touch.current;
+      touch.current = null;
+      if (!t || !nav || busy) return;
+      const dx = e.changedTouches[0].clientX - t.x;
+      const dy = e.changedTouches[0].clientY - t.y;
+      if (Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) / 2) return;
+      if (dx < 0) void go(nav.next);
+      else if (nav.index > 0) void go(nav.prev);
+    },
+  };
   const textPatch = {
     front: c.front,
     back: c.back,
@@ -1168,10 +1427,10 @@ function CardDialog({
   );
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-2xl" {...swipe}>
         <DialogHeader>
           <DialogTitle>
-            {nav ? `Proofreading ${nav.index + 1} of ${nav.total} · ` : ""}
+            {nav ? `Card ${nav.index + 1} of ${nav.total} · ` : ""}
             {c.card_order !== null ? `Card #${c.card_order} · chunk ${c.chunk}` : "Card"}
           </DialogTitle>
         </DialogHeader>
@@ -1196,7 +1455,8 @@ function CardDialog({
               Next <ArrowRight className="ml-1 h-3.5 w-3.5" />
             </Button>
             <span>
-              Keys: Alt+← / Alt+→ previous / next · Ctrl+Enter save, verify and next · Ctrl+S save
+              Swipe or Alt+← / Alt+→ previous / next · Ctrl+Enter save, verify and next · Ctrl+S
+              save
             </span>
           </div>
         )}
@@ -1212,6 +1472,10 @@ function CardDialog({
           <Versions
             topic={topic}
             card={card}
+            draft={c}
+            others={others}
+            onMerged={onOthersGone}
+            onDeleted={(id) => onOthersGone([id])}
             onUse={(patch) => setC({ ...c, ...patch })}
             onSplit={() => {
               toast.success("That book's version is its own card again");
@@ -1882,6 +2146,62 @@ function SettingsTab({ topic, onChanged }: { topic: FlashTopic; onChanged: () =>
       >
         Save settings
       </Button>
+      <ResetChunks topic={topic} onChanged={onChanged} />
     </div>
+  );
+}
+
+// Undoing the chunks, for a topic chunked only to try it out.
+function ResetChunks({ topic, onChanged }: { topic: FlashTopic; onChanged: () => void }) {
+  const resetFn = useServerFn(resetFlashChunks);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!topic.chunks.length && !topic.locked_at) return null;
+  return (
+    <section
+      aria-label="Reset the chunks"
+      className="space-y-2 rounded-xl border border-red-300 p-3 text-sm dark:border-red-900"
+    >
+      <div className="font-medium text-red-700 dark:text-red-400">Reset the chunks</div>
+      <p>
+        Undoes the shuffle: the {topic.chunks.length} chunks, every card&apos;s number and its app
+        id are cleared, and cards removed after numbering are deleted. The cards and their edits
+        stay. Do this only if the chunks were made to try it out:{" "}
+        <b>chunks already uploaded to the app won&apos;t match this topic any more</b>, and the
+        numbers start again from 1.
+      </p>
+      <label className="block space-y-1">
+        <span>
+          Type the topic&apos;s name, <b>{topic.name}</b>, to reset
+        </span>
+        <Input
+          aria-label="Topic name to reset"
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+        />
+      </label>
+      <Button
+        variant="destructive"
+        size="sm"
+        disabled={busy || typed.trim() !== topic.name.trim()}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            const r = await resetFn({ data: { topic_id: topic.id } });
+            toast.success(
+              `Chunks reset: ${r.cards} cards unnumbered${r.removed ? `, ${r.removed} removed cards deleted` : ""}`,
+            );
+            setTyped("");
+            onChanged();
+          } catch (e) {
+            toast.error(errorText(e, "Couldn't reset the chunks"));
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        Reset the chunks
+      </Button>
+    </section>
   );
 }

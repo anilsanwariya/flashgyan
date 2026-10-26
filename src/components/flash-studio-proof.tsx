@@ -6,7 +6,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Combine, Pause, ScanSearch, Sparkles, Split } from "lucide-react";
+import { Combine, Pause, Replace, ScanSearch, Sparkles, Split } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { kindOfTemplate, wordsOf } from "@/lib/flash-split";
 import {
@@ -17,6 +17,8 @@ import {
   mergeAllFlashCards,
   mergeFlashCards,
   splitFlashVariant,
+  deleteFlashCard,
+  setFlashExplanation,
 } from "@/lib/flash-studio.functions";
 import {
   backFromChips,
@@ -26,6 +28,7 @@ import {
   isList,
   mainOf,
   versionsOf,
+  wordingGroups,
   type DupGroup,
 } from "@/lib/flash-merge";
 import type { FlashCard, FlashTopic } from "@/lib/flash-studio";
@@ -90,6 +93,7 @@ export function ProofTools({
   const kind = kindOfTemplate(types.data?.find((t) => t.id === topic.template_id)?.key);
   const groups = useMemo(() => groupDuplicates(cards), [cards]);
   const [merging, setMerging] = useState(false);
+  const [wording, setWording] = useState(false);
   const batches = useBatches();
   const shown = new Set(shownIds);
   const live = cards.filter((c) => !c.removed && shown.has(c.id));
@@ -211,6 +215,19 @@ export function ProofTools({
             </Button>
           )}
         </>
+      )}
+      {topic.columns.length > 0 && (
+        <Button size="sm" variant="ghost" onClick={() => setWording(true)}>
+          <Replace className="mr-1 h-4 w-4" /> One wording for an explanation
+        </Button>
+      )}
+      {wording && (
+        <WordingDialog
+          topic={topic}
+          cards={cards}
+          onClose={() => setWording(false)}
+          onChanged={onChanged}
+        />
       )}
       {merging && (
         <MergeDialog
@@ -343,33 +360,142 @@ function MergeDialog({
   );
 }
 
-// In a card: the other books' versions, to take an answer or explanations
-// from or split out; and for list answers, every book's items as chips.
+// In a card: the same word from other books, both the cards not merged yet
+// and the versions merged into this one. For each, every column with "Use"
+// (copy into this card) and "Add" (append to it); a card not merged can be
+// merged into this one or deleted, a merged version split out again. For
+// list answers (synonyms…), every book's items as chips.
+type Other =
+  | {
+      kind: "card";
+      card: FlashCard;
+      book: string;
+      front: string;
+      back: string;
+      ex: Record<string, string>;
+    }
+  | {
+      kind: "version";
+      index: number;
+      book: string;
+      front: string;
+      back: string;
+      ex: Record<string, string>;
+    };
+
 export function Versions({
   topic,
   card,
+  draft,
+  others = [],
   onUse,
   onSplit,
+  onMerged,
+  onDeleted,
 }: {
   topic: FlashTopic;
   card: FlashCard;
+  // The card as being edited (what "Add" appends to).
+  draft?: Pick<FlashCard, "front" | "back" | "ex">;
+  // Cards of the same word not merged yet.
+  others?: FlashCard[];
   onUse: (patch: Partial<Pick<FlashCard, "back" | "ex" | "front">>) => void;
   onSplit: (c: FlashCard) => void;
+  onMerged?: (ids: string[]) => void;
+  onDeleted?: (id: string) => void;
 }) {
   const splitFn = useServerFn(splitFlashVariant);
-  const vs = versionsOf(card);
-  const chips = useMemo(() => combineItems(vs), [card]); // eslint-disable-line react-hooks/exhaustive-deps
+  const mergeFn = useServerFn(mergeFlashCards);
+  const deleteFn = useServerFn(deleteFlashCard);
+  const now = draft ?? card;
+  const list: Other[] = [
+    ...others.map((o) => ({
+      kind: "card" as const,
+      card: o,
+      book: o.sources[0]?.book ?? "",
+      front: o.front,
+      back: o.back,
+      ex: o.ex,
+    })),
+    ...card.variants.map((v, index) => ({ kind: "version" as const, index, ...v })),
+  ];
+  const vs = [
+    ...versionsOf(card),
+    ...others.map((o) => ({
+      book: o.sources[0]?.book ?? "",
+      front: o.front,
+      back: o.back,
+      ex: o.ex,
+    })),
+  ];
+  const chips = useMemo(() => combineItems(vs), [card, others]); // eslint-disable-line react-hooks/exhaustive-deps
   const [picked, setPicked] = useState<Set<string> | null>(null);
-  if (vs.length < 2) return null;
-  const chosen = picked ?? new Set(chips.filter((c) => c.books.length > 0).map((c) => c.key));
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
+  if (!list.length) return null;
+  const ticked = picked ?? new Set(chips.map((c) => c.key));
   const books = new Set(vs.map((v) => v.book)).size;
+  const fields: {
+    key: string;
+    label: string;
+    get: (o: Other) => string;
+    put: (v: string) => void;
+    cur: string;
+  }[] = [
+    {
+      key: "front",
+      label: "front",
+      get: (o) => o.front,
+      cur: now.front,
+      put: (v) => onUse({ front: v }),
+    },
+    {
+      key: "back",
+      label: "back",
+      get: (o) => o.back,
+      cur: now.back,
+      put: (v) => onUse({ back: v }),
+    },
+    ...topic.columns.map((col) => ({
+      key: col.id,
+      label: col.title,
+      get: (o: Other) => o.ex[col.id] ?? "",
+      cur: now.ex[col.id] ?? "",
+      put: (v: string) => onUse({ ex: { ...now.ex, [col.id]: v } }),
+    })),
+  ];
+  const cardsChosen = [...chosen];
   return (
     <section
       aria-label="Other books"
       className="space-y-2 rounded-lg border border-border p-2 text-sm"
     >
-      <div className="font-medium">
-        In {books} books ({vs.length} versions)
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">
+          Same word in {books} book{books === 1 ? "" : "s"}
+        </span>
+        {others.length > 0 && (
+          <>
+            <span className="text-xs text-muted-foreground">{others.length} not merged yet</span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="ml-auto h-7"
+              disabled={!cardsChosen.length}
+              onClick={async () => {
+                try {
+                  await mergeFn({ data: { main: card.id, others: cardsChosen } });
+                  toast.success(`${cardsChosen.length} merged into this card`);
+                  setChosen(new Set());
+                  onMerged?.(cardsChosen);
+                } catch (e) {
+                  toast.error(errorText(e, "Couldn't merge"));
+                }
+              }}
+            >
+              <Combine className="mr-1 h-3.5 w-3.5" /> Merge the chosen into this card
+            </Button>
+          </>
+        )}
       </div>
       {isList(vs) && (
         <div className="space-y-1.5">
@@ -378,7 +504,7 @@ export function Versions({
           </div>
           <div className="flex flex-wrap gap-1.5" lang="hi">
             {chips.map((ch) => {
-              const on = chosen.has(ch.key);
+              const on = ticked.has(ch.key);
               return (
                 <button
                   key={ch.key}
@@ -386,7 +512,7 @@ export function Versions({
                   aria-pressed={on}
                   title={`${ch.books.join(", ")}${ch.spellings.length > 1 ? ` · spellings: ${ch.spellings.join(" / ")}` : ""}`}
                   onClick={() => {
-                    const next = new Set(chosen);
+                    const next = new Set(ticked);
                     if (on) next.delete(ch.key);
                     else next.add(ch.key);
                     setPicked(next);
@@ -403,55 +529,63 @@ export function Versions({
           <Button
             size="sm"
             variant="outline"
-            onClick={() => onUse({ back: backFromChips(chips.filter((c) => chosen.has(c.key))) })}
+            onClick={() => onUse({ back: backFromChips(chips.filter((c) => ticked.has(c.key))) })}
           >
             Use the ticked answers
           </Button>
         </div>
       )}
-      <ul className="space-y-1.5">
-        {vs.map((v, i) => (
-          <li key={i} className="rounded-md bg-muted/40 p-2">
+      <ul className="space-y-2">
+        {list.map((o) => (
+          <li
+            key={o.kind === "card" ? o.card.id : `v${o.index}`}
+            data-other={o.book}
+            className="rounded-md bg-muted/40 p-2"
+          >
             <div className="flex flex-wrap items-center gap-1.5">
-              <BookChip topic={topic} book={v.book} />
-              {i === 0 && <span className="text-xs text-muted-foreground">this card</span>}
-              {i > 0 && (
-                <span className="ml-auto flex flex-wrap gap-1">
+              {o.kind === "card" && (
+                <input
+                  type="checkbox"
+                  aria-label={`Choose ${o.book}'s card`}
+                  checked={chosen.has(o.card.id)}
+                  onChange={(e) => {
+                    const next = new Set(chosen);
+                    if (e.target.checked) next.add(o.card.id);
+                    else next.delete(o.card.id);
+                    setChosen(next);
+                  }}
+                />
+              )}
+              <BookChip topic={topic} book={o.book} />
+              <span className="text-xs text-muted-foreground">
+                {o.kind === "card" ? "its own card, not merged" : "merged into this card"}
+              </span>
+              <span className="ml-auto flex flex-wrap gap-1">
+                {o.kind === "card" ? (
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-7"
-                    onClick={() => onUse({ back: v.back })}
+                    className="h-7 text-destructive"
+                    onClick={async () => {
+                      if (!confirm(`Delete ${o.book}'s card “${o.front.split("\n")[0]}”?`)) return;
+                      try {
+                        await deleteFn({ data: { id: o.card.id } });
+                        onDeleted?.(o.card.id);
+                      } catch (e) {
+                        toast.error(errorText(e, "Couldn't delete"));
+                      }
+                    }}
                   >
-                    Use answer
+                    Delete it
                   </Button>
-                  {Object.keys(v.ex).length > 0 && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7"
-                      onClick={() => onUse({ ex: { ...card.ex, ...v.ex } })}
-                    >
-                      Use explanations
-                    </Button>
-                  )}
-                  {v.front !== card.front && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7"
-                      onClick={() => onUse({ front: v.front })}
-                    >
-                      Use spelling
-                    </Button>
-                  )}
+                ) : (
                   <Button
                     size="sm"
                     variant="ghost"
                     className="h-7"
                     onClick={async () => {
                       try {
-                        await splitFn({ data: { id: card.id, index: i - 1 } });
+                        await splitFn({ data: { id: card.id, index: o.index } });
                         onSplit(card);
                       } catch (e) {
                         toast.error(errorText(e, "Couldn't split it out"));
@@ -460,27 +594,213 @@ export function Versions({
                   >
                     <Split className="mr-1 h-3.5 w-3.5" /> Own card
                   </Button>
-                </span>
-              )}
+                )}
+              </span>
             </div>
-            <div className="mt-1 grid gap-1 sm:grid-cols-2" lang="hi">
-              <div className="whitespace-pre-wrap">{v.front}</div>
-              <div className="whitespace-pre-wrap">{v.back}</div>
-            </div>
-            {Object.keys(v.ex).length > 0 && i > 0 && (
-              <div className="mt-1 space-y-0.5 text-xs text-muted-foreground" lang="hi">
-                {topic.columns
-                  .filter((c) => v.ex[c.id])
-                  .map((c) => (
-                    <div key={c.id} className="whitespace-pre-wrap">
-                      <b>{c.title}:</b> {v.ex[c.id]}
+            <dl className="mt-1 space-y-1" lang="hi">
+              {fields
+                .filter((f) => o.kind === "card" || f.get(o) || f.key === "back")
+                .map((f) => {
+                  const v = f.get(o);
+                  const same = v.trim() === f.cur.trim();
+                  return (
+                    <div key={f.key} className="grid grid-cols-[6.5rem_1fr_auto] items-start gap-2">
+                      <dt className="truncate text-xs text-muted-foreground">{f.label}</dt>
+                      <dd className={`whitespace-pre-wrap ${v ? "" : "text-muted-foreground"}`}>
+                        {v || "—"}
+                      </dd>
+                      <span className="flex gap-1">
+                        {v && !same && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 px-2 text-xs"
+                              title={`Put ${o.book}'s ${f.label} in this card`}
+                              onClick={() => f.put(v)}
+                            >
+                              Use
+                            </Button>
+                            {f.cur.trim() && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 px-2 text-xs"
+                                title={`Add ${o.book}'s ${f.label} after this card's`}
+                                onClick={() => f.put(`${f.cur}\n${v}`)}
+                              >
+                                Add
+                              </Button>
+                            )}
+                          </>
+                        )}
+                        {same && <span className="text-[11px] text-emerald-700">same</span>}
+                      </span>
                     </div>
-                  ))}
-              </div>
-            )}
+                  );
+                })}
+            </dl>
           </li>
         ))}
       </ul>
     </section>
+  );
+}
+
+// The same explanation written in different words (by different books):
+// similar wordings of a column grouped, one picked (or edited) and given
+// to every card that has any of them.
+function WordingDialog({
+  topic,
+  cards,
+  onClose,
+  onChanged,
+}: {
+  topic: FlashTopic;
+  cards: FlashCard[];
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const setFn = useServerFn(setFlashExplanation);
+  const [column, setColumn] = useState(topic.columns[0]?.id ?? "");
+  const [alike, setAlike] = useState(0.5);
+  const groups = useMemo(() => wordingGroups(cards, column, alike), [cards, column, alike]);
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>One wording for an explanation</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          Books often say the same thing in different words. Similar wordings of a column are
+          grouped below: pick the one to keep (or edit it), untick any that don&apos;t belong, and
+          apply it to all their cards.
+        </p>
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <label className="flex items-center gap-2">
+            Column
+            <select
+              aria-label="Explanation column"
+              value={column}
+              onChange={(e) => setColumn(e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2"
+            >
+              {topic.columns.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2">
+            How alike
+            <select
+              aria-label="How alike"
+              value={alike}
+              onChange={(e) => setAlike(Number(e.target.value))}
+              className="h-8 rounded-md border border-input bg-background px-2"
+            >
+              <option value={0.7}>Very alike</option>
+              <option value={0.5}>Alike</option>
+              <option value={0.35}>Loosely alike</option>
+            </select>
+          </label>
+          <span className="text-muted-foreground">{groups.length} groups</span>
+        </div>
+        {!groups.length && (
+          <p className="text-sm text-muted-foreground">
+            No differently worded groups in this column.
+          </p>
+        )}
+        <ul className="space-y-3">
+          {groups.slice(0, 50).map((g, i) => (
+            <WordingGroupRow
+              key={`${column}-${i}-${g.wordings[0].text.slice(0, 20)}`}
+              group={g}
+              onApply={async (from, to) => {
+                try {
+                  const r = await setFn({ data: { topic_id: topic.id, column, from, to } });
+                  toast.success(`${r.changed} cards now say it this way`);
+                  onChanged();
+                } catch (e) {
+                  toast.error(errorText(e, "Couldn't apply it"));
+                }
+              }}
+            />
+          ))}
+        </ul>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function WordingGroupRow({
+  group,
+  onApply,
+}: {
+  group: ReturnType<typeof wordingGroups>[number];
+  onApply: (from: string[], to: string) => Promise<void>;
+}) {
+  const [pick, setPick] = useState(0);
+  const [text, setText] = useState(group.wordings[0].text);
+  const [off, setOff] = useState<Set<number>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const on = group.wordings.filter((_, i) => !off.has(i));
+  const count = on.reduce((n, w) => n + w.cards.length, 0);
+  return (
+    <li className="space-y-2 rounded-xl border border-border p-3 text-sm">
+      <ul className="space-y-1" lang="hi">
+        {group.wordings.map((w, i) => (
+          <li key={i} className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              aria-label="Include this wording"
+              className="mt-1"
+              checked={!off.has(i)}
+              onChange={(e) => {
+                const next = new Set(off);
+                if (e.target.checked) next.delete(i);
+                else next.add(i);
+                setOff(next);
+              }}
+            />
+            <input
+              type="radio"
+              aria-label="Keep this wording"
+              className="mt-1"
+              checked={pick === i}
+              onChange={() => {
+                setPick(i);
+                setText(w.text);
+              }}
+            />
+            <span className="min-w-0 flex-1 whitespace-pre-wrap">{w.text}</span>
+            <Badge>{w.cards.length}</Badge>
+          </li>
+        ))}
+      </ul>
+      <textarea
+        aria-label="The wording to keep"
+        lang="hi"
+        rows={2}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        className="w-full rounded-md border border-input bg-background p-2"
+      />
+      <Button
+        size="sm"
+        disabled={busy || !text.trim() || on.length < 1}
+        onClick={async () => {
+          setBusy(true);
+          await onApply(
+            on.map((w) => w.text),
+            text.trim(),
+          );
+          setBusy(false);
+        }}
+      >
+        Apply to {count} cards
+      </Button>
+    </li>
   );
 }

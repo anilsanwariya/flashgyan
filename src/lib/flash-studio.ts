@@ -605,7 +605,7 @@ export type FlashSourceRow = {
   topic_id: string;
   book: string;
   name: string;
-  kind: "word" | "pdf" | "text";
+  kind: "word" | "pdf" | "text" | "sheet";
   total: number;
   done: number;
   // The parts (or pages) read, 1-based.
@@ -613,6 +613,11 @@ export type FlashSourceRow = {
   cards: number;
   todos: { where: string; text: string }[];
   error: string | null;
+  // A sheet's rows; and, for any source, its cards deleted and merged into
+  // other books' cards since.
+  rows: number;
+  deleted: number;
+  merged: number;
   created_at: string;
 };
 
