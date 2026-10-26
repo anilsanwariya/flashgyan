@@ -3,6 +3,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { saathiComplete, type SaathiImage } from "../../supabase/functions/_shared/saathi-core.ts";
 import { parseRead, readMessages, type ReadContext, type Todo } from "@/lib/flash-read";
+import * as M from "@/lib/flash-merge";
 import {
   DEFAULT_TEMPLATES,
   lastNumbers,
@@ -14,6 +15,7 @@ import {
   normalizeEx,
   normalizeExamples,
   normalizeSources,
+  normalizeVariants,
   planNumbers,
   wordKeyOf,
   BOOK_COLORS,
@@ -81,6 +83,8 @@ const readCard = (r: Row): FlashCard => ({
   ex: normalizeEx(r.ex),
   own: Array.isArray(r.own) ? r.own.filter((x): x is string => typeof x === "string") : [],
   sources: normalizeSources(r.sources),
+  variants: normalizeVariants(r.variants),
+  note: String(r.note ?? ""),
   error: r.error === true,
   error_type: String(r.error_type ?? ""),
   verified: r.verified === true,
@@ -376,6 +380,7 @@ export type CardPatch = Partial<
     | "error_type"
     | "verified"
     | "removed"
+    | "note"
   >
 >;
 
@@ -691,4 +696,313 @@ export async function deleteSource(sourceId: string): Promise<{ deleted: number;
   fail((await from("flash_sources").delete().eq("id", sourceId)).error);
   await touch(topicId);
   return { deleted: drop.length, kept: cards.length - drop.length };
+}
+
+// ---------- Merging the same word from several books ----------
+
+async function cardsByIds(ids: string[]): Promise<FlashCard[]> {
+  const out: FlashCard[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await from("flash_cards")
+      .select("*")
+      .in("id", ids.slice(i, i + 200));
+    fail(error);
+    out.push(...((data ?? []) as Row[]).map(readCard));
+  }
+  return out;
+}
+
+// The other cards folded into `main`: their versions kept as its variants,
+// their books as its sources, and its empty explanations filled from
+// theirs. They must not be numbered (their numbers are in the app).
+async function foldInto(main: FlashCard, others: FlashCard[]) {
+  if (others.some((o) => o.card_order !== null))
+    throw new Error("A numbered card can't be merged into another; remove it instead");
+  const ex = { ...main.ex };
+  const own = [...main.own];
+  for (const o of others)
+    for (const [k, v] of Object.entries(o.ex))
+      if (v && !(ex[k] ?? "").trim()) {
+        ex[k] = v;
+        if (o.own.includes(k)) own.push(k);
+      }
+  const variants = [
+    ...main.variants,
+    ...others.flatMap((o) => [
+      {
+        book: o.sources[0]?.book ?? "",
+        front: o.front,
+        back: o.back,
+        ex: o.ex,
+        source: o.sources[0] ?? null,
+      },
+      ...o.variants,
+    ]),
+  ];
+  const sources = [...main.sources, ...others.flatMap((o) => o.sources)];
+  fail(
+    (
+      await from("flash_cards")
+        .update({ ex, own: [...new Set(own)], variants, sources, updated_at: now() } as never)
+        .eq("id", main.id)
+    ).error,
+  );
+  fail(
+    (
+      await from("flash_cards")
+        .delete()
+        .in(
+          "id",
+          others.map((o) => o.id),
+        )
+    ).error,
+  );
+}
+
+export async function mergeCards(mainId: string, otherIds: string[]): Promise<FlashCard> {
+  const cards = await cardsByIds([mainId, ...otherIds]);
+  const main = cards.find((c) => c.id === mainId);
+  if (!main) throw new Error("Card not found");
+  const others = cards.filter((c) => c.id !== mainId);
+  if (others.some((o) => o.topic_id !== main.topic_id)) throw new Error("Cards from another topic");
+  if (!others.length) return main;
+  await foldInto(main, others);
+  await touch(main.topic_id);
+  return (await cardsByIds([mainId]))[0];
+}
+
+// Every group of the same word merged into its main card (the first book
+// in the topic's order). Groups with more than one numbered card are left.
+export async function mergeAll(
+  topicId: string,
+): Promise<{ merged: number; cards: number; skipped: number }> {
+  const { topic, cards } = await getTopic(topicId);
+  let merged = 0;
+  let folded = 0;
+  let skipped = 0;
+  for (const g of M.groupDuplicates(cards)) {
+    if (g.cards.filter((c) => c.card_order !== null).length > 1) {
+      skipped++;
+      continue;
+    }
+    const main = M.mainOf(
+      g.cards,
+      topic.books.map((b) => b.code),
+    );
+    const others = g.cards.filter((c) => c.id !== main.id);
+    await foldInto(main, others);
+    merged++;
+    folded += others.length;
+  }
+  if (merged) await touch(topicId);
+  return { merged, cards: folded, skipped };
+}
+
+// One book's version taken out of a merged card again, as its own card.
+export async function splitVariant(cardId: string, index: number): Promise<FlashCard> {
+  const [card] = await cardsByIds([cardId]);
+  if (!card) throw new Error("Card not found");
+  const v = card.variants[index];
+  if (!v) throw new Error("That version isn't there");
+  const sources = [...card.sources];
+  const at = v.source
+    ? sources.findIndex(
+        (s, i) =>
+          i > 0 && s.book === v.source!.book && s.pos === v.source!.pos && s.src === v.source!.src,
+      )
+    : -1;
+  if (at > 0) sources.splice(at, 1);
+  const variants = card.variants.filter((_, i) => i !== index);
+  fail(
+    (
+      await from("flash_cards")
+        .update({ variants, sources, updated_at: now() } as never)
+        .eq("id", cardId)
+    ).error,
+  );
+  const { data: last } = await from("flash_cards")
+    .select("pos")
+    .eq("topic_id", card.topic_id)
+    .order("pos", { ascending: false })
+    .limit(1);
+  const pos = ((last ?? []) as Row[])[0] ? Number(((last ?? []) as Row[])[0].pos) + 1 : 0;
+  const { data, error } = await from("flash_cards")
+    .insert({
+      topic_id: card.topic_id,
+      pos,
+      front: v.front,
+      back: v.back,
+      ex: v.ex,
+      sources: v.source ? [v.source] : [{ book: v.book }],
+    } as never)
+    .select("*")
+    .single();
+  fail(error);
+  await touch(card.topic_id);
+  return readCard(data as unknown as Row);
+}
+
+// ---------- The AI's help: explanations and the check ----------
+
+async function deckOf(topic: FlashTopic) {
+  let deck = {
+    name: topic.name,
+    prompt: topic.prompt,
+    columns: topic.columns,
+    examples: [] as FlashTemplate["examples"],
+  };
+  if (topic.template_id) {
+    const { data: t } = await from("flash_templates")
+      .select("*")
+      .eq("id", topic.template_id)
+      .maybeSingle();
+    if (t) {
+      const tpl = readTemplate(t as unknown as Row);
+      deck = { ...deck, name: tpl.name, examples: tpl.examples };
+    }
+  }
+  return deck;
+}
+
+// Empty explanations filled for these cards: first from other cards of the
+// same book's heading and rule, then by the AI from the book's text (or,
+// marked as its own knowledge, without it).
+export async function fillExplanations(
+  topicId: string,
+  ids: string[],
+): Promise<{ filled: number; own: number; cards: FlashCard[] }> {
+  const { topic, cards } = await getTopic(topicId);
+  const want = cards.filter((c) => ids.includes(c.id) && !c.removed);
+  const deck = await deckOf(topic);
+  // The topic's own verified, complete cards show the house style best.
+  const verified = cards
+    .filter((c) => c.verified && !M.emptyColumns(c, topic.columns).length)
+    .slice(0, 2);
+  deck.examples = [
+    ...verified.map((c) => ({
+      front: c.front,
+      back: c.back,
+      ex: Object.fromEntries(topic.columns.map((col) => [col.title, c.ex[col.id] ?? ""])),
+    })),
+    ...deck.examples,
+  ];
+  // The books' text, for the passages.
+  const { data: srcRows } = await from("flash_sources").select("id,pieces").eq("topic_id", topicId);
+  const pieces = new Map(
+    ((srcRows ?? []) as Row[]).map((r) => [
+      String(r.id),
+      Array.isArray(r.pieces) ? (r.pieces as string[]) : [],
+    ]),
+  );
+  const title = new Map(topic.columns.map((c) => [c.id, c.title]));
+  const patches = new Map<string, { ex: Record<string, string>; own: string[] }>();
+  const items: (M.FillItem & { id: string })[] = [];
+  // Examples of the same book's heading and rule share its explanation:
+  // the AI writes it once (for the first), the others take it.
+  const ruleOf = (c: FlashCard) => {
+    const s = c.sources[0];
+    return s?.heading && s.rule ? `${s.book}|${s.heading}|${s.rule}` : "";
+  };
+  const leaders = new Map<string, string>();
+  const followers: { id: string; leader: string; empty: string[] }[] = [];
+  for (const c of want) {
+    const sib = M.fromSiblings(c, cards, topic.columns);
+    const ex = { ...c.ex, ...sib };
+    if (Object.keys(sib).length) patches.set(c.id, { ex, own: c.own });
+    const empty = M.emptyColumns({ ex }, topic.columns);
+    if (!empty.length) continue;
+    const rule = ruleOf(c);
+    if (rule && leaders.has(rule)) {
+      followers.push({ id: c.id, leader: leaders.get(rule)!, empty });
+      continue;
+    }
+    if (rule) leaders.set(rule, c.id);
+    const texts = c.sources.flatMap((s) => (s.src ? (pieces.get(s.src) ?? []) : []));
+    items.push({
+      id: c.id,
+      n: items.length + 1,
+      front: c.front,
+      back: c.back,
+      heading: c.sources[0]?.heading ?? "",
+      rule: c.sources[0]?.rule ?? "",
+      have: Object.fromEntries(
+        topic.columns
+          .filter((col) => (ex[col.id] ?? "").trim())
+          .map((col) => [col.title, ex[col.id]]),
+      ),
+      want: empty.map((id) => title.get(id)!),
+      passage: M.passageFor(texts, c.front),
+    });
+  }
+  let own = 0;
+  if (items.length) {
+    const got = M.parseFill(
+      await saathiComplete(apiKey(), M.fillMessages(deck, items)),
+      topic.columns,
+      items,
+    );
+    for (const it of items) {
+      const f = got.get(it.n);
+      if (!f || !Object.keys(f.ex).length) continue;
+      const card = want.find((c) => c.id === it.id)!;
+      const base = patches.get(it.id) ?? { ex: card.ex, own: card.own };
+      own += f.own.length;
+      patches.set(it.id, {
+        ex: { ...base.ex, ...f.ex },
+        own: [...new Set([...base.own, ...f.own])],
+      });
+    }
+  }
+  for (const f of followers) {
+    const lead = patches.get(f.leader);
+    if (!lead) continue;
+    const card = want.find((c) => c.id === f.id)!;
+    const base = patches.get(f.id) ?? { ex: card.ex, own: card.own };
+    const add = Object.fromEntries(
+      f.empty.filter((id) => lead.ex[id]).map((id) => [id, lead.ex[id]]),
+    );
+    if (!Object.keys(add).length) continue;
+    const ownAdd = Object.keys(add).filter((id) => lead.own.includes(id));
+    own += ownAdd.length;
+    patches.set(f.id, { ex: { ...base.ex, ...add }, own: [...new Set([...base.own, ...ownAdd])] });
+  }
+  const out: FlashCard[] = [];
+  for (const [id, p] of patches) out.push(await saveCard(id, { ex: p.ex, own: p.own }));
+  return { filled: out.length, own, cards: out };
+}
+
+// The AI's check of these cards: a problem it finds marks the card to
+// recheck with its kind and a note; it changes nothing else.
+export async function checkCards(
+  topicId: string,
+  ids: string[],
+): Promise<{ flagged: number; cards: FlashCard[] }> {
+  const { topic, cards } = await getTopic(topicId);
+  const want = cards.filter((c) => ids.includes(c.id) && !c.removed);
+  if (!want.length) return { flagged: 0, cards: [] };
+  const deck = await deckOf(topic);
+  const items = want.map((c, i) => ({
+    n: i + 1,
+    front: c.front,
+    back: c.back,
+    ex: Object.fromEntries(
+      topic.columns
+        .filter((col) => (c.ex[col.id] ?? "").trim())
+        .map((col) => [col.title, c.ex[col.id]]),
+    ),
+  }));
+  const flags = M.parseCheck(await saathiComplete(apiKey(), M.checkMessages(deck, items)), items);
+  const out: FlashCard[] = [];
+  for (const f of flags) {
+    const c = want[f.n - 1];
+    out.push(
+      await saveCard(c.id, {
+        error: true,
+        error_type: f.type,
+        note: `AI: ${f.note}`,
+        verified: false,
+      }),
+    );
+  }
+  return { flagged: out.length, cards: out };
 }

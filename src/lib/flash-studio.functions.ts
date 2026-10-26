@@ -179,6 +179,7 @@ export const saveFlashCard = createServerFn({ method: "POST" })
             error: z.boolean(),
             error_type: z.string().max(200),
             verified: z.boolean(),
+            note: z.string().max(2000),
           })
           .partial(),
       })
@@ -292,4 +293,48 @@ export const deleteFlashSource = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return (await server()).deleteSource(data.id);
+  });
+
+const ids = z.array(id).min(1).max(40);
+
+export const mergeFlashCards = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ main: id, others: z.array(id).min(1).max(30) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).mergeCards(data.main, data.others);
+  });
+
+export const mergeAllFlashCards = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ topic_id: id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).mergeAll(data.topic_id);
+  });
+
+export const splitFlashVariant = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id, index: z.number().int().min(0).max(30) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).splitVariant(data.id, data.index);
+  });
+
+export const fillFlashExplanations = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ topic_id: id, ids }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).fillExplanations(data.topic_id, data.ids);
+  });
+
+export const checkFlashCards = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ topic_id: id, ids }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).checkCards(data.topic_id, data.ids);
   });
