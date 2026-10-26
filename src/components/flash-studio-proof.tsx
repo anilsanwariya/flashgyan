@@ -6,7 +6,16 @@
 import { useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Combine, Pause, Replace, ScanSearch, Sparkles, Split } from "lucide-react";
+import {
+  ChevronDown,
+  Combine,
+  Pause,
+  Replace,
+  ScanSearch,
+  Sparkles,
+  Split,
+  Wand2,
+} from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { kindOfTemplate, wordsOf } from "@/lib/flash-split";
 import {
@@ -35,6 +44,14 @@ import type { FlashCard, FlashTopic } from "@/lib/flash-studio";
 import { Badge, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const BookChip = ({ topic, book }: { topic: FlashTopic; book: string }) => (
   <span
@@ -70,11 +87,15 @@ function useBatches() {
   return { state, run, stop: () => (stop.current = true) };
 }
 
-// The topic's toolbar: merging duplicates, filling explanations, the check.
+// The topic's tools, in one menu: merging duplicates, filling explanations,
+// the AI check, पृथक करें cards and one wording. A batch running shows its
+// progress in the menu's place.
 export function ProofTools({
   topic,
   cards,
   shownIds,
+  merging,
+  setMerging,
   onChanged,
   onCards,
 }: {
@@ -82,6 +103,9 @@ export function ProofTools({
   cards: FlashCard[];
   // The cards the list shows now (the AI works on those).
   shownIds: string[];
+  // The merge dialog, open from here or from the topic's progress.
+  merging: boolean;
+  setMerging: (open: boolean) => void;
   onChanged: () => void;
   onCards: (c: FlashCard[]) => void;
 }) {
@@ -92,7 +116,6 @@ export function ProofTools({
   const types = useQuery({ queryKey: ["flashTemplates"], queryFn: () => typesFn() });
   const kind = kindOfTemplate(types.data?.find((t) => t.id === topic.template_id)?.key);
   const groups = useMemo(() => groupDuplicates(cards), [cards]);
-  const [merging, setMerging] = useState(false);
   const [wording, setWording] = useState(false);
   const batches = useBatches();
   const shown = new Set(shownIds);
@@ -100,126 +123,150 @@ export function ProofTools({
   const needFill = live.filter((c) => emptyColumns(c, topic.columns).length).map((c) => c.id);
   const needCheck = live.filter((c) => !c.verified).map((c) => c.id);
   const words = kind ? live.reduce((n, c) => n + wordsOf(c.back).length, 0) : 0;
+  const fill = async () => {
+    let own = 0;
+    let filled = 0;
+    try {
+      await batches.run(
+        "Filling explanations",
+        needFill,
+        10,
+        (ids) => fillFn({ data: { topic_id: topic.id, ids } }),
+        (r) => {
+          own += r.own;
+          filled += r.filled;
+          onCards(r.cards);
+        },
+      );
+      toast.success(
+        `${filled} card${filled === 1 ? "" : "s"} filled${own ? `; ${own} explanations not from your books (marked)` : ""}`,
+      );
+    } catch (e) {
+      toast.error(errorText(e, "The AI couldn't fill these; try again"));
+    }
+  };
+  const check = async () => {
+    let flagged = 0;
+    try {
+      await batches.run(
+        "Checking",
+        needCheck,
+        20,
+        (ids) => checkFn({ data: { topic_id: topic.id, ids } }),
+        (r) => {
+          flagged += r.flagged;
+          onCards(r.cards);
+        },
+      );
+      toast.success(
+        flagged ? `${flagged} card${flagged === 1 ? "" : "s"} to recheck` : "No problems found",
+      );
+    } catch (e) {
+      toast.error(errorText(e, "The AI couldn't check these; try again"));
+    }
+  };
+  const split = async () => {
+    if (
+      !confirm(
+        `Make “पृथक करें” cards from the ${words} words of the ${live.length} cards shown, in “${topic.name} – पृथक करें”? Words already there are skipped.`,
+      )
+    )
+      return;
+    let added = 0;
+    let ai = 0;
+    let name = "";
+    try {
+      await batches.run(
+        "Making पृथक करें cards",
+        live.map((c) => c.id),
+        8,
+        (ids) => splitFn({ data: { topic_id: topic.id, ids } }),
+        (r) => {
+          added += r.added;
+          ai += r.ai;
+          name = r.topic.name;
+        },
+      );
+      toast.success(
+        `${added} cards made in “${name}”${ai ? `; ${ai} split by the AI, marked to check` : ""}`,
+      );
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't make the cards"));
+    }
+  };
+  const item = (label: string, note: string) => (
+    <span className="flex flex-col">
+      <span>{label}</span>
+      <span className="text-xs text-muted-foreground">{note}</span>
+    </span>
+  );
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {groups.length > 0 && (
-        <Button size="sm" variant="outline" onClick={() => setMerging(true)}>
-          <Combine className="mr-1 h-4 w-4" /> Same word in several books: {groups.length}
-        </Button>
-      )}
+    <>
       {batches.state ? (
-        <span className="flex items-center gap-2 text-sm">
+        <span
+          role="status"
+          className="flex items-center gap-2 rounded-full border border-border px-3 py-1 text-sm"
+        >
+          <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
           {batches.state.label}: {batches.state.done}/{batches.state.total}
-          <Button size="sm" variant="outline" onClick={batches.stop}>
+          <Button size="sm" variant="ghost" className="h-7" onClick={batches.stop}>
             <Pause className="mr-1 h-4 w-4" /> Stop
           </Button>
         </span>
       ) : (
-        <>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!needFill.length || !topic.columns.length}
-            title="Empty explanations of the cards shown: from the books first; the AI's own knowledge is marked"
-            onClick={async () => {
-              let own = 0;
-              let filled = 0;
-              try {
-                await batches.run(
-                  "Filling explanations",
-                  needFill,
-                  10,
-                  (ids) => fillFn({ data: { topic_id: topic.id, ids } }),
-                  (r) => {
-                    own += r.own;
-                    filled += r.filled;
-                    onCards(r.cards);
-                  },
-                );
-                toast.success(
-                  `${filled} card${filled === 1 ? "" : "s"} filled${own ? `; ${own} explanations not from your books (marked)` : ""}`,
-                );
-              } catch (e) {
-                toast.error(errorText(e, "The AI couldn't fill these; try again"));
-              }
-            }}
-          >
-            <Sparkles className="mr-1 h-4 w-4" /> Fill explanations ({needFill.length})
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!needCheck.length}
-            title="The AI reads the cards shown that aren't verified and marks problems to recheck; it changes nothing"
-            onClick={async () => {
-              let flagged = 0;
-              try {
-                await batches.run(
-                  "Checking",
-                  needCheck,
-                  20,
-                  (ids) => checkFn({ data: { topic_id: topic.id, ids } }),
-                  (r) => {
-                    flagged += r.flagged;
-                    onCards(r.cards);
-                  },
-                );
-                toast.success(
-                  flagged
-                    ? `${flagged} card${flagged === 1 ? "" : "s"} to recheck`
-                    : "No problems found",
-                );
-              } catch (e) {
-                toast.error(errorText(e, "The AI couldn't check these; try again"));
-              }
-            }}
-          >
-            <ScanSearch className="mr-1 h-4 w-4" /> AI check ({needCheck.length})
-          </Button>
-          {kind && words > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              title={`Each word of the cards shown becomes a card in “${topic.name} – पृथक करें”: ${kind === "upsarg" ? "उपसर्ग + मूल शब्द" : "मूल शब्द + प्रत्यय"}, with this card's explanations`}
-              onClick={async () => {
-                if (
-                  !confirm(
-                    `Make “पृथक करें” cards from the ${words} words of the ${live.length} cards shown, in “${topic.name} – पृथक करें”? Words already there are skipped.`,
-                  )
-                )
-                  return;
-                let added = 0;
-                let ai = 0;
-                let name = "";
-                try {
-                  await batches.run(
-                    "Making पृथक करें cards",
-                    live.map((c) => c.id),
-                    8,
-                    (ids) => splitFn({ data: { topic_id: topic.id, ids } }),
-                    (r) => {
-                      added += r.added;
-                      ai += r.ai;
-                      name = r.topic.name;
-                    },
-                  );
-                  toast.success(
-                    `${added} cards made in “${name}”${ai ? `; ${ai} split by the AI, marked to check` : ""}`,
-                  );
-                } catch (e) {
-                  toast.error(errorText(e, "Couldn't make the cards"));
-                }
-              }}
-            >
-              <Split className="mr-1 h-4 w-4" /> पृथक करें cards ({words} words)
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="outline">
+              <Wand2 className="mr-1 h-4 w-4" /> Tools
+              <ChevronDown className="ml-1 h-3.5 w-3.5" />
             </Button>
-          )}
-        </>
-      )}
-      {topic.columns.length > 0 && (
-        <Button size="sm" variant="ghost" onClick={() => setWording(true)}>
-          <Replace className="mr-1 h-4 w-4" /> One wording for an explanation
-        </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-72">
+            <DropdownMenuItem disabled={!groups.length} onSelect={() => setMerging(true)}>
+              <Combine className="mr-2 h-4 w-4 shrink-0" />
+              {item(
+                `Merge the same word (${groups.length})`,
+                "Words in several books become one card",
+              )}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+              AI, on the {live.length} cards shown
+            </DropdownMenuLabel>
+            <DropdownMenuItem
+              disabled={!needFill.length || !topic.columns.length}
+              onSelect={() => void fill()}
+            >
+              <Sparkles className="mr-2 h-4 w-4 shrink-0" />
+              {item(
+                `Fill explanations (${needFill.length})`,
+                "From the books first; its own knowledge is marked",
+              )}
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!needCheck.length} onSelect={() => void check()}>
+              <ScanSearch className="mr-2 h-4 w-4 shrink-0" />
+              {item(`AI check (${needCheck.length})`, "Marks problems to recheck; changes nothing")}
+            </DropdownMenuItem>
+            {kind && words > 0 && (
+              <DropdownMenuItem onSelect={() => void split()}>
+                <Split className="mr-2 h-4 w-4 shrink-0" />
+                {item(
+                  `पृथक करें cards (${words} words)`,
+                  kind === "upsarg" ? "उपसर्ग + मूल शब्द" : "मूल शब्द + प्रत्यय",
+                )}
+              </DropdownMenuItem>
+            )}
+            {topic.columns.length > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => setWording(true)}>
+                  <Replace className="mr-2 h-4 w-4 shrink-0" />
+                  {item("One wording for an explanation", "The same thing said in different words")}
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
       {wording && (
         <WordingDialog
@@ -237,7 +284,7 @@ export function ProofTools({
           onChanged={onChanged}
         />
       )}
-    </div>
+    </>
   );
 }
 

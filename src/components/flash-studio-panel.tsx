@@ -16,6 +16,7 @@ import {
   ArrowRight,
   ArrowUp,
   BadgeCheck,
+  ChevronDown,
   ClipboardPaste,
   Download,
   FileUp,
@@ -74,6 +75,12 @@ import {
 } from "@/lib/flash-studio";
 import { zipFiles } from "@/lib/zip";
 import { BooksPanel } from "@/components/flash-studio-books";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { SheetsTab } from "@/components/flash-studio-sheets";
 import { ProofTools, Versions } from "@/components/flash-studio-proof";
 import {
@@ -151,10 +158,6 @@ export function FlashStudio() {
   if (open) return <TopicView id={open} onBack={() => setOpen(null)} />;
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Bring in each book&apos;s sheet, proofread the cards, then finalise the topic: the cards are
-        shuffled, split into chunks and numbered 1, 2, 3… across them, never to change.
-      </p>
       <PageTabs
         label="Card studio"
         tabs={[
@@ -237,7 +240,20 @@ function TopicList({ onOpen }: { onOpen: (id: string) => void }) {
       </form>
       {topics.error && <p className="text-sm text-destructive">{errorText(topics.error, "")}</p>}
       {topics.data && !topics.data.length && (
-        <p className="text-sm text-muted-foreground">No topics yet.</p>
+        <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+          <p className="font-medium text-foreground">No topics yet</p>
+          <ol className="mt-2 list-decimal space-y-1 pl-5">
+            <li>Make a topic above, with its deck type.</li>
+            <li>
+              Add each book&apos;s Excel sheet, and merge the words that are in several books.
+            </li>
+            <li>Fill the explanations and proofread the cards one by one.</li>
+            <li>
+              Shuffle and number them into chunks (numbered 1, 2, 3… across the chunks, never to
+              change), then download the chunks for the app.
+            </li>
+          </ol>
+        </div>
       )}
       <ul className="space-y-2">
         {topics.data?.map((t: TopicSummary) => (
@@ -246,7 +262,18 @@ function TopicList({ onOpen }: { onOpen: (id: string) => void }) {
             className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-border p-3"
           >
             <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onOpen(t.id)}>
-              <div className="font-medium">{t.name}</div>
+              <div className="flex items-center gap-3">
+                <span className="min-w-0 flex-1 truncate font-medium">{t.name}</span>
+                <span
+                  className="hidden h-1.5 w-28 overflow-hidden rounded-full bg-muted sm:block"
+                  title={`${t.verified} of ${t.total} verified`}
+                >
+                  <span
+                    className="block h-full rounded-full bg-emerald-500"
+                    style={{ width: `${t.total ? (t.verified / t.total) * 100 : 0}%` }}
+                  />
+                </span>
+              </div>
               <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                 {typeName(t.template_id) && <span>{typeName(t.template_id)} ·</span>}
                 <span>{t.total} cards</span>
@@ -614,7 +641,9 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
           <ArrowLeft className="mr-1 h-4 w-4" /> Topics
         </Button>
         <h1 className="min-w-0 flex-1 truncate text-xl font-semibold">{topic.name}</h1>
-        <span className="basis-full text-sm text-muted-foreground sm:basis-auto">
+        <span
+          className={`basis-full text-sm text-muted-foreground sm:basis-auto ${tab === "cards" ? "hidden" : ""}`}
+        >
           {live.length} cards · {live.filter((c) => c.verified).length} verified
           {topic.chunks.length
             ? ` · ${topic.chunks.length} chunk${topic.chunks.length === 1 ? "" : "s"}`
@@ -640,6 +669,7 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
           onChanged={reload}
           onCard={putCard}
           onSheet={(f) => void pickSheet(f)}
+          onTab={setTab}
         />
       )}
       {tab === "sheets" && (
@@ -701,6 +731,26 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "removed", label: "Removed" },
 ];
 
+// Whether a card is in one of the list's filters.
+function passes(c: FlashCard, f: Filter, columns: FlashColumn[]): boolean {
+  if (f === "removed") return c.removed;
+  if (c.removed) return false;
+  if (f === "errors") return c.error;
+  if (f === "unverified") return !c.verified;
+  if (f === "verified") return c.verified;
+  if (f === "unnumbered") return c.card_order === null;
+  if (f === "several") return booksOf(c).length > 1;
+  if (f === "single") return booksOf(c).length <= 1;
+  if (f === "differ") {
+    const d = disagreement(c);
+    return d.answer || d.spelling;
+  }
+  if (f === "own") return c.own.length > 0;
+  if (f === "missing") return emptyColumns(c, columns).length > 0;
+  if (f === "notes") return !!c.note || c.sources.some((s) => s.note);
+  return true;
+}
+
 function CardsTab({
   topic,
   cards,
@@ -708,6 +758,7 @@ function CardsTab({
   onChanged,
   onCard,
   onSheet,
+  onTab,
 }: {
   topic: FlashTopic;
   cards: FlashCard[];
@@ -715,6 +766,7 @@ function CardsTab({
   onChanged: () => void;
   onCard: (c: FlashCard | FlashCard[]) => void;
   onSheet: (file: File) => void;
+  onTab: (t: TopicTab) => void;
 }) {
   const addFn = useServerFn(addFlashCard);
   const [filter, setFilter] = useState<Filter>("all");
@@ -731,6 +783,7 @@ function CardsTab({
   const [sort, setSort] = useState<SortKey>("order");
   const [desc, setDesc] = useState(false);
   const [view, setView] = useState<"list" | "table">("list");
+  const [merging, setMerging] = useState(false);
   const books = new Map(topic.books.map((b) => [b.code, b]));
   const bookCodes = useMemo(
     () => [...new Set([...topic.books.map((b) => b.code), ...cards.flatMap((c) => booksOf(c))])],
@@ -747,33 +800,28 @@ function CardsTab({
         );
     return m;
   }, [cards]);
+  // The book picked (in its own words), before the filter and search.
+  const inBook = useMemo(
+    () =>
+      cards
+        .filter((c) => !book || booksOf(c).includes(book))
+        .map((c) => {
+          const v = book ? versionFor(c, book) : null;
+          return v ? { ...c, front: v.front, back: v.back, ex: v.ex } : c;
+        }),
+    [cards, book],
+  );
+  const counts = useMemo(
+    () =>
+      Object.fromEntries(
+        FILTERS.map((f) => [f.id, inBook.filter((c) => passes(c, f.id, topic.columns)).length]),
+      ) as Record<Filter, number>,
+    [inBook, topic.columns],
+  );
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const picked = cards
-      .filter((c) => !book || booksOf(c).includes(book))
-      .map((c) => {
-        // In one book's view a card shows that book's version.
-        const v = book ? versionFor(c, book) : null;
-        return v ? { ...c, front: v.front, back: v.back, ex: v.ex } : c;
-      })
-      .filter((c) => {
-        if (filter === "removed") return c.removed;
-        if (c.removed) return false;
-        if (filter === "errors") return c.error;
-        if (filter === "unverified") return !c.verified;
-        if (filter === "verified") return c.verified;
-        if (filter === "unnumbered") return c.card_order === null;
-        if (filter === "several") return booksOf(c).length > 1;
-        if (filter === "single") return booksOf(c).length <= 1;
-        if (filter === "differ") {
-          const d = disagreement(c);
-          return d.answer || d.spelling;
-        }
-        if (filter === "own") return c.own.length > 0;
-        if (filter === "missing") return emptyColumns(c, topic.columns).length > 0;
-        if (filter === "notes") return !!c.note || c.sources.some((s) => s.note);
-        return true;
-      })
+    const picked = inBook
+      .filter((c) => passes(c, filter, topic.columns))
       .filter(
         (c) =>
           !q ||
@@ -781,7 +829,16 @@ function CardsTab({
           String(c.card_order) === q,
       );
     return sortCards(picked, sort, desc);
-  }, [cards, filter, query, topic.columns, book, sort, desc]);
+  }, [inBook, filter, query, topic.columns, sort, desc]);
+  const startProof = (from: FlashCard[]) => {
+    if (!from.length) return;
+    const first = from.findIndex((c) => !c.verified);
+    setProof({ ids: from.map((c) => c.id), i: Math.max(0, first) });
+  };
+  const pick = (f: Filter) => {
+    setFilter(f);
+    setShown(60);
+  };
   const open = (shown: FlashCard) => setEditing(cards.find((c) => c.id === shown.id) ?? shown);
   const dropFromProof = (ids: string[]) => {
     // Merged or deleted cards leave the list; the one open stays, or the
@@ -800,6 +857,23 @@ function CardsTab({
   };
   return (
     <div className="space-y-3">
+      <TopicProgress
+        topic={topic}
+        cards={cards}
+        sheets={sources.length}
+        onFilter={pick}
+        onMerge={() => setMerging(true)}
+        onProof={() =>
+          startProof(
+            sortCards(
+              cards.filter((c) => !c.removed),
+              "order",
+            ),
+          )
+        }
+        onAdd={() => onTab("sheets")}
+        onTab={onTab}
+      />
       <BooksPanel
         topic={topic}
         sources={sources.filter((s) => s.kind !== "sheet")}
@@ -810,9 +884,43 @@ function CardsTab({
         setPasting={setPasting}
       />
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}>
-          <FileUp className="mr-1 h-4 w-4" /> Add a book or sheet
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!list.length}
+          title="Go through the cards shown, one at a time"
+          onClick={() => startProof(list)}
+        >
+          <BadgeCheck className="mr-1 h-4 w-4" /> One by one ({list.length})
         </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="outline">
+              <Plus className="mr-1 h-4 w-4" /> Add
+              <ChevronDown className="ml-1 h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onSelect={() => fileRef.current?.click()}>
+              <FileUp className="mr-2 h-4 w-4" /> A book&apos;s sheet or file…
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={async () => {
+                try {
+                  setEditing(await addFn({ data: { topic_id: topic.id } }));
+                  onChanged();
+                } catch (err) {
+                  toast.error(errorText(err, "Couldn't add a card"));
+                }
+              }}
+            >
+              <Plus className="mr-2 h-4 w-4" /> An empty card
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setPasting(true)}>
+              <ClipboardPaste className="mr-2 h-4 w-4" /> Pasted text (AI reads it)
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <input
           ref={fileRef}
           type="file"
@@ -827,24 +935,16 @@ function CardsTab({
             onSheet(file);
           }}
         />
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={async () => {
-            try {
-              setEditing(await addFn({ data: { topic_id: topic.id } }));
-              onChanged();
-            } catch (err) {
-              toast.error(errorText(err, "Couldn't add a card"));
-            }
-          }}
-        >
-          <Plus className="mr-1 h-4 w-4" /> Add card
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => setPasting(true)}>
-          <ClipboardPaste className="mr-1 h-4 w-4" /> Paste text
-        </Button>
-        <div className="relative ml-auto min-w-0 basis-56">
+        <ProofTools
+          topic={topic}
+          cards={cards}
+          shownIds={list.map((c) => c.id)}
+          merging={merging}
+          setMerging={setMerging}
+          onChanged={onChanged}
+          onCards={onCard}
+        />
+        <div className="relative ml-auto min-w-0 flex-1 basis-48 sm:max-w-xs">
           <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             aria-label="Search cards"
@@ -854,26 +954,6 @@ function CardsTab({
             placeholder="Search, or a card number"
           />
         </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          size="sm"
-          disabled={!list.length}
-          onClick={() => {
-            const ids = list.map((c) => c.id);
-            const first = list.findIndex((c) => !c.verified);
-            setProof({ ids, i: Math.max(0, first) });
-          }}
-        >
-          <BadgeCheck className="mr-1 h-4 w-4" /> One by one ({list.length})
-        </Button>
-        <ProofTools
-          topic={topic}
-          cards={cards}
-          shownIds={list.map((c) => c.id)}
-          onChanged={onChanged}
-          onCards={onCard}
-        />
       </div>
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <select
@@ -937,24 +1017,38 @@ function CardsTab({
           ))}
         </div>
       </div>
-      <div className="flex flex-wrap gap-1">
-        {FILTERS.map((f) => (
+      <div
+        role="group"
+        aria-label="Show"
+        className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 [scrollbar-width:none] sm:flex-wrap sm:overflow-visible"
+      >
+        {FILTERS.filter((f) => f.id === "all" || f.id === filter || counts[f.id] > 0).map((f) => (
           <button
             key={f.id}
             type="button"
-            onClick={() => {
-              setFilter(f.id);
-              setShown(60);
-            }}
-            className={`rounded-full border px-3 py-1 text-xs ${filter === f.id ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground"}`}
+            aria-pressed={filter === f.id}
+            onClick={() => pick(f.id)}
+            className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs ${filter === f.id ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
           >
-            {f.label}
+            {f.label} <span className="tabular-nums opacity-70">{counts[f.id]}</span>
           </button>
         ))}
-        <span className="ml-auto self-center text-xs text-muted-foreground">
-          {list.length} cards
-        </span>
       </div>
+      {(query || filter !== "all") && (
+        <div className="text-xs text-muted-foreground">
+          {list.length} of {counts.all} cards shown{" "}
+          <button
+            type="button"
+            className="ml-1 underline"
+            onClick={() => {
+              pick("all");
+              setQuery("");
+            }}
+          >
+            Show all
+          </button>
+        </div>
+      )}
       {!cards.length && (
         <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
           Add each book&apos;s Excel sheet with the columns <code>order</code>, <code>prompt</code>,{" "}
@@ -973,7 +1067,7 @@ function CardsTab({
             <button
               type="button"
               onClick={() => open(c)}
-              className={`w-full rounded-xl border p-3 text-left hover:bg-muted/40 ${c.error ? "border-red-300" : "border-border"}`}
+              className={`w-full rounded-xl border border-l-4 p-3 text-left hover:bg-muted/40 ${c.error ? "border-red-300 border-l-red-500" : c.verified ? "border-border border-l-emerald-500" : "border-border"}`}
             >
               <div className="mb-1 flex flex-wrap items-center gap-1.5 text-xs">
                 {c.card_order !== null && (
@@ -1097,6 +1191,117 @@ function CardsTab({
   );
 }
 
+// Where the topic stands and the next step: sheets added, the same word to
+// merge, explanations to fill, cards proofread, chunks. Each figure opens
+// what it counts.
+function TopicProgress({
+  topic,
+  cards,
+  sheets,
+  onFilter,
+  onMerge,
+  onProof,
+  onAdd,
+  onTab,
+}: {
+  topic: FlashTopic;
+  cards: FlashCard[];
+  sheets: number;
+  onFilter: (f: Filter) => void;
+  onMerge: () => void;
+  onProof: () => void;
+  onAdd: () => void;
+  onTab: (t: TopicTab) => void;
+}) {
+  const live = cards.filter((c) => !c.removed);
+  const verified = live.filter((c) => c.verified).length;
+  const errors = live.filter((c) => c.error).length;
+  const missing = topic.columns.length
+    ? live.filter((c) => emptyColumns(c, topic.columns).length).length
+    : 0;
+  const dups = useMemo(() => groupDuplicates(cards).length, [cards]);
+  const pct = live.length ? Math.round((verified / live.length) * 100) : 0;
+  const next: { text: string; action: string; go: () => void } | null = !live.length
+    ? { text: "Add each book's Excel sheet.", action: "Add a sheet", go: onAdd }
+    : dups
+      ? {
+          text: `${dups} words are in several books as separate cards.`,
+          action: "Merge them",
+          go: onMerge,
+        }
+      : missing
+        ? {
+            text: `${missing} cards have empty explanations.`,
+            action: "Show them",
+            go: () => onFilter("missing"),
+          }
+        : verified < live.length
+          ? {
+              text: `${live.length - verified} cards to proofread.`,
+              action: verified ? "Continue proofreading" : "Start proofreading",
+              go: onProof,
+            }
+          : !topic.chunks.length
+            ? {
+                text: "Every card is verified.",
+                action: "Shuffle and number",
+                go: () => onTab("chunks"),
+              }
+            : null;
+  const stat = (label: string, n: number, go: () => void, tone = "") => (
+    <button
+      type="button"
+      onClick={go}
+      className={`rounded-lg px-2 py-1 text-left text-xs hover:bg-muted ${tone}`}
+    >
+      <span className="block text-base font-semibold tabular-nums">{n}</span>
+      {label}
+    </button>
+  );
+  return (
+    <section
+      aria-label="Progress"
+      className="space-y-2 rounded-xl border border-border bg-muted/20 p-3"
+    >
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-sm font-medium">
+          {verified} of {live.length} verified
+        </span>
+        <div
+          className="h-2 min-w-24 flex-1 overflow-hidden rounded-full bg-muted"
+          role="progressbar"
+          aria-label="Verified"
+          aria-valuenow={pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
+        </div>
+        <span className="text-xs tabular-nums text-muted-foreground">{pct}%</span>
+      </div>
+      <div className="-mx-1 flex flex-wrap gap-1">
+        {stat("sheets", sheets, () => onTab("sheets"))}
+        {dups > 0 && stat("words to merge", dups, onMerge, "text-amber-700 dark:text-amber-400")}
+        {topic.columns.length > 0 && stat("empty explanations", missing, () => onFilter("missing"))}
+        {errors > 0 && stat("to recheck", errors, () => onFilter("errors"), "text-destructive")}
+        {stat("not verified", live.length - verified, () => onFilter("unverified"))}
+        {stat(topic.chunks.length ? "chunks" : "chunks (not finalised)", topic.chunks.length, () =>
+          onTab("chunks"),
+        )}
+      </div>
+      {next && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2 text-sm">
+          <span className="text-muted-foreground">Next:</span>
+          <span className="min-w-0 flex-1">{next.text}</span>
+          <Button size="sm" onClick={next.go}>
+            {next.action} <ArrowRight className="ml-1 h-4 w-4" />
+          </Button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 // A card's merge and explanation state, as small badges.
 function CardFlags({ topic, card: c }: { topic: FlashTopic; card: FlashCard }) {
   const books = booksOf(c).length;
@@ -1112,7 +1317,11 @@ function CardFlags({ topic, card: c }: { topic: FlashTopic; card: FlashCard }) {
           ◇ {c.own.length} not from your books
         </Badge>
       )}
-      {missing > 0 && topic.columns.length > 0 && <Badge>{missing} empty</Badge>}
+      {missing > 0 && topic.columns.length > 0 && (
+        <Badge>
+          {missing} explanation{missing === 1 ? "" : "s"} empty
+        </Badge>
+      )}
     </>
   );
 }
@@ -1413,62 +1622,82 @@ function CardDialog({
     error: c.error,
     error_type: c.error_type,
   };
-  const field = (label: string, value: string, set: (v: string) => void, rows = 2) => (
+  const field = (label: string, value: string, set: (v: string) => void, big = false) => (
     <label className="block space-y-1 text-sm">
       <span className="font-medium">{label}</span>
-      <Textarea
+      <GrowingText
         aria-label={label}
         lang="hi"
-        rows={rows}
+        className={big ? "text-base" : ""}
         value={value}
         onChange={(e) => set(e.target.value)}
       />
     </label>
   );
+  const remove = async () => {
+    const numbered = c.card_order !== null;
+    if (
+      !confirm(
+        numbered
+          ? `Remove card #${c.card_order}? Its number is never used again; delete it in the app too.`
+          : "Delete this card?",
+      )
+    )
+      return;
+    try {
+      await deleteFn({ data: { id: c.id } });
+      onGone();
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't delete"));
+    }
+  };
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-2xl" {...swipe}>
-        <DialogHeader>
-          <DialogTitle>
-            {nav ? `Card ${nav.index + 1} of ${nav.total} · ` : ""}
-            {c.card_order !== null ? `Card #${c.card_order} · chunk ${c.chunk}` : "Card"}
+      <DialogContent
+        className="flex max-h-[92dvh] flex-col gap-0 p-0 sm:max-w-2xl max-sm:left-0 max-sm:top-0 max-sm:h-dvh max-sm:max-h-dvh max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0"
+        {...swipe}
+      >
+        <DialogHeader className="space-y-2 border-b border-border px-5 pb-3 pr-12 pt-4 text-left">
+          <DialogTitle className="text-base">
+            {nav ? `Card ${nav.index + 1} of ${nav.total}` : "Card"}
+            {c.card_order !== null && (
+              <span className="ml-2 text-sm font-normal text-muted-foreground">
+                #{c.card_order} · chunk {c.chunk}
+              </span>
+            )}
           </DialogTitle>
-        </DialogHeader>
-        {nav && (
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7"
-              disabled={busy || nav.index === 0}
-              onClick={() => void go(nav.prev)}
-            >
-              <ArrowLeft className="mr-1 h-3.5 w-3.5" /> Previous
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7"
-              disabled={busy}
-              onClick={() => void go(nav.next)}
-            >
-              Next <ArrowRight className="ml-1 h-3.5 w-3.5" />
-            </Button>
+          {nav && (
+            <div className="h-1 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full bg-primary transition-all"
+                style={{ width: `${((nav.index + 1) / nav.total) * 100}%` }}
+              />
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            {card.verified ? (
+              <Badge tone="good">
+                <BadgeCheck className="h-3 w-3" /> Verified
+              </Badge>
+            ) : (
+              <Badge>Not verified</Badge>
+            )}
+            {card.error && (
+              <Badge tone="bad">
+                <AlertTriangle className="h-3 w-3" /> {card.error_type || "Recheck"}
+              </Badge>
+            )}
             <span>
-              Swipe or Alt+← / Alt+→ previous / next · Ctrl+Enter save, verify and next · Ctrl+S
-              save
+              {c.sources.length
+                ? `From ${c.sources.map((s) => `${s.book}${s.pos != null ? ` (${s.pos})` : ""}`).join(", ")}`
+                : "Added by hand"}
+              {c.app_id ? ` · app id ${c.app_id}` : ""}
             </span>
           </div>
-        )}
-        <div className="space-y-3">
-          <p className="text-xs text-muted-foreground">
-            {c.sources.length
-              ? `From ${c.sources.map((s) => `${s.book}${s.pos != null ? ` (${s.pos})` : ""}`).join(", ")}`
-              : "Added by hand"}
-            {c.app_id ? ` · app id ${c.app_id}` : ""}
-          </p>
-          {field("front", c.front, (front) => setC({ ...c, front }), 3)}
-          {field("back", c.back, (back) => setC({ ...c, back }), 3)}
+        </DialogHeader>
+        <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
+          {field("front", c.front, (front) => setC({ ...c, front }), true)}
+          {field("back", c.back, (back) => setC({ ...c, back }))}
           <Versions
             topic={topic}
             card={card}
@@ -1522,17 +1751,13 @@ function CardDialog({
           )}
           {topic.columns.map((col) => (
             <div key={col.id}>
-              {field(
-                `explanation_${col.title}`,
-                c.ex[col.id] ?? "",
-                (v) =>
-                  setC({
-                    ...c,
-                    ex: { ...c.ex, [col.id]: v },
-                    // Edited by hand: the editor's now.
-                    own: c.own.filter((o) => o !== col.id),
-                  }),
-                3,
+              {field(`explanation_${col.title}`, c.ex[col.id] ?? "", (v) =>
+                setC({
+                  ...c,
+                  ex: { ...c.ex, [col.id]: v },
+                  // Edited by hand: the editor's now.
+                  own: c.own.filter((o) => o !== col.id),
+                }),
               )}
               {c.own.includes(col.id) && (
                 <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
@@ -1557,7 +1782,7 @@ function CardDialog({
                   onChange={(e) => setC({ ...c, prompt: e.target.value || null })}
                 />
               </label>
-              {field("backHint", c.back_hint, (back_hint) => setC({ ...c, back_hint }), 1)}
+              {field("backHint", c.back_hint, (back_hint) => setC({ ...c, back_hint }))}
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -1614,52 +1839,106 @@ function CardDialog({
               </select>
             )}
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button disabled={busy} onClick={() => void save(textPatch)}>
-              Save
-            </Button>
+          {!c.removed && (
             <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive"
               disabled={busy}
-              variant={c.verified ? "outline" : "default"}
-              className={c.verified ? "" : "bg-emerald-600 hover:bg-emerald-700"}
-              onClick={() =>
-                c.verified ? void save({ ...textPatch, verified: false }) : void saveAndVerify()
-              }
+              onClick={() => void remove()}
             >
-              <BadgeCheck className="mr-1 h-4 w-4" />
-              {c.verified ? "Not verified" : nav ? "Save, verify and next" : "Save and verify"}
+              <Trash2 className="mr-1 h-4 w-4" />
+              {c.card_order !== null ? "Remove this card" : "Delete this card"}
             </Button>
-            {!c.removed && (
-              <Button
-                variant="ghost"
-                className="ml-auto text-destructive"
-                disabled={busy}
-                onClick={async () => {
-                  const numbered = c.card_order !== null;
-                  if (
-                    !confirm(
-                      numbered
-                        ? `Remove card #${c.card_order}? Its number is never used again; delete it in the app too.`
-                        : "Delete this card?",
-                    )
-                  )
-                    return;
-                  try {
-                    await deleteFn({ data: { id: c.id } });
-                    onGone();
-                  } catch (e) {
-                    toast.error(errorText(e, "Couldn't delete"));
-                  }
-                }}
-              >
-                <Trash2 className="mr-1 h-4 w-4" />
-                {c.card_order !== null ? "Remove" : "Delete"}
-              </Button>
+          )}
+        </div>
+        <div className="flex items-center gap-2 border-t border-border bg-background px-3 py-2.5 sm:px-5">
+          {nav && (
+            <Button
+              size="icon"
+              variant="outline"
+              aria-label="Previous"
+              title="Previous (Alt+←)"
+              disabled={busy || nav.index === 0}
+              onClick={() => void go(nav.prev)}
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            title="Save (Ctrl+S)"
+            disabled={busy}
+            onClick={() => void save(textPatch)}
+          >
+            Save
+          </Button>
+          <Button
+            disabled={busy}
+            variant={c.verified ? "outline" : "default"}
+            title={c.verified ? undefined : "Ctrl+Enter"}
+            className={`min-w-0 ${c.verified ? "" : "flex-1 bg-emerald-600 hover:bg-emerald-700 sm:flex-none"}`}
+            onClick={() =>
+              c.verified ? void save({ ...textPatch, verified: false }) : void saveAndVerify()
+            }
+          >
+            <BadgeCheck className="mr-1 h-4 w-4 shrink-0" />
+            {c.verified ? (
+              "Not verified"
+            ) : nav ? (
+              <>
+                <span className="sm:hidden">Verify, next</span>
+                <span className="hidden sm:inline">Save, verify and next</span>
+              </>
+            ) : (
+              "Save and verify"
             )}
-          </div>
+          </Button>
+          <span className="ml-auto hidden text-xs text-muted-foreground md:inline">
+            {changed ? (
+              <span className="text-amber-700 dark:text-amber-400">● Unsaved</span>
+            ) : nav ? (
+              "Swipe or Alt+← →"
+            ) : (
+              ""
+            )}
+          </span>
+          {changed && <span className="ml-auto h-2 w-2 rounded-full bg-amber-500 md:hidden" />}
+          {nav && (
+            <Button
+              size="icon"
+              variant="outline"
+              aria-label="Next"
+              title="Next (Alt+→)"
+              className={changed ? "" : "ml-auto md:ml-0"}
+              disabled={busy}
+              onClick={() => void go(nav.next)}
+            >
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// A textarea as tall as its text.
+function GrowingText(props: React.ComponentProps<"textarea">) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + 2}px`;
+  }, [props.value]);
+  return (
+    <Textarea
+      ref={ref}
+      rows={1}
+      {...props}
+      className={`min-h-[2.5rem] resize-none overflow-hidden ${props.className ?? ""}`}
+    />
   );
 }
 
@@ -2070,6 +2349,15 @@ function SettingsTab({ topic, onChanged }: { topic: FlashTopic; onChanged: () =>
     books: topic.books,
   });
   const [busy, setBusy] = useState(false);
+  const dirty =
+    JSON.stringify(t) !==
+    JSON.stringify({
+      name: topic.name,
+      prompt: topic.prompt,
+      word_key: topic.word_key,
+      columns: topic.columns,
+      books: topic.books,
+    });
   const setBook = (i: number, patch: Partial<FlashBook>) =>
     setT({ ...t, books: t.books.map((b, k) => (k === i ? { ...b, ...patch } : b)) });
   return (
@@ -2128,24 +2416,44 @@ function SettingsTab({ topic, onChanged }: { topic: FlashTopic; onChanged: () =>
           <Plus className="mr-1 h-4 w-4" /> Add book
         </Button>
       </div>
-      <Button
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true);
-          try {
-            await updateFn({ data: { id: topic.id, ...t } });
-            toast.success("Saved");
-            await qc.invalidateQueries({ queryKey: ["flashTopics"] });
-            onChanged();
-          } catch (e) {
-            toast.error(errorText(e, "Couldn't save"));
-          } finally {
-            setBusy(false);
-          }
-        }}
+      <div
+        className={`sticky bottom-0 z-10 -mx-1 flex items-center gap-3 border-t border-border bg-background/95 px-1 py-3 backdrop-blur ${dirty ? "" : "hidden"}`}
       >
-        Save settings
-      </Button>
+        <span className="text-sm text-amber-700 dark:text-amber-400">Unsaved changes</span>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() =>
+            setT({
+              name: topic.name,
+              prompt: topic.prompt,
+              word_key: topic.word_key,
+              columns: topic.columns,
+              books: topic.books,
+            })
+          }
+        >
+          Undo
+        </Button>
+        <Button
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await updateFn({ data: { id: topic.id, ...t } });
+              toast.success("Saved");
+              await qc.invalidateQueries({ queryKey: ["flashTopics"] });
+              onChanged();
+            } catch (e) {
+              toast.error(errorText(e, "Couldn't save"));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Save settings
+        </Button>
+      </div>
       <ResetChunks topic={topic} onChanged={onChanged} />
     </div>
   );
