@@ -1744,6 +1744,7 @@ export type Database = {
           history: Json
           id: string
           is_revealed: boolean
+          note: string
           own: Json
           pos: number
           prompt: string | null
@@ -1751,6 +1752,7 @@ export type Database = {
           sources: Json
           topic_id: string
           updated_at: string
+          variants: Json
           verified: boolean
           word_key: string | null
         }
@@ -1768,6 +1770,7 @@ export type Database = {
           history?: Json
           id?: string
           is_revealed?: boolean
+          note?: string
           own?: Json
           pos?: number
           prompt?: string | null
@@ -1775,6 +1778,7 @@ export type Database = {
           sources?: Json
           topic_id: string
           updated_at?: string
+          variants?: Json
           verified?: boolean
           word_key?: string | null
         }
@@ -1792,6 +1796,7 @@ export type Database = {
           history?: Json
           id?: string
           is_revealed?: boolean
+          note?: string
           own?: Json
           pos?: number
           prompt?: string | null
@@ -1799,6 +1804,7 @@ export type Database = {
           sources?: Json
           topic_id?: string
           updated_at?: string
+          variants?: Json
           verified?: boolean
           word_key?: string | null
         }
