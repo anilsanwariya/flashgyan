@@ -257,12 +257,21 @@ export type FillItem = {
   passage: string;
 };
 
-export function fillMessages(deck: Deck, items: FillItem[]): ChatMessage[] {
+// `wordings`: by column title, the values the editor already uses again and
+// again (a kind, a rule): the AI reuses one exactly when it fits.
+export function fillMessages(
+  deck: Deck,
+  items: FillItem[],
+  wordings: Record<string, string[]> = {},
+): ChatMessage[] {
   const cols = deck.columns
-    .map((c) => `- "${c.title}": ${c.hint || "as the books explain it"}`)
+    .map((c) => {
+      const used = wordings[c.title] ?? [];
+      return `- "${c.title}": ${c.hint || "as the books explain it"}${used.length ? `\n  Wordings already used (use one exactly when it fits): ${used.map((u) => `"${u}"`).join("; ")}` : ""}`;
+    })
     .join("\n");
   const examples = deck.examples
-    .slice(0, 2)
+    .slice(0, 6)
     .map((e) => JSON.stringify({ front: e.front, back: e.back, ex: e.ex }))
     .join("\n");
   return [
@@ -271,7 +280,7 @@ export function fillMessages(deck: Deck, items: FillItem[]): ChatMessage[] {
       content: `You write the explanation columns of Hindi flashcards for FlashGyan, an app for Rajasthan's competitive exams (RPSC, RSSB). Deck type: ${deck.name}; each card asks "${deck.prompt.trim()}".
 Columns:
 ${cols}
-Finished cards in the house style (copy their form, length and symbols):
+Finished cards in the house style, checked by the editor (copy their form, length, wording and symbols):
 ${examples || "(none)"}
 
 For each card, fill ONLY the columns listed under "fill". Use the book passage given with the card first; mark such a value "from": "book". When the passage doesn't say it, write it from your own knowledge and mark it "from": "own" (the editor checks those). Never change the front or back. Write in Hindi unless the column is English (e.g. Pronunciation, Sentence-Usage). Be exact and short; no value is better than a doubtful one, so leave a column out when unsure.
@@ -390,6 +399,108 @@ export function parseCheck(
       fix: typeof f?.fix === "string" ? f.fix.trim().slice(0, 20000) : "",
     }))
     .filter((f) => ns.has(f.n) && f.note);
+}
+
+// ---------- The house style for the AI ----------
+
+// The editor's verified cards that show the house style best for these
+// cards: those with the most explanations they wrote themselves (not the
+// AI's), the same heading first, then the closest words.
+export function styleExamples(
+  cards: FlashCard[],
+  columns: FlashColumn[],
+  forCards: FlashCard[],
+  max = 5,
+): FlashCard[] {
+  const headings = new Set(forCards.map((c) => c.sources[0]?.heading).filter(Boolean));
+  const fronts = forCards.slice(0, 20).map((c) => c.front);
+  const mine = (c: FlashCard) =>
+    columns.filter((col) => (c.ex[col.id] ?? "").trim() && !c.own.includes(col.id)).length;
+  const near = (c: FlashCard) => Math.max(0, ...fronts.map((f) => likeness(f, c.front)));
+  const ids = new Set(forCards.map((c) => c.id));
+  return cards
+    .filter((c) => c.verified && !c.removed && !ids.has(c.id) && mine(c) > 0)
+    .map((c) => ({
+      c,
+      score: mine(c) * 10 + (headings.has(c.sources[0]?.heading) ? 20 : 0) + near(c) * 5,
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, max)
+    .map((x) => x.c);
+}
+
+// By column title: the short values the editor's verified cards use at
+// least twice (most used first), for the AI to reuse word for word.
+export function usedWordings(
+  cards: FlashCard[],
+  columns: FlashColumn[],
+  max = 15,
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const col of columns) {
+    const count = new Map<string, number>();
+    for (const c of cards) {
+      if (!c.verified || c.removed || c.own.includes(col.id)) continue;
+      const v = (c.ex[col.id] ?? "").trim();
+      if (v && v.length <= 60 && !v.includes("\n")) count.set(v, (count.get(v) ?? 0) + 1);
+    }
+    const used = [...count]
+      .filter(([, n]) => n >= 2)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, max)
+      .map(([v]) => v);
+    if (used.length) out[col.title] = used;
+  }
+  return out;
+}
+
+// ---------- Words spelt a little differently ----------
+
+// Whether two keys are one letter apart (one added, dropped or changed).
+function oneApart(a: string, b: string): boolean {
+  if (a === b || Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  const x = a.slice(i);
+  const y = b.slice(i);
+  return x.slice(1) === y.slice(1) || x.slice(1) === y || x === y.slice(1);
+}
+
+// Cards whose fronts are one letter apart (and not already the same word):
+// perhaps the same word spelt differently. Words of 4 letters or more; two
+// cards a group.
+export function nearDuplicates(cards: FlashCard[], max = 300): DupGroup[] {
+  const live = cards.filter((c) => !c.removed && dupKey(c.front).length >= 4);
+  // Grouped by length, compared with the same and the next length.
+  const byLen = new Map<number, FlashCard[]>();
+  for (const c of live) {
+    const n = dupKey(c.front).length;
+    byLen.set(n, [...(byLen.get(n) ?? []), c]);
+  }
+  const out: DupGroup[] = [];
+  const seen = new Set<string>();
+  for (const [n, list] of [...byLen].sort((a, b) => a[0] - b[0])) {
+    const next = [...list, ...(byLen.get(n + 1) ?? [])];
+    for (let i = 0; i < list.length && out.length < max; i++)
+      for (let j = i + 1; j < next.length && out.length < max; j++) {
+        const a = list[i];
+        const b = next[j];
+        const ka = dupKey(a.front);
+        const kb = dupKey(b.front);
+        if (ka === kb || !oneApart(ka, kb)) continue;
+        const k = [ka, kb].sort().join("~");
+        if (seen.has(k)) continue;
+        seen.add(k);
+        const books = [a, b].map((c) => c.sources[0]?.book ?? "");
+        out.push({
+          key: k,
+          cards: [a, b].sort((x, y) => x.pos - y.pos),
+          books: [...new Set(books.filter(Boolean))],
+          sameBook: books[0] === books[1],
+        });
+      }
+  }
+  return out;
 }
 
 // ---------- Views ----------

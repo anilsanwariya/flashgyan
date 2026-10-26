@@ -37,6 +37,7 @@ import {
   exConflicts,
   filledCount,
   groupDuplicates,
+  nearDuplicates,
   isList,
   mainOf,
   versionsOf,
@@ -206,6 +207,7 @@ export function ProofTools({
   const types = useQuery({ queryKey: ["flashTemplates"], queryFn: () => typesFn() });
   const kind = kindOfTemplate(types.data?.find((t) => t.id === topic.template_id)?.key);
   const groups = useMemo(() => groupDuplicates(cards), [cards]);
+  const near = useMemo(() => (merging ? nearDuplicates(cards) : []), [cards, merging]);
   const [wording, setWording] = useState(false);
   const running = useStudioJob();
   const shown = new Set(shownIds);
@@ -299,11 +301,11 @@ export function ProofTools({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-72">
-            <DropdownMenuItem disabled={!groups.length} onSelect={() => setMerging(true)}>
+            <DropdownMenuItem onSelect={() => setMerging(true)}>
               <Combine className="mr-2 h-4 w-4 shrink-0" />
               {item(
                 `Merge the same word (${groups.length})`,
-                "Words in several books become one card",
+                "Words in several books become one card; also words spelt a little differently",
               )}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
@@ -372,6 +374,7 @@ export function ProofTools({
         <MergeDialog
           topic={topic}
           groups={groups}
+          near={near}
           onClose={() => setMerging(false)}
           onChanged={onChanged}
         />
@@ -383,11 +386,14 @@ export function ProofTools({
 function MergeDialog({
   topic,
   groups,
+  near,
   onClose,
   onChanged,
 }: {
   topic: FlashTopic;
   groups: DupGroup[];
+  // Words one letter apart: perhaps the same word, spelt differently.
+  near: DupGroup[];
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -402,6 +408,12 @@ function MergeDialog({
       <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Same word in several books ({groups.length})</DialogTitle>
+          {near.length > 0 && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              And {near.length} pair{near.length === 1 ? "" : "s"} of words one letter apart, at the
+              end: perhaps the same word spelt differently. Merge all leaves them; check each.
+            </p>
+          )}
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
           Merging keeps one card (the chosen book&apos;s version in front) and keeps the other
@@ -411,7 +423,7 @@ function MergeDialog({
           the front card&apos;s wording is kept and the others stay in their versions.
         </p>
         <Button
-          disabled={busy}
+          disabled={busy || !groups.length}
           onClick={async () => {
             if (
               !confirm(
@@ -437,14 +449,23 @@ function MergeDialog({
           <Combine className="mr-1 h-4 w-4" /> Merge all {groups.length}
         </Button>
         <ul className="space-y-2">
-          {groups.slice(0, shown).map((g) => {
+          {[...groups, ...near].slice(0, shown).map((g, gi) => {
             const main = mains[g.key] ?? mainOf(g.cards, order).id;
+            const isNear = gi >= groups.length;
             return (
               <li key={g.key} className="space-y-2 rounded-xl border border-border p-3 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
                   <b lang="hi">{g.cards[0].front.split("\n").join(" / ")}</b>
                   <Badge tone="primary">{g.books.length} books</Badge>
-                  {g.sameBook && <Badge tone="warn">twice in one book</Badge>}
+                  {isNear && (
+                    <Badge
+                      tone="warn"
+                      title="Not merged by Merge all: check they are the same word"
+                    >
+                      spelt a little differently
+                    </Badge>
+                  )}
+                  {g.sameBook && !isNear && <Badge tone="warn">twice in one book</Badge>}
                   {exConflicts(g.cards, topic.columns).length > 0 && (
                     <Badge
                       tone="warn"
@@ -520,9 +541,9 @@ function MergeDialog({
             );
           })}
         </ul>
-        {groups.length > shown && (
+        {groups.length + near.length > shown && (
           <Button variant="outline" size="sm" onClick={() => setShown(shown + 60)}>
-            Show more ({groups.length - shown} left)
+            Show more ({groups.length + near.length - shown} left)
           </Button>
         )}
       </DialogContent>

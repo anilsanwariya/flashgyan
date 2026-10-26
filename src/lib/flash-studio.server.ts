@@ -1031,15 +1031,18 @@ export async function fillExplanations(
   const { topic, cards } = await getTopic(topicId);
   const want = cards.filter((c) => ids.includes(c.id) && !c.removed);
   const deck = await deckOf(topic);
-  // The topic's own verified, complete cards show the house style best.
-  const verified = cards
-    .filter((c) => c.verified && !M.emptyColumns(c, topic.columns).length)
-    .slice(0, 2);
+  // The editor's own verified cards show the house style best: those
+  // closest to these cards, with the wordings they use again and again.
+  const verified = M.styleExamples(cards, topic.columns, want);
+  const wordings = M.usedWordings(cards, topic.columns);
   deck.examples = [
     ...verified.map((c) => ({
       front: c.front,
       back: c.back,
-      ex: Object.fromEntries(topic.columns.map((col) => [col.title, c.ex[col.id] ?? ""])),
+      // Only what the editor wrote (not the AI's own).
+      ex: Object.fromEntries(
+        topic.columns.map((col) => [col.title, c.own.includes(col.id) ? "" : (c.ex[col.id] ?? "")]),
+      ),
     })),
     ...deck.examples,
   ];
@@ -1094,7 +1097,7 @@ export async function fillExplanations(
   let own = 0;
   if (items.length) {
     const got = M.parseFill(
-      await saathiComplete(apiKey(), M.fillMessages(deck, items)),
+      await saathiComplete(apiKey(), M.fillMessages(deck, items, wordings)),
       topic.columns,
       items,
     );
@@ -1802,4 +1805,39 @@ export async function applyWorking(topicId: string, rows: SH.WorkingRow[]): Prom
     added: plan.added.length,
     unknown: plan.unknown.length,
   };
+}
+
+// ---------- The same word in other topics ----------
+
+// For this topic's words (by their key), the other topics that have them.
+export async function otherTopicWords(
+  topicId: string,
+): Promise<{ key: string; topics: { id: string; name: string; front: string }[] }[]> {
+  const mine = new Set(
+    (await topicCards(topicId)).filter((c) => !c.removed).map((c) => M.dupKey(c.front)),
+  );
+  mine.delete("");
+  const { data: topics, error } = await from("flash_topics").select("id,name").neq("id", topicId);
+  fail(error);
+  const names = new Map(((topics ?? []) as Row[]).map((t) => [String(t.id), String(t.name)]));
+  const found = new Map<string, Map<string, { id: string; name: string; front: string }>>();
+  for (let page = 0; ; page++) {
+    const { data, error: e2 } = await from("flash_cards")
+      .select("topic_id,front")
+      .neq("topic_id", topicId)
+      .eq("removed", false)
+      .order("id")
+      .range(page * 1000, page * 1000 + 999);
+    fail(e2);
+    for (const r of (data ?? []) as Row[]) {
+      const key = M.dupKey(String(r.front ?? ""));
+      const tid = String(r.topic_id);
+      if (!mine.has(key) || !names.has(tid)) continue;
+      const m = found.get(key) ?? new Map();
+      if (!m.has(tid)) m.set(tid, { id: tid, name: names.get(tid)!, front: String(r.front) });
+      found.set(key, m);
+    }
+    if ((data ?? []).length < 1000) break;
+  }
+  return [...found].map(([key, m]) => ({ key, topics: [...m.values()] }));
 }

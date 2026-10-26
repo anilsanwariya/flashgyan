@@ -504,3 +504,11 @@ export const applyFlashWorking = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await server()).applyWorking(data.topic_id, data.rows);
   });
+
+export const otherFlashTopicWords = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ topic_id: id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).otherTopicWords(data.topic_id);
+  });

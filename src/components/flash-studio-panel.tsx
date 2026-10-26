@@ -20,6 +20,7 @@ import {
   ChevronDown,
   ClipboardPaste,
   Copy,
+  Eye,
   Download,
   FileUp,
   KeyRound,
@@ -44,6 +45,7 @@ import {
   listFlashTemplates,
   listFlashTopics,
   numberFlashCards,
+  otherFlashTopicWords,
   resetFlashChunks,
   saveFlashAppIds,
   markFlashDownloaded,
@@ -95,6 +97,7 @@ import { parseWorking, workingRows, type WorkingRow } from "@/lib/flash-sheets";
 import { ProofTools, Versions } from "@/components/flash-studio-proof";
 import {
   booksOf,
+  dupKey,
   disagreement,
   emptyColumns,
   groupDuplicates,
@@ -780,6 +783,7 @@ type Filter =
   | "notes"
   | "ai"
   | "lint"
+  | "other"
   | "unnumbered"
   | "removed";
 const FILTERS: { id: Filter; label: string }[] = [
@@ -794,6 +798,7 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "missing", label: "Missing explanations" },
   { id: "ai", label: "AI suggestions" },
   { id: "lint", label: "Quick checks" },
+  { id: "other", label: "In other topics" },
   { id: "notes", label: "Notes" },
   { id: "unnumbered", label: "Not numbered" },
   { id: "removed", label: "Removed" },
@@ -805,8 +810,10 @@ function passes(
   f: Filter,
   columns: FlashColumn[],
   lints?: Map<string, Lint[]>,
+  other?: Map<string, unknown>,
 ): boolean {
   if (f === "lint") return !c.removed && !!lints?.get(c.id)?.length;
+  if (f === "other") return !c.removed && !!other?.has(dupKey(c.front));
   if (f === "removed") return c.removed;
   if (c.removed) return false;
   if (f === "errors") return c.error;
@@ -882,6 +889,17 @@ function CardsTab({
     return { numbering: numberingOf(live), variants: spellingVariants(live) };
   }, [cards]);
   const lints = useMemo(() => lintTopic(cards, topic.columns), [cards, topic.columns]);
+  // This topic's words that other topics have too.
+  const otherFn = useServerFn(otherFlashTopicWords);
+  const otherQ = useQuery({
+    queryKey: ["flashOther", topic.id],
+    queryFn: () => otherFn({ data: { topic_id: topic.id } }),
+    staleTime: 60_000,
+  });
+  const inOther = useMemo(
+    () => new Map((otherQ.data ?? []).map((o) => [o.key, o.topics])),
+    [otherQ.data],
+  );
   // Cards ticked for an action on them all.
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const pickOne = (id: string, on: boolean) =>
@@ -907,15 +925,15 @@ function CardsTab({
       Object.fromEntries(
         FILTERS.map((f) => [
           f.id,
-          inBook.filter((c) => passes(c, f.id, topic.columns, lints)).length,
+          inBook.filter((c) => passes(c, f.id, topic.columns, lints, inOther)).length,
         ]),
       ) as Record<Filter, number>,
-    [inBook, topic.columns, lints],
+    [inBook, topic.columns, lints, inOther],
   );
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
     const picked = inBook
-      .filter((c) => passes(c, filter, topic.columns, lints))
+      .filter((c) => passes(c, filter, topic.columns, lints, inOther))
       .filter(
         (c) =>
           !q ||
@@ -923,7 +941,7 @@ function CardsTab({
           String(c.card_order) === q,
       );
     return sortCards(picked, sort, desc);
-  }, [inBook, filter, query, topic.columns, sort, desc, lints]);
+  }, [inBook, filter, query, topic.columns, sort, desc, lints, inOther]);
   const startProof = (from: FlashCard[]) => {
     if (!from.length) return;
     const first = from.findIndex((c) => !c.verified);
@@ -1191,6 +1209,8 @@ function CardsTab({
           onOpen={open}
           picked={picked}
           onPick={pickOne}
+          // One book's view shows its version: edit those in the card.
+          onEdit={book ? undefined : onCard}
         />
       )}
       <ul className={`space-y-2 ${view === "table" ? "hidden" : ""}`}>
@@ -1237,6 +1257,20 @@ function CardsTab({
                 {c.app_id && <Badge title={`App id ${c.app_id}`}>app id</Badge>}
                 {c.removed && <Badge tone="warn">Removed</Badge>}
                 <CardFlags topic={topic} card={c} />
+                {inOther.get(dupKey(c.front)) && (
+                  <Badge
+                    tone="primary"
+                    title={inOther
+                      .get(dupKey(c.front))!
+                      .map((o) => `${o.name}: ${o.front}`)
+                      .join("\n")}
+                  >
+                    also in {inOther.get(dupKey(c.front))![0].name}
+                    {inOther.get(dupKey(c.front))!.length > 1
+                      ? ` +${inOther.get(dupKey(c.front))!.length - 1}`
+                      : ""}
+                  </Badge>
+                )}
                 {!!lints.get(c.id)?.length && (
                   <Badge
                     title={lints
@@ -1645,20 +1679,126 @@ function ImportDialog({
   );
 }
 
-// Every column of the cards, one row each; a row opens its card.
+// A table cell: double-click to edit it in place; Ctrl+Enter or leaving it
+// saves, Escape puts it back.
+function EditCell({
+  label,
+  value,
+  className,
+  prefix,
+  onSave,
+}: {
+  label: string;
+  value: string;
+  className: string;
+  prefix: string;
+  onSave: (v: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  // Closed by a key: the blur that follows isn't a save.
+  const done = useRef(false);
+  if (draft === null)
+    return (
+      <td
+        className={`cursor-text whitespace-pre-wrap p-2 ${className}`}
+        title="Double-click to edit"
+        data-cell={label}
+        onDoubleClick={() => {
+          done.current = false;
+          setDraft(value);
+        }}
+      >
+        {value ? prefix : ""}
+        {value}
+      </td>
+    );
+  return (
+    <td className={`p-1 ${className}`} data-cell={label}>
+      <GrowingText
+        autoFocus
+        aria-label={label}
+        lang="hi"
+        value={draft}
+        onFocus={(e) => e.currentTarget.setSelectionRange(draft.length, draft.length)}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            done.current = true;
+            setDraft(null);
+          } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            done.current = true;
+            onSave(draft);
+            setDraft(null);
+          }
+        }}
+        onBlur={() => {
+          if (done.current) return;
+          done.current = true;
+          onSave(draft);
+          setDraft(null);
+        }}
+        className="min-w-40 text-sm"
+      />
+    </td>
+  );
+}
+
+// Every column of the cards, one row each: the number or book opens the
+// card; a text cell is edited in place with a double-click.
 function CardTable({
   topic,
   cards,
   onOpen,
   picked,
   onPick,
+  onEdit,
 }: {
   topic: FlashTopic;
   cards: FlashCard[];
   onOpen: (c: FlashCard) => void;
   picked: Set<string>;
   onPick: (id: string, on: boolean) => void;
+  // A cell edited in place and saved (no editing without it).
+  onEdit?: (c: FlashCard) => void;
 }) {
+  const saveFn = useServerFn(saveFlashCard);
+  const save = async (c: FlashCard, field: string, v: string) => {
+    if (fieldText(c, field) === v) return;
+    const patch =
+      field === "front" || field === "back"
+        ? { [field]: v }
+        : {
+            ex: { ...c.ex, [field.slice(3)]: v },
+            own: c.own.filter((o) => `ex:${o}` !== field),
+          };
+    try {
+      onEdit?.(await saveFn({ data: { id: c.id, patch: patch as never } }));
+      toast.success("Saved");
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't save"));
+    }
+  };
+  const cell = (c: FlashCard, field: string, className: string) =>
+    onEdit ? (
+      <EditCell
+        key={field}
+        label={`${field === "front" || field === "back" ? field : `explanation_${topic.columns.find((col) => `ex:${col.id}` === field)?.title}`} of ${c.front.split("\n")[0]}`}
+        value={fieldText(c, field)}
+        className={className}
+        prefix={field.startsWith("ex:") && c.own.includes(field.slice(3)) ? "◇ " : ""}
+        onSave={(v) => void save(c, field, v)}
+      />
+    ) : (
+      <td key={field} className={`whitespace-pre-wrap p-2 ${className}`} onClick={() => onOpen(c)}>
+        {field.startsWith("ex:") && c.own.includes(field.slice(3)) && fieldText(c, field)
+          ? "◇ "
+          : ""}
+        {fieldText(c, field)}
+      </td>
+    );
   return (
     <div className="max-h-[75dvh] overflow-auto rounded-xl border border-border">
       <table className="w-full min-w-[720px] border-collapse text-sm" lang="hi">
@@ -1681,11 +1821,10 @@ function CardTable({
             <tr
               key={c.id}
               tabIndex={0}
-              onClick={() => onOpen(c)}
-              onKeyDown={(e) => e.key === "Enter" && onOpen(c)}
-              className={`cursor-pointer border-t border-border align-top hover:bg-muted/40 ${picked.has(c.id) ? "bg-primary/5" : c.error ? "bg-red-50/60 dark:bg-red-950/20" : ""}`}
+              onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && onOpen(c)}
+              className={`border-t border-border align-top hover:bg-muted/40 ${picked.has(c.id) ? "bg-primary/5" : c.error ? "bg-red-50/60 dark:bg-red-950/20" : ""}`}
             >
-              <td className="p-2" onClick={(e) => e.stopPropagation()}>
+              <td className="p-2">
                 <input
                   type="checkbox"
                   aria-label={`Tick ${c.front.split("\n")[0]}`}
@@ -1694,19 +1833,29 @@ function CardTable({
                   onChange={(e) => onPick(c.id, e.target.checked)}
                 />
               </td>
-              <td className="whitespace-nowrap p-2 text-xs text-muted-foreground">
+              <td
+                className="cursor-pointer whitespace-nowrap p-2 text-xs text-muted-foreground"
+                onClick={() => onOpen(c)}
+              >
+                <button
+                  type="button"
+                  aria-label={`Open ${c.front.split("\n")[0]}`}
+                  className="mr-1 inline-flex align-middle text-muted-foreground hover:text-foreground"
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                </button>
                 {c.card_order ?? ""}
                 {c.verified && <BadgeCheck className="ml-1 inline h-3.5 w-3.5 text-emerald-600" />}
               </td>
-              <td className="whitespace-nowrap p-2 text-xs">{booksOf(c).join(", ")}</td>
-              <td className="whitespace-pre-wrap p-2 font-medium">{c.front}</td>
-              <td className="whitespace-pre-wrap p-2">{c.back}</td>
-              {topic.columns.map((col) => (
-                <td key={col.id} className="whitespace-pre-wrap p-2 text-xs">
-                  {c.own.includes(col.id) && c.ex[col.id] ? "◇ " : ""}
-                  {c.ex[col.id] ?? ""}
-                </td>
-              ))}
+              <td
+                className="cursor-pointer whitespace-nowrap p-2 text-xs"
+                onClick={() => onOpen(c)}
+              >
+                {booksOf(c).join(", ")}
+              </td>
+              {cell(c, "front", "font-medium")}
+              {cell(c, "back", "")}
+              {topic.columns.map((col) => cell(c, `ex:${col.id}`, "text-xs"))}
             </tr>
           ))}
         </tbody>
