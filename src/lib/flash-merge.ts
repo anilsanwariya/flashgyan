@@ -329,14 +329,17 @@ export function parseFill(raw: string, columns: FlashColumn[], items: FillItem[]
 
 export type CheckItem = { n: number; front: string; back: string; ex: Record<string, string> };
 
+// The AI check: every field of each card read (front and back as closely
+// as the explanations), each problem with the field's corrected text.
 export function checkMessages(deck: Deck, items: CheckItem[]): ChatMessage[] {
   return [
     {
       role: "system",
-      content: `You proofread Hindi flashcards for FlashGyan (Rajasthan's competitive exams: RPSC, RSSB) before students see them. Deck type: ${deck.name}; each card asks "${deck.prompt.trim()}".
-Report only real problems a careful Hindi teacher would fix: a misspelt word (वर्तनी: matras, nukta, halant, anusvara), a wrong or incomplete answer, an explanation that is wrong or doesn't fit the card, the wrong rule or type (e.g. a संधि named wrongly), or a form that breaks the deck's style. Don't report style preferences or spellings both of which are accepted. A card with no problem is left out.
-Kinds: ${ERROR_TYPES.filter((t) => t !== "Check in book" && t !== "Other").join(", ")}, Other.
-Reply with JSON only: {"flags": [{"n": 1, "type": "Spelling", "note": "what is wrong and the fix, in a few words"}]}`,
+      content: `You proofread Hindi flashcards for FlashGyan (Rajasthan's competitive exams: RPSC, RSSB) before students see them. Deck type: ${deck.name}; each card asks "${deck.prompt.trim()}" about its front, and the back is the answer.
+Read every field of every card — the front and the back as closely as the explanations. Report only real problems a careful Hindi teacher would fix: a misspelt word (वर्तनी: matras, nukta, halant, anusvara, चन्द्रबिन्दु), a wrong, incomplete or extra answer on the back, a front that isn't the right word or form for this deck, an explanation that is wrong or doesn't fit the card, the wrong rule or type (e.g. a संधि named wrongly), or a form that breaks the deck's style. Don't report style preferences or spellings both of which are accepted. A card with no problem is left out.
+For each problem give the field ("front", "back", or the explanation's name exactly as written), the kind, a short reason, and "fix": the whole field as it should read, changing only what is wrong and keeping its layout (numbering, commas, line breaks). If you can only point the problem out (you would need the book), leave "fix" empty.
+Kinds: ${ERROR_TYPES.filter((t) => t !== "Check in book" && t !== "Other").join(", ")}, Check in book, Other.
+Reply with JSON only: {"flags": [{"n": 1, "field": "back", "type": "Spelling", "note": "what is wrong, in a few words", "fix": "the field corrected"}]}`,
     },
     {
       role: "user",
@@ -352,18 +355,39 @@ Reply with JSON only: {"flags": [{"n": 1, "type": "Spelling", "note": "what is w
   ];
 }
 
+export type CheckFlag = {
+  n: number;
+  type: string;
+  note: string;
+  // "front", "back" or "ex:<column id>"; "" when the AI named no field.
+  field: string;
+  fix: string;
+};
+
 export function parseCheck(
   raw: string,
   items: CheckItem[],
-): { n: number; type: string; note: string }[] {
+  columns: FlashColumn[] = [],
+): CheckFlag[] {
   const o = parseJsonLoose<{ flags?: unknown }>(raw);
   if (!o || !Array.isArray(o.flags)) throw new Error("The AI's reply couldn't be read");
   const ns = new Set(items.map((i) => i.n));
+  const fieldOf = (v: unknown) => {
+    const f = String(v ?? "")
+      .trim()
+      .replace(/^explanation_/, "");
+    if (/^front$/i.test(f)) return "front";
+    if (/^back$/i.test(f)) return "back";
+    const col = columns.find((c) => c.title.trim() === f || c.id === f);
+    return col ? `ex:${col.id}` : "";
+  };
   return (o.flags as Record<string, unknown>[])
     .map((f) => ({
       n: Number(f?.n),
       type: ERROR_TYPES.includes(String(f?.type)) ? String(f?.type) : "Other",
       note: typeof f?.note === "string" ? f.note.trim().slice(0, 500) : "",
+      field: fieldOf(f?.field),
+      fix: typeof f?.fix === "string" ? f.fix.trim().slice(0, 20000) : "",
     }))
     .filter((f) => ns.has(f.n) && f.note);
 }

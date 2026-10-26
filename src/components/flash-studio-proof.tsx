@@ -3,14 +3,13 @@
 // versions and its answer combined from them as chips, and the AI's help
 // over many cards: empty explanations filled (its own knowledge marked)
 // and the check (it only flags).
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import {
   ChevronDown,
   Combine,
   Eye,
-  Pause,
   Replace,
   ScanSearch,
   Sparkles,
@@ -43,7 +42,8 @@ import {
   wordingGroups,
   type DupGroup,
 } from "@/lib/flash-merge";
-import type { FlashCard, FlashSource, FlashTopic } from "@/lib/flash-studio";
+import { needsCheck, type FlashCard, type FlashSource, type FlashTopic } from "@/lib/flash-studio";
+import { runStudioJob, useStudioJob } from "@/lib/flash-jobs";
 import { Badge, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -173,31 +173,6 @@ function PeekButton({ topic, peek }: { topic: FlashTopic; peek: Peek }) {
   );
 }
 
-// Runs the AI over cards in batches, with progress and a stop button.
-function useBatches() {
-  const [state, setState] = useState<{ label: string; done: number; total: number } | null>(null);
-  const stop = useRef(false);
-  const run = async <T,>(
-    label: string,
-    ids: string[],
-    size: number,
-    step: (batch: string[]) => Promise<T>,
-    each: (r: T) => void,
-  ) => {
-    stop.current = false;
-    setState({ label, done: 0, total: ids.length });
-    try {
-      for (let i = 0; i < ids.length && !stop.current; i += size) {
-        each(await step(ids.slice(i, i + size)));
-        setState({ label, done: Math.min(ids.length, i + size), total: ids.length });
-      }
-    } finally {
-      setState(null);
-    }
-  };
-  return { state, run, stop: () => (stop.current = true) };
-}
-
 // The topic's tools, in one menu: merging duplicates, filling explanations,
 // the AI check, पृथक करें cards and one wording. A batch running shows its
 // progress in the menu's place.
@@ -228,55 +203,53 @@ export function ProofTools({
   const kind = kindOfTemplate(types.data?.find((t) => t.id === topic.template_id)?.key);
   const groups = useMemo(() => groupDuplicates(cards), [cards]);
   const [wording, setWording] = useState(false);
-  const batches = useBatches();
+  const running = useStudioJob();
   const shown = new Set(shownIds);
   const live = cards.filter((c) => !c.removed && shown.has(c.id));
   const needFill = live.filter((c) => emptyColumns(c, topic.columns).length).map((c) => c.id);
-  const needCheck = live.filter((c) => !c.verified).map((c) => c.id);
+  const needCheck = live.filter(needsCheck).map((c) => c.id);
   const words = kind ? live.reduce((n, c) => n + wordsOf(c.back).length, 0) : 0;
-  const fill = async () => {
-    let own = 0;
-    let filled = 0;
-    try {
-      await batches.run(
-        "Filling explanations",
-        needFill,
-        10,
-        (ids) => fillFn({ data: { topic_id: topic.id, ids } }),
-        (r) => {
+  const fill = () =>
+    runStudioJob({
+      label: "Filling explanations",
+      topic: topic.name,
+      ids: needFill,
+      size: 10,
+      step: (ids) => fillFn({ data: { topic_id: topic.id, ids } }),
+      each: (() => {
+        let own = 0;
+        let filled = 0;
+        return (r: { own: number; filled: number; cards: FlashCard[] }) => {
           own += r.own;
           filled += r.filled;
           onCards(r.cards);
-        },
-      );
-      toast.success(
-        `${filled} card${filled === 1 ? "" : "s"} filled${own ? `; ${own} explanations not from your books (marked)` : ""}`,
-      );
-    } catch (e) {
-      toast.error(errorText(e, "The AI couldn't fill these; try again"));
-    }
-  };
-  const check = async () => {
-    let flagged = 0;
-    try {
-      await batches.run(
-        "Checking",
-        needCheck,
-        20,
-        (ids) => checkFn({ data: { topic_id: topic.id, ids } }),
-        (r) => {
+          return `${filled} filled${own ? `, ${own} not from your books` : ""}`;
+        };
+      })(),
+      end: (found) =>
+        toast.success(found ? `Explanations: ${found} (marked ◇)` : "Nothing to fill"),
+    });
+  const check = () =>
+    runStudioJob({
+      label: "AI check",
+      topic: topic.name,
+      ids: needCheck,
+      size: 20,
+      step: (ids) => checkFn({ data: { topic_id: topic.id, ids } }),
+      each: (() => {
+        let flagged = 0;
+        return (r: { flagged: number; cards: FlashCard[] }) => {
           flagged += r.flagged;
           onCards(r.cards);
-        },
-      );
-      toast.success(
-        flagged ? `${flagged} card${flagged === 1 ? "" : "s"} to recheck` : "No problems found",
-      );
-    } catch (e) {
-      toast.error(errorText(e, "The AI couldn't check these; try again"));
-    }
-  };
-  const split = async () => {
+          return flagged ? `${flagged} card${flagged === 1 ? "" : "s"} to recheck` : "";
+        };
+      })(),
+      end: (found, stopped) =>
+        toast.success(
+          `${stopped ? "AI check stopped" : "AI check done"}: ${found || "no problems found"}`,
+        ),
+    });
+  const split = () => {
     if (
       !confirm(
         `Make “पृथक करें” cards from the ${words} words of the ${live.length} cards shown, in “${topic.name} – पृथक करें”? Words already there are skipped.`,
@@ -286,24 +259,23 @@ export function ProofTools({
     let added = 0;
     let ai = 0;
     let name = "";
-    try {
-      await batches.run(
-        "Making पृथक करें cards",
-        live.map((c) => c.id),
-        8,
-        (ids) => splitFn({ data: { topic_id: topic.id, ids } }),
-        (r) => {
-          added += r.added;
-          ai += r.ai;
-          name = r.topic.name;
-        },
-      );
-      toast.success(
-        `${added} cards made in “${name}”${ai ? `; ${ai} split by the AI, marked to check` : ""}`,
-      );
-    } catch (e) {
-      toast.error(errorText(e, "Couldn't make the cards"));
-    }
+    return runStudioJob({
+      label: "Making पृथक करें cards",
+      topic: topic.name,
+      ids: live.map((c) => c.id),
+      size: 8,
+      step: (ids) => splitFn({ data: { topic_id: topic.id, ids } }),
+      each: (r) => {
+        added += r.added;
+        ai += r.ai;
+        name = r.topic.name;
+        return `${added} made`;
+      },
+      end: () =>
+        toast.success(
+          `${added} cards made in “${name}”${ai ? `; ${ai} split by the AI, marked to check` : ""}`,
+        ),
+    });
   };
   const item = (label: string, note: string) => (
     <span className="flex flex-col">
@@ -313,18 +285,7 @@ export function ProofTools({
   );
   return (
     <>
-      {batches.state ? (
-        <span
-          role="status"
-          className="flex items-center gap-2 rounded-full border border-border px-3 py-1 text-sm"
-        >
-          <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
-          {batches.state.label}: {batches.state.done}/{batches.state.total}
-          <Button size="sm" variant="ghost" className="h-7" onClick={batches.stop}>
-            <Pause className="mr-1 h-4 w-4" /> Stop
-          </Button>
-        </span>
-      ) : (
+      {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button size="sm" variant="outline">
@@ -342,10 +303,12 @@ export function ProofTools({
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-              AI, on the {live.length} cards shown
+              {running
+                ? `AI: wait for “${running.label}” to finish`
+                : `AI, on the ${live.length} cards shown (runs while you work)`}
             </DropdownMenuLabel>
             <DropdownMenuItem
-              disabled={!needFill.length || !topic.columns.length}
+              disabled={!!running || !needFill.length || !topic.columns.length}
               onSelect={() => void fill()}
             >
               <Sparkles className="mr-2 h-4 w-4 shrink-0" />
@@ -354,12 +317,18 @@ export function ProofTools({
                 "From the books first; its own knowledge is marked",
               )}
             </DropdownMenuItem>
-            <DropdownMenuItem disabled={!needCheck.length} onSelect={() => void check()}>
+            <DropdownMenuItem
+              disabled={!!running || !needCheck.length}
+              onSelect={() => void check()}
+            >
               <ScanSearch className="mr-2 h-4 w-4 shrink-0" />
-              {item(`AI check (${needCheck.length})`, "Marks problems to recheck; changes nothing")}
+              {item(
+                `AI check (${needCheck.length})`,
+                "Front, back and explanations; fixes to apply or dismiss. Skips verified and already-checked cards",
+              )}
             </DropdownMenuItem>
             {kind && words > 0 && (
-              <DropdownMenuItem onSelect={() => void split()}>
+              <DropdownMenuItem disabled={!!running} onSelect={() => void split()}>
                 <Split className="mr-2 h-4 w-4 shrink-0" />
                 {item(
                   `पृथक करें cards (${words} words)`,
@@ -378,7 +347,7 @@ export function ProofTools({
             )}
           </DropdownMenuContent>
         </DropdownMenu>
-      )}
+      }
       {wording && (
         <WordingDialog
           topic={topic}

@@ -65,6 +65,9 @@ import {
   newColumnId,
   parseSheet,
   suggestSizes,
+  cardSig,
+  fieldText,
+  type AiFix,
   type FlashBook,
   type FlashCard,
   type FlashColumn,
@@ -77,6 +80,7 @@ import {
 } from "@/lib/flash-studio";
 import { zipFiles } from "@/lib/zip";
 import { BooksPanel } from "@/components/flash-studio-books";
+import { StudioJobBar } from "@/components/flash-studio-jobs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -157,9 +161,16 @@ function useOpenTopic(): [string | null, (id: string | null) => void] {
 export function FlashStudio() {
   const [open, setOpen] = useOpenTopic();
   const [tab, setTab] = useState<"topics" | "types">("topics");
-  if (open) return <TopicView id={open} onBack={() => setOpen(null)} />;
+  if (open)
+    return (
+      <div className="space-y-3">
+        <StudioJobBar />
+        <TopicView id={open} onBack={() => setOpen(null)} />
+      </div>
+    );
   return (
     <div className="space-y-4">
+      <StudioJobBar />
       <PageTabs
         label="Card studio"
         tabs={[
@@ -716,6 +727,7 @@ type Filter =
   | "own"
   | "missing"
   | "notes"
+  | "ai"
   | "unnumbered"
   | "removed";
 const FILTERS: { id: Filter; label: string }[] = [
@@ -728,6 +740,7 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "differ", label: "Books differ" },
   { id: "own", label: "Not from your books" },
   { id: "missing", label: "Missing explanations" },
+  { id: "ai", label: "AI suggestions" },
   { id: "notes", label: "Notes" },
   { id: "unnumbered", label: "Not numbered" },
   { id: "removed", label: "Removed" },
@@ -750,6 +763,7 @@ function passes(c: FlashCard, f: Filter, columns: FlashColumn[]): boolean {
   if (f === "own") return c.own.length > 0;
   if (f === "missing") return emptyColumns(c, columns).length > 0;
   if (f === "notes") return !!c.note || c.sources.some((s) => s.note);
+  if (f === "ai") return !!c.ai?.fixes.length;
   return true;
 }
 
@@ -1329,6 +1343,11 @@ function CardFlags({ topic, card: c }: { topic: FlashTopic; card: FlashCard }) {
           ◇ {c.own.length} not from your books
         </Badge>
       )}
+      {!!c.ai?.fixes.length && (
+        <Badge tone="warn" title="The AI check suggests changes: open the card to apply or dismiss">
+          ✦ {c.ai.fixes.length} AI suggestion{c.ai.fixes.length === 1 ? "" : "s"}
+        </Badge>
+      )}
       {missing > 0 && topic.columns.length > 0 && (
         <Badge>
           {missing} explanation{missing === 1 ? "" : "s"} empty
@@ -1552,7 +1571,18 @@ function CardDialog({
   const fillFn = useServerFn(fillFlashExplanations);
   const [c, setC] = useState(card);
   const [busy, setBusy] = useState(false);
-  useEffect(() => setC(card), [card]);
+  // The card changed outside (saved, or the AI check ran in the
+  // background): edits not saved yet stay, the check's findings come in.
+  const shown = useRef(card);
+  useEffect(() => {
+    setC((prev) => {
+      const edited = prev.id === card.id && JSON.stringify(prev) !== JSON.stringify(shown.current);
+      shown.current = card;
+      return edited
+        ? { ...prev, ai: card.ai, error: card.error, error_type: card.error_type, note: card.note }
+        : card;
+    });
+  }, [card]);
   const save = async (patch: Partial<FlashCard>) => {
     setBusy(true);
     try {
@@ -1633,6 +1663,8 @@ function CardDialog({
     note: c.note,
     error: c.error,
     error_type: c.error_type,
+    // Sent only when changed (applied or dismissed).
+    ...(JSON.stringify(c.ai) !== JSON.stringify(card.ai) ? { ai: c.ai } : {}),
   };
   const field = (
     label: string,
@@ -1714,6 +1746,9 @@ function CardDialog({
           </div>
         </DialogHeader>
         <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
+          {c.ai && c.ai.fixes.length > 0 && (
+            <AiSuggestions topic={topic} card={c} onChange={setC} />
+          )}
           {field("front", c.front, (front) => setC({ ...c, front }), true)}
           {field("back", c.back, (back) => setC({ ...c, back }))}
           <Versions
@@ -1936,6 +1971,139 @@ function CardDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// The AI check's suggested fixes for a card: each field's text now and as
+// the AI would have it, to apply (fills the field; Save to keep it) or
+// dismiss. When none are left, the AI's note and recheck mark go too.
+function AiSuggestions({
+  topic,
+  card: c,
+  onChange,
+}: {
+  topic: FlashTopic;
+  card: FlashCard;
+  onChange: (c: FlashCard) => void;
+}) {
+  const fixes = c.ai?.fixes ?? [];
+  const label = (field: string) =>
+    field === "front" || field === "back"
+      ? field
+      : field.startsWith("ex:")
+        ? `explanation_${topic.columns.find((col) => col.id === field.slice(3))?.title ?? "?"}`
+        : "the card";
+  const settle = (next: FlashCard, left: AiFix[]): FlashCard => {
+    const done = !left.length && next.note.startsWith("AI:");
+    return {
+      ...next,
+      // The card as it now reads counts as checked.
+      ai: next.ai ? { ...next.ai, fixes: left, sig: cardSig(next) } : null,
+      ...(done ? { note: "", error: false, error_type: "" } : {}),
+    };
+  };
+  const put = (card: FlashCard, f: AiFix): FlashCard =>
+    f.field === "front"
+      ? { ...card, front: f.to }
+      : f.field === "back"
+        ? { ...card, back: f.to }
+        : {
+            ...card,
+            ex: { ...card.ex, [f.field.slice(3)]: f.to },
+            own: card.own.filter((o) => `ex:${o}` !== f.field),
+          };
+  const apply = (i: number) =>
+    onChange(
+      settle(
+        put(c, fixes[i]),
+        fixes.filter((_, k) => k !== i),
+      ),
+    );
+  const dismiss = (i: number) =>
+    onChange(
+      settle(
+        c,
+        fixes.filter((_, k) => k !== i),
+      ),
+    );
+  const canApply = (f: AiFix) => !!f.to && !!f.field;
+  return (
+    <section
+      aria-label="AI suggestions"
+      className="space-y-2 rounded-lg border border-amber-300 bg-amber-50/60 p-2 text-sm dark:border-amber-800 dark:bg-amber-950/20"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">✦ AI suggests</span>
+        <span className="text-xs text-muted-foreground">
+          Apply fills the field; Save or verify to keep it.
+        </span>
+        <span className="ml-auto flex gap-1">
+          {fixes.some(canApply) && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7"
+              onClick={() => {
+                let next = c;
+                for (const f of fixes) if (canApply(f)) next = put(next, f);
+                onChange(
+                  settle(
+                    next,
+                    fixes.filter((f) => !canApply(f)),
+                  ),
+                );
+              }}
+            >
+              Apply all
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" className="h-7" onClick={() => onChange(settle(c, []))}>
+            Dismiss all
+          </Button>
+        </span>
+      </div>
+      <ul className="space-y-2">
+        {fixes.map((f, i) => {
+          const stale = !!f.field && fieldText(c, f.field).trim() !== f.from.trim();
+          return (
+            <li key={i} data-fix={f.field} className="space-y-1 rounded-md bg-background/80 p-2">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                <Badge tone="warn">{f.type}</Badge>
+                <span className="font-medium">{label(f.field)}</span>
+                <span className="text-muted-foreground" lang="hi">
+                  {f.note}
+                </span>
+              </div>
+              {canApply(f) && (
+                <div className="grid gap-1 text-sm sm:grid-cols-2" lang="hi">
+                  <div className="whitespace-pre-wrap rounded bg-red-500/10 px-2 py-1 text-red-800 line-through decoration-red-400/60 dark:text-red-300">
+                    {f.from || "—"}
+                  </div>
+                  <div className="whitespace-pre-wrap rounded bg-emerald-500/10 px-2 py-1 text-emerald-800 dark:text-emerald-300">
+                    {f.to}
+                  </div>
+                </div>
+              )}
+              {stale && (
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  The field has changed since the check; applying replaces it.
+                </p>
+              )}
+              <div className="flex gap-1">
+                {canApply(f) && (
+                  <Button size="sm" className="h-7" onClick={() => apply(i)}>
+                    Apply
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" className="h-7" onClick={() => dismiss(i)}>
+                  {canApply(f) ? "Dismiss" : "Done"}
+                </Button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

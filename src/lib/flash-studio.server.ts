@@ -17,6 +17,10 @@ import {
   normalizeExamples,
   normalizeSources,
   normalizeVariants,
+  normalizeAi,
+  cardSig,
+  needsCheck,
+  fieldText,
   planNumbers,
   wordKeyOf,
   BOOK_COLORS,
@@ -93,6 +97,7 @@ const readCard = (r: Row): FlashCard => ({
   chunk: typeof r.chunk === "number" ? r.chunk : null,
   card_order: typeof r.card_order === "number" ? r.card_order : null,
   app_id: typeof r.app_id === "string" && r.app_id ? r.app_id : null,
+  ai: normalizeAi(r.ai),
   created_at: String(r.created_at),
   updated_at: String(r.updated_at),
 });
@@ -408,6 +413,7 @@ export type CardPatch = Partial<
     | "verified"
     | "removed"
     | "note"
+    | "ai"
   >
 >;
 
@@ -1115,10 +1121,11 @@ export async function fillExplanations(
 export async function checkCards(
   topicId: string,
   ids: string[],
-): Promise<{ flagged: number; cards: FlashCard[] }> {
+): Promise<{ checked: number; flagged: number; cards: FlashCard[] }> {
   const { topic, cards } = await getTopic(topicId);
-  const want = cards.filter((c) => ids.includes(c.id) && !c.removed);
-  if (!want.length) return { flagged: 0, cards: [] };
+  // Only cards not verified and not read as they are now.
+  const want = cards.filter((c) => ids.includes(c.id) && needsCheck(c));
+  if (!want.length) return { checked: 0, flagged: 0, cards: [] };
   const deck = await deckOf(topic);
   const items = want.map((c, i) => ({
     n: i + 1,
@@ -1130,20 +1137,50 @@ export async function checkCards(
         .map((col) => [col.title, c.ex[col.id]]),
     ),
   }));
-  const flags = M.parseCheck(await saathiComplete(apiKey(), M.checkMessages(deck, items)), items);
-  const out: FlashCard[] = [];
-  for (const f of flags) {
-    const c = want[f.n - 1];
-    out.push(
-      await saveCard(c.id, {
-        error: true,
-        error_type: f.type,
-        note: `AI: ${f.note}`,
-        verified: false,
-      }),
+  const flags = M.parseCheck(
+    await saathiComplete(apiKey(), M.checkMessages(deck, items)),
+    items,
+    topic.columns,
+  );
+  const at = now();
+  const rows = want.map((c, i) => {
+    const mine = flags.filter((f) => f.n === i + 1);
+    const fixes = mine.map((f) => {
+      const from = f.field ? fieldText(c, f.field) : "";
+      return {
+        field: f.field,
+        from,
+        // A "fix" the same as the text is only a pointer.
+        to: f.fix && f.fix !== from.trim() ? f.fix : "",
+        type: f.type,
+        note: f.note,
+      };
+    });
+    // Every row has the same keys (a bulk upsert nulls missing ones).
+    return {
+      id: c.id,
+      topic_id: topicId,
+      ai: { at, sig: cardSig(c), fixes },
+      error: fixes.length ? true : c.error,
+      error_type: fixes.length ? fixes[0].type : c.error_type,
+      note: fixes.length ? `AI: ${fixes.map((f) => f.note).join("; ")}`.slice(0, 2000) : c.note,
+      flagged: fixes.length > 0,
+    };
+  });
+  const { data, error } = await from("flash_cards")
+    .upsert(rows.map(({ flagged: _f, ...r }) => r) as never, { onConflict: "id" })
+    .select("*");
+  if (error && /\bai\b.*(column|schema cache)|column.*\bai\b/i.test(error.message))
+    throw new Error(
+      "The AI check needs a database update: run the latest migration (flash_card_ai) in Lovable or the SQL editor.",
     );
-  }
-  return { flagged: out.length, cards: out };
+  fail(error);
+  await touch(topicId);
+  return {
+    checked: want.length,
+    flagged: rows.filter((r) => r.flagged).length,
+    cards: ((data ?? []) as Row[]).map(readCard),
+  };
 }
 
 // ---------- Downloads ----------
