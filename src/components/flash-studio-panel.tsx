@@ -81,6 +81,8 @@ import {
 import { zipFiles } from "@/lib/zip";
 import { BooksPanel } from "@/components/flash-studio-books";
 import { StudioJobBar } from "@/components/flash-studio-jobs";
+import { BulkBar, HistoryButton, QuickChecks } from "@/components/flash-studio-tools";
+import { lintCard, lintTopic, numberingOf, spellingVariants, type Lint } from "@/lib/flash-lint";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -728,6 +730,7 @@ type Filter =
   | "missing"
   | "notes"
   | "ai"
+  | "lint"
   | "unnumbered"
   | "removed";
 const FILTERS: { id: Filter; label: string }[] = [
@@ -741,13 +744,20 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "own", label: "Not from your books" },
   { id: "missing", label: "Missing explanations" },
   { id: "ai", label: "AI suggestions" },
+  { id: "lint", label: "Quick checks" },
   { id: "notes", label: "Notes" },
   { id: "unnumbered", label: "Not numbered" },
   { id: "removed", label: "Removed" },
 ];
 
 // Whether a card is in one of the list's filters.
-function passes(c: FlashCard, f: Filter, columns: FlashColumn[]): boolean {
+function passes(
+  c: FlashCard,
+  f: Filter,
+  columns: FlashColumn[],
+  lints?: Map<string, Lint[]>,
+): boolean {
+  if (f === "lint") return !c.removed && !!lints?.get(c.id)?.length;
   if (f === "removed") return c.removed;
   if (c.removed) return false;
   if (f === "errors") return c.error;
@@ -816,6 +826,21 @@ function CardsTab({
         );
     return m;
   }, [cards]);
+  // The quick checks over the whole topic (as saved).
+  const lintCtx = useMemo(() => {
+    const live = cards.filter((c) => !c.removed);
+    return { numbering: numberingOf(live), variants: spellingVariants(live) };
+  }, [cards]);
+  const lints = useMemo(() => lintTopic(cards, topic.columns), [cards, topic.columns]);
+  // Cards ticked for an action on them all.
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const pickOne = (id: string, on: boolean) =>
+    setPicked((p) => {
+      const n = new Set(p);
+      if (on) n.add(id);
+      else n.delete(id);
+      return n;
+    });
   // The book picked (in its own words), before the filter and search.
   const inBook = useMemo(
     () =>
@@ -830,14 +855,17 @@ function CardsTab({
   const counts = useMemo(
     () =>
       Object.fromEntries(
-        FILTERS.map((f) => [f.id, inBook.filter((c) => passes(c, f.id, topic.columns)).length]),
+        FILTERS.map((f) => [
+          f.id,
+          inBook.filter((c) => passes(c, f.id, topic.columns, lints)).length,
+        ]),
       ) as Record<Filter, number>,
-    [inBook, topic.columns],
+    [inBook, topic.columns, lints],
   );
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
     const picked = inBook
-      .filter((c) => passes(c, filter, topic.columns))
+      .filter((c) => passes(c, filter, topic.columns, lints))
       .filter(
         (c) =>
           !q ||
@@ -845,7 +873,7 @@ function CardsTab({
           String(c.card_order) === q,
       );
     return sortCards(picked, sort, desc);
-  }, [inBook, filter, query, topic.columns, sort, desc]);
+  }, [inBook, filter, query, topic.columns, sort, desc, lints]);
   const startProof = (from: FlashCard[]) => {
     if (!from.length) return;
     const first = from.findIndex((c) => !c.verified);
@@ -1084,16 +1112,49 @@ function CardsTab({
           and pasted text can also be read by the AI.
         </p>
       )}
+      {list.length > 0 && (
+        <label className="flex w-fit items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            className="h-4 w-4"
+            checked={list.every((c) => picked.has(c.id))}
+            onChange={(e) =>
+              setPicked((p) => {
+                const n = new Set(p);
+                for (const c of list) {
+                  if (e.target.checked) n.add(c.id);
+                  else n.delete(c.id);
+                }
+                return n;
+              })
+            }
+          />
+          Tick all {list.length} shown
+        </label>
+      )}
       {view === "table" && list.length > 0 && (
-        <CardTable topic={topic} cards={list.slice(0, shown)} onOpen={open} />
+        <CardTable
+          topic={topic}
+          cards={list.slice(0, shown)}
+          onOpen={open}
+          picked={picked}
+          onPick={pickOne}
+        />
       )}
       <ul className={`space-y-2 ${view === "table" ? "hidden" : ""}`}>
         {(view === "list" ? list.slice(0, shown) : []).map((c) => (
-          <li key={c.id}>
+          <li key={c.id} className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              aria-label={`Tick ${c.front.split("\n")[0]}`}
+              className="mt-4 h-4 w-4 shrink-0"
+              checked={picked.has(c.id)}
+              onChange={(e) => pickOne(c.id, e.target.checked)}
+            />
             <button
               type="button"
               onClick={() => open(c)}
-              className={`w-full rounded-xl border border-l-4 p-3 text-left hover:bg-muted/40 ${c.error ? "border-red-300 border-l-red-500" : c.verified ? "border-border border-l-emerald-500" : "border-border"}`}
+              className={`min-w-0 flex-1 rounded-xl border border-l-4 p-3 text-left hover:bg-muted/40 ${picked.has(c.id) ? "ring-2 ring-primary/40 " : ""}${c.error ? "border-red-300 border-l-red-500" : c.verified ? "border-border border-l-emerald-500" : "border-border"}`}
             >
               <div className="mb-1 flex flex-wrap items-center gap-1.5 text-xs">
                 {c.card_order !== null && (
@@ -1124,6 +1185,17 @@ function CardsTab({
                 {c.app_id && <Badge title={`App id ${c.app_id}`}>app id</Badge>}
                 {c.removed && <Badge tone="warn">Removed</Badge>}
                 <CardFlags topic={topic} card={c} />
+                {!!lints.get(c.id)?.length && (
+                  <Badge
+                    title={lints
+                      .get(c.id)!
+                      .map((l) => l.note)
+                      .join("\n")}
+                  >
+                    ⚑ {lints.get(c.id)!.length} quick check
+                    {lints.get(c.id)!.length === 1 ? "" : "s"}
+                  </Badge>
+                )}
               </div>
               <div className="grid gap-2 sm:grid-cols-2" lang="hi">
                 <div className="whitespace-pre-wrap font-medium">{c.front || "—"}</div>
@@ -1171,11 +1243,22 @@ function CardsTab({
           Show more ({list.length - shown} left)
         </Button>
       )}
+      {picked.size > 0 && (
+        <BulkBar
+          topic={topic}
+          cards={cards.filter((c) => picked.has(c.id))}
+          lints={lints}
+          onCards={onCard}
+          onChanged={onChanged}
+          onClear={() => setPicked(new Set())}
+        />
+      )}
       {editing && !proof && (
         <CardDialog
           topic={topic}
           card={cards.find((c) => c.id === editing.id) ?? editing}
           others={othersOf.get(editing.id)}
+          lintCtx={lintCtx}
           onOthersGone={() => onChanged()}
           onClose={() => setEditing(null)}
           onSaved={(c) => {
@@ -1193,6 +1276,7 @@ function CardsTab({
           topic={topic}
           card={cards.find((c) => c.id === proof.ids[proof.i])!}
           others={othersOf.get(proof.ids[proof.i])}
+          lintCtx={lintCtx}
           onOthersGone={(ids) => dropFromProof(ids)}
           nav={{
             index: proof.i,
@@ -1491,16 +1575,21 @@ function CardTable({
   topic,
   cards,
   onOpen,
+  picked,
+  onPick,
 }: {
   topic: FlashTopic;
   cards: FlashCard[];
   onOpen: (c: FlashCard) => void;
+  picked: Set<string>;
+  onPick: (id: string, on: boolean) => void;
 }) {
   return (
     <div className="max-h-[75dvh] overflow-auto rounded-xl border border-border">
       <table className="w-full min-w-[720px] border-collapse text-sm" lang="hi">
         <thead className="sticky top-0 z-10 bg-muted text-left text-xs">
           <tr>
+            <th className="w-8 p-2" />
             <th className="p-2 font-medium">#</th>
             <th className="p-2 font-medium">Book</th>
             <th className="p-2 font-medium">front</th>
@@ -1519,8 +1608,17 @@ function CardTable({
               tabIndex={0}
               onClick={() => onOpen(c)}
               onKeyDown={(e) => e.key === "Enter" && onOpen(c)}
-              className={`cursor-pointer border-t border-border align-top hover:bg-muted/40 ${c.error ? "bg-red-50/60 dark:bg-red-950/20" : ""}`}
+              className={`cursor-pointer border-t border-border align-top hover:bg-muted/40 ${picked.has(c.id) ? "bg-primary/5" : c.error ? "bg-red-50/60 dark:bg-red-950/20" : ""}`}
             >
+              <td className="p-2" onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="checkbox"
+                  aria-label={`Tick ${c.front.split("\n")[0]}`}
+                  className="h-4 w-4"
+                  checked={picked.has(c.id)}
+                  onChange={(e) => onPick(c.id, e.target.checked)}
+                />
+              </td>
               <td className="whitespace-nowrap p-2 text-xs text-muted-foreground">
                 {c.card_order ?? ""}
                 {c.verified && <BadgeCheck className="ml-1 inline h-3.5 w-3.5 text-emerald-600" />}
@@ -1548,6 +1646,7 @@ function CardDialog({
   topic,
   card,
   others,
+  lintCtx,
   nav,
   onClose,
   onSaved,
@@ -1556,6 +1655,8 @@ function CardDialog({
 }: {
   topic: FlashTopic;
   card: FlashCard;
+  // What the quick checks need from the whole topic.
+  lintCtx: Parameters<typeof lintCard>[2];
   // Other books' cards of the same word, not merged into this one yet.
   others?: FlashCard[];
   // Proofreading: this card's place in the list, and moving along it.
@@ -1749,6 +1850,7 @@ function CardDialog({
           {c.ai && c.ai.fixes.length > 0 && (
             <AiSuggestions topic={topic} card={c} onChange={setC} />
           )}
+          <QuickChecks topic={topic} card={c} ctx={lintCtx} onChange={setC} />
           {field("front", c.front, (front) => setC({ ...c, front }), true)}
           {field("back", c.back, (back) => setC({ ...c, back }))}
           <Versions
@@ -1890,6 +1992,7 @@ function CardDialog({
               </select>
             )}
           </div>
+          <HistoryButton card={c} onRestore={(v) => setC({ ...c, ...v })} />
           {!c.removed && (
             <Button
               variant="ghost"

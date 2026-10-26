@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { saathiComplete, type SaathiImage } from "../../supabase/functions/_shared/saathi-core.ts";
 import { parseReply, readMessages, type ReadResult, type Todo } from "@/lib/flash-read";
 import * as M from "@/lib/flash-merge";
+import * as L from "@/lib/flash-lint";
 import * as S from "@/lib/flash-split";
 import {
   DEFAULT_TEMPLATES,
@@ -1391,4 +1392,143 @@ export async function setExplanation(
     );
   if (rows.length) await touch(topicId);
   return { changed: rows.length };
+}
+
+// ---------- Many cards at once ----------
+
+export type BulkAction = "verify" | "unverify" | "recheck" | "delete" | "apply_ai" | "fix_lint";
+
+// Text changes to many cards in one go, each card's old text kept in its
+// history (the last 20) as a single save would.
+async function writeEdits(topicId: string, edits: { id: string; patch: Row }[]) {
+  if (!edits.length) return [] as FlashCard[];
+  const raw = new Map<string, Row>();
+  const ids = edits.map((e) => e.id);
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await from("flash_cards")
+      .select("*")
+      .in("id", ids.slice(i, i + 200));
+    fail(error);
+    for (const r of (data ?? []) as Row[]) raw.set(String(r.id), r);
+  }
+  const at = now();
+  // Every row has the same keys (a bulk upsert nulls missing ones).
+  const keys = [...new Set(edits.flatMap((e) => Object.keys(e.patch)))];
+  const rows = edits
+    .filter((e) => raw.has(e.id))
+    .map((e) => {
+      const old = raw.get(e.id)!;
+      const before = readCard(old);
+      const row: Row = { id: e.id, topic_id: topicId, updated_at: at };
+      for (const k of keys) row[k] = k in e.patch ? e.patch[k] : old[k];
+      if (["front", "back", "ex"].some((k) => k in e.patch)) {
+        const history = Array.isArray(old.history) ? (old.history as unknown[]) : [];
+        row.history = [
+          { at, front: before.front, back: before.back, ex: before.ex },
+          ...history,
+        ].slice(0, 20);
+      } else row.history = old.history ?? [];
+      return row;
+    });
+  const out: FlashCard[] = [];
+  for (let i = 0; i < rows.length; i += 300) {
+    const { data, error } = await from("flash_cards")
+      .upsert(rows.slice(i, i + 300) as never, { onConflict: "id" })
+      .select("*");
+    fail(error);
+    out.push(...((data ?? []) as Row[]).map(readCard));
+  }
+  await touch(topicId);
+  return out;
+}
+
+// What an action does to many cards: verify, not verified, to recheck,
+// delete (numbered cards are removed), apply the AI's fixes, or make the
+// quick checks' safe fixes.
+export async function bulkCards(
+  topicId: string,
+  ids: string[],
+  action: BulkAction,
+): Promise<{ changed: number; deleted: number; removed: number; cards: FlashCard[] }> {
+  const { topic, cards } = await getTopic(topicId);
+  const want = new Set(ids);
+  const chosen = cards.filter((c) => want.has(c.id) && !c.removed);
+  if (action === "delete") {
+    let deleted = 0;
+    let removed = 0;
+    for (const c of chosen) {
+      if ((await deleteCard(c.id)) === "deleted") deleted++;
+      else removed++;
+    }
+    return { changed: 0, deleted, removed, cards: [] };
+  }
+  const edits: { id: string; patch: Row }[] = [];
+  if (action === "verify" || action === "unverify")
+    for (const c of chosen) {
+      if (c.verified !== (action === "verify"))
+        edits.push({ id: c.id, patch: { verified: action === "verify" } });
+    }
+  else if (action === "recheck")
+    for (const c of chosen) {
+      if (!c.error)
+        edits.push({ id: c.id, patch: { error: true, error_type: c.error_type, verified: false } });
+    }
+  else if (action === "apply_ai")
+    for (const c of chosen) {
+      const fixes = c.ai?.fixes ?? [];
+      const usable = fixes.filter((f) => f.to && f.field);
+      if (!usable.length) continue;
+      const next = { front: c.front, back: c.back, ex: { ...c.ex } };
+      let own = c.own;
+      for (const f of usable) {
+        if (f.field === "front") next.front = f.to;
+        else if (f.field === "back") next.back = f.to;
+        else {
+          next.ex[f.field.slice(3)] = f.to;
+          own = own.filter((o) => `ex:${o}` !== f.field);
+        }
+      }
+      const left = fixes.filter((f) => !(f.to && f.field));
+      const clear = !left.length && c.note.startsWith("AI:");
+      edits.push({
+        id: c.id,
+        patch: {
+          ...next,
+          own,
+          ai: { ...c.ai!, fixes: left, sig: cardSig(next) },
+          ...(clear ? { note: "", error: false, error_type: "" } : {}),
+        },
+      });
+    }
+  else if (action === "fix_lint") {
+    const lints = L.lintTopic(cards, topic.columns);
+    for (const c of chosen) {
+      const mine = (lints.get(c.id) ?? []).filter((l) => l.fix !== undefined);
+      if (!mine.length) continue;
+      const next = L.applyLints(c, mine);
+      if (JSON.stringify(next) === JSON.stringify({ front: c.front, back: c.back, ex: c.ex }))
+        continue;
+      edits.push({ id: c.id, patch: { ...next } });
+    }
+  }
+  const out = await writeEdits(topicId, edits);
+  return { changed: out.length, deleted: 0, removed: 0, cards: out };
+}
+
+export type CardVersion = { at: string; front: string; back: string; ex: Record<string, string> };
+
+// A card's earlier texts, newest first.
+export async function cardHistory(id: string): Promise<CardVersion[]> {
+  const { data, error } = await from("flash_cards").select("history").eq("id", id).single();
+  fail(error);
+  const h = (data as unknown as Row | null)?.history;
+  return (Array.isArray(h) ? h : []).map((x) => {
+    const o = (x ?? {}) as Row;
+    return {
+      at: String(o.at ?? ""),
+      front: String(o.front ?? ""),
+      back: String(o.back ?? ""),
+      ex: normalizeEx(o.ex),
+    };
+  });
 }

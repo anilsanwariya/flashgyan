@@ -404,3 +404,27 @@ export const setFlashExplanation = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await server()).setExplanation(data.topic_id, data.column, data.from, data.to);
   });
+
+export const bulkFlashCards = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        topic_id: id,
+        ids: z.array(id).min(1).max(5000),
+        action: z.enum(["verify", "unverify", "recheck", "delete", "apply_ai", "fix_lint"]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).bulkCards(data.topic_id, data.ids, data.action);
+  });
+
+export const getFlashCardHistory = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).cardHistory(data.id);
+  });
