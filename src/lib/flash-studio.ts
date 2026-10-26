@@ -66,6 +66,15 @@ export type FlashVariant = {
   source: FlashSource | null;
 };
 
+// A fix the AI check suggests: a field ("front", "back" or "ex:<column
+// id>"), its text when checked, and the corrected text ("" when it can
+// only point the problem out).
+export type AiFix = { field: string; from: string; to: string; type: string; note: string };
+
+// The AI check's last look at a card: when, a fingerprint of the text it
+// read (changed text means it hasn't seen the card as it is), and its fixes.
+export type FlashAi = { at: string; sig: string; fixes: AiFix[] };
+
 export type FlashCard = {
   id: string;
   topic_id: string;
@@ -94,9 +103,54 @@ export type FlashCard = {
   chunk: number | null;
   card_order: number | null;
   app_id: string | null;
+  ai: FlashAi | null;
   created_at: string;
   updated_at: string;
 };
+
+// A fingerprint of a card's text: front, back and explanations.
+export function cardSig(c: Pick<FlashCard, "front" | "back" | "ex">): string {
+  const t = JSON.stringify([
+    c.front.trim(),
+    c.back.trim(),
+    Object.entries(c.ex)
+      .filter(([, v]) => v.trim())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => [k, v.trim()]),
+  ]);
+  let h = 5381;
+  for (let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36) + t.length.toString(36);
+}
+
+// Whether the AI check should read a card: not verified, and not read as
+// it is now.
+export const needsCheck = (c: FlashCard) =>
+  !c.removed && !c.verified && (!c.ai || c.ai.sig !== cardSig(c));
+
+export function normalizeAi(v: unknown): FlashAi | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const str = (x: unknown, max: number) => (typeof x === "string" ? x.slice(0, max) : "");
+  return {
+    at: str(o.at, 40),
+    sig: str(o.sig, 40),
+    fixes: (Array.isArray(o.fixes) ? o.fixes : []).slice(0, 20).map((f) => {
+      const x = (f ?? {}) as Record<string, unknown>;
+      return {
+        field: str(x.field, 30),
+        from: str(x.from, 20000),
+        to: str(x.to, 20000),
+        type: str(x.type, 60),
+        note: str(x.note, 500),
+      };
+    }),
+  };
+}
+
+// The text of a card's field ("front", "back", "ex:<id>").
+export const fieldText = (c: Pick<FlashCard, "front" | "back" | "ex">, field: string) =>
+  field === "front" ? c.front : field === "back" ? c.back : (c.ex[field.slice(3)] ?? "");
 
 export const BOOK_COLORS = [
   "#D9D2E9",

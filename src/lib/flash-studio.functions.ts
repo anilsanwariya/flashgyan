@@ -182,6 +182,23 @@ export const saveFlashCard = createServerFn({ method: "POST" })
             error_type: z.string().max(200),
             verified: z.boolean(),
             note: z.string().max(2000),
+            ai: z
+              .object({
+                at: z.string().max(40),
+                sig: z.string().max(40),
+                fixes: z
+                  .array(
+                    z.object({
+                      field: z.string().max(30),
+                      from: big,
+                      to: big,
+                      type: z.string().max(60),
+                      note: z.string().max(500),
+                    }),
+                  )
+                  .max(20),
+              })
+              .nullable(),
           })
           .partial(),
       })
