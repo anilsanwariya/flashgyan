@@ -15,6 +15,7 @@ import {
   ArrowLeft,
   ArrowUp,
   BadgeCheck,
+  ClipboardPaste,
   Download,
   FileUp,
   KeyRound,
@@ -23,6 +24,7 @@ import {
   Plus,
   Search,
   Shuffle,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -30,6 +32,7 @@ import {
   addFlashCard,
   createFlashTopic,
   deleteFlashCard,
+  fillFlashExplanations,
   deleteFlashTemplate,
   deleteFlashTopic,
   getFlashTopic,
@@ -56,6 +59,7 @@ import {
   type FlashBook,
   type FlashCard,
   type FlashColumn,
+  type FlashSourceRow,
   type FlashTemplate,
   type FlashTopic,
   type IdMatch,
@@ -63,6 +67,10 @@ import {
   type WordKey,
 } from "@/lib/flash-studio";
 import { zipFiles } from "@/lib/zip";
+import { BooksPanel } from "@/components/flash-studio-books";
+import { ProofTools, Versions } from "@/components/flash-studio-proof";
+import { booksOf, disagreement, emptyColumns } from "@/lib/flash-merge";
+import { BOOK_FILE_TYPES, isBookFile } from "@/lib/flash-read";
 import { Badge, PageTabs, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -550,10 +558,12 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
   const [tab, setTab] = useState<TopicTab>("cards");
   const reload = () => qc.invalidateQueries({ queryKey: ["flashTopic", id] });
   // A card saved: put into the list without reloading every card.
-  const putCard = (card: FlashCard) =>
+  const putCard = (card: FlashCard | FlashCard[]) => {
+    const next = new Map((Array.isArray(card) ? card : [card]).map((c) => [c.id, c]));
     qc.setQueryData(["flashTopic", id], (old: typeof q.data) =>
-      old ? { ...old, cards: old.cards.map((c) => (c.id === card.id ? card : c)) } : old,
+      old ? { ...old, cards: old.cards.map((c) => next.get(c.id) ?? c) } : old,
     );
+  };
   if (q.error)
     return (
       <div className="space-y-2">
@@ -564,7 +574,7 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
       </div>
     );
   if (!q.data) return <div className="h-40 animate-pulse rounded-xl bg-muted" />;
-  const { topic, cards } = q.data;
+  const { topic, cards, sources } = q.data;
   const live = cards.filter((c) => !c.removed);
   const unnumbered = live.filter((c) => c.card_order === null).length;
   return (
@@ -590,7 +600,13 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
         onChange={setTab}
       />
       {tab === "cards" && (
-        <CardsTab topic={topic} cards={cards} onChanged={reload} onCard={putCard} />
+        <CardsTab
+          topic={topic}
+          cards={cards}
+          sources={sources}
+          onChanged={reload}
+          onCard={putCard}
+        />
       )}
       {tab === "chunks" && <ChunksTab topic={topic} cards={cards} onChanged={reload} />}
       {tab === "settings" && <SettingsTab topic={topic} onChanged={reload} />}
@@ -600,12 +616,30 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
 
 // ---------- Cards ----------
 
-type Filter = "all" | "errors" | "unverified" | "verified" | "unnumbered" | "removed";
+type Filter =
+  | "all"
+  | "errors"
+  | "unverified"
+  | "verified"
+  | "several"
+  | "single"
+  | "differ"
+  | "own"
+  | "missing"
+  | "notes"
+  | "unnumbered"
+  | "removed";
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "All" },
   { id: "unverified", label: "Not verified" },
   { id: "errors", label: "To recheck" },
   { id: "verified", label: "Verified" },
+  { id: "several", label: "In several books" },
+  { id: "single", label: "One book only" },
+  { id: "differ", label: "Books differ" },
+  { id: "own", label: "Not from your books" },
+  { id: "missing", label: "Missing explanations" },
+  { id: "notes", label: "Notes" },
   { id: "unnumbered", label: "Not numbered" },
   { id: "removed", label: "Removed" },
 ];
@@ -613,13 +647,15 @@ const FILTERS: { id: Filter; label: string }[] = [
 function CardsTab({
   topic,
   cards,
+  sources,
   onChanged,
   onCard,
 }: {
   topic: FlashTopic;
   cards: FlashCard[];
+  sources: FlashSourceRow[];
   onChanged: () => void;
-  onCard: (c: FlashCard) => void;
+  onCard: (c: FlashCard | FlashCard[]) => void;
 }) {
   const addFn = useServerFn(addFlashCard);
   const [filter, setFilter] = useState<Filter>("all");
@@ -628,6 +664,8 @@ function CardsTab({
   const [editing, setEditing] = useState<FlashCard | null>(null);
   const [importing, setImporting] = useState<{ file: string; sheet: ParsedSheet } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [bookFile, setBookFile] = useState<File | null>(null);
+  const [pasting, setPasting] = useState(false);
   const books = new Map(topic.books.map((b) => [b.code, b]));
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -639,6 +677,15 @@ function CardsTab({
         if (filter === "unverified") return !c.verified;
         if (filter === "verified") return c.verified;
         if (filter === "unnumbered") return c.card_order === null;
+        if (filter === "several") return booksOf(c).length > 1;
+        if (filter === "single") return booksOf(c).length <= 1;
+        if (filter === "differ") {
+          const d = disagreement(c);
+          return d.answer || d.spelling;
+        }
+        if (filter === "own") return c.own.length > 0;
+        if (filter === "missing") return emptyColumns(c, topic.columns).length > 0;
+        if (filter === "notes") return !!c.note || c.sources.some((s) => s.note);
         return true;
       })
       .filter(
@@ -648,22 +695,33 @@ function CardsTab({
           String(c.card_order) === q,
       )
       .sort((a, b) => (a.card_order ?? Infinity) - (b.card_order ?? Infinity) || a.pos - b.pos);
-  }, [cards, filter, query]);
+  }, [cards, filter, query, topic.columns]);
   return (
     <div className="space-y-3">
+      <BooksPanel
+        topic={topic}
+        sources={sources}
+        onChanged={onChanged}
+        openFile={bookFile}
+        onOpened={() => setBookFile(null)}
+        pasting={pasting}
+        setPasting={setPasting}
+      />
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}>
-          <FileUp className="mr-1 h-4 w-4" /> Add a sheet
+          <FileUp className="mr-1 h-4 w-4" /> Add a book or sheet
         </Button>
         <input
           ref={fileRef}
           type="file"
-          accept=".xlsx,.xls,.csv"
+          aria-label="Book or sheet file"
+          accept={`.xlsx,.xls,.csv,${BOOK_FILE_TYPES}`}
           className="hidden"
           onChange={async (e) => {
             const file = e.target.files?.[0];
             e.target.value = "";
             if (!file) return;
+            if (isBookFile(file)) return setBookFile(file);
             try {
               const sheet = parseSheet(await readRows(file));
               if (!sheet.cards.length) throw new Error("No cards found in the sheet");
@@ -687,6 +745,9 @@ function CardsTab({
         >
           <Plus className="mr-1 h-4 w-4" /> Add card
         </Button>
+        <Button size="sm" variant="ghost" onClick={() => setPasting(true)}>
+          <ClipboardPaste className="mr-1 h-4 w-4" /> Paste text
+        </Button>
         <div className="relative ml-auto min-w-0 basis-56">
           <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
@@ -698,6 +759,13 @@ function CardsTab({
           />
         </div>
       </div>
+      <ProofTools
+        topic={topic}
+        cards={cards}
+        shownIds={list.map((c) => c.id)}
+        onChanged={onChanged}
+        onCards={onCard}
+      />
       <div className="flex flex-wrap gap-1">
         {FILTERS.map((f) => (
           <button
@@ -718,8 +786,9 @@ function CardsTab({
       </div>
       {!cards.length && (
         <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-          Add each book&apos;s sheet (.xlsx). A finished sheet with sheet and order columns can keep
-          its chunks and numbers.
+          Add each book: a Word file, a PDF or pasted text is read by the AI into cards; an Excel
+          sheet is added as it is (a finished sheet with sheet and order columns can keep its chunks
+          and numbers).
         </p>
       )}
       <ul className="space-y-2">
@@ -758,11 +827,27 @@ function CardsTab({
                 )}
                 {c.app_id && <Badge title={`App id ${c.app_id}`}>app id</Badge>}
                 {c.removed && <Badge tone="warn">Removed</Badge>}
+                <CardFlags topic={topic} card={c} />
               </div>
               <div className="grid gap-2 sm:grid-cols-2" lang="hi">
                 <div className="whitespace-pre-wrap font-medium">{c.front || "—"}</div>
                 <div className="whitespace-pre-wrap text-sm">{c.back || "—"}</div>
               </div>
+              {(c.sources[0]?.heading || c.sources[0]?.rule || c.sources[0]?.note) && (
+                <div className="mt-1 text-xs text-muted-foreground" lang="hi">
+                  {[c.sources[0].heading, c.sources[0].rule].filter(Boolean).join(" · ")}
+                  {c.sources[0].note && (
+                    <span className="ml-1 text-amber-700 dark:text-amber-400">
+                      Book&apos;s note: {c.sources[0].note}
+                    </span>
+                  )}
+                </div>
+              )}
+              {c.note && (
+                <div className="mt-1 text-xs text-red-700 dark:text-red-400" lang="hi">
+                  {c.note}
+                </div>
+              )}
             </button>
           </li>
         ))}
@@ -801,6 +886,26 @@ function CardsTab({
         />
       )}
     </div>
+  );
+}
+
+// A card's merge and explanation state, as small badges.
+function CardFlags({ topic, card: c }: { topic: FlashTopic; card: FlashCard }) {
+  const books = booksOf(c).length;
+  const d = disagreement(c);
+  const missing = emptyColumns(c, topic.columns).length;
+  return (
+    <>
+      {books > 1 && <Badge tone="primary">{books} books</Badge>}
+      {d.answer && !c.verified && <Badge tone="warn">Books differ</Badge>}
+      {d.spelling && !c.verified && <Badge tone="warn">Spellings differ</Badge>}
+      {c.own.length > 0 && (
+        <Badge tone="warn" title="Written by the AI from its own knowledge: check against a book">
+          ◇ {c.own.length} not from your books
+        </Badge>
+      )}
+      {missing > 0 && topic.columns.length > 0 && <Badge>{missing} empty</Badge>}
+    </>
   );
 }
 
@@ -930,6 +1035,7 @@ function CardDialog({
 }) {
   const saveFn = useServerFn(saveFlashCard);
   const deleteFn = useServerFn(deleteFlashCard);
+  const fillFn = useServerFn(fillFlashExplanations);
   const [c, setC] = useState(card);
   const [busy, setBusy] = useState(false);
   useEffect(() => setC(card), [card]);
@@ -953,6 +1059,8 @@ function CardDialog({
     is_revealed: c.is_revealed,
     word_key: c.word_key,
     ex: c.ex,
+    own: c.own,
+    note: c.note,
     error: c.error,
     error_type: c.error_type,
   };
@@ -985,13 +1093,72 @@ function CardDialog({
           </p>
           {field("front", c.front, (front) => setC({ ...c, front }), 3)}
           {field("back", c.back, (back) => setC({ ...c, back }), 3)}
+          <Versions
+            topic={topic}
+            card={card}
+            onUse={(patch) => setC({ ...c, ...patch })}
+            onSplit={() => {
+              toast.success("That book's version is its own card again");
+              onGone();
+            }}
+          />
+          {c.note && (
+            <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50/60 p-2 text-sm dark:bg-red-950/20">
+              <span className="min-w-0 flex-1" lang="hi">
+                {c.note}
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7"
+                onClick={() => setC({ ...c, note: "" })}
+              >
+                Clear note
+              </Button>
+            </div>
+          )}
+          {topic.columns.length > 0 && emptyColumns(c, topic.columns).length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  if (JSON.stringify(c) !== JSON.stringify(card))
+                    await saveFn({ data: { id: card.id, patch: textPatch as never } });
+                  const r = await fillFn({ data: { topic_id: topic.id, ids: [card.id] } });
+                  if (r.cards[0]) onSaved(r.cards[0]);
+                  else toast("Nothing to fill");
+                } catch (e) {
+                  toast.error(errorText(e, "The AI couldn't fill this card"));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              <Sparkles className="mr-1 h-4 w-4" /> Fill the empty explanations
+            </Button>
+          )}
           {topic.columns.map((col) => (
             <div key={col.id}>
               {field(
                 `explanation_${col.title}`,
                 c.ex[col.id] ?? "",
-                (v) => setC({ ...c, ex: { ...c.ex, [col.id]: v } }),
+                (v) =>
+                  setC({
+                    ...c,
+                    ex: { ...c.ex, [col.id]: v },
+                    // Edited by hand: the editor's now.
+                    own: c.own.filter((o) => o !== col.id),
+                  }),
                 3,
+              )}
+              {c.own.includes(col.id) && (
+                <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
+                  ◇ Not from your books: written by the AI from its own knowledge. Check it in a
+                  book; editing it makes it yours.
+                </p>
               )}
               {col.hint && <p className="mt-0.5 text-xs text-muted-foreground">{col.hint}</p>}
             </div>

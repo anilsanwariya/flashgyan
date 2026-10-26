@@ -49,6 +49,19 @@ export type FlashSource = {
   page?: number | null;
   heading?: string;
   rule?: string;
+  // The book's note for this example (a meaning, "also correct: …").
+  note?: string;
+  // The book (flash_sources row) the AI read it from.
+  src?: string;
+};
+
+// Another book's version of a card (kept when cards are merged).
+export type FlashVariant = {
+  book: string;
+  front: string;
+  back: string;
+  ex: Record<string, string>;
+  source: FlashSource | null;
 };
 
 export type FlashCard = {
@@ -68,6 +81,10 @@ export type FlashCard = {
   // Columns the AI wrote from its own knowledge, not the books.
   own: string[];
   sources: FlashSource[];
+  // The other books' versions of a card made from several books.
+  variants: FlashVariant[];
+  // The AI check's finding, or the editor's own note.
+  note: string;
   error: boolean;
   error_type: string;
   verified: boolean;
@@ -573,6 +590,36 @@ export function normalizeSources(v: unknown): FlashSource[] {
       page: num(o.page),
       heading: oneLine(o.heading, 300),
       rule: oneLine(o.rule, 300),
+      ...(oneLine(o.note, 500) ? { note: oneLine(o.note, 500) } : {}),
+      ...(oneLine(o.src, 40) ? { src: oneLine(o.src, 40) } : {}),
+    };
+  });
+}
+
+// A book being read into a topic.
+export type FlashSourceRow = {
+  id: string;
+  topic_id: string;
+  book: string;
+  name: string;
+  kind: "word" | "pdf" | "text";
+  total: number;
+  done: number;
+  cards: number;
+  todos: { where: string; text: string }[];
+  error: string | null;
+  created_at: string;
+};
+
+export function normalizeVariants(v: unknown): FlashVariant[] {
+  return (Array.isArray(v) ? v : []).slice(0, 30).map((x) => {
+    const o = (x ?? {}) as Record<string, unknown>;
+    return {
+      book: oneLine(o.book, 30),
+      front: text(o.front),
+      back: text(o.back),
+      ex: normalizeEx(o.ex),
+      source: o.source ? (normalizeSources([o.source])[0] ?? null) : null,
     };
   });
 }
