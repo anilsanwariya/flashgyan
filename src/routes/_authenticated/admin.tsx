@@ -138,6 +138,7 @@ import { SaathiPanel } from "@/components/saathi-panel";
 import { SaathiAnswersPanel } from "@/components/saathi-answers-panel";
 import { CurrentAffairsPanel, type CaSection } from "@/components/current-affairs-panel";
 import { HomePanel } from "@/components/home-panel";
+import { FlashStudio } from "@/components/flash-studio-panel";
 import { BotManagerPanel, type BotSection } from "@/components/bot-manager-panel";
 import { AdminShell, isAdminSection, type AdminSectionId } from "@/components/admin-shell";
 import { setAdminDevice } from "@/lib/pwa";
@@ -279,6 +280,8 @@ function Admin() {
         <McqPanel />
       ) : section === "mcqPractice" ? (
         <McqPracticePanel />
+      ) : section === "cardStudio" ? (
+        <FlashStudio />
       ) : section === "saathi" ? (
         <SaathiPanel />
       ) : section === "saathiAnswers" ? (
