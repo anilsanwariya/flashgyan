@@ -15,6 +15,7 @@ import {
   ArrowLeft,
   ArrowUp,
   BadgeCheck,
+  ClipboardPaste,
   Download,
   FileUp,
   KeyRound,
@@ -56,6 +57,7 @@ import {
   type FlashBook,
   type FlashCard,
   type FlashColumn,
+  type FlashSourceRow,
   type FlashTemplate,
   type FlashTopic,
   type IdMatch,
@@ -63,6 +65,8 @@ import {
   type WordKey,
 } from "@/lib/flash-studio";
 import { zipFiles } from "@/lib/zip";
+import { BooksPanel } from "@/components/flash-studio-books";
+import { BOOK_FILE_TYPES, isBookFile } from "@/lib/flash-read";
 import { Badge, PageTabs, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -564,7 +568,7 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
       </div>
     );
   if (!q.data) return <div className="h-40 animate-pulse rounded-xl bg-muted" />;
-  const { topic, cards } = q.data;
+  const { topic, cards, sources } = q.data;
   const live = cards.filter((c) => !c.removed);
   const unnumbered = live.filter((c) => c.card_order === null).length;
   return (
@@ -590,7 +594,13 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
         onChange={setTab}
       />
       {tab === "cards" && (
-        <CardsTab topic={topic} cards={cards} onChanged={reload} onCard={putCard} />
+        <CardsTab
+          topic={topic}
+          cards={cards}
+          sources={sources}
+          onChanged={reload}
+          onCard={putCard}
+        />
       )}
       {tab === "chunks" && <ChunksTab topic={topic} cards={cards} onChanged={reload} />}
       {tab === "settings" && <SettingsTab topic={topic} onChanged={reload} />}
@@ -613,11 +623,13 @@ const FILTERS: { id: Filter; label: string }[] = [
 function CardsTab({
   topic,
   cards,
+  sources,
   onChanged,
   onCard,
 }: {
   topic: FlashTopic;
   cards: FlashCard[];
+  sources: FlashSourceRow[];
   onChanged: () => void;
   onCard: (c: FlashCard) => void;
 }) {
@@ -628,6 +640,8 @@ function CardsTab({
   const [editing, setEditing] = useState<FlashCard | null>(null);
   const [importing, setImporting] = useState<{ file: string; sheet: ParsedSheet } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [bookFile, setBookFile] = useState<File | null>(null);
+  const [pasting, setPasting] = useState(false);
   const books = new Map(topic.books.map((b) => [b.code, b]));
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -651,19 +665,30 @@ function CardsTab({
   }, [cards, filter, query]);
   return (
     <div className="space-y-3">
+      <BooksPanel
+        topic={topic}
+        sources={sources}
+        onChanged={onChanged}
+        openFile={bookFile}
+        onOpened={() => setBookFile(null)}
+        pasting={pasting}
+        setPasting={setPasting}
+      />
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}>
-          <FileUp className="mr-1 h-4 w-4" /> Add a sheet
+          <FileUp className="mr-1 h-4 w-4" /> Add a book or sheet
         </Button>
         <input
           ref={fileRef}
           type="file"
-          accept=".xlsx,.xls,.csv"
+          aria-label="Book or sheet file"
+          accept={`.xlsx,.xls,.csv,${BOOK_FILE_TYPES}`}
           className="hidden"
           onChange={async (e) => {
             const file = e.target.files?.[0];
             e.target.value = "";
             if (!file) return;
+            if (isBookFile(file)) return setBookFile(file);
             try {
               const sheet = parseSheet(await readRows(file));
               if (!sheet.cards.length) throw new Error("No cards found in the sheet");
@@ -686,6 +711,9 @@ function CardsTab({
           }}
         >
           <Plus className="mr-1 h-4 w-4" /> Add card
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setPasting(true)}>
+          <ClipboardPaste className="mr-1 h-4 w-4" /> Paste text
         </Button>
         <div className="relative ml-auto min-w-0 basis-56">
           <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -718,8 +746,9 @@ function CardsTab({
       </div>
       {!cards.length && (
         <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-          Add each book&apos;s sheet (.xlsx). A finished sheet with sheet and order columns can keep
-          its chunks and numbers.
+          Add each book: a Word file, a PDF or pasted text is read by the AI into cards; an Excel
+          sheet is added as it is (a finished sheet with sheet and order columns can keep its chunks
+          and numbers).
         </p>
       )}
       <ul className="space-y-2">
@@ -763,6 +792,16 @@ function CardsTab({
                 <div className="whitespace-pre-wrap font-medium">{c.front || "—"}</div>
                 <div className="whitespace-pre-wrap text-sm">{c.back || "—"}</div>
               </div>
+              {(c.sources[0]?.heading || c.sources[0]?.rule || c.sources[0]?.note) && (
+                <div className="mt-1 text-xs text-muted-foreground" lang="hi">
+                  {[c.sources[0].heading, c.sources[0].rule].filter(Boolean).join(" · ")}
+                  {c.sources[0].note && (
+                    <span className="ml-1 text-amber-700 dark:text-amber-400">
+                      Book&apos;s note: {c.sources[0].note}
+                    </span>
+                  )}
+                </div>
+              )}
             </button>
           </li>
         ))}

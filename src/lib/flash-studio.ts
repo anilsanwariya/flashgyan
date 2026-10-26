@@ -49,6 +49,10 @@ export type FlashSource = {
   page?: number | null;
   heading?: string;
   rule?: string;
+  // The book's note for this example (a meaning, "also correct: …").
+  note?: string;
+  // The book (flash_sources row) the AI read it from.
+  src?: string;
 };
 
 export type FlashCard = {
@@ -573,9 +577,26 @@ export function normalizeSources(v: unknown): FlashSource[] {
       page: num(o.page),
       heading: oneLine(o.heading, 300),
       rule: oneLine(o.rule, 300),
+      ...(oneLine(o.note, 500) ? { note: oneLine(o.note, 500) } : {}),
+      ...(oneLine(o.src, 40) ? { src: oneLine(o.src, 40) } : {}),
     };
   });
 }
+
+// A book being read into a topic.
+export type FlashSourceRow = {
+  id: string;
+  topic_id: string;
+  book: string;
+  name: string;
+  kind: "word" | "pdf" | "text";
+  total: number;
+  done: number;
+  cards: number;
+  todos: { where: string; text: string }[];
+  error: string | null;
+  created_at: string;
+};
 
 export const normalizeEx = (v: unknown): Record<string, string> => {
   const out: Record<string, string> = {};

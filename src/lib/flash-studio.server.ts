@@ -1,6 +1,8 @@
 // Server-only flashcard studio: templates, topics and cards; reading a sheet
 // into a topic, numbering its chunks once, and keeping the app's ids.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { saathiComplete, type SaathiImage } from "../../supabase/functions/_shared/saathi-core.ts";
+import { parseRead, readMessages, type ReadContext, type Todo } from "@/lib/flash-read";
 import {
   DEFAULT_TEMPLATES,
   lastNumbers,
@@ -18,6 +20,7 @@ import {
   type FlashCard,
   type FlashColumn,
   type FlashTemplate,
+  type FlashSourceRow,
   type FlashTopic,
   type IdMatch,
   type SheetCard,
@@ -27,7 +30,7 @@ import {
 const from = (table: string) => supabaseAdmin.from(table as never);
 const missing = (e: { message: string } | null) =>
   !!e &&
-  /flash_(templates|topics|cards).*(does not exist|schema cache)|Could not find the table/.test(
+  /flash_(templates|topics|cards|sources).*(does not exist|schema cache)|Could not find the table/.test(
     e.message,
   );
 export const STUDIO_NOT_READY =
@@ -218,8 +221,12 @@ async function topicCards(id: string): Promise<FlashCard[]> {
 }
 
 export async function getTopic(id: string) {
-  const [topic, cards] = await Promise.all([topicRow(id), topicCards(id)]);
-  return { topic, cards };
+  const [topic, cards, sources] = await Promise.all([
+    topicRow(id),
+    topicCards(id),
+    listSources(id),
+  ]);
+  return { topic, cards, sources };
 }
 
 export async function updateTopic(
@@ -474,4 +481,214 @@ export async function saveAppIds(
   }
   if (out.length) await touch(topicId);
   return match;
+}
+
+// ---------- Reading books with the AI ----------
+
+const readSource = (r: Row): FlashSourceRow => ({
+  id: String(r.id),
+  topic_id: String(r.topic_id),
+  book: String(r.book),
+  name: String(r.name ?? ""),
+  kind: (["word", "pdf", "text"].includes(String(r.kind))
+    ? r.kind
+    : "text") as FlashSourceRow["kind"],
+  total: Number(r.total) || 0,
+  done: Number(r.done) || 0,
+  cards: Number(r.cards) || 0,
+  todos: Array.isArray(r.todos) ? (r.todos as FlashSourceRow["todos"]) : [],
+  error: typeof r.error === "string" ? r.error : null,
+  created_at: String(r.created_at),
+});
+
+// The books read into a topic (none before the flash_sources migration).
+export async function listSources(topicId: string): Promise<FlashSourceRow[]> {
+  const { data, error } = await from("flash_sources")
+    .select("id,topic_id,book,name,kind,total,done,cards,todos,error,created_at")
+    .eq("topic_id", topicId)
+    .order("created_at");
+  if (missing(error)) return [];
+  fail(error);
+  return ((data ?? []) as Row[]).map(readSource);
+}
+
+// A book to read: a Word file or pasted text in pieces, or a PDF's page
+// count (its pages are sent one at a time). Its book joins the topic's.
+export async function addSource(
+  topicId: string,
+  s: {
+    book: string;
+    name: string;
+    kind: FlashSourceRow["kind"];
+    pieces: string[];
+    pages: number;
+    todos: Todo[];
+  },
+): Promise<FlashSourceRow> {
+  const book = s.book.trim();
+  if (!book) throw new Error("Give the book's short name");
+  const total = s.kind === "pdf" ? s.pages : s.pieces.length;
+  if (!total) throw new Error("Nothing to read in this file");
+  const topic = await topicRow(topicId);
+  if (!topic.books.some((b) => b.code === book))
+    await updateTopic(topicId, {
+      books: [
+        ...topic.books,
+        { code: book, name: "", color: BOOK_COLORS[topic.books.length % BOOK_COLORS.length] },
+      ],
+    });
+  const { data, error } = await from("flash_sources")
+    .insert({
+      topic_id: topicId,
+      book,
+      name: s.name.slice(0, 200),
+      kind: s.kind,
+      pieces: s.kind === "pdf" ? [] : s.pieces,
+      total,
+      todos: s.todos.slice(0, 500),
+    } as never)
+    .select("id,topic_id,book,name,kind,total,done,cards,todos,error,created_at")
+    .single();
+  fail(error);
+  return readSource(data as unknown as Row);
+}
+
+function apiKey(): string {
+  const key = process.env.LOVABLE_API_KEY;
+  if (!key) throw new Error("LOVABLE_API_KEY is not configured");
+  return key;
+}
+
+// The next piece (or the given PDF page) read by the AI into cards, added
+// to the topic in the book's order.
+export async function readSourceStep(
+  sourceId: string,
+  image?: SaathiImage,
+): Promise<FlashSourceRow & { added: number }> {
+  const { data, error } = await from("flash_sources").select("*").eq("id", sourceId).single();
+  fail(error);
+  const row = data as unknown as Row;
+  const src = readSource(row);
+  if (src.done >= src.total) return { ...src, added: 0 };
+  const topic = await topicRow(src.topic_id);
+  let deck = {
+    name: topic.name,
+    prompt: topic.prompt,
+    columns: topic.columns,
+    examples: [] as FlashTemplate["examples"],
+  };
+  if (topic.template_id) {
+    const { data: t } = await from("flash_templates")
+      .select("*")
+      .eq("id", topic.template_id)
+      .maybeSingle();
+    if (t)
+      deck = {
+        ...deck,
+        name: readTemplate(t as unknown as Row).name,
+        examples: readTemplate(t as unknown as Row).examples,
+      };
+  }
+  const ctx0 = (row.context ?? {}) as Partial<ReadContext>;
+  const context: ReadContext = {
+    heading: String(ctx0.heading ?? ""),
+    rule: String(ctx0.rule ?? ""),
+  };
+  const part = src.done + 1;
+  let input: Parameters<typeof readMessages>[2];
+  if (src.kind === "pdf") {
+    if (!image) throw new Error("Choose the PDF again to go on reading it");
+    input = { page: part, pages: src.total };
+  } else {
+    const pieces = Array.isArray(row.pieces) ? (row.pieces as string[]) : [];
+    input = { text: String(pieces[src.done] ?? ""), part, parts: src.total };
+  }
+  let read;
+  try {
+    read = parseRead(
+      await saathiComplete(
+        apiKey(),
+        readMessages(deck, src.book, input, context),
+        undefined,
+        image ? [image] : undefined,
+      ),
+      topic.columns,
+      context,
+    );
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    await from("flash_sources")
+      .update({ error: message, updated_at: now() } as never)
+      .eq("id", sourceId);
+    throw e;
+  }
+  const { data: last } = await from("flash_cards")
+    .select("pos")
+    .eq("topic_id", src.topic_id)
+    .order("pos", { ascending: false })
+    .limit(1);
+  const start = ((last ?? []) as Row[])[0] ? Number(((last ?? []) as Row[])[0].pos) + 1 : 0;
+  await insertCards(
+    read.cards.map((c, i) => ({
+      topic_id: src.topic_id,
+      pos: start + i,
+      front: c.front,
+      back: c.back,
+      ex: c.ex,
+      sources: [
+        {
+          book: src.book,
+          pos: src.cards + i + 1,
+          page: src.kind === "pdf" ? part : null,
+          heading: c.heading,
+          rule: c.rule,
+          ...(c.note ? { note: c.note } : {}),
+          src: sourceId,
+        },
+      ],
+    })),
+  );
+  const where = src.kind === "pdf" ? `Page ${part}` : `Part ${part}`;
+  const todos = [...src.todos, ...read.notes.map((text) => ({ where, text }))].slice(0, 500);
+  const { data: saved, error: e2 } = await from("flash_sources")
+    .update({
+      done: part,
+      cards: src.cards + read.cards.length,
+      context: read.context,
+      todos,
+      error: null,
+      updated_at: now(),
+    } as never)
+    .eq("id", sourceId)
+    .select("id,topic_id,book,name,kind,total,done,cards,todos,error,created_at")
+    .single();
+  fail(e2);
+  await touch(src.topic_id);
+  return { ...readSource(saved as unknown as Row), added: read.cards.length };
+}
+
+// A book taken out again: its cards not yet numbered go with it (numbered
+// ones stay, their numbers being in the app).
+export async function deleteSource(sourceId: string): Promise<{ deleted: number; kept: number }> {
+  const { data, error } = await from("flash_sources")
+    .select("topic_id")
+    .eq("id", sourceId)
+    .single();
+  fail(error);
+  const topicId = String((data as unknown as Row).topic_id);
+  const cards = (await topicCards(topicId)).filter((c) =>
+    c.sources.some((s) => s.src === sourceId),
+  );
+  const drop = cards.filter((c) => c.card_order === null).map((c) => c.id);
+  for (let i = 0; i < drop.length; i += 200)
+    fail(
+      (
+        await from("flash_cards")
+          .delete()
+          .in("id", drop.slice(i, i + 200))
+      ).error,
+    );
+  fail((await from("flash_sources").delete().eq("id", sourceId)).error);
+  await touch(topicId);
+  return { deleted: drop.length, kept: cards.length - drop.length };
 }
