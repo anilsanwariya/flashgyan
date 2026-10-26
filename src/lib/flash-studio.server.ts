@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { saathiComplete, type SaathiImage } from "../../supabase/functions/_shared/saathi-core.ts";
 import { parseRead, readMessages, type ReadContext, type Todo } from "@/lib/flash-read";
 import * as M from "@/lib/flash-merge";
+import * as S from "@/lib/flash-split";
 import {
   DEFAULT_TEMPLATES,
   lastNumbers,
@@ -447,9 +448,12 @@ export async function deleteCard(id: string): Promise<"deleted" | "removed"> {
 
 // The cards without numbers shuffled, split into chunks of the given sizes
 // and numbered on from the topic's last number. Done once per card.
-export async function numberCards(topicId: string, sizes: number[], seed: number) {
+// `only`: just these cards (an alphabetical range), the rest left for later.
+export async function numberCards(topicId: string, sizes: number[], seed: number, only?: string[]) {
   const { topic, cards } = await getTopic(topicId);
-  const ids = cards.filter((c) => c.card_order === null && !c.removed).map((c) => c.id);
+  const ids = cards
+    .filter((c) => c.card_order === null && !c.removed && (!only || only.includes(c.id)))
+    .map((c) => c.id);
   if (!ids.length) throw new Error("Every card already has its number");
   const { numbers, chunks } = planNumbers(ids, sizes, seed, lastNumbers(topic, cards));
   const rows = numbers.map((n) => ({ topic_id: topicId, ...n, updated_at: now() }));
@@ -1005,4 +1009,123 @@ export async function checkCards(
     );
   }
   return { flagged: out.length, cards: out };
+}
+
+// ---------- Downloads ----------
+
+// The chunks just downloaded: their time kept, so later edits show as
+// "changed since download".
+export async function markDownloaded(topicId: string, ns: number[]) {
+  const topic = await topicRow(topicId);
+  const at = now();
+  const chunks = topic.chunks.map((c) => (ns.includes(c.n) ? { ...c, downloaded: at } : c));
+  fail(
+    (
+      await from("flash_topics")
+        .update({ chunks } as never)
+        .eq("id", topicId)
+    ).error,
+  );
+  return chunks;
+}
+
+// ---------- "पृथक करें" cards from an उपसर्ग / प्रत्यय topic ----------
+
+async function templateKey(id: string | null): Promise<string | null> {
+  if (!id) return null;
+  const { data } = await from("flash_templates").select("key").eq("id", id).maybeSingle();
+  return data ? String((data as unknown as Row).key) : null;
+}
+
+// The "पृथक करें" topic for an उपसर्ग / प्रत्यय topic: the one named after it,
+// or a new one of the matching deck type.
+async function splitTopicFor(source: FlashTopic, kind: S.AffixKind): Promise<FlashTopic> {
+  const name = `${source.name} – पृथक करें`;
+  const { data } = await from("flash_topics").select("*").eq("name", name).limit(1);
+  if (((data ?? []) as Row[])[0]) return readTopic(((data ?? []) as Row[])[0]);
+  const { data: t } = await from("flash_templates")
+    .select("id")
+    .eq("key", S.SPLIT_OF[kind])
+    .maybeSingle();
+  const created = await createTopic(name, t ? String((t as unknown as Row).id) : null);
+  return updateTopic(created.id, { books: source.books });
+}
+
+export async function makeSplitCards(
+  sourceId: string,
+  cardIds: string[],
+): Promise<{ topic: FlashTopic; added: number; ai: number; skipped: number }> {
+  const { topic: source, cards } = await getTopic(sourceId);
+  const kind = S.kindOfTemplate(await templateKey(source.template_id));
+  if (!kind) throw new Error("Only an उपसर्ग or प्रत्यय topic makes पृथक करें cards");
+  const target = await splitTopicFor(source, kind);
+  const have = new Set(
+    (await topicCards(target.id)).filter((c) => !c.removed).map((c) => M.dupKey(c.front)),
+  );
+  const colOf = new Map(target.columns.map((c) => [c.title.trim(), c.id]));
+  type Made = { word: string; split: string | null; card: FlashCard; affix: string };
+  const made: Made[] = [];
+  let skipped = 0;
+  for (const card of cards.filter((c) => cardIds.includes(c.id) && !c.removed)) {
+    const affix = S.cleanAffix(card.front);
+    for (const word of S.wordsOf(card.back)) {
+      const key = M.dupKey(word);
+      if (have.has(key)) {
+        skipped++;
+        continue;
+      }
+      have.add(key);
+      made.push({ word, split: S.plainSplit(kind, affix, word), card, affix });
+    }
+  }
+  const ask = made
+    .filter((m) => !m.split)
+    .map((m, i) => ({ n: i + 1, affix: m.affix, word: m.word, m }));
+  let ai = 0;
+  if (ask.length) {
+    const got = S.parseSplit(await saathiComplete(apiKey(), S.splitMessages(kind, ask)), ask);
+    for (const a of ask) {
+      const split = got.get(a.n);
+      if (split) {
+        a.m.split = split;
+        ai++;
+      }
+    }
+  }
+  const { data: last } = await from("flash_cards")
+    .select("pos")
+    .eq("topic_id", target.id)
+    .order("pos", { ascending: false })
+    .limit(1);
+  let pos = ((last ?? []) as Row[])[0] ? Number(((last ?? []) as Row[])[0].pos) + 1 : 0;
+  const titleOf = new Map(source.columns.map((c) => [c.id, c.title.trim()]));
+  const rows = made
+    .filter((m) => m.split)
+    .map((m) => {
+      const ex: Record<string, string> = {};
+      const own: string[] = [];
+      for (const [id, v] of Object.entries(m.card.ex)) {
+        const to = colOf.get(titleOf.get(id) ?? "");
+        if (to && v) {
+          ex[to] = v;
+          if (m.card.own.includes(id)) own.push(to);
+        }
+      }
+      const fromAi = !S.plainSplit(kind, m.affix, m.word);
+      return {
+        topic_id: target.id,
+        pos: pos++,
+        front: m.word,
+        back: m.split,
+        ex,
+        own,
+        sources: m.card.sources.slice(0, 1),
+        note: fromAi ? "AI: parts split by the AI; check them" : "",
+        error: false,
+      };
+    });
+  skipped += made.length - rows.length;
+  await insertCards(rows);
+  await touch(target.id);
+  return { topic: target, added: rows.length, ai, skipped };
 }

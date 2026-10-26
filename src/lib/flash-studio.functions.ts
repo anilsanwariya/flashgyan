@@ -218,12 +218,13 @@ export const numberFlashCards = createServerFn({ method: "POST" })
           .int()
           .min(0)
           .max(2 ** 31),
+        only: z.array(id).max(5000).optional(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    return (await server()).numberCards(data.topic_id, data.sizes, data.seed);
+    return (await server()).numberCards(data.topic_id, data.sizes, data.seed, data.only);
   });
 
 export const saveFlashAppIds = createServerFn({ method: "POST" })
@@ -337,4 +338,24 @@ export const checkFlashCards = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return (await server()).checkCards(data.topic_id, data.ids);
+  });
+
+export const markFlashDownloaded = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ topic_id: id, chunks: z.array(z.number().int().min(1)).min(1).max(500) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).markDownloaded(data.topic_id, data.chunks);
+  });
+
+export const makeFlashSplitCards = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ topic_id: id, ids: z.array(id).min(1).max(20) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).makeSplitCards(data.topic_id, data.ids);
   });

@@ -7,9 +7,13 @@ import { useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Combine, Pause, ScanSearch, Sparkles, Split } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { kindOfTemplate, wordsOf } from "@/lib/flash-split";
 import {
   checkFlashCards,
   fillFlashExplanations,
+  listFlashTemplates,
+  makeFlashSplitCards,
   mergeAllFlashCards,
   mergeFlashCards,
   splitFlashVariant,
@@ -80,6 +84,10 @@ export function ProofTools({
 }) {
   const fillFn = useServerFn(fillFlashExplanations);
   const checkFn = useServerFn(checkFlashCards);
+  const splitFn = useServerFn(makeFlashSplitCards);
+  const typesFn = useServerFn(listFlashTemplates);
+  const types = useQuery({ queryKey: ["flashTemplates"], queryFn: () => typesFn() });
+  const kind = kindOfTemplate(types.data?.find((t) => t.id === topic.template_id)?.key);
   const groups = useMemo(() => groupDuplicates(cards), [cards]);
   const [merging, setMerging] = useState(false);
   const batches = useBatches();
@@ -87,6 +95,7 @@ export function ProofTools({
   const live = cards.filter((c) => !c.removed && shown.has(c.id));
   const needFill = live.filter((c) => emptyColumns(c, topic.columns).length).map((c) => c.id);
   const needCheck = live.filter((c) => !c.verified).map((c) => c.id);
+  const words = kind ? live.reduce((n, c) => n + wordsOf(c.back).length, 0) : 0;
   return (
     <div className="flex flex-wrap items-center gap-2">
       {groups.length > 0 && (
@@ -163,6 +172,44 @@ export function ProofTools({
           >
             <ScanSearch className="mr-1 h-4 w-4" /> AI check ({needCheck.length})
           </Button>
+          {kind && words > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              title={`Each word of the cards shown becomes a card in “${topic.name} – पृथक करें”: ${kind === "upsarg" ? "उपसर्ग + मूल शब्द" : "मूल शब्द + प्रत्यय"}, with this card's explanations`}
+              onClick={async () => {
+                if (
+                  !confirm(
+                    `Make “पृथक करें” cards from the ${words} words of the ${live.length} cards shown, in “${topic.name} – पृथक करें”? Words already there are skipped.`,
+                  )
+                )
+                  return;
+                let added = 0;
+                let ai = 0;
+                let name = "";
+                try {
+                  await batches.run(
+                    "Making पृथक करें cards",
+                    live.map((c) => c.id),
+                    8,
+                    (ids) => splitFn({ data: { topic_id: topic.id, ids } }),
+                    (r) => {
+                      added += r.added;
+                      ai += r.ai;
+                      name = r.topic.name;
+                    },
+                  );
+                  toast.success(
+                    `${added} cards made in “${name}”${ai ? `; ${ai} split by the AI, marked to check` : ""}`,
+                  );
+                } catch (e) {
+                  toast.error(errorText(e, "Couldn't make the cards"));
+                }
+              }}
+            >
+              <Split className="mr-1 h-4 w-4" /> पृथक करें cards ({words} words)
+            </Button>
+          )}
         </>
       )}
       {merging && (

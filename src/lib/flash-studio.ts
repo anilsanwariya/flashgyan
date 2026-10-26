@@ -25,7 +25,9 @@ export type FlashTemplate = {
 };
 
 export type FlashBook = { code: string; name: string; color: string };
-export type FlashChunk = { n: number; from: number; to: number };
+// A chunk's numbers, and when it was last downloaded (to show what changed
+// since, so only those chunks go back to the app).
+export type FlashChunk = { n: number; from: number; to: number; downloaded?: string | null };
 
 export type FlashTopic = {
   id: string;
@@ -563,7 +565,8 @@ export function normalizeChunks(v: unknown): FlashChunk[] {
   return (Array.isArray(v) ? v : [])
     .map((x) => {
       const o = (x ?? {}) as Record<string, unknown>;
-      return { n: Number(o.n), from: Number(o.from), to: Number(o.to) };
+      const downloaded = typeof o.downloaded === "string" && o.downloaded ? o.downloaded : null;
+      return { n: Number(o.n), from: Number(o.from), to: Number(o.to), downloaded };
     })
     .filter((c) => [c.n, c.from, c.to].every((n) => Number.isInteger(n) && n > 0))
     .sort((a, b) => a.n - b.n);
@@ -1006,6 +1009,67 @@ export function matchAppIds(
       if (card.app_id && card.app_id !== r.app_id) out.changed++;
       out.saved.push({ card: card.id, app_id: r.app_id });
     }
+  }
+  return out;
+}
+
+// ---------- Alphabetical ranges ----------
+
+// The letter a card's front starts with: its first letter (Latin in
+// capitals; Devanagari as written, its vowel sign left off), "#" for none.
+export function firstLetter(front: string): string {
+  const m = /[A-Za-z\u0905-\u0939\u0958-\u0961]/.exec(front.normalize("NFC"));
+  if (!m) return "#";
+  return /[a-z]/i.test(m[0]) ? m[0].toUpperCase() : m[0];
+}
+
+// Letters in alphabet order: Latin A–Z, then Devanagari (vowels, then
+// consonants, as the script orders them), then anything else.
+export function compareLetters(a: string, b: string): number {
+  const rank = (l: string) => (l === "#" ? 3 : /[A-Z]/.test(l) ? 1 : 2);
+  return rank(a) - rank(b) || a.localeCompare(b, rank(a) === 2 ? "hi" : "en");
+}
+
+// The letters the cards start with, in order, with how many cards each.
+export function lettersOf(cards: Pick<FlashCard, "front">[]): { letter: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const c of cards)
+    counts.set(firstLetter(c.front), (counts.get(firstLetter(c.front)) ?? 0) + 1);
+  return [...counts]
+    .map(([letter, count]) => ({ letter, count }))
+    .sort((a, b) => compareLetters(a.letter, b.letter));
+}
+
+// Whether a card's front starts within letters `from`–`to`.
+export const inLetters = (front: string, from: string, to: string) => {
+  const l = firstLetter(front);
+  return compareLetters(l, from) >= 0 && compareLetters(l, to) <= 0;
+};
+
+// ---------- What changed since a chunk was downloaded ----------
+
+export type ChunkChanges = { changed: FlashCard[]; removed: FlashCard[]; never: boolean };
+
+// For each chunk: its cards edited (or removed) after it was last
+// downloaded, or that it was never downloaded.
+export function chunkChanges(
+  topic: Pick<FlashTopic, "chunks">,
+  cards: FlashCard[],
+): Map<number, ChunkChanges> {
+  const out = new Map<number, ChunkChanges>();
+  for (const ch of topic.chunks) {
+    const mine = cards.filter((c) => c.chunk === ch.n);
+    if (!ch.downloaded) {
+      out.set(ch.n, { changed: [], removed: [], never: true });
+      continue;
+    }
+    const at = Date.parse(ch.downloaded);
+    const after = mine.filter((c) => Date.parse(c.updated_at) > at);
+    out.set(ch.n, {
+      changed: after.filter((c) => !c.removed),
+      removed: after.filter((c) => c.removed),
+      never: false,
+    });
   }
   return out;
 }
