@@ -88,6 +88,7 @@ import { ServerJobsBar, StudioJobBar } from "@/components/flash-studio-jobs";
 import {
   AiReview,
   BulkBar,
+  BookText,
   FindReplace,
   RecentlyDeleted,
   HistoryButton,
@@ -2170,6 +2171,7 @@ function CardDialog({
                   book; editing it makes it yours.
                 </p>
               )}
+              {c.own.includes(col.id) && <BookText topicId={topic.id} card={card} />}
               {col.hint && <p className="mt-0.5 text-xs text-muted-foreground">{col.hint}</p>}
             </div>
           ))}

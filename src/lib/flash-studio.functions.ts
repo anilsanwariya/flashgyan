@@ -609,3 +609,11 @@ export const restoreFlashStates = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await server()).restoreStates(data.topic_id, data.states);
   });
+
+export const getFlashBookText = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ topic_id: id, card_id: id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).bookText(data.topic_id, data.card_id);
+  });

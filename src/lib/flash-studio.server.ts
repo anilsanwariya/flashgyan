@@ -1,7 +1,14 @@
 // Server-only flashcard studio: templates, topics and cards; reading a sheet
 // into a topic, numbering its chunks once, and keeping the app's ids.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { saathiComplete, type SaathiImage } from "../../supabase/functions/_shared/saathi-core.ts";
+import {
+  matchLabel,
+  relevantMatches,
+  saathiComplete,
+  saathiSearchQuery,
+  type SaathiImage,
+  type SaathiRpc,
+} from "../../supabase/functions/_shared/saathi-core.ts";
 import { parseReply, readMessages, type ReadResult, type Todo } from "@/lib/flash-read";
 import * as M from "@/lib/flash-merge";
 import * as L from "@/lib/flash-lint";
@@ -2176,4 +2183,62 @@ export async function restoreStates(
     states.map(({ id, ...patch }) => ({ id, patch: { ...patch, ex: normalizeEx(patch.ex) } })),
   );
   return { changed: out.length, cards: out };
+}
+
+// ---------- Book text ----------
+
+export type BookPassage = { from: "book" | "saathi"; label: string; text: string };
+
+const rpc: SaathiRpc = (fn, args) => supabaseAdmin.rpc(fn as never, args as never);
+
+// What the books say about a card, to check what the AI wrote beside it:
+// the card's own books' text where its word is (from the sheets' sources),
+// then the closest passages in SAATHI's knowledge base.
+export async function bookText(
+  topicId: string,
+  cardId: string,
+): Promise<{ passages: BookPassage[] }> {
+  const { data, error } = await from("flash_cards")
+    .select("*")
+    .eq("id", cardId)
+    .eq("topic_id", topicId)
+    .maybeSingle();
+  fail(error);
+  if (!data) throw new Error("This card isn't in the topic any more.");
+  const card = readCard(data as unknown as Row);
+  const srcs = [...card.sources, ...card.variants.flatMap((v) => (v.source ? [v.source] : []))];
+  const ids = [...new Set(srcs.map((s) => s.src).filter(Boolean))];
+  const passages: BookPassage[] = [];
+  if (ids.length) {
+    const { data: rows, error: e2 } = await from("flash_sources").select("id,pieces").in("id", ids);
+    fail(e2);
+    for (const r of (rows ?? []) as Row[]) {
+      const pieces = Array.isArray(r.pieces) ? (r.pieces as string[]) : [];
+      const text = M.passageFor(pieces, card.front, 1200).trim();
+      const book = srcs.find((s) => s.src === r.id)?.book ?? "";
+      if (text) passages.push({ from: "book", label: book || "The book", text });
+    }
+  }
+  const { data: subj } = await supabaseAdmin
+    .from("saathi_knowledge")
+    .select("subject")
+    .is("parent_id", null)
+    .limit(2000);
+  const subjects = [
+    ...new Set(((subj ?? []) as { subject: string }[]).map((r) => r.subject)),
+  ].filter(Boolean);
+  if (subjects.length) {
+    const query = [card.front, card.back].join("\n").slice(0, 1000);
+    const matches = await saathiSearchQuery(
+      apiKey(),
+      rpc,
+      { standalone: query, english: null },
+      subjects,
+    )
+      .then((m) => relevantMatches(m).slice(0, 3))
+      .catch(() => []);
+    for (const m of matches)
+      passages.push({ from: "saathi", label: matchLabel(m), text: m.content.slice(0, 1500) });
+  }
+  return { passages };
 }

@@ -7,10 +7,20 @@ import { useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { BadgeCheck, History, ScanSearch, Sparkles, Trash2, Wand2, X } from "lucide-react";
+import {
+  BadgeCheck,
+  BookOpen,
+  History,
+  ScanSearch,
+  Sparkles,
+  Trash2,
+  Wand2,
+  X,
+} from "lucide-react";
 import {
   bulkFlashCards,
   checkFlashCards,
+  getFlashBookText,
   getFlashCardHistory,
   listFlashTrash,
   replaceFlashText,
@@ -919,5 +929,83 @@ export function RecentlyDeleted({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+// What the books say about a card, beside an explanation the AI wrote from
+// its own knowledge: the card's books' text where its word is, then
+// SAATHI's closest passages; the word marked in each.
+export function BookText({ topicId, card }: { topicId: string; card: FlashCard }) {
+  const textFn = useServerFn(getFlashBookText);
+  const [open, setOpen] = useState(false);
+  const q = useQuery({
+    queryKey: ["flashBookText", card.id],
+    queryFn: () => textFn({ data: { topic_id: topicId, card_id: card.id } }),
+    enabled: open,
+    staleTime: 10 * 60_000,
+  });
+  const word = card.front.split("\n")[0].trim();
+  const re = useMemo(() => findPattern({ find: word, variants: true, wholeWord: false }), [word]);
+  if (!open)
+    return (
+      <Button
+        size="sm"
+        variant="ghost"
+        className="mt-0.5 h-7 px-2 text-xs"
+        onClick={() => setOpen(true)}
+      >
+        <BookOpen className="mr-1 h-3.5 w-3.5" /> Check it against the book
+      </Button>
+    );
+  const list = q.data?.passages ?? [];
+  return (
+    <div
+      className="mt-1 space-y-2 rounded-lg border border-amber-200 bg-amber-50/40 p-2 text-sm dark:border-amber-900 dark:bg-amber-950/10"
+      aria-label="Book text"
+    >
+      <div className="flex items-center gap-2 text-xs font-medium">
+        <BookOpen className="h-3.5 w-3.5" /> What the books say
+        <Button
+          size="icon"
+          variant="ghost"
+          className="ml-auto h-6 w-6"
+          aria-label="Hide the book text"
+          onClick={() => setOpen(false)}
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      {q.isLoading ? (
+        <p className="text-xs text-muted-foreground">Looking in the books…</p>
+      ) : q.error ? (
+        <p className="text-xs text-destructive">{errorText(q.error, "Couldn't look it up")}</p>
+      ) : !list.length ? (
+        <p className="text-xs text-muted-foreground">
+          Nothing found for this word in its books or in SAATHI&apos;s knowledge base.
+        </p>
+      ) : (
+        list.map((p, i) => (
+          <div key={i} data-passage={p.from}>
+            <div className="mb-0.5 text-xs text-muted-foreground">
+              {p.from === "book" ? `Your book: ${p.label}` : `SAATHI: ${p.label}`}
+            </div>
+            <p
+              className="max-h-48 overflow-y-auto whitespace-pre-wrap text-[13px] leading-relaxed"
+              lang="hi"
+            >
+              {markMatches(p.text, re).map(([t, hit], k) =>
+                hit ? (
+                  <mark key={k} className="rounded bg-amber-200 px-0.5 dark:bg-amber-700/60">
+                    {t}
+                  </mark>
+                ) : (
+                  <span key={k}>{t}</span>
+                ),
+              )}
+            </p>
+          </div>
+        ))
+      )}
+    </div>
   );
 }
