@@ -1,0 +1,2 @@
+ALTER TABLE public.flash_sources DROP CONSTRAINT IF EXISTS flash_sources_kind_check;
+ALTER TABLE public.flash_sources ADD CONSTRAINT flash_sources_kind_check CHECK (kind IN ('word', 'pdf', 'text', 'sheet'));
