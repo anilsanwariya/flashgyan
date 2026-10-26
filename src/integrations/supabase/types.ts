@@ -1731,6 +1731,7 @@ export type Database = {
       }
       flash_cards: {
         Row: {
+          ai: Json | null
           app_id: string | null
           back: string
           back_hint: string
@@ -1757,6 +1758,7 @@ export type Database = {
           word_key: string | null
         }
         Insert: {
+          ai?: Json | null
           app_id?: string | null
           back?: string
           back_hint?: string
@@ -1783,6 +1785,7 @@ export type Database = {
           word_key?: string | null
         }
         Update: {
+          ai?: Json | null
           app_id?: string | null
           back?: string
           back_hint?: string

@@ -302,6 +302,13 @@
       "when": 1793008114006,
       "tag": "0042_flash_sources_sheet_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1793021295885,
+      "tag": "0043_flash_card_ai",
+      "breakpoints": true
     }
   ]
 }
