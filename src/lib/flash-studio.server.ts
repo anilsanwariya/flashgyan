@@ -306,6 +306,9 @@ export async function importSheet(
   // A sheet added before, replaced by this one (its cards not yet
   // numbered go; numbered ones stay, their numbers being in the app).
   replace?: string,
+  // A topic brought in from the app: its cards verified already, and these
+  // chunks as in the app now (nothing changed since their download).
+  fromApp?: { verified: boolean; downloaded: number[] },
 ): Promise<ImportResult> {
   if (replace) await deleteSource(replace);
   const { topic, cards } = await getTopic(topicId);
@@ -361,6 +364,7 @@ export async function importSheet(
     // Before the sheet migration: added without being kept as a source.
     if (!error) src = String((data as unknown as Row).id);
   }
+  const stamp = now();
   const rows: Row[] = sheet.cards.map((c, i) => {
     const ex: Record<string, string> = {};
     for (const [title, v] of Object.entries(c.ex)) {
@@ -384,6 +388,9 @@ export async function importSheet(
       chunk: keepNumbers ? c.sheet : null,
       card_order: keepNumbers ? c.order : null,
       app_id: c.app_id || null,
+      verified: fromApp?.verified ?? false,
+      // Stamped with the chunks' download time (see below).
+      ...(fromApp ? { updated_at: stamp } : {}),
     };
   });
   const topicPatch: Row = { columns, books, prompt, updated_at: now() };
@@ -397,6 +404,12 @@ export async function importSheet(
     topicPatch.locked_at = now();
   }
   await insertCards(rows);
+  // The app's chunks as downloaded when the cards were written (so none
+  // counts as changed since).
+  if (keepNumbers && fromApp?.downloaded.length)
+    topicPatch.chunks = (topicPatch.chunks as FlashTopic["chunks"]).map((c) =>
+      fromApp.downloaded.includes(c.n) ? { ...c, downloaded: stamp } : c,
+    );
   fail(
     (
       await from("flash_topics")
@@ -1138,8 +1151,9 @@ export async function checkCards(
   ids: string[],
 ): Promise<{ checked: number; flagged: number; cards: FlashCard[] }> {
   const { topic, cards } = await getTopic(topicId);
-  // Only cards not verified and not read as they are now.
-  const want = cards.filter((c) => ids.includes(c.id) && needsCheck(c));
+  // Only cards not read as they are now (the callers leave verified ones
+  // out unless asked to check them too).
+  const want = cards.filter((c) => ids.includes(c.id) && needsCheck(c, true));
   if (!want.length) return { checked: 0, flagged: 0, cards: [] };
   const deck = await deckOf(topic);
   const items = want.map((c, i) => ({
@@ -1892,6 +1906,8 @@ export async function startServerJob(
   topicId: string,
   kind: "check" | "fill",
   ids: string[],
+  // The check: verified cards too.
+  withVerified = false,
 ): Promise<FlashJob> {
   const { topic, cards } = await getTopic(topicId);
   const want = new Set(ids);
@@ -1900,7 +1916,9 @@ export async function startServerJob(
       (c) =>
         want.has(c.id) &&
         !c.removed &&
-        (kind === "check" ? needsCheck(c) : M.emptyColumns(c, topic.columns).length > 0),
+        (kind === "check"
+          ? needsCheck(c, withVerified)
+          : M.emptyColumns(c, topic.columns).length > 0),
     )
     .map((c) => c.id);
   if (!todo.length) throw new Error("Nothing to do: every card asked for is done already");

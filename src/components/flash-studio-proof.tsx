@@ -215,9 +215,11 @@ export function ProofTools({
   const serverFn = useServerFn(startFlashServerJob);
   const qc = useQueryClient();
   // The same on the server: goes on with the browser closed.
-  const onServer = async (kind: "check" | "fill", ids: string[]) => {
+  const onServer = async (kind: "check" | "fill", ids: string[], withVerified = false) => {
     try {
-      const j = await serverFn({ data: { topic_id: topic.id, kind, ids } });
+      const j = await serverFn({
+        data: { topic_id: topic.id, kind, ids, with_verified: withVerified },
+      });
       await qc.invalidateQueries({ queryKey: ["flashJobs", topic.id] });
       toast.success(
         `${j.total} cards queued on the server: it starts within a minute and goes on with this page closed`,
@@ -236,7 +238,9 @@ export function ProofTools({
   const shown = new Set(shownIds);
   const live = cards.filter((c) => !c.removed && shown.has(c.id));
   const needFill = live.filter((c) => emptyColumns(c, topic.columns).length).map((c) => c.id);
-  const needCheck = live.filter(needsCheck).map((c) => c.id);
+  const needCheck = live.filter((c) => needsCheck(c)).map((c) => c.id);
+  // Verified cards never read by the AI (a topic imported from the app).
+  const verifiedUnchecked = live.filter((c) => c.verified && needsCheck(c, true)).length;
   const withFixes = cards.reduce((n, c) => n + (c.removed ? 0 : (c.ai?.fixes.length ?? 0)), 0);
   const words = kind ? live.reduce((n, c) => n + wordsOf(c.back).length, 0) : 0;
   const fill = () =>
@@ -375,6 +379,23 @@ export function ProofTools({
                 "A few batches a minute; follow it at the top of the topic",
               )}
             </DropdownMenuItem>
+            {verifiedUnchecked > 0 && (
+              <DropdownMenuItem
+                onSelect={() =>
+                  void onServer(
+                    "check",
+                    live.filter((c) => needsCheck(c, true)).map((c) => c.id),
+                    true,
+                  )
+                }
+              >
+                <Server className="mr-2 h-4 w-4 shrink-0" />
+                {item(
+                  `AI check, verified cards too (${needCheck.length + verifiedUnchecked})`,
+                  "Suggestions only: verified cards stay verified until you apply a fix",
+                )}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               disabled={!needFill.length || !topic.columns.length}
               onSelect={() => void onServer("fill", needFill)}

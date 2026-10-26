@@ -116,6 +116,7 @@ import {
 } from "@/lib/flash-merge";
 import { BOOK_FILE_TYPES, isBookFile } from "@/lib/flash-read";
 import { StudentPreview } from "@/components/flash-studio-preview";
+import { AppImportDialog } from "@/components/flash-studio-import";
 import { Badge, PageTabs, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -219,6 +220,7 @@ function TopicList({ onOpen }: { onOpen: (id: string) => void }) {
   const [name, setName] = useState("");
   const [type, setType] = useState("");
   const [busy, setBusy] = useState(false);
+  const [fromApp, setFromApp] = useState(false);
   const typeName = (id: string | null) => types.data?.find((t) => t.id === id)?.name ?? "";
   return (
     <div className="space-y-4">
@@ -267,7 +269,26 @@ function TopicList({ onOpen }: { onOpen: (id: string) => void }) {
         <Button type="submit" disabled={busy || !name.trim()}>
           <Plus className="mr-1 h-4 w-4" /> Make topic
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          title="A topic uploaded to the app before: its master sheet and the app's chunks"
+          onClick={() => setFromApp(true)}
+        >
+          <FileUp className="mr-1 h-4 w-4" /> Bring in from the app
+        </Button>
       </form>
+      {fromApp && (
+        <AppImportDialog
+          types={types.data ?? []}
+          onClose={() => setFromApp(false)}
+          onDone={async (id) => {
+            setFromApp(false);
+            await qc.invalidateQueries({ queryKey: ["flashTopics"] });
+            onOpen(id);
+          }}
+        />
+      )}
       {topics.error && <p className="text-sm text-destructive">{errorText(topics.error, "")}</p>}
       {topics.data && !topics.data.length && (
         <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
