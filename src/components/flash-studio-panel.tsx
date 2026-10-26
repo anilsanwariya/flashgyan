@@ -24,6 +24,7 @@ import {
   Smartphone,
   Download,
   FileUp,
+  GitCompare,
   KeyRound,
   Lock,
   Pencil,
@@ -41,6 +42,7 @@ import {
   fillFlashExplanations,
   deleteFlashTemplate,
   deleteFlashTopic,
+  getFlashHouse,
   getFlashTopic,
   importFlashSheet,
   listFlashTemplates,
@@ -116,7 +118,9 @@ import {
 } from "@/lib/flash-merge";
 import { BOOK_FILE_TYPES, isBookFile } from "@/lib/flash-read";
 import { StudentPreview } from "@/components/flash-studio-preview";
-import { AppImportDialog } from "@/components/flash-studio-import";
+import { AppImportDialog, CompareWithApp } from "@/components/flash-studio-import";
+import { SpellingList } from "@/components/flash-studio-spellings";
+import { houseFromList } from "@/lib/flash-spell";
 import { Badge, PageTabs, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -182,7 +186,7 @@ function useOpenTopic(): [string | null, (id: string | null, show?: string) => v
 
 export function FlashStudio() {
   const [open, setOpen] = useOpenTopic();
-  const [tab, setTab] = useState<"topics" | "types">("topics");
+  const [tab, setTab] = useState<"topics" | "types" | "spellings">("topics");
   if (open)
     return (
       <div className="space-y-3">
@@ -198,11 +202,18 @@ export function FlashStudio() {
         tabs={[
           { id: "topics", label: "Topics" },
           { id: "types", label: "Deck types" },
+          { id: "spellings", label: "Spellings" },
         ]}
         value={tab}
         onChange={setTab}
       />
-      {tab === "topics" ? <TopicList onOpen={setOpen} /> : <TemplateList />}
+      {tab === "topics" ? (
+        <TopicList onOpen={setOpen} />
+      ) : tab === "types" ? (
+        <TemplateList />
+      ) : (
+        <SpellingList />
+      )}
     </div>
   );
 }
@@ -1013,11 +1024,22 @@ function CardsTab({
     return m;
   }, [cards]);
   // The quick checks over the whole topic (as saved).
+  // The house spelling list (every topic's verified cards and the rules).
+  const houseFn = useServerFn(getFlashHouse);
+  const houseQ = useQuery({
+    queryKey: ["flashHouse"],
+    queryFn: () => houseFn(),
+    staleTime: 60_000,
+  });
+  const house = useMemo(() => houseFromList(houseQ.data ?? []), [houseQ.data]);
   const lintCtx = useMemo(() => {
     const live = cards.filter((c) => !c.removed);
-    return { numbering: numberingOf(live), variants: spellingVariants(live) };
-  }, [cards]);
-  const lints = useMemo(() => lintTopic(cards, topic.columns), [cards, topic.columns]);
+    return { numbering: numberingOf(live), variants: spellingVariants(live), house };
+  }, [cards, house]);
+  const lints = useMemo(
+    () => lintTopic(cards, topic.columns, house),
+    [cards, topic.columns, house],
+  );
   // This topic's words that other topics have too.
   const otherFn = useServerFn(otherFlashTopicWords);
   const otherQ = useQuery({
@@ -2742,6 +2764,7 @@ function ChunksTab({
   const [sizes, setSizes] = useState(() => suggestSizes(waiting.length, 100).join(", "));
   const [busy, setBusy] = useState(false);
   const [chunkPreview, setChunkPreview] = useState<number | null>(null);
+  const [comparing, setComparing] = useState(false);
   const [report, setReport] = useState<IdMatch | null>(null);
   const idRef = useRef<HTMLInputElement>(null);
   useEffect(
@@ -2964,6 +2987,14 @@ function ChunksTab({
             >
               <Download className="mr-1 h-4 w-4" /> All chunks (.zip)
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              title="See which cards differ between the studio and the app before uploading"
+              onClick={() => setComparing(true)}
+            >
+              <GitCompare className="mr-1 h-4 w-4" /> Compare with the app
+            </Button>
             <Button size="sm" variant="outline" onClick={() => idRef.current?.click()}>
               <KeyRound className="mr-1 h-4 w-4" /> Add the app&apos;s ids
             </Button>
@@ -3067,6 +3098,14 @@ function ChunksTab({
               );
             })}
           </ul>
+          {comparing && (
+            <CompareWithApp
+              topic={topic}
+              cards={cards}
+              onChanged={onChanged}
+              onClose={() => setComparing(false)}
+            />
+          )}
           {chunkPreview !== null && (
             <StudentPreview
               topic={topic}

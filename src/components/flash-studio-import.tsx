@@ -1,3 +1,6 @@
+// The app and the studio side by side: a topic already in the app brought
+// into the studio, and a topic's chunks compared with the app's.
+//
 // A topic already in the app, brought into the studio: its final master
 // sheet and the chunks downloaded from the app's admin panel, matched card
 // by card (the app's version kept where they differ), then added as a topic
@@ -6,9 +9,22 @@ import { useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Download, X } from "lucide-react";
-import { createFlashTopic, deleteFlashTopic, importFlashSheet } from "@/lib/flash-studio.functions";
-import { parseSheet, type FlashTemplate, type ParsedSheet } from "@/lib/flash-studio";
-import { planAppImport } from "@/lib/flash-app-import";
+import {
+  createFlashTopic,
+  deleteFlashTopic,
+  importFlashSheet,
+  markFlashDownloaded,
+  takeFlashAppText,
+} from "@/lib/flash-studio.functions";
+import {
+  chunkChanges,
+  parseSheet,
+  type FlashCard,
+  type FlashTemplate,
+  type FlashTopic,
+  type ParsedSheet,
+} from "@/lib/flash-studio";
+import { compareWithApp, planAppImport } from "@/lib/flash-app-import";
 import { Badge, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -340,6 +356,271 @@ export function AppImportDialog({
             onClick={() => void run()}
           >
             {busy ? "Bringing it in…" : `Bring in ${plan?.cards.length ?? 0} cards`}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// The topic's chunks against the app's exports of them: every card that
+// differs (field by field), to keep the studio's text (uploaded next time)
+// or take the app's (edited in the app).
+export function CompareWithApp({
+  topic,
+  cards,
+  onChanged,
+  onClose,
+}: {
+  topic: FlashTopic;
+  cards: FlashCard[];
+  onChanged: () => void;
+  onClose: () => void;
+}) {
+  const takeFn = useServerFn(takeFlashAppText);
+  const markFn = useServerFn(markFlashDownloaded);
+  const [apps, setApps] = useState<{ file: string; sheet: ParsedSheet }[]>([]);
+  const [take, setTake] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const cmp = useMemo(
+    () =>
+      apps.length
+        ? compareWithApp(
+            topic,
+            cards,
+            apps.map((a) => a.sheet),
+          )
+        : null,
+    [topic, cards, apps],
+  );
+  const read = async (files: FileList | null) => {
+    if (!files?.length) return;
+    try {
+      const got = await Promise.all(
+        [...files].map(async (f) => ({ file: f.name, sheet: await readSheet(f) })),
+      );
+      setApps((list) => [...list.filter((a) => !got.some((g) => g.file === a.file)), ...got]);
+      setTake(new Set());
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't read the file"));
+    }
+  };
+  // Chunks the same as the app's file in every card, though changed here
+  // since their download (changed, then changed back or taken from the app).
+  const chunkOf = (order: number | null) =>
+    order === null ? null : (topic.chunks.find((c) => order >= c.from && order <= c.to)?.n ?? null);
+  const changes = chunkChanges(topic, cards);
+  const matching = (cmp?.chunks ?? []).filter((n) => {
+    const x = changes.get(n);
+    if (!x || x.never || !(x.changed.length + x.removed.length)) return false;
+    return (
+      !cmp!.differ.some((d) => d.chunk === n) &&
+      !cmp!.studioOnly.some((d) => chunkOf(d.order) === n) &&
+      !cmp!.appOnly.some((d) => chunkOf(d.order) === n) &&
+      !cmp!.removedHere.some((d) => chunkOf(d.order) === n)
+    );
+  });
+  const label = (f: string) => f.replace(/^explanation_/, "");
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent
+        className="flex max-h-[92dvh] flex-col gap-0 p-0 sm:max-w-4xl"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <DialogHeader className="space-y-1 border-b border-border px-5 pb-3 pr-12 pt-4 text-left">
+          <DialogTitle className="text-base">Compare with the app</DialogTitle>
+          <p className="text-xs text-muted-foreground">
+            Add chunks exported from the app&apos;s admin panel. Cards are matched by their app id
+            (else their number). Keep the studio&apos;s text to upload it next time, or tick a card
+            to take the app&apos;s (edited in the app).
+          </p>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4 text-sm">
+          <label className="block space-y-1">
+            <span className="font-medium">Chunks from the app</span>
+            <Input
+              type="file"
+              multiple
+              accept=".xlsx,.xls,.csv"
+              aria-label="Chunks from the app to compare"
+              onChange={(e) => {
+                void read(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          {apps.length > 0 && (
+            <ul className="flex flex-wrap gap-1.5">
+              {apps.map((a) => (
+                <li
+                  key={a.file}
+                  className="flex items-center gap-1 rounded-full border border-border py-0.5 pl-2.5 pr-1 text-xs"
+                >
+                  {a.file} · {a.sheet.cards.length}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${a.file}`}
+                    className="rounded-full p-0.5 hover:bg-muted"
+                    onClick={() => setApps(apps.filter((x) => x !== a))}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {cmp && (
+            <>
+              <p className="font-medium" aria-label="Comparison">
+                Chunk{cmp.chunks.length === 1 ? "" : "s"} {cmp.chunks.join(", ") || "—"}: {cmp.same}{" "}
+                the same, {cmp.differ.length} differ
+                {cmp.appOnly.length ? `, ${cmp.appOnly.length} only in the app` : ""}
+                {cmp.studioOnly.length ? `, ${cmp.studioOnly.length} only here` : ""}
+                {cmp.removedHere.length ? `, ${cmp.removedHere.length} removed here` : ""}
+              </p>
+              {!cmp.differ.length && !cmp.appOnly.length && !cmp.studioOnly.length && (
+                <p className="text-emerald-700 dark:text-emerald-400">
+                  The app has exactly what the studio has.
+                </p>
+              )}
+              {matching.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-300 p-2 text-xs">
+                  <span>
+                    Chunk{matching.length === 1 ? "" : "s"} {matching.join(", ")} show
+                    {matching.length === 1 ? "s" : ""} as changed since download, but match the app.
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="ml-auto h-7"
+                    onClick={async () => {
+                      try {
+                        await markFn({ data: { topic_id: topic.id, chunks: matching } });
+                        onChanged();
+                        toast.success("Marked as in the app");
+                      } catch (e) {
+                        toast.error(errorText(e, "Couldn't mark them"));
+                      }
+                    }}
+                  >
+                    Mark as in the app
+                  </Button>
+                </div>
+              )}
+              {cmp.differ.length > 0 && (
+                <ul className="space-y-2" lang="hi">
+                  {cmp.differ.map((d) => (
+                    <li
+                      key={d.id}
+                      data-compare={d.order}
+                      className="rounded-lg border border-border p-2"
+                    >
+                      <label className="flex items-center gap-2 text-xs">
+                        <input
+                          type="checkbox"
+                          aria-label={`Take the app's #${d.order}`}
+                          checked={take.has(d.id)}
+                          onChange={(e) => {
+                            const next = new Set(take);
+                            if (e.target.checked) next.add(d.id);
+                            else next.delete(d.id);
+                            setTake(next);
+                          }}
+                        />
+                        <span className="font-medium">
+                          #{d.order} {d.front}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {take.has(d.id) ? "the app's will be taken" : "the studio's kept"}
+                        </span>
+                      </label>
+                      {d.fields.map((f) => (
+                        <div
+                          key={f.field}
+                          className="mt-1 grid gap-1 text-xs sm:grid-cols-[7rem_1fr_1fr]"
+                        >
+                          <span className="text-muted-foreground">{label(f.field)}</span>
+                          <span className="whitespace-pre-wrap rounded bg-muted/40 p-1">
+                            <span className="block text-[10px] uppercase text-muted-foreground">
+                              Studio
+                            </span>
+                            {f.studio || "(empty)"}
+                          </span>
+                          <span className="whitespace-pre-wrap rounded bg-amber-50 p-1 dark:bg-amber-950/20">
+                            <span className="block text-[10px] uppercase text-muted-foreground">
+                              App
+                            </span>
+                            {f.app || "(empty)"}
+                          </span>
+                        </div>
+                      ))}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {[
+                ["Only in the app (not cards here)", cmp.appOnly],
+                ["Only here (not in the app's file)", cmp.studioOnly],
+                ["Removed here, still in the app", cmp.removedHere],
+              ].map(([title, list]) =>
+                (list as { order: number | null; front: string }[]).length ? (
+                  <div key={title as string} className="text-xs" lang="hi">
+                    <b>{title as string}:</b>{" "}
+                    {(list as { order: number | null; front: string }[])
+                      .slice(0, 12)
+                      .map((x) => `#${x.order ?? "?"} ${x.front}`)
+                      .join(" · ")}
+                    {(list as unknown[]).length > 12 ? " …" : ""}
+                  </div>
+                ) : null,
+              )}
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-2 border-t border-border px-5 py-3">
+          {cmp && cmp.differ.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                setTake(
+                  take.size === cmp.differ.length
+                    ? new Set()
+                    : new Set(cmp.differ.map((d) => d.id)),
+                )
+              }
+            >
+              {take.size === cmp.differ.length ? "Untick all" : "Tick all"}
+            </Button>
+          )}
+          <Button
+            className="ml-auto"
+            disabled={busy || !take.size || !cmp}
+            onClick={async () => {
+              if (!cmp) return;
+              setBusy(true);
+              try {
+                const r = await takeFn({
+                  data: {
+                    topic_id: topic.id,
+                    items: cmp.differ
+                      .filter((d) => take.has(d.id))
+                      .map((d) => ({ id: d.id, ...d.app })),
+                  },
+                });
+                setTake(new Set());
+                onChanged();
+                toast.success(
+                  `The app's text taken on ${r.changed} card${r.changed === 1 ? "" : "s"} (the old text is in their history)`,
+                );
+              } catch (e) {
+                toast.error(errorText(e, "Couldn't take the app's text"));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Take the app&apos;s for {take.size} ticked
           </Button>
         </div>
       </DialogContent>

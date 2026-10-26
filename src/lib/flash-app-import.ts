@@ -3,7 +3,7 @@
 // app's admin panel (each card's app id). Cards are matched by their number;
 // where the master and the app differ, the app's version is kept (it is what
 // students see). Pure: shared by the import dialog and tests.
-import type { ParsedSheet, SheetCard } from "@/lib/flash-studio";
+import type { FlashCard, FlashTopic, ParsedSheet, SheetCard } from "@/lib/flash-studio";
 
 export type AppDiff = { order: number; field: string; master: string; app: string };
 
@@ -198,4 +198,111 @@ export function planAppImport(master: ParsedSheet | null, apps: ParsedSheet[]): 
   plan.prompt = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? master?.prompt ?? "";
   if (!plan.cards.length && !problems.length) problems.push("No cards in these files.");
   return plan;
+}
+
+// ---------- Comparing the studio with the app ----------
+
+export type AppField = { field: string; studio: string; app: string };
+
+export type AppCompare = {
+  // Cards the same in both.
+  same: number;
+  // Cards that differ: each field that does, and the app's text by field.
+  differ: {
+    id: string;
+    order: number | null;
+    chunk: number | null;
+    front: string;
+    fields: AppField[];
+    app: {
+      front: string;
+      back: string;
+      prompt: string;
+      back_hint: string;
+      ex: Record<string, string>;
+    };
+  }[];
+  // In the app's file, not a card here (by id or number).
+  appOnly: { order: number | null; front: string }[];
+  // Cards here in the compared chunks, not in the app's file.
+  studioOnly: { id: string; order: number | null; front: string }[];
+  // Removed here, still in the app.
+  removedHere: { id: string; order: number | null; front: string }[];
+  // The chunks the app's files cover.
+  chunks: number[];
+};
+
+// The topic's cards against chunks exported from the app: matched by the
+// app's id, else by number.
+export function compareWithApp(
+  topic: Pick<FlashTopic, "prompt" | "columns">,
+  cards: FlashCard[],
+  apps: ParsedSheet[],
+): AppCompare {
+  const out: AppCompare = {
+    same: 0,
+    differ: [],
+    appOnly: [],
+    studioOnly: [],
+    removedHere: [],
+    chunks: [],
+  };
+  const byId = new Map(cards.filter((c) => c.app_id).map((c) => [c.app_id!, c]));
+  const byOrder = new Map(
+    cards.filter((c) => c.card_order !== null).map((c) => [c.card_order!, c]),
+  );
+  const colOf = new Map(topic.columns.map((c) => [c.title.trim(), c.id]));
+  const seen = new Set<string>();
+  const chunks = new Set<number>();
+  for (const sheet of apps) {
+    const titles = sheet.columns.filter((t) => colOf.has(t.trim()));
+    for (const a of sheet.cards) {
+      const c =
+        (a.app_id && byId.get(a.app_id)) || (a.order !== null ? byOrder.get(a.order) : undefined);
+      if (!c) {
+        out.appOnly.push({ order: a.order, front: first(a.front) });
+        continue;
+      }
+      if (seen.has(c.id)) continue;
+      seen.add(c.id);
+      if (c.chunk !== null) chunks.add(c.chunk);
+      if (c.removed) {
+        out.removedHere.push({ id: c.id, order: c.card_order, front: first(c.front) });
+        continue;
+      }
+      const app = {
+        front: a.front,
+        back: a.back,
+        prompt: a.prompt,
+        back_hint: a.back_hint,
+        ex: Object.fromEntries(titles.map((t) => [colOf.get(t.trim())!, a.ex[t] ?? ""])),
+      };
+      const fields: AppField[] = [];
+      const cmp = (field: string, studio: string, appText: string) => {
+        if (norm(studio) !== norm(appText)) fields.push({ field, studio, app: appText });
+      };
+      cmp("front", c.front, a.front);
+      cmp("back", c.back, a.back);
+      cmp("prompt", c.prompt ?? topic.prompt, a.prompt || topic.prompt);
+      cmp("backHint", c.back_hint, a.back_hint);
+      for (const t of titles)
+        cmp(`explanation_${t}`, c.ex[colOf.get(t.trim())!] ?? "", a.ex[t] ?? "");
+      if (fields.length)
+        out.differ.push({
+          id: c.id,
+          order: c.card_order,
+          chunk: c.chunk,
+          front: first(c.front),
+          fields,
+          app,
+        });
+      else out.same++;
+    }
+  }
+  out.chunks = [...chunks].sort((a, b) => a - b);
+  for (const c of cards)
+    if (!c.removed && c.chunk !== null && chunks.has(c.chunk) && !seen.has(c.id))
+      out.studioOnly.push({ id: c.id, order: c.card_order, front: first(c.front) });
+  out.differ.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  return out;
 }

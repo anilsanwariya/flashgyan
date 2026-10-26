@@ -263,6 +263,8 @@ export function fillMessages(
   deck: Deck,
   items: FillItem[],
   wordings: Record<string, string[]> = {},
+  // The house spellings of the cards' words.
+  house: string[] = [],
 ): ChatMessage[] {
   const cols = deck.columns
     .map((c) => {
@@ -283,7 +285,7 @@ ${cols}
 Finished cards in the house style, checked by the editor (copy their form, length, wording and symbols):
 ${examples || "(none)"}
 
-For each card, fill ONLY the columns listed under "fill". Use the book passage given with the card first; mark such a value "from": "book". When the passage doesn't say it, write it from your own knowledge and mark it "from": "own" (the editor checks those). Never change the front or back. Write in Hindi unless the column is English (e.g. Pronunciation, Sentence-Usage). Be exact and short; no value is better than a doubtful one, so leave a column out when unsure.
+${house.length ? `House spellings (the editor's accepted forms of words in these cards; write them this way): ${house.join("; ")}\n\n` : ""}For each card, fill ONLY the columns listed under "fill". Use the book passage given with the card first; mark such a value "from": "book". When the passage doesn't say it, write it from your own knowledge and mark it "from": "own" (the editor checks those). Never change the front or back. Write in Hindi unless the column is English (e.g. Pronunciation, Sentence-Usage). Be exact and short; no value is better than a doubtful one, so leave a column out when unsure.
 Reply with JSON only: {"cards": [{"n": 1, "ex": {"<column title>": {"text": "...", "from": "book"}}}]}`,
     },
     {
@@ -340,7 +342,12 @@ export type CheckItem = { n: number; front: string; back: string; ex: Record<str
 
 // The AI check: every field of each card read (front and back as closely
 // as the explanations), each problem with the field's corrected text.
-export function checkMessages(deck: Deck, items: CheckItem[]): ChatMessage[] {
+export function checkMessages(
+  deck: Deck,
+  items: CheckItem[],
+  // The house spellings of the cards' words.
+  house: string[] = [],
+): ChatMessage[] {
   return [
     {
       role: "system",
@@ -348,7 +355,7 @@ export function checkMessages(deck: Deck, items: CheckItem[]): ChatMessage[] {
 Read every field of every card — the front and the back as closely as the explanations. Report only real problems a careful Hindi teacher would fix: a misspelt word (वर्तनी: matras, nukta, halant, anusvara, चन्द्रबिन्दु), a wrong, incomplete or extra answer on the back, a front that isn't the right word or form for this deck, an explanation that is wrong or doesn't fit the card, the wrong rule or type (e.g. a संधि named wrongly), or a form that breaks the deck's style. Don't report style preferences or spellings both of which are accepted. A card with no problem is left out.
 For each problem give the field ("front", "back", or the explanation's name exactly as written), the kind, a short reason, and "fix": the whole field as it should read, changing only what is wrong and keeping its layout (numbering, commas, line breaks). If you can only point the problem out (you would need the book), leave "fix" empty.
 Kinds: ${ERROR_TYPES.filter((t) => t !== "Check in book" && t !== "Other").join(", ")}, Check in book, Other.
-Reply with JSON only: {"flags": [{"n": 1, "field": "back", "type": "Spelling", "note": "what is wrong, in a few words", "fix": "the field corrected"}]}`,
+${house.length ? `House spellings (the editor's accepted forms; never report these as misspelt, and when a card spells one of these words another way, that is a Spelling problem): ${house.join("; ")}\n` : ""}Reply with JSON only: {"flags": [{"n": 1, "field": "back", "type": "Spelling", "note": "what is wrong, in a few words", "fix": "the field corrected"}]}`,
     },
     {
       role: "user",

@@ -632,3 +632,61 @@ export const getFlashBookText = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await server()).bookText(data.topic_id, data.card_id);
   });
+
+export const takeFlashAppText = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        topic_id: id,
+        items: z
+          .array(
+            z.object({
+              id,
+              front: big,
+              back: big,
+              prompt: z.string().max(1000),
+              back_hint: z.string().max(4000),
+              ex: z.record(z.string().max(20), big),
+            }),
+          )
+          .min(1)
+          .max(5000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).takeAppText(data.topic_id, data.items);
+  });
+
+export const getFlashHouse = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).getHouse();
+  });
+
+export const listFlashSpellings = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).listSpellings();
+  });
+
+export const saveFlashSpellRule = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        key: z.string().min(1).max(200),
+        preferred: z.string().max(200).nullable(),
+        accepted: z.array(z.string().max(200)).max(50),
+        rejected: z.array(z.string().max(200)).max(50),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).saveSpellRule(data);
+  });
