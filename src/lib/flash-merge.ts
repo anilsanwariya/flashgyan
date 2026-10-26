@@ -61,12 +61,30 @@ export function mainOf(cards: FlashCard[], bookOrder: string[]): FlashCard {
     const i = bookOrder.indexOf(c.sources[0]?.book ?? "");
     return i < 0 ? bookOrder.length : i;
   };
+  // A numbered card first (its number is in the app), then the one with
+  // the most explanations, then the books' order.
   return [...cards].sort(
     (a, b) =>
       Number(a.card_order === null) - Number(b.card_order === null) ||
+      filledCount(b) - filledCount(a) ||
       rank(a) - rank(b) ||
       a.pos - b.pos,
   )[0];
+}
+
+// How many explanation columns a card (or a book's version) has filled.
+export const filledCount = (c: Pick<FlashCard, "ex">) =>
+  Object.values(c.ex).filter((v) => (v ?? "").trim()).length;
+
+// The columns where two of these cards say different things: merged, the
+// main card keeps its own and the other wording stays in its version.
+export function exConflicts(cards: Pick<FlashCard, "ex">[], columns: FlashColumn[]): FlashColumn[] {
+  return columns.filter((col) => {
+    const said = new Set(
+      cards.map((c) => (c.ex[col.id] ?? "").trim().replace(/[।.]$/, "")).filter(Boolean),
+    );
+    return said.size > 1;
+  });
 }
 
 export type Version = { book: string; front: string; back: string; ex: Record<string, string> };

@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import {
   ChevronDown,
   Combine,
+  Eye,
   Pause,
   Replace,
   ScanSearch,
@@ -33,6 +34,8 @@ import {
   backFromChips,
   combineItems,
   emptyColumns,
+  exConflicts,
+  filledCount,
   groupDuplicates,
   isList,
   mainOf,
@@ -40,7 +43,7 @@ import {
   wordingGroups,
   type DupGroup,
 } from "@/lib/flash-merge";
-import type { FlashCard, FlashTopic } from "@/lib/flash-studio";
+import type { FlashCard, FlashSource, FlashTopic } from "@/lib/flash-studio";
 import { Badge, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -61,6 +64,114 @@ const BookChip = ({ topic, book }: { topic: FlashTopic; book: string }) => (
     {book || "—"}
   </span>
 );
+
+// Which explanation columns a book's card (or version) has filled: ✓ or –.
+function ExMarks({ topic, ex }: { topic: FlashTopic; ex: Record<string, string> }) {
+  if (!topic.columns.length) return null;
+  const n = filledCount({ ex });
+  return (
+    <span
+      className="inline-flex flex-wrap items-center gap-1"
+      title={`${n} of ${topic.columns.length} explanations`}
+    >
+      {n === 0 ? (
+        <span className="text-[11px] text-muted-foreground">no explanations</span>
+      ) : (
+        topic.columns.map((col) => {
+          const on = !!(ex[col.id] ?? "").trim();
+          return (
+            <span
+              key={col.id}
+              lang="hi"
+              className={`rounded px-1 text-[11px] ${on ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground line-through"}`}
+            >
+              {col.title} {on ? "✓" : "–"}
+            </span>
+          );
+        })
+      )}
+    </span>
+  );
+}
+
+// A book's card or version, all of it, to read.
+type Peek = {
+  book: string;
+  front: string;
+  back: string;
+  ex: Record<string, string>;
+  source?: FlashSource | null;
+  card?: FlashCard;
+};
+
+function PeekButton({ topic, peek }: { topic: FlashTopic; peek: Peek }) {
+  const [open, setOpen] = useState(false);
+  const src = peek.source ?? peek.card?.sources[0];
+  return (
+    <>
+      <Button
+        size="icon"
+        variant="ghost"
+        className="h-7 w-7 shrink-0"
+        aria-label={`See ${peek.book}'s card`}
+        title="See the whole card"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen(true);
+        }}
+      >
+        <Eye className="h-4 w-4" />
+      </Button>
+      {open && (
+        <Dialog open onOpenChange={(o) => !o && setOpen(false)}>
+          <DialogContent
+            className="max-h-[85dvh] overflow-y-auto sm:max-w-lg"
+            onOpenAutoFocus={(e) => e.preventDefault()}
+          >
+            <DialogHeader>
+              <DialogTitle className="flex flex-wrap items-center gap-2 text-base">
+                <BookChip topic={topic} book={peek.book} />
+                {peek.card ? "Its own card" : "Merged version"}
+              </DialogTitle>
+            </DialogHeader>
+            <dl className="space-y-3 text-sm" lang="hi">
+              {[
+                ["front", peek.front],
+                ["back", peek.back],
+                ...topic.columns.map((c) => [`explanation_${c.title}`, peek.ex[c.id] ?? ""]),
+              ].map(([label, v]) => (
+                <div key={label}>
+                  <dt className="text-xs text-muted-foreground">{label}</dt>
+                  <dd className={`whitespace-pre-wrap ${v ? "" : "text-muted-foreground"}`}>
+                    {v || "—"}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <div className="flex flex-wrap gap-1.5 text-xs text-muted-foreground" lang="hi">
+              {src && (
+                <span>
+                  {src.book}
+                  {src.pos != null ? ` (${src.pos})` : ""}
+                  {src.page ? ` · page ${src.page}` : ""}
+                  {src.heading ? ` · ${src.heading}` : ""}
+                </span>
+              )}
+              {peek.card?.verified && <Badge tone="good">Verified</Badge>}
+              {peek.card?.error && <Badge tone="bad">{peek.card.error_type || "Recheck"}</Badge>}
+              {(peek.card?.note || src?.note) && (
+                <span className="text-amber-700 dark:text-amber-400">
+                  {peek.card?.note || src?.note}
+                </span>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
+  );
+}
 
 // Runs the AI over cards in batches, with progress and a stop button.
 function useBatches() {
@@ -314,14 +425,17 @@ function MergeDialog({
         <p className="text-sm text-muted-foreground">
           Merging keeps one card (the chosen book&apos;s version in front) and keeps the other
           books&apos; versions with it: you can take any of their answers or explanations, combine
-          their answers, or split a version out again. Books earlier in the topic&apos;s Settings
-          come first.
+          their answers, or split a version out again. The book with the most explanations is picked
+          first (then the books&apos; order in Settings). Where books explain a column differently,
+          the front card&apos;s wording is kept and the others stay in their versions.
         </p>
         <Button
           disabled={busy}
           onClick={async () => {
             if (
-              !confirm(`Merge all ${groups.length} groups, keeping each one's first book in front?`)
+              !confirm(
+                `Merge all ${groups.length} words? Each keeps the book with the most explanations in front; the others' versions stay with it.`,
+              )
             )
               return;
             setBusy(true);
@@ -350,6 +464,17 @@ function MergeDialog({
                   <b lang="hi">{g.cards[0].front.split("\n").join(" / ")}</b>
                   <Badge tone="primary">{g.books.length} books</Badge>
                   {g.sameBook && <Badge tone="warn">twice in one book</Badge>}
+                  {exConflicts(g.cards, topic.columns).length > 0 && (
+                    <Badge
+                      tone="warn"
+                      title="Merged, the front card's wording is kept; the others stay in their versions"
+                    >
+                      explained differently:{" "}
+                      {exConflicts(g.cards, topic.columns)
+                        .map((c) => c.title)
+                        .join(", ")}
+                    </Badge>
+                  )}
                   <Button
                     size="sm"
                     className="ml-auto"
@@ -376,8 +501,12 @@ function MergeDialog({
                 </div>
                 <ul className="space-y-1">
                   {g.cards.map((c) => (
-                    <li key={c.id}>
-                      <label className="flex items-start gap-2">
+                    <li
+                      key={c.id}
+                      data-book={c.sources[0]?.book ?? ""}
+                      className="flex items-start gap-1"
+                    >
+                      <label className="flex min-w-0 flex-1 items-start gap-2">
                         <input
                           type="radio"
                           name={`main-${g.key}`}
@@ -386,10 +515,23 @@ function MergeDialog({
                           onChange={() => setMains({ ...mains, [g.key]: c.id })}
                         />
                         <BookChip topic={topic} book={c.sources[0]?.book ?? ""} />
-                        <span className="min-w-0 flex-1 whitespace-pre-wrap" lang="hi">
-                          {c.back}
+                        <span className="min-w-0 flex-1 space-y-0.5">
+                          <span className="block whitespace-pre-wrap" lang="hi">
+                            {c.back}
+                          </span>
+                          <ExMarks topic={topic} ex={c.ex} />
                         </span>
                       </label>
+                      <PeekButton
+                        topic={topic}
+                        peek={{
+                          book: c.sources[0]?.book ?? "",
+                          front: c.front,
+                          back: c.back,
+                          ex: c.ex,
+                          card: c,
+                        }}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -428,6 +570,7 @@ type Other =
       front: string;
       back: string;
       ex: Record<string, string>;
+      source: FlashSource | null;
     };
 
 export function Versions({
@@ -607,6 +750,17 @@ export function Versions({
               <span className="text-xs text-muted-foreground">
                 {o.kind === "card" ? "its own card, not merged" : "merged into this card"}
               </span>
+              <ExMarks topic={topic} ex={o.ex} />
+              <PeekButton
+                topic={topic}
+                peek={{
+                  book: o.book,
+                  front: o.front,
+                  back: o.back,
+                  ex: o.ex,
+                  ...(o.kind === "card" ? { card: o.card } : { source: o.source }),
+                }}
+              />
               <span className="ml-auto flex flex-wrap gap-1">
                 {o.kind === "card" ? (
                   <Button
@@ -614,7 +768,21 @@ export function Versions({
                     variant="ghost"
                     className="h-7 text-destructive"
                     onClick={async () => {
-                      if (!confirm(`Delete ${o.book}'s card “${o.front.split("\n")[0]}”?`)) return;
+                      const filled = topic.columns.filter((c) => (o.ex[c.id] ?? "").trim());
+                      const lost = [
+                        filled.length
+                          ? `its ${filled.length} explanation${filled.length === 1 ? "" : "s"} (${filled.map((c) => c.title).join(", ")})`
+                          : "",
+                        o.card.verified ? "its verified mark" : "",
+                      ].filter(Boolean);
+                      if (
+                        !confirm(
+                          lost.length
+                            ? `${o.book}'s card “${o.front.split("\n")[0]}” has ${lost.join(" and ")}, which will be lost.\n\nMerging it into this card keeps them as its version. Delete it anyway?`
+                            : `Delete ${o.book}'s card “${o.front.split("\n")[0]}”? It has no explanations.`,
+                        )
+                      )
+                        return;
                       try {
                         await deleteFn({ data: { id: o.card.id } });
                         onDeleted?.(o.card.id);

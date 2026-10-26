@@ -16,8 +16,10 @@ import {
   ArrowRight,
   ArrowUp,
   BadgeCheck,
+  Check,
   ChevronDown,
   ClipboardPaste,
+  Copy,
   Download,
   FileUp,
   KeyRound,
@@ -839,7 +841,16 @@ function CardsTab({
     setFilter(f);
     setShown(60);
   };
-  const open = (shown: FlashCard) => setEditing(cards.find((c) => c.id === shown.id) ?? shown);
+  // A card opened from the list: the list, one card at a time, from it.
+  const open = (shown: FlashCard) =>
+    setProof({
+      ids: list.map((c) => c.id),
+      i: Math.max(
+        0,
+        list.findIndex((c) => c.id === shown.id),
+      ),
+    });
+  const notVerified = list.filter((c) => !c.verified).length;
   const dropFromProof = (ids: string[]) => {
     // Merged or deleted cards leave the list; the one open stays, or the
     // next takes its place.
@@ -887,11 +898,11 @@ function CardsTab({
         <Button
           size="sm"
           variant="outline"
-          disabled={!list.length}
-          title="Go through the cards shown, one at a time"
+          disabled={!notVerified}
+          title="Open the first card shown that isn't verified; swipe or Alt+→ for the next"
           onClick={() => startProof(list)}
         >
-          <BadgeCheck className="mr-1 h-4 w-4" /> One by one ({list.length})
+          <BadgeCheck className="mr-1 h-4 w-4" /> Next not verified ({notVerified})
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -1016,6 +1027,7 @@ function CardsTab({
             </button>
           ))}
         </div>
+        <span className="text-xs tabular-nums text-muted-foreground">{list.length} cards</span>
       </div>
       <div
         role="group"
@@ -1622,17 +1634,21 @@ function CardDialog({
     error: c.error,
     error_type: c.error_type,
   };
-  const field = (label: string, value: string, set: (v: string) => void, big = false) => (
-    <label className="block space-y-1 text-sm">
-      <span className="font-medium">{label}</span>
-      <GrowingText
-        aria-label={label}
-        lang="hi"
-        className={big ? "text-base" : ""}
-        value={value}
-        onChange={(e) => set(e.target.value)}
-      />
-    </label>
+  const field = (
+    label: string,
+    value: string,
+    set: (v: string) => void,
+    big = false,
+    placeholder?: string,
+  ) => (
+    <EditField
+      key={`${card.id}-${label}`}
+      label={label}
+      value={value}
+      onChange={set}
+      big={big}
+      placeholder={placeholder}
+    />
   );
   const remove = async () => {
     const numbered = c.card_order !== null;
@@ -1654,6 +1670,8 @@ function CardDialog({
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent
+        // Opened to read: no box takes the cursor (and a phone's keyboard).
+        onOpenAutoFocus={(e) => e.preventDefault()}
         className="flex max-h-[92dvh] flex-col gap-0 p-0 sm:max-w-2xl max-sm:left-0 max-sm:top-0 max-sm:h-dvh max-sm:max-h-dvh max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0"
         {...swipe}
       >
@@ -1773,15 +1791,13 @@ function CardDialog({
               More: prompt, backHint, isRevealed, wordKey
             </summary>
             <div className="mt-2 space-y-2">
-              <label className="block space-y-1">
-                <span>Prompt (empty: the topic&apos;s)</span>
-                <Input
-                  lang="hi"
-                  value={c.prompt ?? ""}
-                  placeholder={topic.prompt}
-                  onChange={(e) => setC({ ...c, prompt: e.target.value || null })}
-                />
-              </label>
+              {field(
+                "prompt",
+                c.prompt ?? "",
+                (v) => setC({ ...c, prompt: v || null }),
+                false,
+                `The topic's: ${topic.prompt}`,
+              )}
               {field("backHint", c.back_hint, (back_hint) => setC({ ...c, back_hint }))}
               <label className="flex items-center gap-2">
                 <input
@@ -1920,6 +1936,86 @@ function CardDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// A card's text to read, with copy and edit (pencil, or a double click):
+// editing makes it a text box with the cursor at the end.
+function EditField({
+  label,
+  value,
+  onChange,
+  big,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  big?: boolean;
+  placeholder?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  return (
+    <div className="space-y-1 text-sm" data-field={label}>
+      <div className="flex items-center gap-1">
+        <span className="font-medium">{label}</span>
+        <span className="ml-auto flex gap-0.5">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7"
+            aria-label={`Copy ${label}`}
+            title="Copy"
+            disabled={!value}
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(value);
+                toast.success(`${label} copied`);
+              } catch {
+                toast.error("Couldn't copy");
+              }
+            }}
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant={editing ? "secondary" : "ghost"}
+            className="h-7 w-7"
+            aria-label={editing ? `Done editing ${label}` : `Edit ${label}`}
+            title={editing ? "Done" : "Edit"}
+            // Keeps the box from losing focus (and closing) before the click.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setEditing(!editing)}
+          >
+            {editing ? <Check className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
+          </Button>
+        </span>
+      </div>
+      {editing ? (
+        <GrowingText
+          autoFocus
+          aria-label={label}
+          lang="hi"
+          className={big ? "text-base" : ""}
+          value={value}
+          placeholder={placeholder}
+          onFocus={(e) => e.currentTarget.setSelectionRange(value.length, value.length)}
+          onBlur={() => setEditing(false)}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      ) : (
+        <div
+          lang="hi"
+          data-value
+          title="Double-click to edit"
+          onDoubleClick={() => setEditing(true)}
+          className={`min-h-[2.5rem] whitespace-pre-wrap rounded-md bg-muted/40 px-3 py-2 ${big ? "text-base font-medium" : ""}`}
+        >
+          {value || <span className="text-muted-foreground">{placeholder ?? "—"}</span>}
+        </div>
+      )}
+    </div>
   );
 }
 
