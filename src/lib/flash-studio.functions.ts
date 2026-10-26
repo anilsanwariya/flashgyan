@@ -176,12 +176,21 @@ export const importFlashSheet = createServerFn({ method: "POST" })
         name: z.string().max(200).optional(),
         replace: id.optional(),
         keep_numbers: z.boolean(),
+        from_app: z
+          .object({ verified: z.boolean(), downloaded: z.array(z.number().int()).max(500) })
+          .optional(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    return (await server()).importSheet(data.topic_id, data, data.keep_numbers, data.replace);
+    return (await server()).importSheet(
+      data.topic_id,
+      data,
+      data.keep_numbers,
+      data.replace,
+      data.from_app,
+    );
   });
 
 export const saveFlashCard = createServerFn({ method: "POST" })
@@ -517,12 +526,18 @@ export const startFlashServerJob = createServerFn({ method: "POST" })
         topic_id: id,
         kind: z.enum(["check", "fill"]),
         ids: z.array(id).min(1).max(5000),
+        with_verified: z.boolean().optional(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    return (await server()).startServerJob(data.topic_id, data.kind, data.ids);
+    return (await server()).startServerJob(
+      data.topic_id,
+      data.kind,
+      data.ids,
+      data.with_verified ?? false,
+    );
   });
 
 export const listFlashServerJobs = createServerFn({ method: "POST" })

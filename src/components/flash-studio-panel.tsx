@@ -116,6 +116,7 @@ import {
 } from "@/lib/flash-merge";
 import { BOOK_FILE_TYPES, isBookFile } from "@/lib/flash-read";
 import { StudentPreview } from "@/components/flash-studio-preview";
+import { AppImportDialog } from "@/components/flash-studio-import";
 import { Badge, PageTabs, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -155,19 +156,23 @@ const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.s
 
 // ---------- The page ----------
 
-function useOpenTopic(): [string | null, (id: string | null) => void] {
+function useOpenTopic(): [string | null, (id: string | null, show?: string) => void] {
   const navigate = useNavigate();
   const [id, setId] = useState<string | null>(null);
   useEffect(() => {
-    setId(new URLSearchParams(window.location.search).get("topic"));
+    const q = new URLSearchParams(window.location.search);
+    opening = q.get("show") ?? "";
+    setId(q.get("topic"));
   }, []);
-  const choose = (next: string | null) => {
+  // `show`: a filter of the cards list, or "chunks", to open the topic on.
+  const choose = (next: string | null, show?: string) => {
+    opening = show ?? "";
     setId(next);
     void navigate({
       to: ".",
       search: (s: Record<string, unknown>) => {
-        const { topic: _t, ...rest } = s;
-        return next ? { ...rest, topic: next } : rest;
+        const { topic: _t, show: _s, ...rest } = s;
+        return next ? { ...rest, topic: next, ...(show ? { show } : {}) } : rest;
       },
       replace: true,
     } as never);
@@ -204,7 +209,12 @@ export function FlashStudio() {
 
 // ---------- Topics ----------
 
-function TopicList({ onOpen }: { onOpen: (id: string) => void }) {
+// What the topic was opened on (a filter of its cards, or "chunks"): set
+// when it opens, read once by its view.
+let opening = "";
+const openedOn = () => opening;
+
+function TopicList({ onOpen }: { onOpen: (id: string, show?: string) => void }) {
   const listFn = useServerFn(listFlashTopics);
   const typesFn = useServerFn(listFlashTemplates);
   const createFn = useServerFn(createFlashTopic);
@@ -213,12 +223,19 @@ function TopicList({ onOpen }: { onOpen: (id: string) => void }) {
   const topics = useQuery({
     queryKey: ["flashTopics"],
     queryFn: () => listFn(),
-    refetchOnMount: true,
+    // What is waiting changes in the topics: read again on every visit.
+    refetchOnMount: "always",
   });
   const types = useQuery({ queryKey: ["flashTemplates"], queryFn: () => typesFn() });
   const [name, setName] = useState("");
   const [type, setType] = useState("");
   const [busy, setBusy] = useState(false);
+  const [fromApp, setFromApp] = useState(false);
+  const [order, setOrder] = useState<"todo" | "edited">("todo");
+  const todo = (t: TopicSummary) => t.total - t.verified + t.errors + t.ai + t.lint + t.missing;
+  const list = [...(topics.data ?? [])].sort((a, b) =>
+    order === "todo" ? todo(b) - todo(a) : b.updated_at.localeCompare(a.updated_at),
+  );
   const typeName = (id: string | null) => types.data?.find((t) => t.id === id)?.name ?? "";
   return (
     <div className="space-y-4">
@@ -267,7 +284,26 @@ function TopicList({ onOpen }: { onOpen: (id: string) => void }) {
         <Button type="submit" disabled={busy || !name.trim()}>
           <Plus className="mr-1 h-4 w-4" /> Make topic
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          title="A topic uploaded to the app before: its master sheet and the app's chunks"
+          onClick={() => setFromApp(true)}
+        >
+          <FileUp className="mr-1 h-4 w-4" /> Bring in from the app
+        </Button>
       </form>
+      {fromApp && (
+        <AppImportDialog
+          types={types.data ?? []}
+          onClose={() => setFromApp(false)}
+          onDone={async (id) => {
+            setFromApp(false);
+            await qc.invalidateQueries({ queryKey: ["flashTopics"] });
+            onOpen(id);
+          }}
+        />
+      )}
       {topics.error && <p className="text-sm text-destructive">{errorText(topics.error, "")}</p>}
       {topics.data && !topics.data.length && (
         <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
@@ -285,69 +321,147 @@ function TopicList({ onOpen }: { onOpen: (id: string) => void }) {
           </ol>
         </div>
       )}
-      <ul className="space-y-2">
-        {topics.data?.map((t: TopicSummary) => (
-          <li
-            key={t.id}
-            className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-border p-3"
+      {list.length > 1 && (
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">{list.length} topics</span>
+          <select
+            aria-label="Order of the topics"
+            value={order}
+            onChange={(e) => setOrder(e.target.value as "todo" | "edited")}
+            className="ml-auto h-8 rounded-md border border-input bg-background px-2 text-sm"
           >
-            <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onOpen(t.id)}>
-              <div className="flex items-center gap-3">
-                <span className="min-w-0 flex-1 truncate font-medium">{t.name}</span>
-                <span
-                  className="hidden h-1.5 w-28 overflow-hidden rounded-full bg-muted sm:block"
-                  title={`${t.verified} of ${t.total} verified`}
-                >
-                  <span
-                    className="block h-full rounded-full bg-emerald-500"
-                    style={{ width: `${t.total ? (t.verified / t.total) * 100 : 0}%` }}
-                  />
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                {typeName(t.template_id) && <span>{typeName(t.template_id)} ·</span>}
-                <span>{t.total} cards</span>
-                <Badge tone={t.verified === t.total && t.total ? "good" : "muted"}>
-                  {t.verified} verified
-                </Badge>
-                {t.errors > 0 && <Badge tone="bad">{t.errors} to recheck</Badge>}
-                {t.chunks.length ? (
-                  <Badge tone="primary">
-                    <Lock className="h-3 w-3" /> {t.chunks.length} chunks · {t.withId}/{t.numbered}{" "}
-                    with app ids
-                  </Badge>
-                ) : (
-                  <Badge>Not finalised</Badge>
-                )}
-                {t.books.map((b) => (
-                  <span
-                    key={b.code}
-                    className="rounded px-1.5 text-[11px] text-slate-800"
-                    style={{ background: b.color }}
-                  >
-                    {b.code}
-                  </span>
-                ))}
-              </div>
-            </button>
-            <Button
-              size="sm"
-              variant="ghost"
-              aria-label={`Delete ${t.name}`}
-              onClick={async () => {
-                if (!confirm(`Delete “${t.name}” and its ${t.total} cards?`)) return;
-                try {
-                  await deleteFn({ data: { id: t.id } });
-                  await qc.invalidateQueries({ queryKey: ["flashTopics"] });
-                } catch (err) {
-                  toast.error(errorText(err, "Couldn't delete"));
-                }
-              }}
+            <option value="todo">Most to do first</option>
+            <option value="edited">Last edited first</option>
+          </select>
+        </div>
+      )}
+      <ul className="space-y-2">
+        {list.map((t: TopicSummary) => {
+          // Each count opens the topic on its filter.
+          const waiting: {
+            n: number;
+            label: string;
+            show: string;
+            tone: "bad" | "warn" | "muted";
+          }[] = [
+            { n: t.errors, label: "to recheck", show: "errors", tone: "bad" },
+            { n: t.ai, label: "with AI suggestions", show: "ai", tone: "warn" },
+            { n: t.lint, label: "with quick-check problems", show: "lint", tone: "warn" },
+            { n: t.missing, label: "missing explanations", show: "missing", tone: "muted" },
+            { n: t.total - t.verified, label: "not verified", show: "unverified", tone: "muted" },
+          ];
+          return (
+            <li
+              key={t.id}
+              data-topic={t.name}
+              className="space-y-2 rounded-xl border border-border p-3"
             >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </li>
-        ))}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 text-left"
+                  onClick={() => onOpen(t.id)}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="min-w-0 flex-1 truncate font-medium">{t.name}</span>
+                    <span
+                      className="hidden h-1.5 w-28 overflow-hidden rounded-full bg-muted sm:block"
+                      title={`${t.verified} of ${t.total} verified`}
+                    >
+                      <span
+                        className="block h-full rounded-full bg-emerald-500"
+                        style={{ width: `${t.total ? (t.verified / t.total) * 100 : 0}%` }}
+                      />
+                    </span>
+                    <span className="w-10 text-right text-xs tabular-nums text-muted-foreground">
+                      {t.total ? Math.round((t.verified / t.total) * 100) : 0}%
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                    {typeName(t.template_id) && <span>{typeName(t.template_id)} ·</span>}
+                    <span>
+                      {t.total} cards · {t.verified} verified
+                    </span>
+                    {t.chunks.length ? (
+                      <Badge tone="primary">
+                        <Lock className="h-3 w-3" /> {t.chunks.length} chunks · {t.withId}/
+                        {t.numbered} with app ids
+                      </Badge>
+                    ) : (
+                      <Badge>Not finalised</Badge>
+                    )}
+                    {t.books.map((b) => (
+                      <span
+                        key={b.code}
+                        className="rounded px-1.5 text-[11px] text-slate-800"
+                        style={{ background: b.color }}
+                      >
+                        {b.code}
+                      </span>
+                    ))}
+                    <span>· edited {new Date(t.updated_at).toLocaleDateString()}</span>
+                  </div>
+                </button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`Delete ${t.name}`}
+                  onClick={async () => {
+                    if (!confirm(`Delete “${t.name}” and its ${t.total} cards?`)) return;
+                    try {
+                      await deleteFn({ data: { id: t.id } });
+                      await qc.invalidateQueries({ queryKey: ["flashTopics"] });
+                    } catch (err) {
+                      toast.error(errorText(err, "Couldn't delete"));
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+              {(waiting.some((w) => w.n > 0) ||
+                t.unchecked > 0 ||
+                t.changedChunks.length > 0 ||
+                t.jobs > 0) && (
+                <div className="flex flex-wrap items-center gap-1.5 text-xs" aria-label="Waiting">
+                  {waiting
+                    .filter((w) => w.n > 0)
+                    .map((w) => (
+                      <button
+                        key={w.show}
+                        type="button"
+                        onClick={() => onOpen(t.id, w.show)}
+                        className={`rounded-full border px-2 py-0.5 hover:bg-muted ${w.tone === "bad" ? "border-red-300 text-destructive" : w.tone === "warn" ? "border-amber-300 text-amber-800 dark:text-amber-300" : "border-border text-muted-foreground"}`}
+                      >
+                        {w.n} {w.label}
+                      </button>
+                    ))}
+                  {t.unchecked > 0 && (
+                    <span className="px-1 text-muted-foreground">
+                      {t.unchecked} not read by the AI yet
+                    </span>
+                  )}
+                  {t.changedChunks.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => onOpen(t.id, "chunks")}
+                      className="rounded-full border border-primary/40 px-2 py-0.5 text-primary hover:bg-muted"
+                    >
+                      Chunk{t.changedChunks.length === 1 ? "" : "s"} {t.changedChunks.join(", ")}{" "}
+                      changed since download
+                    </button>
+                  )}
+                  {t.jobs > 0 && (
+                    <span className="flex items-center gap-1 px-1 text-primary">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" /> AI job
+                      running on the server
+                    </span>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -627,7 +741,7 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
     refetchOnMount: true,
   });
   const qc = useQueryClient();
-  const [tab, setTab] = useState<TopicTab>("cards");
+  const [tab, setTab] = useState<TopicTab>(() => (openedOn() === "chunks" ? "chunks" : "cards"));
   // A sheet being added (or replacing one already added).
   const [importing, setImporting] = useState<{
     file: string;
@@ -862,7 +976,9 @@ function CardsTab({
   onTab: (t: TopicTab) => void;
 }) {
   const addFn = useServerFn(addFlashCard);
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<Filter>(
+    () => FILTERS.find((f) => f.id === openedOn())?.id ?? "all",
+  );
   const [query, setQuery] = useState("");
   const [shown, setShown] = useState(60);
   const [editing, setEditing] = useState<FlashCard | null>(null);

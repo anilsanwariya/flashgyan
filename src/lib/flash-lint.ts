@@ -130,7 +130,11 @@ export function lintCard(
         fix: nfc,
       });
     const spaced = fixSpaces(nfc);
-    if (spaced !== nfc) out.push({ kind: "spaces", field, note: "Extra spaces", fix: spaced });
+    // Spaces only at line ends don't show (the app's own cards have them,
+    // e.g. "असार - " before the next line): not flagged on their own.
+    const lineEnds = nfc.replace(/[ \t]+$/gm, "");
+    if (spaced !== nfc && spaced !== lineEnds)
+      out.push({ kind: "spaces", field, note: "Extra spaces", fix: spaced });
     if (field !== "front") {
       const once = fixRepeats(nfc);
       if (once !== nfc) out.push({ kind: "repeat", field, note: "The same item twice", fix: once });

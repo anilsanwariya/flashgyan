@@ -74,7 +74,7 @@ export function BulkBar({
   const live = cards.filter((c) => !c.removed);
   const withAi = live.filter((c) => c.ai?.fixes.some((f) => f.to && f.field)).length;
   const withLint = live.filter((c) => lints.get(c.id)?.some((l) => l.fix !== undefined)).length;
-  const toCheck = live.filter(needsCheck).map((c) => c.id);
+  const toCheck = live.filter((c) => needsCheck(c)).map((c) => c.id);
   const run = async (action: Action, done: (r: Awaited<ReturnType<typeof bulkFn>>) => string) => {
     setBusy(true);
     try {

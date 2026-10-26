@@ -129,8 +129,9 @@ export function cardSig(c: Pick<FlashCard, "front" | "back" | "ex">): string {
 
 // Whether the AI check should read a card: not verified, and not read as
 // it is now.
-export const needsCheck = (c: FlashCard) =>
-  !c.removed && !c.verified && (!c.ai || c.ai.sig !== cardSig(c));
+// Not read by the AI as it is now (and, unless `withVerified`, not verified).
+export const needsCheck = (c: FlashCard, withVerified = false) =>
+  !c.removed && (withVerified || !c.verified) && (!c.ai || c.ai.sig !== cardSig(c));
 
 export function normalizeAi(v: unknown): FlashAi | null {
   if (!v || typeof v !== "object") return null;
