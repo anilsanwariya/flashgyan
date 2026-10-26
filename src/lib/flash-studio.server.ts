@@ -4,6 +4,8 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { saathiComplete, type SaathiImage } from "../../supabase/functions/_shared/saathi-core.ts";
 import { parseReply, readMessages, type ReadResult, type Todo } from "@/lib/flash-read";
 import * as M from "@/lib/flash-merge";
+import * as L from "@/lib/flash-lint";
+import * as SH from "@/lib/flash-sheets";
 import * as S from "@/lib/flash-split";
 import {
   DEFAULT_TEMPLATES,
@@ -21,6 +23,8 @@ import {
   cardSig,
   needsCheck,
   fieldText,
+  doneOf,
+  type AiFix,
   planNumbers,
   wordKeyOf,
   BOOK_COLORS,
@@ -29,6 +33,7 @@ import {
   type FlashTemplate,
   type FlashSourceRow,
   type FlashTopic,
+  type FlashVariant,
   type IdMatch,
   type SheetCard,
   type WordKey,
@@ -782,6 +787,31 @@ export async function deleteSource(sourceId: string): Promise<{ deleted: number;
   // books' versions merged into it goes to the next book's version instead.
   const own = cards.filter((c) => c.sources[0]?.src === sourceId);
   const free = own.filter((c) => c.card_order === null);
+  await removeOwn(sourceId, free);
+  // Its versions merged into other books' cards are taken out of them.
+  const strip = cards
+    .filter((c) => c.sources[0]?.src !== sourceId)
+    .map((c) => ({
+      id: c.id,
+      topic_id: c.topic_id,
+      sources: c.sources.filter((s) => s.src !== sourceId),
+      variants: c.variants.filter((v) => v.source?.src !== sourceId),
+      updated_at: now(),
+    }));
+  for (let i = 0; i < strip.length; i += 500)
+    fail(
+      (await from("flash_cards").upsert(strip.slice(i, i + 500) as never, { onConflict: "id" }))
+        .error,
+    );
+  fail((await from("flash_sources").delete().eq("id", sourceId)).error);
+  await touch(topicId);
+  return { deleted: free.length, kept: own.length - free.length };
+}
+
+// A sheet's own cards (not numbered) taken out: one holding other books'
+// versions merged into it goes to the next book's version, the rest are
+// deleted.
+async function removeOwn(sourceId: string, free: FlashCard[]) {
   const promote = free
     .map((c) => {
       const variants = c.variants.filter((v) => v.source?.src !== sourceId);
@@ -819,24 +849,6 @@ export async function deleteSource(sourceId: string): Promise<{ deleted: number;
           .in("id", drop.slice(i, i + 200))
       ).error,
     );
-  // Its versions merged into other books' cards are taken out of them.
-  const strip = cards
-    .filter((c) => c.sources[0]?.src !== sourceId)
-    .map((c) => ({
-      id: c.id,
-      topic_id: c.topic_id,
-      sources: c.sources.filter((s) => s.src !== sourceId),
-      variants: c.variants.filter((v) => v.source?.src !== sourceId),
-      updated_at: now(),
-    }));
-  for (let i = 0; i < strip.length; i += 500)
-    fail(
-      (await from("flash_cards").upsert(strip.slice(i, i + 500) as never, { onConflict: "id" }))
-        .error,
-    );
-  fail((await from("flash_sources").delete().eq("id", sourceId)).error);
-  await touch(topicId);
-  return { deleted: free.length, kept: own.length - free.length };
 }
 
 const sameSource = (a: FlashCard["sources"][number], b: FlashCard["sources"][number] | null) =>
@@ -1019,15 +1031,18 @@ export async function fillExplanations(
   const { topic, cards } = await getTopic(topicId);
   const want = cards.filter((c) => ids.includes(c.id) && !c.removed);
   const deck = await deckOf(topic);
-  // The topic's own verified, complete cards show the house style best.
-  const verified = cards
-    .filter((c) => c.verified && !M.emptyColumns(c, topic.columns).length)
-    .slice(0, 2);
+  // The editor's own verified cards show the house style best: those
+  // closest to these cards, with the wordings they use again and again.
+  const verified = M.styleExamples(cards, topic.columns, want);
+  const wordings = M.usedWordings(cards, topic.columns);
   deck.examples = [
     ...verified.map((c) => ({
       front: c.front,
       back: c.back,
-      ex: Object.fromEntries(topic.columns.map((col) => [col.title, c.ex[col.id] ?? ""])),
+      // Only what the editor wrote (not the AI's own).
+      ex: Object.fromEntries(
+        topic.columns.map((col) => [col.title, c.own.includes(col.id) ? "" : (c.ex[col.id] ?? "")]),
+      ),
     })),
     ...deck.examples,
   ];
@@ -1082,7 +1097,7 @@ export async function fillExplanations(
   let own = 0;
   if (items.length) {
     const got = M.parseFill(
-      await saathiComplete(apiKey(), M.fillMessages(deck, items)),
+      await saathiComplete(apiKey(), M.fillMessages(deck, items, wordings)),
       topic.columns,
       items,
     );
@@ -1160,7 +1175,7 @@ export async function checkCards(
     return {
       id: c.id,
       topic_id: topicId,
-      ai: { at, sig: cardSig(c), fixes },
+      ai: { at, sig: cardSig(c), fixes, done: c.ai?.done ?? [] },
       error: fixes.length ? true : c.error,
       error_type: fixes.length ? fixes[0].type : c.error_type,
       note: fixes.length ? `AI: ${fixes.map((f) => f.note).join("; ")}`.slice(0, 2000) : c.note,
@@ -1391,4 +1406,612 @@ export async function setExplanation(
     );
   if (rows.length) await touch(topicId);
   return { changed: rows.length };
+}
+
+// ---------- Many cards at once ----------
+
+export type BulkAction = "verify" | "unverify" | "recheck" | "delete" | "apply_ai" | "fix_lint";
+
+// Text changes to many cards in one go, each card's old text kept in its
+// history (the last 20) as a single save would.
+async function writeEdits(topicId: string, edits: { id: string; patch: Row }[]) {
+  if (!edits.length) return [] as FlashCard[];
+  const raw = new Map<string, Row>();
+  const ids = edits.map((e) => e.id);
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await from("flash_cards")
+      .select("*")
+      .in("id", ids.slice(i, i + 200));
+    fail(error);
+    for (const r of (data ?? []) as Row[]) raw.set(String(r.id), r);
+  }
+  const at = now();
+  // Every row has the same keys (a bulk upsert nulls missing ones).
+  const keys = [...new Set(edits.flatMap((e) => Object.keys(e.patch)))];
+  const rows = edits
+    .filter((e) => raw.has(e.id))
+    .map((e) => {
+      const old = raw.get(e.id)!;
+      const before = readCard(old);
+      const row: Row = { id: e.id, topic_id: topicId, updated_at: at };
+      for (const k of keys) row[k] = k in e.patch ? e.patch[k] : old[k];
+      if (["front", "back", "ex"].some((k) => k in e.patch)) {
+        const history = Array.isArray(old.history) ? (old.history as unknown[]) : [];
+        row.history = [
+          { at, front: before.front, back: before.back, ex: before.ex },
+          ...history,
+        ].slice(0, 20);
+      } else row.history = old.history ?? [];
+      return row;
+    });
+  const out: FlashCard[] = [];
+  for (let i = 0; i < rows.length; i += 300) {
+    const { data, error } = await from("flash_cards")
+      .upsert(rows.slice(i, i + 300) as never, { onConflict: "id" })
+      .select("*");
+    fail(error);
+    out.push(...((data ?? []) as Row[]).map(readCard));
+  }
+  await touch(topicId);
+  return out;
+}
+
+// What an action does to many cards: verify, not verified, to recheck,
+// delete (numbered cards are removed), apply the AI's fixes, or make the
+// quick checks' safe fixes.
+export async function bulkCards(
+  topicId: string,
+  ids: string[],
+  action: BulkAction,
+): Promise<{ changed: number; deleted: number; removed: number; cards: FlashCard[] }> {
+  const { topic, cards } = await getTopic(topicId);
+  const want = new Set(ids);
+  const chosen = cards.filter((c) => want.has(c.id) && !c.removed);
+  if (action === "delete") {
+    let deleted = 0;
+    let removed = 0;
+    for (const c of chosen) {
+      if ((await deleteCard(c.id)) === "deleted") deleted++;
+      else removed++;
+    }
+    return { changed: 0, deleted, removed, cards: [] };
+  }
+  const edits: { id: string; patch: Row }[] = [];
+  if (action === "verify" || action === "unverify")
+    for (const c of chosen) {
+      if (c.verified !== (action === "verify"))
+        edits.push({ id: c.id, patch: { verified: action === "verify" } });
+    }
+  else if (action === "recheck")
+    for (const c of chosen) {
+      if (!c.error)
+        edits.push({ id: c.id, patch: { error: true, error_type: c.error_type, verified: false } });
+    }
+  else if (action === "apply_ai")
+    for (const c of chosen) {
+      const fixes = c.ai?.fixes ?? [];
+      const usable = fixes.filter((f) => f.to && f.field);
+      if (!usable.length) continue;
+      const next = { front: c.front, back: c.back, ex: { ...c.ex } };
+      let own = c.own;
+      for (const f of usable) {
+        if (f.field === "front") next.front = f.to;
+        else if (f.field === "back") next.back = f.to;
+        else {
+          next.ex[f.field.slice(3)] = f.to;
+          own = own.filter((o) => `ex:${o}` !== f.field);
+        }
+      }
+      const left = fixes.filter((f) => !(f.to && f.field));
+      const clear = !left.length && c.note.startsWith("AI:");
+      edits.push({
+        id: c.id,
+        patch: {
+          ...next,
+          own,
+          ai: {
+            ...c.ai!,
+            fixes: left,
+            sig: cardSig(next),
+            done: [...c.ai!.done, ...doneOf(usable, true)].slice(-100),
+          },
+          ...(clear ? { note: "", error: false, error_type: "" } : {}),
+        },
+      });
+    }
+  else if (action === "fix_lint") {
+    const lints = L.lintTopic(cards, topic.columns);
+    for (const c of chosen) {
+      const mine = (lints.get(c.id) ?? []).filter((l) => l.fix !== undefined);
+      if (!mine.length) continue;
+      const next = L.applyLints(c, mine);
+      if (JSON.stringify(next) === JSON.stringify({ front: c.front, back: c.back, ex: c.ex }))
+        continue;
+      edits.push({ id: c.id, patch: { ...next } });
+    }
+  }
+  const out = await writeEdits(topicId, edits);
+  return { changed: out.length, deleted: 0, removed: 0, cards: out };
+}
+
+export type CardVersion = { at: string; front: string; back: string; ex: Record<string, string> };
+
+// A card's earlier texts, newest first.
+export async function cardHistory(id: string): Promise<CardVersion[]> {
+  const { data, error } = await from("flash_cards").select("history").eq("id", id).single();
+  fail(error);
+  const h = (data as unknown as Row | null)?.history;
+  return (Array.isArray(h) ? h : []).map((x) => {
+    const o = (x ?? {}) as Row;
+    return {
+      at: String(o.at ?? ""),
+      front: String(o.front ?? ""),
+      back: String(o.back ?? ""),
+      ex: normalizeEx(o.ex),
+    };
+  });
+}
+
+// ---------- The AI's fixes, many at once ----------
+
+// Fixes picked from the topic's list (each by card, field and suggested
+// text, so a list shown before a new check can't touch the wrong one),
+// applied or dismissed. A card with none left loses the AI's note and its
+// recheck mark; one whose text changed counts as read as it now is.
+export async function resolveAi(
+  topicId: string,
+  picks: { id: string; field: string; to: string }[],
+  apply: boolean,
+): Promise<{ changed: number; cards: FlashCard[] }> {
+  const cards = await topicCards(topicId);
+  const want = new Map<string, { field: string; to: string }[]>();
+  for (const p of picks) want.set(p.id, [...(want.get(p.id) ?? []), p]);
+  const edits: { id: string; patch: Row }[] = [];
+  for (const c of cards) {
+    const mine = want.get(c.id);
+    if (!mine || !c.ai || c.removed) continue;
+    const hit = (f: AiFix) => mine.some((p) => p.field === f.field && p.to === f.to);
+    const chosen = c.ai.fixes.filter(hit);
+    if (!chosen.length) continue;
+    const left = c.ai.fixes.filter((f) => !hit(f));
+    const next = { front: c.front, back: c.back, ex: { ...c.ex } };
+    let own = c.own;
+    const used = apply ? chosen.filter((f) => f.to && f.field) : [];
+    for (const f of used) {
+      if (f.field === "front") next.front = f.to;
+      else if (f.field === "back") next.back = f.to;
+      else {
+        next.ex[f.field.slice(3)] = f.to;
+        own = own.filter((o) => `ex:${o}` !== f.field);
+      }
+    }
+    const clear = !left.length && c.note.startsWith("AI:");
+    const ai = {
+      ...c.ai,
+      fixes: left,
+      sig: used.length ? cardSig(next) : c.ai.sig,
+      done: [
+        ...c.ai.done,
+        ...doneOf(used, true),
+        ...doneOf(
+          chosen.filter((f) => !used.includes(f)),
+          false,
+        ),
+      ].slice(-100),
+    };
+    edits.push({
+      id: c.id,
+      patch: {
+        ...(used.length ? { ...next, own } : {}),
+        ai,
+        ...(clear ? { note: "", error: false, error_type: "" } : {}),
+      },
+    });
+  }
+  // Text and no-text edits written apart (a bulk write has one set of keys).
+  const withText = edits.filter((e) => "front" in e.patch);
+  const without = edits.filter((e) => !("front" in e.patch));
+  const out = [...(await writeEdits(topicId, withText)), ...(await writeEdits(topicId, without))];
+  return { changed: out.length, cards: out };
+}
+
+// ---------- A book's sheet replaced, card by card ----------
+
+// The topic's columns and books with any the sheet brings added.
+function growTopic(topic: FlashTopic, titles: string[], codes: string[]) {
+  const columns = [...topic.columns];
+  const idOf = new Map(columns.map((c) => [c.title.trim(), c.id]));
+  for (const title of titles) {
+    const t = title.trim();
+    if (!t || idOf.has(t)) continue;
+    const id = newColumnId(columns);
+    columns.push({ id, title: t, hint: "" });
+    idOf.set(t, id);
+  }
+  const books = [...topic.books];
+  for (const code of codes)
+    if (code && !books.some((b) => b.code === code))
+      books.push({ code, name: "", color: BOOK_COLORS[books.length % BOOK_COLORS.length] });
+  return { columns, books, idOf };
+}
+
+export type ReplaceResult = {
+  same: number;
+  changed: number;
+  added: number;
+  gone: number;
+  // Gone from the sheet but numbered (in the app): kept.
+  kept: number;
+};
+
+// The sheet `sourceId` replaced by a new version: rows matched to its cards
+// (and its versions merged into other books' cards) by their word. The same
+// stay as they are, with their merges and verified marks; changed ones get
+// the new text (old text kept in their history) and need verifying again;
+// new rows are added; rows gone are taken out (numbered cards stay).
+export async function replaceSheet(
+  topicId: string,
+  sourceId: string,
+  sheet: { cards: SheetCard[]; columns: string[]; book: string; name?: string },
+): Promise<ReplaceResult> {
+  const { topic, cards } = await getTopic(topicId);
+  const codes = [...new Set(sheet.cards.map((c) => (c.book || sheet.book).trim()).filter(Boolean))];
+  const { columns, books, idOf } = growTopic(topic, sheet.columns, codes);
+  const plan = SH.planReplace(cards, sourceId, sheet.cards, idOf);
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  const textEdits = new Map<string, Row>();
+  // Cards whose merged versions change or go: their versions, by place.
+  const versions = new Map<string, (FlashVariant | null)[]>();
+  const versionsOf = (id: string) => {
+    if (!versions.has(id)) versions.set(id, [...byId.get(id)!.variants]);
+    return versions.get(id)!;
+  };
+  for (const ch of plan.changed) {
+    if (ch.variant === null)
+      textEdits.set(ch.id, {
+        front: ch.after.front,
+        back: ch.after.back,
+        ex: ch.after.ex,
+        verified: false,
+      });
+    else {
+      const vs = versionsOf(ch.id);
+      vs[ch.variant] = { ...vs[ch.variant]!, ...ch.after };
+    }
+  }
+  const goneOwn: FlashCard[] = [];
+  let kept = 0;
+  for (const g of plan.gone) {
+    if (g.variant !== null) versionsOf(g.id)[g.variant] = null;
+    else if (g.numbered) kept++;
+    else goneOwn.push(byId.get(g.id)!);
+  }
+  const edits: { id: string; patch: Row }[] = [...textEdits].map(([id, patch]) => ({ id, patch }));
+  for (const [id, vs] of versions) {
+    const c = byId.get(id)!;
+    const goneSrc = c.variants.filter((_, i) => vs[i] === null).map((v) => v.source);
+    edits.push({
+      id,
+      patch: {
+        ...(textEdits.get(id) ?? {}),
+        variants: vs.filter((v) => v !== null),
+        sources: c.sources.filter((s) => !goneSrc.some((g) => sameSource(s, g ?? null))),
+      },
+    });
+  }
+  // One write per card (a card may have both kinds of change).
+  const merged = new Map<string, Row>();
+  for (const e of edits) merged.set(e.id, { ...(merged.get(e.id) ?? {}), ...e.patch });
+  await writeEdits(
+    topicId,
+    [...merged].map(([id, patch]) => ({ id, patch })),
+  );
+  await removeOwn(sourceId, goneOwn);
+  const start = cards.reduce((m, c) => Math.max(m, c.pos + 1), 0);
+  await insertCards(
+    plan.added.map((i, k) => {
+      const c = sheet.cards[i];
+      const book = (c.book || sheet.book).trim();
+      return {
+        topic_id: topicId,
+        pos: start + k,
+        prompt: c.prompt && c.prompt !== topic.prompt ? c.prompt : null,
+        front: c.front,
+        back: c.back,
+        back_hint: c.back_hint,
+        is_revealed: c.is_revealed,
+        word_key: c.word_key || null,
+        ex: SH.sheetEx(c, idOf),
+        sources: [{ book, pos: c.book_order, src: sourceId }],
+        error: c.error,
+        error_type: c.error_type,
+      };
+    }),
+  );
+  fail(
+    (
+      await from("flash_topics")
+        .update({ columns, books, updated_at: now() } as never)
+        .eq("id", topicId)
+    ).error,
+  );
+  await updateSource(sourceId, (r) => ({
+    name: (sheet.name ?? String(r.name ?? "")).slice(0, 200),
+    cards: sheet.cards.length,
+    context: { ...((r.context ?? {}) as Row), rows: sheet.cards.length },
+  }));
+  await touch(topicId);
+  return {
+    same: plan.same,
+    changed: plan.changed.length,
+    added: plan.added.length,
+    gone: plan.gone.length - kept,
+    kept,
+  };
+}
+
+// ---------- The working sheet back ----------
+
+export type WorkingResult = { same: number; changed: number; added: number; unknown: number };
+
+// A working sheet's edits made on the cards they name (old text kept in
+// each card's history); rows without a card id added as new cards.
+export async function applyWorking(topicId: string, rows: SH.WorkingRow[]): Promise<WorkingResult> {
+  const { topic, cards } = await getTopic(topicId);
+  const plan = SH.planWorking(cards, rows);
+  const edits = plan.changed
+    .map((ch) => ({ id: ch.id, patch: SH.workingPatch(ch.before, ch.after) as Row }))
+    .filter((e) => Object.keys(e.patch).length);
+  // A bulk write has one set of keys: text edits and mark-only edits apart.
+  await writeEdits(
+    topicId,
+    edits.filter((e) => "front" in e.patch),
+  );
+  await writeEdits(
+    topicId,
+    edits.filter((e) => !("front" in e.patch)),
+  );
+  if (plan.added.length) {
+    const { books } = growTopic(
+      topic,
+      [],
+      plan.added.map((r) => r.book),
+    );
+    const start = cards.reduce((m, c) => Math.max(m, c.pos + 1), 0);
+    await insertCards(
+      plan.added.map((r, k) => ({
+        topic_id: topicId,
+        pos: start + k,
+        front: r.front,
+        back: r.back,
+        ex: Object.fromEntries(Object.entries(r.ex).filter(([, v]) => v.trim())),
+        sources: r.book ? [{ book: r.book, pos: null }] : [],
+        verified: r.verified === true,
+        note: r.note ?? "",
+      })),
+    );
+    fail(
+      (
+        await from("flash_topics")
+          .update({ books, updated_at: now() } as never)
+          .eq("id", topicId)
+      ).error,
+    );
+  }
+  await touch(topicId);
+  return {
+    same: plan.same,
+    changed: edits.length,
+    added: plan.added.length,
+    unknown: plan.unknown.length,
+  };
+}
+
+// ---------- The same word in other topics ----------
+
+// For this topic's words (by their key), the other topics that have them.
+export async function otherTopicWords(
+  topicId: string,
+): Promise<{ key: string; topics: { id: string; name: string; front: string }[] }[]> {
+  const mine = new Set(
+    (await topicCards(topicId)).filter((c) => !c.removed).map((c) => M.dupKey(c.front)),
+  );
+  mine.delete("");
+  const { data: topics, error } = await from("flash_topics").select("id,name").neq("id", topicId);
+  fail(error);
+  const names = new Map(((topics ?? []) as Row[]).map((t) => [String(t.id), String(t.name)]));
+  const found = new Map<string, Map<string, { id: string; name: string; front: string }>>();
+  for (let page = 0; ; page++) {
+    const { data, error: e2 } = await from("flash_cards")
+      .select("topic_id,front")
+      .neq("topic_id", topicId)
+      .eq("removed", false)
+      .order("id")
+      .range(page * 1000, page * 1000 + 999);
+    fail(e2);
+    for (const r of (data ?? []) as Row[]) {
+      const key = M.dupKey(String(r.front ?? ""));
+      const tid = String(r.topic_id);
+      if (!mine.has(key) || !names.has(tid)) continue;
+      const m = found.get(key) ?? new Map();
+      if (!m.has(tid)) m.set(tid, { id: tid, name: names.get(tid)!, front: String(r.front) });
+      found.set(key, m);
+    }
+    if ((data ?? []).length < 1000) break;
+  }
+  return [...found].map(([key, m]) => ({ key, topics: [...m.values()] }));
+}
+
+// ---------- AI jobs on the server (with the browser closed) ----------
+
+export type FlashJob = {
+  id: string;
+  topic_id: string;
+  kind: "check" | "fill";
+  total: number;
+  done: number;
+  found: number;
+  status: "queued" | "running" | "done" | "stopped" | "failed";
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+const JOB_COLS = "id,topic_id,kind,total,done,found,status,error,created_at,updated_at";
+const JOBS_NOT_READY =
+  "AI jobs on the server need a database update: run the latest migration (flash_jobs) in Lovable or the SQL editor.";
+const jobFail = (e: { message: string } | null) => {
+  if (e && /flash_jobs/.test(e.message)) throw new Error(JOBS_NOT_READY);
+  fail(e);
+};
+const readJob = (r: Row): FlashJob => ({
+  id: String(r.id),
+  topic_id: String(r.topic_id),
+  kind: r.kind === "fill" ? "fill" : "check",
+  total: Number(r.total) || 0,
+  done: Number(r.done) || 0,
+  found: Number(r.found) || 0,
+  status: (["queued", "running", "done", "stopped", "failed"].includes(String(r.status))
+    ? r.status
+    : "queued") as FlashJob["status"],
+  error: typeof r.error === "string" ? r.error : null,
+  created_at: String(r.created_at),
+  updated_at: String(r.updated_at),
+});
+
+// A job queued for the server: the cards that need it now (not verified
+// and not read as they are, for the check; with empty explanations, for
+// the fill). One of each kind a topic at a time.
+export async function startServerJob(
+  topicId: string,
+  kind: "check" | "fill",
+  ids: string[],
+): Promise<FlashJob> {
+  const { topic, cards } = await getTopic(topicId);
+  const want = new Set(ids);
+  const todo = cards
+    .filter(
+      (c) =>
+        want.has(c.id) &&
+        !c.removed &&
+        (kind === "check" ? needsCheck(c) : M.emptyColumns(c, topic.columns).length > 0),
+    )
+    .map((c) => c.id);
+  if (!todo.length) throw new Error("Nothing to do: every card asked for is done already");
+  const { data: running, error: e0 } = await from("flash_jobs")
+    .select("id")
+    .eq("topic_id", topicId)
+    .eq("kind", kind)
+    .in("status", ["queued", "running"]);
+  jobFail(e0);
+  if ((running ?? []).length)
+    throw new Error("This topic already has that job on the server: stop it or wait for it");
+  const { data, error } = await from("flash_jobs")
+    .insert({ topic_id: topicId, kind, ids: todo, total: todo.length } as never)
+    .select(JOB_COLS)
+    .single();
+  jobFail(error);
+  return readJob(data as unknown as Row);
+}
+
+export async function listServerJobs(topicId: string): Promise<FlashJob[]> {
+  const { data, error } = await from("flash_jobs")
+    .select(JOB_COLS)
+    .eq("topic_id", topicId)
+    .order("created_at", { ascending: false })
+    .limit(5);
+  // Before the migration: no jobs.
+  if (error && /flash_jobs/.test(error.message)) return [];
+  fail(error);
+  return ((data ?? []) as Row[]).map(readJob);
+}
+
+export async function stopServerJob(id: string): Promise<FlashJob> {
+  const { data, error } = await from("flash_jobs")
+    .update({ status: "stopped", locked_until: null, updated_at: now() } as never)
+    .eq("id", id)
+    .in("status", ["queued", "running"])
+    .select(JOB_COLS)
+    .maybeSingle();
+  jobFail(error);
+  if (!data) throw new Error("The job had already finished");
+  return readJob(data as unknown as Row);
+}
+
+// One step of the oldest job waiting: its next few batches, side by side
+// (the check reads 20 cards a batch, the fill 10). A job claims itself for
+// two minutes so two ticks don't run it at once. Three failures in a row
+// stop it with the error.
+export async function jobStep(batches = 3): Promise<FlashJob | null> {
+  const at = now();
+  const { data: waiting, error } = await from("flash_jobs")
+    .select("*")
+    .in("status", ["queued", "running"])
+    .or(`locked_until.is.null,locked_until.lt.${at}`)
+    .order("created_at")
+    .limit(1);
+  if (error && /flash_jobs/.test(error.message)) return null;
+  fail(error);
+  const row = ((waiting ?? []) as Row[])[0];
+  if (!row) return null;
+  // Claimed only if no other tick claimed it since.
+  const { data: claimed, error: e2 } = await from("flash_jobs")
+    .update({
+      status: "running",
+      locked_until: new Date(Date.now() + 120_000).toISOString(),
+      updated_at: at,
+    } as never)
+    .eq("id", String(row.id))
+    .eq("updated_at", String(row.updated_at))
+    .select("*")
+    .maybeSingle();
+  fail(e2);
+  if (!claimed) return null;
+  const job = claimed as unknown as Row;
+  const ids = (Array.isArray(job.ids) ? job.ids : []).map(String);
+  const size = job.kind === "fill" ? 10 : 20;
+  const parts: string[][] = [];
+  for (let i = 0; i < Math.min(ids.length, size * batches); i += size)
+    parts.push(ids.slice(i, i + size));
+  const topicId = String(job.topic_id);
+  const results = await Promise.allSettled(
+    parts.map((p) =>
+      job.kind === "fill"
+        ? fillExplanations(topicId, p).then((r) => r.filled)
+        : checkCards(topicId, p).then((r) => r.flagged),
+    ),
+  );
+  const ok = results
+    .map((r, i) => ({ r, ids: parts[i] }))
+    .filter((x) => x.r.status === "fulfilled");
+  const failed = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+  const doneIds = new Set(ok.flatMap((x) => x.ids));
+  const left = ids.filter((id) => !doneIds.has(id));
+  const fails = failed && !ok.length ? (Number(job.fails) || 0) + 1 : 0;
+  const status = !left.length ? "done" : fails >= 3 ? "failed" : "running";
+  const { data: saved, error: e3 } = await from("flash_jobs")
+    .update({
+      ids: left,
+      done: (Number(job.done) || 0) + doneIds.size,
+      found:
+        (Number(job.found) || 0) +
+        ok.reduce((n, x) => n + ((x.r as PromiseFulfilledResult<number>).value || 0), 0),
+      fails,
+      status,
+      error: failed
+        ? String(failed.reason instanceof Error ? failed.reason.message : failed.reason).slice(
+            0,
+            500,
+          )
+        : null,
+      locked_until: null,
+      updated_at: now(),
+    } as never)
+    .eq("id", String(job.id))
+    // Stopped meanwhile: stays stopped (its progress is kept).
+    .eq("status", "running")
+    .select(JOB_COLS)
+    .maybeSingle();
+  fail(e3);
+  return saved ? readJob(saved as unknown as Row) : null;
 }

@@ -197,6 +197,16 @@ export const saveFlashCard = createServerFn({ method: "POST" })
                     }),
                   )
                   .max(20),
+                done: z
+                  .array(
+                    z.object({
+                      type: z.string().max(60),
+                      applied: z.boolean(),
+                      at: z.string().max(40),
+                    }),
+                  )
+                  .max(100)
+                  .default([]),
               })
               .nullable(),
           })
@@ -403,4 +413,134 @@ export const setFlashExplanation = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return (await server()).setExplanation(data.topic_id, data.column, data.from, data.to);
+  });
+
+export const bulkFlashCards = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        topic_id: id,
+        ids: z.array(id).min(1).max(5000),
+        action: z.enum(["verify", "unverify", "recheck", "delete", "apply_ai", "fix_lint"]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).bulkCards(data.topic_id, data.ids, data.action);
+  });
+
+export const getFlashCardHistory = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).cardHistory(data.id);
+  });
+
+export const resolveFlashAi = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        topic_id: id,
+        apply: z.boolean(),
+        picks: z
+          .array(z.object({ id, field: z.string().max(30), to: big }))
+          .min(1)
+          .max(3000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).resolveAi(data.topic_id, data.picks, data.apply);
+  });
+
+export const replaceFlashSheet = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        topic_id: id,
+        source_id: id,
+        cards: z.array(sheetCard).min(1).max(5000),
+        columns: z.array(z.string().max(80)).max(30),
+        book: z.string().max(30),
+        name: z.string().max(200).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).replaceSheet(data.topic_id, data.source_id, data);
+  });
+
+export const applyFlashWorking = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        topic_id: id,
+        rows: z
+          .array(
+            z.object({
+              id: z.union([id, z.literal("")]),
+              book: z.string().max(30),
+              front: big,
+              back: big,
+              ex: z.record(z.string().max(20), big),
+              verified: z.boolean().nullable(),
+              note: z.string().max(2000).nullable(),
+            }),
+          )
+          .min(1)
+          .max(5000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).applyWorking(data.topic_id, data.rows);
+  });
+
+export const otherFlashTopicWords = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ topic_id: id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).otherTopicWords(data.topic_id);
+  });
+
+export const startFlashServerJob = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        topic_id: id,
+        kind: z.enum(["check", "fill"]),
+        ids: z.array(id).min(1).max(5000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).startServerJob(data.topic_id, data.kind, data.ids);
+  });
+
+export const listFlashServerJobs = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ topic_id: id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).listServerJobs(data.topic_id);
+  });
+
+export const stopFlashServerJob = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).stopServerJob(data.id);
   });

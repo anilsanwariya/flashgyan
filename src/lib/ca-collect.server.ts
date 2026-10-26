@@ -206,6 +206,17 @@ export async function tick(origin?: string): Promise<TickResult> {
   } catch (e) {
     console.error("scheme register:", e);
   }
+  // The card studio's AI jobs left to run on the server (the check, the
+  // fill), a few batches at a time.
+  try {
+    const flash = await import("@/lib/flash-studio.server");
+    const t0 = Date.now();
+    while (Date.now() - t0 < 30_000 && (await flash.jobStep())) {
+      // the next batches, within the tick's time
+    }
+  } catch (e) {
+    console.error("card studio jobs:", e);
+  }
   // Clipped newspapers finish in the background after "Done".
   try {
     const clips = await import("@/lib/ca-clips.server");

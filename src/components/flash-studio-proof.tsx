@@ -10,13 +10,15 @@ import {
   ChevronDown,
   Combine,
   Eye,
+  ListChecks,
+  Server,
   Replace,
   ScanSearch,
   Sparkles,
   Split,
   Wand2,
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { kindOfTemplate, wordsOf } from "@/lib/flash-split";
 import {
   checkFlashCards,
@@ -26,6 +28,7 @@ import {
   mergeAllFlashCards,
   mergeFlashCards,
   splitFlashVariant,
+  startFlashServerJob,
   deleteFlashCard,
   setFlashExplanation,
 } from "@/lib/flash-studio.functions";
@@ -36,6 +39,7 @@ import {
   exConflicts,
   filledCount,
   groupDuplicates,
+  nearDuplicates,
   isList,
   mainOf,
   versionsOf,
@@ -182,6 +186,7 @@ export function ProofTools({
   shownIds,
   merging,
   setMerging,
+  onReview,
   onChanged,
   onCards,
 }: {
@@ -192,22 +197,40 @@ export function ProofTools({
   // The merge dialog, open from here or from the topic's progress.
   merging: boolean;
   setMerging: (open: boolean) => void;
+  // Every AI fix in the topic, in one list.
+  onReview: () => void;
   onChanged: () => void;
   onCards: (c: FlashCard[]) => void;
 }) {
   const fillFn = useServerFn(fillFlashExplanations);
   const checkFn = useServerFn(checkFlashCards);
   const splitFn = useServerFn(makeFlashSplitCards);
+  const serverFn = useServerFn(startFlashServerJob);
+  const qc = useQueryClient();
+  // The same on the server: goes on with the browser closed.
+  const onServer = async (kind: "check" | "fill", ids: string[]) => {
+    try {
+      const j = await serverFn({ data: { topic_id: topic.id, kind, ids } });
+      await qc.invalidateQueries({ queryKey: ["flashJobs", topic.id] });
+      toast.success(
+        `${j.total} cards queued on the server: it starts within a minute and goes on with this page closed`,
+      );
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't queue it"));
+    }
+  };
   const typesFn = useServerFn(listFlashTemplates);
   const types = useQuery({ queryKey: ["flashTemplates"], queryFn: () => typesFn() });
   const kind = kindOfTemplate(types.data?.find((t) => t.id === topic.template_id)?.key);
   const groups = useMemo(() => groupDuplicates(cards), [cards]);
+  const near = useMemo(() => (merging ? nearDuplicates(cards) : []), [cards, merging]);
   const [wording, setWording] = useState(false);
   const running = useStudioJob();
   const shown = new Set(shownIds);
   const live = cards.filter((c) => !c.removed && shown.has(c.id));
   const needFill = live.filter((c) => emptyColumns(c, topic.columns).length).map((c) => c.id);
   const needCheck = live.filter(needsCheck).map((c) => c.id);
+  const withFixes = cards.reduce((n, c) => n + (c.removed ? 0 : (c.ai?.fixes.length ?? 0)), 0);
   const words = kind ? live.reduce((n, c) => n + wordsOf(c.back).length, 0) : 0;
   const fill = () =>
     runStudioJob({
@@ -294,11 +317,11 @@ export function ProofTools({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-72">
-            <DropdownMenuItem disabled={!groups.length} onSelect={() => setMerging(true)}>
+            <DropdownMenuItem onSelect={() => setMerging(true)}>
               <Combine className="mr-2 h-4 w-4 shrink-0" />
               {item(
                 `Merge the same word (${groups.length})`,
-                "Words in several books become one card",
+                "Words in several books become one card; also words spelt a little differently",
               )}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
@@ -327,6 +350,30 @@ export function ProofTools({
                 "Front, back and explanations; fixes to apply or dismiss. Skips verified and already-checked cards",
               )}
             </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+              On the server (goes on with the browser closed)
+            </DropdownMenuLabel>
+            <DropdownMenuItem
+              disabled={!needCheck.length}
+              onSelect={() => void onServer("check", needCheck)}
+            >
+              <Server className="mr-2 h-4 w-4 shrink-0" />
+              {item(
+                `AI check on the server (${needCheck.length})`,
+                "A few batches a minute; follow it at the top of the topic",
+              )}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!needFill.length || !topic.columns.length}
+              onSelect={() => void onServer("fill", needFill)}
+            >
+              <Server className="mr-2 h-4 w-4 shrink-0" />
+              {item(
+                `Fill explanations on the server (${needFill.length})`,
+                "A few batches a minute; follow it at the top of the topic",
+              )}
+            </DropdownMenuItem>
             {kind && words > 0 && (
               <DropdownMenuItem disabled={!!running} onSelect={() => void split()}>
                 <Split className="mr-2 h-4 w-4 shrink-0" />
@@ -336,6 +383,13 @@ export function ProofTools({
                 )}
               </DropdownMenuItem>
             )}
+            <DropdownMenuItem disabled={!withFixes} onSelect={onReview}>
+              <ListChecks className="mr-2 h-4 w-4 shrink-0" />
+              {item(
+                `Review AI suggestions (${withFixes})`,
+                "Every fix in the topic in one list: tick, apply or dismiss",
+              )}
+            </DropdownMenuItem>
             {topic.columns.length > 0 && (
               <>
                 <DropdownMenuSeparator />
@@ -360,6 +414,7 @@ export function ProofTools({
         <MergeDialog
           topic={topic}
           groups={groups}
+          near={near}
           onClose={() => setMerging(false)}
           onChanged={onChanged}
         />
@@ -371,11 +426,14 @@ export function ProofTools({
 function MergeDialog({
   topic,
   groups,
+  near,
   onClose,
   onChanged,
 }: {
   topic: FlashTopic;
   groups: DupGroup[];
+  // Words one letter apart: perhaps the same word, spelt differently.
+  near: DupGroup[];
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -390,6 +448,12 @@ function MergeDialog({
       <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Same word in several books ({groups.length})</DialogTitle>
+          {near.length > 0 && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              And {near.length} pair{near.length === 1 ? "" : "s"} of words one letter apart, at the
+              end: perhaps the same word spelt differently. Merge all leaves them; check each.
+            </p>
+          )}
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
           Merging keeps one card (the chosen book&apos;s version in front) and keeps the other
@@ -399,7 +463,7 @@ function MergeDialog({
           the front card&apos;s wording is kept and the others stay in their versions.
         </p>
         <Button
-          disabled={busy}
+          disabled={busy || !groups.length}
           onClick={async () => {
             if (
               !confirm(
@@ -425,14 +489,23 @@ function MergeDialog({
           <Combine className="mr-1 h-4 w-4" /> Merge all {groups.length}
         </Button>
         <ul className="space-y-2">
-          {groups.slice(0, shown).map((g) => {
+          {[...groups, ...near].slice(0, shown).map((g, gi) => {
             const main = mains[g.key] ?? mainOf(g.cards, order).id;
+            const isNear = gi >= groups.length;
             return (
               <li key={g.key} className="space-y-2 rounded-xl border border-border p-3 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
                   <b lang="hi">{g.cards[0].front.split("\n").join(" / ")}</b>
                   <Badge tone="primary">{g.books.length} books</Badge>
-                  {g.sameBook && <Badge tone="warn">twice in one book</Badge>}
+                  {isNear && (
+                    <Badge
+                      tone="warn"
+                      title="Not merged by Merge all: check they are the same word"
+                    >
+                      spelt a little differently
+                    </Badge>
+                  )}
+                  {g.sameBook && !isNear && <Badge tone="warn">twice in one book</Badge>}
                   {exConflicts(g.cards, topic.columns).length > 0 && (
                     <Badge
                       tone="warn"
@@ -508,9 +581,9 @@ function MergeDialog({
             );
           })}
         </ul>
-        {groups.length > shown && (
+        {groups.length + near.length > shown && (
           <Button variant="outline" size="sm" onClick={() => setShown(shown + 60)}>
-            Show more ({groups.length - shown} left)
+            Show more ({groups.length + near.length - shown} left)
           </Button>
         )}
       </DialogContent>
