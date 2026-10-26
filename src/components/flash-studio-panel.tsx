@@ -84,7 +84,13 @@ import {
 import { zipFiles } from "@/lib/zip";
 import { BooksPanel } from "@/components/flash-studio-books";
 import { ServerJobsBar, StudioJobBar } from "@/components/flash-studio-jobs";
-import { AiReview, BulkBar, HistoryButton, QuickChecks } from "@/components/flash-studio-tools";
+import {
+  AiReview,
+  BulkBar,
+  FindReplace,
+  HistoryButton,
+  QuickChecks,
+} from "@/components/flash-studio-tools";
 import { lintCard, lintTopic, numberingOf, spellingVariants, type Lint } from "@/lib/flash-lint";
 import {
   DropdownMenu,
@@ -868,6 +874,7 @@ function CardsTab({
   const [view, setView] = useState<"list" | "table">("list");
   const [merging, setMerging] = useState(false);
   const [reviewing, setReviewing] = useState(false);
+  const [finding, setFinding] = useState(false);
   const books = new Map(topic.books.map((b) => [b.code, b]));
   const bookCodes = useMemo(
     () => [...new Set([...topic.books.map((b) => b.code), ...cards.flatMap((c) => booksOf(c))])],
@@ -1065,6 +1072,7 @@ function CardsTab({
           merging={merging}
           setMerging={setMerging}
           onReview={() => setReviewing(true)}
+          onFind={() => setFinding(true)}
           onChanged={onChanged}
           onCards={onCard}
         />
@@ -1329,6 +1337,14 @@ function CardsTab({
         <Button variant="outline" size="sm" onClick={() => setShown(shown + 120)}>
           Show more ({list.length - shown} left)
         </Button>
+      )}
+      {finding && (
+        <FindReplace
+          topic={topic}
+          cards={cards}
+          onCards={onCard}
+          onClose={() => setFinding(false)}
+        />
       )}
       {reviewing && (
         <AiReview

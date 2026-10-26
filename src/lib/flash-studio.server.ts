@@ -2015,3 +2015,43 @@ export async function jobStep(batches = 3): Promise<FlashJob | null> {
   fail(e3);
   return saved ? readJob(saved as unknown as Row) : null;
 }
+
+// ---------- Find and replace ----------
+
+// Replacements picked from the preview, made where the field still reads
+// as it did then (each card's old text kept in its history). `reverify`:
+// changed cards need verifying again.
+export async function replaceText(
+  topicId: string,
+  edits: { id: string; field: string; before: string; after: string }[],
+  reverify: boolean,
+): Promise<{ changed: number; skipped: number; cards: FlashCard[] }> {
+  const cards = await topicCards(topicId);
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  const patches = new Map<string, Row>();
+  let skipped = 0;
+  for (const e of edits) {
+    const c = byId.get(e.id);
+    if (!c || c.removed || fieldText(c, e.field) !== e.before) {
+      skipped++;
+      continue;
+    }
+    const p = patches.get(c.id) ?? { front: c.front, back: c.back, ex: { ...c.ex }, own: c.own };
+    if (e.field === "front") p.front = e.after;
+    else if (e.field === "back") p.back = e.after;
+    else if (e.field.startsWith("ex:")) {
+      (p.ex as Record<string, string>)[e.field.slice(3)] = e.after;
+      p.own = (p.own as string[]).filter((o) => `ex:${o}` !== e.field);
+    } else {
+      skipped++;
+      continue;
+    }
+    if (reverify) p.verified = false;
+    patches.set(c.id, p);
+  }
+  const out = await writeEdits(
+    topicId,
+    [...patches].map(([id, patch]) => ({ id, patch })),
+  );
+  return { changed: out.length, skipped, cards: out };
+}

@@ -2,7 +2,7 @@
 // on the ticked cards, every AI fix in one list, a card's quick checks
 // (problems found without the AI, with their safe fixes) and its history
 // (earlier texts to restore).
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { BadgeCheck, History, ScanSearch, Sparkles, Trash2, Wand2, X } from "lucide-react";
@@ -10,6 +10,7 @@ import {
   bulkFlashCards,
   checkFlashCards,
   getFlashCardHistory,
+  replaceFlashText,
   resolveFlashAi,
 } from "@/lib/flash-studio.functions";
 import {
@@ -21,6 +22,13 @@ import {
 } from "@/lib/flash-studio";
 import { LINT_LABELS, applyLints, lintCard, type Lint } from "@/lib/flash-lint";
 import { runStudioJob, useStudioJob } from "@/lib/flash-jobs";
+import {
+  findMatches,
+  findPattern,
+  markMatches,
+  type FindMatch,
+  type FindOptions,
+} from "@/lib/flash-find";
 import { Badge, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -543,6 +551,219 @@ export function AiReview({
             onClick={() => void run(false)}
           >
             Dismiss ticked ({ticked.length})
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Find and replace across the topic: what to find (with its spelling
+// variants, as a whole word), where; every match previewed (before → after)
+// to tick, then replaced (each card's old text kept in its history).
+export function FindReplace({
+  topic,
+  cards,
+  onCards,
+  onClose,
+}: {
+  topic: FlashTopic;
+  cards: FlashCard[];
+  onCards: (c: FlashCard[]) => void;
+  onClose: () => void;
+}) {
+  const replaceFn = useServerFn(replaceFlashText);
+  const [o, setO] = useState<FindOptions>({
+    find: "",
+    replace: "",
+    where: "all",
+    variants: true,
+    wholeWord: false,
+  });
+  const [reverify, setReverify] = useState(false);
+  const [off, setOff] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [shown, setShown] = useState(100);
+  const matches = useMemo(() => findMatches(cards, topic.columns, o), [cards, topic.columns, o]);
+  const re = useMemo(() => findPattern(o), [o]);
+  const key = (m: FindMatch) => `${m.id}|${m.field}`;
+  const ticked = matches.filter((m) => !off.has(key(m)));
+  const front = new Map(cards.map((c) => [c.id, c.front.split("\n")[0]]));
+  const label = (field: string) =>
+    field === "front" || field === "back"
+      ? field
+      : (topic.columns.find((c) => `ex:${c.id}` === field)?.title ?? "?");
+  const set = (p: Partial<FindOptions>) => {
+    setO({ ...o, ...p });
+    setOff(new Set());
+    setShown(100);
+  };
+  const places = ticked.reduce((n, m) => n + m.count, 0);
+  const cardsTouched = new Set(ticked.map((m) => m.id)).size;
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="flex max-h-[92dvh] flex-col gap-0 p-0 sm:max-w-3xl">
+        <DialogHeader className="space-y-2 border-b border-border px-5 pb-3 pr-12 pt-4 text-left">
+          <DialogTitle className="text-base">Find and replace</DialogTitle>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input
+              aria-label="Find"
+              lang="hi"
+              autoFocus
+              placeholder="Find"
+              value={o.find}
+              onChange={(e) => set({ find: e.target.value })}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+            />
+            <input
+              aria-label="Replace with"
+              lang="hi"
+              placeholder="Replace with (empty: take it out)"
+              value={o.replace}
+              onChange={(e) => set({ replace: e.target.value })}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+            <select
+              aria-label="Where"
+              value={o.where}
+              onChange={(e) => set({ where: e.target.value })}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+            >
+              <option value="all">Every field</option>
+              <option value="front">front</option>
+              <option value="back">back</option>
+              {topic.columns.length > 0 && <option value="ex">Every explanation</option>}
+              {topic.columns.map((c) => (
+                <option key={c.id} value={`ex:${c.id}`}>
+                  explanation_{c.title}
+                </option>
+              ))}
+            </select>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={o.variants}
+                onChange={(e) => set({ variants: e.target.checked })}
+              />
+              Spelling variants too (nukta, ँ / ं)
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={o.wholeWord}
+                onChange={(e) => set({ wholeWord: e.target.checked })}
+              />
+              Whole word only
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={reverify}
+                onChange={(e) => setReverify(e.target.checked)}
+              />
+              Changed cards need verifying again
+            </label>
+          </div>
+        </DialogHeader>
+        <div className="flex-1 overflow-y-auto px-5 py-3">
+          {o.find.trim() && !matches.length && (
+            <p className="py-6 text-center text-sm text-muted-foreground">Not found.</p>
+          )}
+          <ul className="space-y-1.5" lang="hi">
+            {matches.slice(0, shown).map((m) => (
+              <li
+                key={key(m)}
+                data-match={front.get(m.id)}
+                className="grid grid-cols-[auto_1fr] gap-2 rounded-lg border border-border p-2 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  aria-label={`Replace in ${front.get(m.id)} ${label(m.field)}`}
+                  className="mt-1 h-4 w-4"
+                  checked={!off.has(key(m))}
+                  onChange={(e) =>
+                    setOff((p) => {
+                      const n = new Set(p);
+                      if (e.target.checked) n.delete(key(m));
+                      else n.add(key(m));
+                      return n;
+                    })
+                  }
+                />
+                <div className="min-w-0 space-y-1">
+                  <div className="text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">{front.get(m.id)}</span> ·{" "}
+                    {label(m.field)}
+                    {m.count > 1 ? ` · ${m.count} places` : ""}
+                  </div>
+                  <div className="grid gap-1 sm:grid-cols-2">
+                    <div className="whitespace-pre-wrap rounded bg-muted/50 px-2 py-0.5">
+                      {markMatches(m.before, re).map(([t, hit], i) =>
+                        hit ? (
+                          <mark key={i} className="rounded bg-amber-300/60 px-0.5 text-inherit">
+                            {t}
+                          </mark>
+                        ) : (
+                          <span key={i}>{t}</span>
+                        ),
+                      )}
+                    </div>
+                    <div className="whitespace-pre-wrap rounded bg-emerald-500/10 px-2 py-0.5">
+                      {m.after || "—"}
+                    </div>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {matches.length > shown && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              onClick={() => setShown(shown + 300)}
+            >
+              Show more ({matches.length - shown} left)
+            </Button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 border-t border-border px-5 py-2.5">
+          <span className="text-xs text-muted-foreground">
+            {matches.length ? `${places} places in ${cardsTouched} cards ticked` : ""}
+          </span>
+          <Button
+            className="ml-auto"
+            disabled={busy || !ticked.length}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                const r = await replaceFn({
+                  data: {
+                    topic_id: topic.id,
+                    reverify,
+                    edits: ticked.map((m) => ({
+                      id: m.id,
+                      field: m.field,
+                      before: m.before,
+                      after: m.after,
+                    })),
+                  },
+                });
+                onCards(r.cards);
+                toast.success(
+                  `Replaced in ${r.changed} card${r.changed === 1 ? "" : "s"}${r.skipped ? `; ${r.skipped} changed meanwhile, left` : ""}`,
+                );
+                setOff(new Set());
+              } catch (e) {
+                toast.error(errorText(e, "Couldn't replace"));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Replace in {cardsTouched} card{cardsTouched === 1 ? "" : "s"}
           </Button>
         </div>
       </DialogContent>

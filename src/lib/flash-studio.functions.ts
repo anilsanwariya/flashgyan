@@ -544,3 +544,22 @@ export const stopFlashServerJob = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await server()).stopServerJob(data.id);
   });
+
+export const replaceFlashText = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        topic_id: id,
+        reverify: z.boolean(),
+        edits: z
+          .array(z.object({ id, field: z.string().max(30), before: big, after: big }))
+          .min(1)
+          .max(5000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).replaceText(data.topic_id, data.edits, data.reverify);
+  });
