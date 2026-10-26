@@ -1812,6 +1812,65 @@ export type Database = {
           },
         ]
       }
+      flash_sources: {
+        Row: {
+          book: string
+          cards: number
+          context: Json
+          created_at: string
+          done: number
+          error: string | null
+          id: string
+          kind: string
+          name: string
+          pieces: Json
+          todos: Json
+          topic_id: string
+          total: number
+          updated_at: string
+        }
+        Insert: {
+          book: string
+          cards?: number
+          context?: Json
+          created_at?: string
+          done?: number
+          error?: string | null
+          id?: string
+          kind: string
+          name?: string
+          pieces?: Json
+          todos?: Json
+          topic_id: string
+          total?: number
+          updated_at?: string
+        }
+        Update: {
+          book?: string
+          cards?: number
+          context?: Json
+          created_at?: string
+          done?: number
+          error?: string | null
+          id?: string
+          kind?: string
+          name?: string
+          pieces?: Json
+          todos?: Json
+          topic_id?: string
+          total?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flash_sources_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "flash_topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       flash_templates: {
         Row: {
           columns: Json
