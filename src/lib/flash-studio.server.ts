@@ -12,6 +12,7 @@ import {
 import { parseReply, readMessages, type ReadResult, type Todo } from "@/lib/flash-read";
 import * as M from "@/lib/flash-merge";
 import * as L from "@/lib/flash-lint";
+import * as SP from "@/lib/flash-spell";
 import * as SH from "@/lib/flash-sheets";
 import * as S from "@/lib/flash-split";
 import {
@@ -213,6 +214,7 @@ export async function listTopics(): Promise<TopicSummary[]> {
       for (const r of (rows ?? []) as Row[])
         jobs.set(String(r.topic_id), (jobs.get(String(r.topic_id)) ?? 0) + 1);
   }
+  const house = SP.buildHouse(SP.spellCounts([...byTopic.values()].flat()), await spellRules());
   return topics.map((t) => {
     const all = byTopic.get(t.id) ?? [];
     const live = all.filter((c) => !c.removed);
@@ -226,7 +228,7 @@ export async function listTopics(): Promise<TopicSummary[]> {
       withId: live.filter((c) => c.app_id).length,
       removed: all.length - live.length,
       ai: live.filter((c) => c.ai?.fixes.length).length,
-      lint: L.lintTopic(live, t.columns).size,
+      lint: L.lintTopic(live, t.columns, house).size,
       missing: live.filter((c) => M.emptyColumns(c, t.columns).length > 0).length,
       unchecked: live.filter((c) => needsCheck(c, true)).length,
       changedChunks: [...changes]
@@ -1142,7 +1144,18 @@ export async function fillExplanations(
   let own = 0;
   if (items.length) {
     const got = M.parseFill(
-      await saathiComplete(apiKey(), M.fillMessages(deck, items, wordings)),
+      await saathiComplete(
+        apiKey(),
+        M.fillMessages(
+          deck,
+          items,
+          wordings,
+          SP.houseLines(
+            (await houseNow()).house,
+            items.flatMap((it) => [it.front, it.back, ...Object.values(it.have)]),
+          ),
+        ),
+      ),
       topic.columns,
       items,
     );
@@ -1200,7 +1213,17 @@ export async function checkCards(
     ),
   }));
   const flags = M.parseCheck(
-    await saathiComplete(apiKey(), M.checkMessages(deck, items)),
+    await saathiComplete(
+      apiKey(),
+      M.checkMessages(
+        deck,
+        items,
+        SP.houseLines(
+          (await houseNow()).house,
+          items.flatMap((it) => [it.front, it.back, ...Object.values(it.ex)]),
+        ),
+      ),
+    ),
     items,
     topic.columns,
   );
@@ -1573,7 +1596,7 @@ export async function bulkCards(
       });
     }
   else if (action === "fix_lint") {
-    const lints = L.lintTopic(cards, topic.columns);
+    const lints = L.lintTopic(cards, topic.columns, (await houseNow()).house);
     for (const c of chosen) {
       const mine = (lints.get(c.id) ?? []).filter((l) => l.fix !== undefined);
       if (!mine.length) continue;
@@ -2339,4 +2362,82 @@ export async function takeAppText(
   }
   const out = await writeEdits(topicId, edits);
   return { changed: out.length, cards: out };
+}
+
+// ---------- House spellings ----------
+
+// The editor's rules (none before the spellings' migration).
+async function spellRules(): Promise<SP.SpellRule[]> {
+  const { data, error } = await from("flash_spellings").select("*");
+  if (error && /flash_spellings/.test(error.message)) return [];
+  fail(error);
+  return ((data ?? []) as Row[]).map((r) => ({
+    key: String(r.key),
+    preferred: typeof r.preferred === "string" && r.preferred ? r.preferred : null,
+    accepted: Array.isArray(r.accepted) ? (r.accepted as string[]) : [],
+    rejected: Array.isArray(r.rejected) ? (r.rejected as string[]) : [],
+  }));
+}
+
+// Every topic's spellings and the rules (read afresh: a topic just added
+// brings its own spellings).
+async function houseNow() {
+  const cards: Pick<FlashCard, "front" | "back" | "ex" | "removed" | "verified">[] = [];
+  for (let page = 0; ; page++) {
+    const { data, error } = await from("flash_cards")
+      .select("id,front,back,ex,removed,verified")
+      .order("id")
+      .range(page * 1000, page * 1000 + 999);
+    fail(error);
+    for (const r of (data ?? []) as Row[])
+      cards.push({
+        front: String(r.front ?? ""),
+        back: String(r.back ?? ""),
+        ex: normalizeEx(r.ex),
+        removed: !!r.removed,
+        verified: !!r.verified,
+      });
+    if ((data ?? []).length < 1000) break;
+  }
+  const counts = SP.spellCounts(cards);
+  const rules = await spellRules();
+  return { counts, rules, house: SP.buildHouse(counts, rules) };
+}
+
+// The house list for the quick checks in the browser.
+export async function getHouse() {
+  return SP.houseToList((await houseNow()).house);
+}
+
+// The words spelt more than one way, for the Spellings page.
+export async function listSpellings(): Promise<SP.SpellRow[]> {
+  const h = await houseNow();
+  return SP.spellRows(h.counts, h.rules);
+}
+
+// A word's rule saved (an empty one removed).
+export async function saveSpellRule(rule: SP.SpellRule): Promise<SP.SpellRow[]> {
+  const key = SP.looseWord(rule.key);
+  const clean = (l: string[]) => [
+    ...new Set(l.map((w) => w.normalize("NFC").trim()).filter(Boolean)),
+  ];
+  const accepted = clean(rule.accepted);
+  const rejected = clean(rule.rejected).filter(
+    (w) => !accepted.includes(w) && w !== rule.preferred,
+  );
+  const preferred = rule.preferred?.normalize("NFC").trim() || null;
+  if (!preferred && !accepted.length && !rejected.length)
+    fail((await from("flash_spellings").delete().eq("key", key)).error);
+  else {
+    const { error } = await from("flash_spellings").upsert(
+      { key, preferred, accepted, rejected, updated_at: now() } as never,
+      { onConflict: "key" },
+    );
+    if (error && /flash_spellings/.test(error.message))
+      throw new Error(
+        "The spelling list needs a database update: run the latest migration (flash_spellings) in Lovable or the SQL editor.",
+      );
+    fail(error);
+  }
+  return listSpellings();
 }

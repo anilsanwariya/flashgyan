@@ -3,9 +3,19 @@
 // (spaces, the same item twice, hidden letter codes, numbering written the
 // topic's other way). Pure: shared by the server, the panel and tests.
 import type { FlashCard, FlashColumn } from "@/lib/flash-studio";
+import { houseCheck, looseWord, swapWords, type House } from "@/lib/flash-spell";
 
 export type Lint = {
-  kind: "spaces" | "repeat" | "code" | "numbering" | "empty" | "same" | "latin" | "spelling";
+  kind:
+    | "spaces"
+    | "repeat"
+    | "code"
+    | "numbering"
+    | "empty"
+    | "same"
+    | "latin"
+    | "spelling"
+    | "house";
   // "front", "back" or "ex:<column id>".
   field: string;
   note: string;
@@ -13,6 +23,8 @@ export type Lint = {
   fix?: string;
   // Numbering: the topic's way.
   style?: "." | ")";
+  // House spellings: each word to write the house's way.
+  swaps?: [string, string][];
 };
 
 export const LINT_LABELS: Record<Lint["kind"], string> = {
@@ -24,6 +36,7 @@ export const LINT_LABELS: Record<Lint["kind"], string> = {
   same: "Front and back the same",
   latin: "English letters in Hindi",
   spelling: "Spelt two ways",
+  house: "Not the house spelling",
 };
 
 const DEVA = /[ऀ-ॿ]/;
@@ -79,7 +92,7 @@ const fixNumbering = (t: string, style: "." | ")") =>
 
 // A word written without its nukta and with ं for ँ: the same word spelt
 // two ways meets here.
-const loose = (w: string) => w.normalize("NFC").replace(/़/g, "").replace(/ँ/g, "ं");
+const loose = looseWord;
 
 const wordsOf = (t: string) => t.normalize("NFC").match(/[ऀ-ॿ]+/g) ?? [];
 
@@ -110,7 +123,13 @@ export function spellingVariants(
 export function lintCard(
   c: Pick<FlashCard, "front" | "back" | "ex" | "removed">,
   columns: FlashColumn[],
-  topic: { numbering: "." | ")" | null; variants: Map<string, Map<string, number>> },
+  topic: {
+    numbering: "." | ")" | null;
+    variants: Map<string, Map<string, number>>;
+    // The house spelling list (all topics' verified cards and the editor's
+    // rules): words spelt another way are flagged, with the fix.
+    house?: House;
+  },
 ): Lint[] {
   if (c.removed) return [];
   const out: Lint[] = [];
@@ -156,7 +175,28 @@ export function lintCard(
         field,
         note: `English letters in Hindi text: “${(nfc.match(/[A-Za-z][A-Za-z\s]*/g) ?? []).slice(0, 3).join(", ")}”`,
       });
+    const houseOdd = new Map<string, { to: string | null; accepted: string[] }>();
+    if (topic.house)
+      for (const w of wordsOf(nfc)) {
+        const h = houseCheck(topic.house, w);
+        if (h) houseOdd.set(w, h);
+      }
+    if (houseOdd.size) {
+      const swaps = [...houseOdd]
+        .filter(([, h]) => h.to)
+        .map(([w, h]): [string, string] => [w, h.to!]);
+      out.push({
+        kind: "house",
+        field,
+        note: `Not the house spelling: ${[...houseOdd]
+          .slice(0, 3)
+          .map(([w, h]) => `${w} → ${h.to ?? h.accepted.join(" / ")}`)
+          .join(", ")}`,
+        ...(swaps.length === houseOdd.size ? { fix: swapWords(nfc, swaps), swaps } : {}),
+      });
+    }
     const odd = wordsOf(nfc)
+      .filter((w) => !topic.house?.has(loose(w)))
       .map((w) => {
         const m = topic.variants.get(loose(w));
         if (!m) return null;
@@ -178,9 +218,13 @@ export function lintCard(
 }
 
 // Every live card's problems, by card id (cards with none left out).
-export function lintTopic(cards: FlashCard[], columns: FlashColumn[]): Map<string, Lint[]> {
+export function lintTopic(
+  cards: FlashCard[],
+  columns: FlashColumn[],
+  house?: House,
+): Map<string, Lint[]> {
   const live = cards.filter((c) => !c.removed);
-  const topic = { numbering: numberingOf(live), variants: spellingVariants(live) };
+  const topic = { numbering: numberingOf(live), variants: spellingVariants(live), house };
   const out = new Map<string, Lint[]>();
   for (const c of live) {
     const l = lintCard(c, columns, topic);
@@ -203,7 +247,7 @@ export function applyLints(
     else if (f === "back") next.back = v;
     else next.ex[f.slice(3)] = v;
   };
-  for (const kind of ["code", "spaces", "repeat", "numbering"] as const)
+  for (const kind of ["code", "house", "spaces", "repeat", "numbering"] as const)
     for (const l of lints)
       if (l.kind === kind && l.fix !== undefined) {
         const t = get(l.field).normalize("NFC");
@@ -211,11 +255,13 @@ export function applyLints(
           l.field,
           kind === "code"
             ? t
-            : kind === "spaces"
-              ? fixSpaces(t)
-              : kind === "repeat"
-                ? fixRepeats(t)
-                : fixNumbering(t, l.style ?? "."),
+            : kind === "house"
+              ? swapWords(t, l.swaps ?? [])
+              : kind === "spaces"
+                ? fixSpaces(t)
+                : kind === "repeat"
+                  ? fixRepeats(t)
+                  : fixNumbering(t, l.style ?? "."),
         );
       }
   return next;
