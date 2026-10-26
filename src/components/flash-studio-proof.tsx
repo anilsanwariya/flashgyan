@@ -11,13 +11,14 @@ import {
   Combine,
   Eye,
   ListChecks,
+  Server,
   Replace,
   ScanSearch,
   Sparkles,
   Split,
   Wand2,
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { kindOfTemplate, wordsOf } from "@/lib/flash-split";
 import {
   checkFlashCards,
@@ -27,6 +28,7 @@ import {
   mergeAllFlashCards,
   mergeFlashCards,
   splitFlashVariant,
+  startFlashServerJob,
   deleteFlashCard,
   setFlashExplanation,
 } from "@/lib/flash-studio.functions";
@@ -203,6 +205,20 @@ export function ProofTools({
   const fillFn = useServerFn(fillFlashExplanations);
   const checkFn = useServerFn(checkFlashCards);
   const splitFn = useServerFn(makeFlashSplitCards);
+  const serverFn = useServerFn(startFlashServerJob);
+  const qc = useQueryClient();
+  // The same on the server: goes on with the browser closed.
+  const onServer = async (kind: "check" | "fill", ids: string[]) => {
+    try {
+      const j = await serverFn({ data: { topic_id: topic.id, kind, ids } });
+      await qc.invalidateQueries({ queryKey: ["flashJobs", topic.id] });
+      toast.success(
+        `${j.total} cards queued on the server: it starts within a minute and goes on with this page closed`,
+      );
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't queue it"));
+    }
+  };
   const typesFn = useServerFn(listFlashTemplates);
   const types = useQuery({ queryKey: ["flashTemplates"], queryFn: () => typesFn() });
   const kind = kindOfTemplate(types.data?.find((t) => t.id === topic.template_id)?.key);
@@ -332,6 +348,30 @@ export function ProofTools({
               {item(
                 `AI check (${needCheck.length})`,
                 "Front, back and explanations; fixes to apply or dismiss. Skips verified and already-checked cards",
+              )}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+              On the server (goes on with the browser closed)
+            </DropdownMenuLabel>
+            <DropdownMenuItem
+              disabled={!needCheck.length}
+              onSelect={() => void onServer("check", needCheck)}
+            >
+              <Server className="mr-2 h-4 w-4 shrink-0" />
+              {item(
+                `AI check on the server (${needCheck.length})`,
+                "A few batches a minute; follow it at the top of the topic",
+              )}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!needFill.length || !topic.columns.length}
+              onSelect={() => void onServer("fill", needFill)}
+            >
+              <Server className="mr-2 h-4 w-4 shrink-0" />
+              {item(
+                `Fill explanations on the server (${needFill.length})`,
+                "A few batches a minute; follow it at the top of the topic",
               )}
             </DropdownMenuItem>
             {kind && words > 0 && (

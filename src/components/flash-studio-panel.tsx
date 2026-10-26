@@ -83,7 +83,7 @@ import {
 } from "@/lib/flash-studio";
 import { zipFiles } from "@/lib/zip";
 import { BooksPanel } from "@/components/flash-studio-books";
-import { StudioJobBar } from "@/components/flash-studio-jobs";
+import { ServerJobsBar, StudioJobBar } from "@/components/flash-studio-jobs";
 import { AiReview, BulkBar, HistoryButton, QuickChecks } from "@/components/flash-studio-tools";
 import { lintCard, lintTopic, numberingOf, spellingVariants, type Lint } from "@/lib/flash-lint";
 import {
@@ -682,6 +682,7 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
             : ""}
         </span>
       </div>
+      <ServerJobsBar topicId={topic.id} onProgress={() => void reload()} />
       <PageTabs
         label="Topic"
         tabs={[
