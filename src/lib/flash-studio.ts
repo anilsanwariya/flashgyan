@@ -22,7 +22,25 @@ export type FlashTemplate = {
   // Finished cards in the house style (keyed by column title).
   examples: FlashExample[];
   sort: number;
+  // The front is the wrong form on purpose (शब्द शुद्धि, वाक्य शुद्धि: the
+  // question asks for its correct form), so its spelling is never "fixed".
+  wrong_front: boolean;
 };
+
+// The deck types whose front is wrong on purpose, before the setting was
+// saved for them.
+export const WRONG_FRONT_KEYS = ["shabd-shuddhi", "vakya-shuddhi"];
+
+// Whether a topic's front is wrong on purpose: its deck type's setting,
+// else (no deck type) a question asking for the correct form.
+export function frontIsWrong(
+  topic: { template_id: string | null; prompt: string },
+  templates: Pick<FlashTemplate, "id" | "wrong_front">[] | undefined,
+): boolean {
+  const t = topic.template_id ? templates?.find((x) => x.id === topic.template_id) : undefined;
+  if (t) return t.wrong_front;
+  return /शुद्ध\s*(रूप|वर्तनी|वाक्य|शब्द)/.test(topic.prompt);
+}
 
 export type FlashBook = { code: string; name: string; color: string };
 // A chunk's numbers, and when it was last downloaded (to show what changed
@@ -226,6 +244,7 @@ const SANDHI_EXC = "other words that break or follow the rule, one per line, eac
 export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "sandhi-swar",
+    wrong_front: false,
     name: "00-1 संधि (स्वर)",
     prompt: "संधि करें -",
     columns: cols(
@@ -250,6 +269,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   },
   {
     key: "sandhi-vyanjan",
+    wrong_front: false,
     name: "00-2 संधि (व्यंजन)",
     prompt: "संधि करें -",
     columns: cols(
@@ -276,6 +296,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   },
   {
     key: "sandhi-visarg",
+    wrong_front: false,
     name: "00-3 संधि (विसर्ग)",
     prompt: "संधि करें -",
     columns: cols(
@@ -302,6 +323,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   },
   {
     key: "samas",
+    wrong_front: false,
     name: "01 समास",
     prompt: "समास विग्रह करें -",
     columns: cols(
@@ -329,6 +351,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   },
   {
     key: "upsarg",
+    wrong_front: false,
     name: "02 उपसर्ग",
     prompt: "उपसर्ग के योग से शब्द बनायें -",
     columns: cols(
@@ -352,6 +375,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   },
   {
     key: "upsarg-split",
+    wrong_front: false,
     name: "02 उपसर्ग (पृथक करें)",
     prompt: "दिए गए शब्द में से उपसर्ग तथा मूल शब्द पृथक करें -",
     columns: cols(
@@ -375,6 +399,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   },
   {
     key: "pratyay",
+    wrong_front: false,
     name: "03 प्रत्यय",
     prompt: "प्रत्यय के योग से शब्द बनायें -",
     columns: cols(
@@ -405,6 +430,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   },
   {
     key: "pratyay-split",
+    wrong_front: false,
     name: "03 प्रत्यय (पृथक करें)",
     prompt: "दिए गए शब्द में से प्रत्यय तथा मूल शब्द पृथक करें -",
     columns: cols(
@@ -426,6 +452,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   },
   {
     key: "shabd-shuddhi",
+    wrong_front: true,
     name: "04 शब्द शुद्धि",
     prompt: "निम्नलिखित शब्द का शुद्ध रूप बतायें - ",
     columns: cols(
@@ -448,6 +475,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   },
   {
     key: "vakya-shuddhi",
+    wrong_front: true,
     name: "05 वाक्य शुद्धि",
     prompt: "वाक्य का शुद्ध रूप बतायें - ",
     columns: cols(
@@ -470,6 +498,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   },
   {
     key: "paryayvachi",
+    wrong_front: false,
     name: "06 पर्यायवाची",
     prompt: "पर्यायवाची बतायें - ",
     columns: cols(["अर्थ", "the word's meaning, when it has more than one"]),
@@ -479,6 +508,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   },
   {
     key: "vilom",
+    wrong_front: false,
     name: "07 विलोम",
     prompt: "विलोम शब्द बतायें - ",
     columns: cols(
@@ -500,6 +530,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   },
   {
     key: "samanarthi-antar",
+    wrong_front: false,
     name: "08 समानार्थी शब्दों में अंतर",
     prompt: "समानार्थी शब्दों में अंतर स्पष्ट करें - ",
     columns: cols(["वाक्य-प्रयोग", "a sentence for each word, one per line, each starting '◆ '"]),
@@ -518,6 +549,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   },
   {
     key: "shabd-yugm",
+    wrong_front: false,
     name: "09 शब्द-युग्म",
     prompt: "शब्द-युग्म का वाक्य प्रयोग द्वारा अर्थगत अंतर स्पष्ट करें -",
     columns: cols(["वाक्य-प्रयोग", "a sentence for each word, one per line, each starting '◆ '"]),
@@ -536,6 +568,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   },
   {
     key: "vakyansh",
+    wrong_front: false,
     name: "10 वाक्यांश के लिए एक शब्द",
     prompt: "वाक्यांश के लिए सार्थक शब्द बतायें - ",
     columns: cols(["व्याख्या", "how the word is made or used, when it helps"]),
@@ -545,6 +578,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   },
   {
     key: "muhavare",
+    wrong_front: false,
     name: "11 मुहावरे",
     prompt: "निम्नलिखित मुहावरे का अर्थ बतायें - ",
     columns: cols(["वाक्य-प्रयोग", "one everyday sentence using the मुहावरा"]),
@@ -563,6 +597,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   },
   {
     key: "lokokti",
+    wrong_front: false,
     name: "12 लोकोक्तियाँ",
     prompt: "निम्नलिखित लोकोक्ति का अर्थ बतायें - ",
     columns: cols(["वाक्य-प्रयोग", "one everyday sentence using the लोकोक्ति"]),
@@ -581,6 +616,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   },
   {
     key: "paribhashik",
+    wrong_front: false,
     name: "13 पारिभाषिक शब्दावली",
     prompt: "निम्नलिखित अंग्रेजी पारिभाषिक शब्द का समानार्थक हिंदी शब्द बतायें -",
     columns: cols(

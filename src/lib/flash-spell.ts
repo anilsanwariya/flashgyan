@@ -47,6 +47,12 @@ export type SpellRule = {
   rejected: string[];
 };
 
+// A topic's cards as the house list reads them: a शुद्धि deck's fronts
+// (wrong on purpose) left out.
+export function forHouse<T extends { front: string }>(cards: T[], wrongFront: boolean): T[] {
+  return wrongFront ? cards.map((c) => ({ ...c, front: "" })) : cards;
+}
+
 // By loose form, by spelling: cards using it, verified and in all.
 export type SpellCounts = Map<string, Map<string, { verified: number; all: number }>>;
 
