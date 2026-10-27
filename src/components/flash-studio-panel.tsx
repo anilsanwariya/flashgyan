@@ -22,6 +22,7 @@ import {
   Copy,
   Eye,
   Smartphone,
+  BookA,
   Download,
   FileUp,
   GitCompare,
@@ -120,6 +121,7 @@ import { BOOK_FILE_TYPES, isBookFile } from "@/lib/flash-read";
 import { StudentPreview } from "@/components/flash-studio-preview";
 import { AppImportDialog, CompareWithApp } from "@/components/flash-studio-import";
 import { SpellingList } from "@/components/flash-studio-spellings";
+import { DictionaryPanel } from "@/components/flash-studio-dict";
 import { houseFromList } from "@/lib/flash-spell";
 import { Badge, PageTabs, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
@@ -2061,6 +2063,7 @@ function CardDialog({
   const [c, setC] = useState(card);
   const [busy, setBusy] = useState(false);
   const [student, setStudent] = useState(false);
+  const [dict, setDict] = useState(false);
   // The card changed outside (saved, or the AI check ran in the
   // background): edits not saved yet stay, the check's findings come in.
   const shown = useRef(card);
@@ -2391,6 +2394,23 @@ function CardDialog({
           >
             <Smartphone className="mr-1 h-4 w-4" /> Student view
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-pressed={dict}
+            title="The front's words in Wiktionary: meanings, synonyms, antonyms, other spellings"
+            onClick={() => setDict(!dict)}
+          >
+            <BookA className="mr-1 h-4 w-4" /> Dictionary
+          </Button>
+          {dict && (
+            <DictionaryPanel
+              front={c.front}
+              back={c.back}
+              onAdd={(w) => setC({ ...c, back: c.back.trim() ? `${c.back.trimEnd()}, ${w}` : w })}
+              onClose={() => setDict(false)}
+            />
+          )}
           {student && (
             <StudentPreview
               topic={topic}

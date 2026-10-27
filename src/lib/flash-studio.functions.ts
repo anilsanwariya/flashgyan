@@ -690,3 +690,13 @@ export const saveFlashSpellRule = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await server()).saveSpellRule(data);
   });
+
+export const lookupFlashDictionary = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ words: z.array(z.string().min(1).max(80)).min(1).max(30) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).lookupDictionary(data.words);
+  });

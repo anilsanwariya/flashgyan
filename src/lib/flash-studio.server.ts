@@ -13,6 +13,7 @@ import { parseReply, readMessages, type ReadResult, type Todo } from "@/lib/flas
 import * as M from "@/lib/flash-merge";
 import * as L from "@/lib/flash-lint";
 import * as SP from "@/lib/flash-spell";
+import * as D from "@/lib/flash-dict";
 import * as SH from "@/lib/flash-sheets";
 import * as S from "@/lib/flash-split";
 import {
@@ -1222,6 +1223,7 @@ export async function checkCards(
           (await houseNow()).house,
           items.flatMap((it) => [it.front, it.back, ...Object.values(it.ex)]),
         ),
+        await dictLinesFor(items.map((it) => it.front)),
       ),
     ),
     items,
@@ -2440,4 +2442,118 @@ export async function saveSpellRule(rule: SP.SpellRule): Promise<SP.SpellRow[]> 
     fail(error);
   }
   return listSpellings();
+}
+
+// ---------- Dictionary (Wiktionary) ----------
+
+const DICT_UA = "FlashGyan-CardStudio/1.0 (https://flashgyan.com; flashcard proofreading)";
+const DICT_DAYS = 30;
+
+// A Wiktionary request: its JSON, null when the page isn't there; throws
+// when Wiktionary can't be reached.
+async function wiki(url: string): Promise<unknown | null> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 10_000);
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": DICT_UA, "Api-User-Agent": DICT_UA, Accept: "application/json" },
+      signal: ctl.signal,
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`Wiktionary answered ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const parseUrl = (lang: "en" | "hi", word: string) =>
+  `https://${lang}.wiktionary.org/w/api.php?action=parse&page=${encodeURIComponent(word)}&prop=wikitext&format=json&formatversion=2&redirects=1`;
+
+const wikitextOf = (j: unknown) => {
+  const t = (j as { parse?: { wikitext?: unknown } } | null)?.parse?.wikitext;
+  return typeof t === "string" ? t : null;
+};
+
+async function fetchEntry(word: string): Promise<{ entry: D.DictEntry; complete: boolean }> {
+  const got = await Promise.allSettled([
+    wiki(`https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(word)}`),
+    wiki(parseUrl("en", word)),
+    wiki(parseUrl("hi", word)),
+  ]);
+  if (got.every((g) => g.status === "rejected"))
+    throw new Error(
+      `Couldn't reach Wiktionary: ${(got[0] as PromiseRejectedResult).reason?.message ?? "no answer"}`,
+    );
+  const val = (i: number) => (got[i].status === "fulfilled" ? got[i].value : null);
+  return {
+    entry: D.buildEntry(word, {
+      enDefs: val(0),
+      enWiki: wikitextOf(val(1)),
+      hiWiki: wikitextOf(val(2)),
+    }),
+    complete: got.every((g) => g.status === "fulfilled"),
+  };
+}
+
+// Entries kept from earlier lookups (fresh ones only).
+async function cachedEntries(words: string[]): Promise<Map<string, D.DictEntry>> {
+  const out = new Map<string, D.DictEntry>();
+  if (!words.length) return out;
+  const cut = new Date(Date.now() - DICT_DAYS * 86_400_000).toISOString();
+  for (let i = 0; i < words.length; i += 200) {
+    const { data, error } = await from("flash_dictionary")
+      .select("word,entry")
+      .in("word", words.slice(i, i + 200))
+      .gte("fetched_at", cut);
+    // Before the dictionary's migration: nothing kept.
+    if (error && /flash_dictionary/.test(error.message)) return out;
+    fail(error);
+    for (const r of (data ?? []) as Row[]) out.set(String(r.word), r.entry as D.DictEntry);
+  }
+  return out;
+}
+
+// Words looked up in Wiktionary (kept a month; fetched when not kept).
+export async function lookupDictionary(
+  words: string[],
+): Promise<{ entries: D.DictEntry[]; failed: string[] }> {
+  const want = [...new Set(words.map((w) => w.normalize("NFC").trim()).filter(Boolean))];
+  const kept = await cachedEntries(want);
+  const entries: D.DictEntry[] = [];
+  const failed: string[] = [];
+  // A few at a time (Wiktionary asks callers to go easy).
+  const todo = want.filter((w) => !kept.has(w));
+  const fetched = new Map<string, D.DictEntry>();
+  for (let i = 0; i < todo.length; i += 3)
+    await Promise.all(
+      todo.slice(i, i + 3).map(async (w) => {
+        try {
+          const { entry, complete } = await fetchEntry(w);
+          fetched.set(w, entry);
+          if (complete) {
+            const { error } = await from("flash_dictionary").upsert(
+              { word: w, entry, fetched_at: now() } as never,
+              { onConflict: "word" },
+            );
+            if (error && !/flash_dictionary/.test(error.message)) fail(error);
+          }
+        } catch {
+          failed.push(w);
+        }
+      }),
+    );
+  for (const w of want) {
+    const e = kept.get(w) ?? fetched.get(w);
+    if (e) entries.push(e);
+  }
+  return { entries, failed };
+}
+
+// The dictionary lines for some cards' fronts, from what is kept (the AI
+// check doesn't wait on Wiktionary).
+async function dictLinesFor(fronts: string[]): Promise<string[]> {
+  const words = [...new Set(fronts.flatMap((f) => D.lookupWords(f)))];
+  const kept = await cachedEntries(words);
+  return words.map((w) => (kept.get(w) ? D.dictLine(kept.get(w)!) : "")).filter(Boolean);
 }
