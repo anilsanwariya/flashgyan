@@ -10,6 +10,8 @@
 // 3 → indices, two targets; 4 → ontology node. Lexical relations 18–29
 // are the antonyms (ANTO_ACTION … ANTO_MANNER).
 
+import { looseWord } from "@/lib/flash-spell";
+
 export type WnSynset = {
   id: number;
   // 1 noun, 2 adjective, 3 verb, 4 adverb.
@@ -92,6 +94,18 @@ export type WnSense = {
 
 // The senses of `word` from its synsets (those spelling it exactly first)
 // and their antonym synsets' words (the first few of each).
+// The words once each, a word spelt two ways (वसुंधरा / वसुन्धरा, ग़रीब /
+// गरीब) under its first spelling, and not the word itself.
+function oneSpelling(words: string[], self: string): string[] {
+  const seen = new Set([looseWord(self)]);
+  return words.filter((x) => {
+    const k = looseWord(x);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 export function wnSenses(
   word: string,
   synsets: WnSynset[],
@@ -104,10 +118,11 @@ export function wnSenses(
       pos: WN_POS[s.pos] ?? "",
       gloss: s.gloss,
       example: s.example,
-      synonyms: s.words.filter((x) => x !== w),
-      antonyms: [
-        ...new Set(s.antonyms.flatMap((a) => byId.get(a)?.words.slice(0, 4) ?? [])),
-      ].filter((x) => x !== w),
+      synonyms: oneSpelling(s.words, w),
+      antonyms: oneSpelling(
+        s.antonyms.flatMap((a) => byId.get(a)?.words.slice(0, 4) ?? []),
+        w,
+      ),
     }));
 }
 

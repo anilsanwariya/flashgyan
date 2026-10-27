@@ -90,14 +90,14 @@ export function numberingOf(cards: Pick<FlashCard, "back">[]): "." | ")" | null 
 const fixNumbering = (t: string, style: "." | ")") =>
   t.replace(/^(\s*\d+)[.)](\s)/gm, `$1${style}$2`);
 
-// A word written without its nukta and with ं for ँ: the same word spelt
+// A word in its loose form (see looseWord): the same word spelt
 // two ways meets here.
 const loose = looseWord;
 
 const wordsOf = (t: string) => t.normalize("NFC").match(/[ऀ-ॿ]+/g) ?? [];
 
-// Words spelt more than one way across the topic (nukta, ँ / ं): for each
-// loose form, its spellings and how many cards use each.
+// Words spelt more than one way across the topic (nukta, ँ / ं, half nasal
+// / ं): for each loose form, its spellings and how many cards use each.
 export function spellingVariants(
   cards: Pick<FlashCard, "front" | "back" | "ex" | "removed">[],
 ): Map<string, Map<string, number>> {

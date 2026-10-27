@@ -1,13 +1,42 @@
 // The house spelling list: for words that can be spelt more than one way
-// (nukta, ँ / ं), the spellings the editor accepts. A spelling is accepted
+// (nukta, ँ / ं, ं or the half nasal: संपन्न / सम्पन्न), the spellings the editor accepts. A spelling is accepted
 // when a verified card in any topic uses it, or the editor said so; the
 // editor can also prefer one, or call one wrong. Words spelt both ways in
 // verified cards (जरा / ज़रा are different words) are both accepted.
 // Pure: shared by the server, the panel, the quick checks and tests.
 import type { FlashCard } from "@/lib/flash-studio";
 
-// The loose form of a word: without its nukta, with ं for ँ.
-export const looseWord = (w: string) => w.normalize("NFC").replace(/़/g, "").replace(/ँ/g, "ं");
+// The loose form of a word: without its nukta, with ं for ँ, and with ं for
+// a half nasal before a consonant of its own group (पंचमाक्षर: सम्पन्न,
+// हिन्दी, वसुन्धरा → संपन्न, हिंदी, वसुंधरा). जन्म, अन्न and सम्मान keep theirs.
+export const looseWord = (w: string) =>
+  w
+    .normalize("NFC")
+    .replace(/़/g, "")
+    .replace(/ँ/g, "ं")
+    .replace(/ङ्(?=[कखगघ])|ञ्(?=[चछजझ])|ण्(?=[टठडढ])|न्(?=[तथदध])|म्(?=[पफबभ])/g, "ं");
+
+// Rules saved under an older loose form, met again under today's (and
+// merged when two now meet).
+export function mergeRules(rules: SpellRule[]): SpellRule[] {
+  const by = new Map<string, SpellRule>();
+  for (const r of rules) {
+    const key = looseWord(r.key);
+    const o = by.get(key);
+    by.set(
+      key,
+      o
+        ? {
+            key,
+            preferred: o.preferred ?? r.preferred,
+            accepted: [...new Set([...o.accepted, ...r.accepted])],
+            rejected: [...new Set([...o.rejected, ...r.rejected])],
+          }
+        : { ...r, key },
+    );
+  }
+  return [...by.values()];
+}
 
 export const wordsIn = (t: string) => t.normalize("NFC").match(/[ऀ-ॿ]+/g) ?? [];
 
