@@ -4,6 +4,7 @@
 // pages; this reads them (shared with tests).
 
 import type { WnSense } from "@/lib/flash-wordnet";
+import { looseWord } from "@/lib/flash-spell";
 
 export type DictSense = { pos: string; text: string; examples: string[] };
 
@@ -361,3 +362,65 @@ export function backItems(back: string): string[] {
 
 export const wiktionaryUrl = (word: string, lang: "en" | "hi") =>
   `https://${lang}.wiktionary.org/wiki/${encodeURIComponent(word)}${lang === "en" ? "#Hindi" : ""}`;
+
+// ---------- A card against Hindi WordNet ----------
+
+export type WnGap = {
+  // WordNet's words for the card's meaning not on its back.
+  missing: string[];
+  // The back's words WordNet doesn't list for this word (worth a look:
+  // rare, a spelling slip, or not the right word).
+  unlisted: string[];
+};
+
+// A पर्यायवाची card (`syn`) or a विलोम card (`ant`) against WordNet's
+// meanings of its front. For synonyms, the meaning(s) the back shares a
+// word with (else the first) give the missing words; any meaning's words
+// count as listed. Matched loosely (nukta, ँ / ं).
+export function wnGap(back: string, senses: WnSense[], kind: "syn" | "ant"): WnGap | null {
+  if (!senses.length) return null;
+  const items = backItems(back);
+  const have = new Set(items.map(looseWord));
+  const wordsOf = (s: WnSense) => (kind === "syn" ? s.synonyms : s.antonyms);
+  const all = new Set(senses.flatMap(wordsOf).map(looseWord));
+  if (kind === "ant" && !all.size) return null;
+  const meant = senses.filter((s) => wordsOf(s).some((w) => have.has(looseWord(w))));
+  const from = meant.length ? meant : kind === "syn" ? senses.slice(0, 1) : senses;
+  const missing = [...new Set(from.flatMap(wordsOf))]
+    .filter((w) => !have.has(looseWord(w)))
+    .slice(0, kind === "syn" ? 12 : 8);
+  const unlisted = items.filter((w) => !all.has(looseWord(w)));
+  return { missing, unlisted };
+}
+
+// Which side of WordNet a deck checks against: its deck type's key, else
+// its question (prompt). null: not a पर्यायवाची or विलोम deck.
+export function wnKind(templateKey: string | undefined, prompt: string): "syn" | "ant" | null {
+  if (templateKey === "paryayvachi" || /पर्यायवाची|समानार्थी/.test(prompt)) return "syn";
+  if (templateKey === "vilom" || /विलोम|विपरीतार्थ/.test(prompt)) return "ant";
+  return null;
+}
+
+// The words typed for drafting cards: one a line or comma-separated, each once.
+export function draftWords(text: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const w of text.split(/[\n,،;]+/)) {
+    const t = w.replace(/\s+/g, " ").trim();
+    if (!t || t.length > 80 || seen.has(looseWord(t))) continue;
+    seen.add(looseWord(t));
+    out.push(t);
+  }
+  return out;
+}
+
+// A draft card from one WordNet meaning: the synonyms (or opposites) on its
+// back, the meaning's gloss for an अर्थ column. Empty back: nothing to add.
+export function wnDraftCard(
+  word: string,
+  sense: WnSense,
+  kind: "syn" | "ant",
+): { front: string; back: string; meaning: string } {
+  const words = (kind === "syn" ? sense.synonyms : sense.antonyms).slice(0, 12);
+  return { front: word, back: words.join(", "), meaning: sense.gloss };
+}

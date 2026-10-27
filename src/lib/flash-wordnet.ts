@@ -110,3 +110,80 @@ export function wnSenses(
       ].filter((x) => x !== w),
     }));
 }
+
+// ---------- Word questions (पर्यायवाची, विलोम, अर्थ) ----------
+
+// Words of a question that say what it asks, not the word asked about.
+const QUESTION_WORDS = new Set(
+  (
+    "का के की को है हैं नहीं शब्द शब्दों पर्यायवाची समानार्थी समानार्थक विलोम विलोमार्थी " +
+    "विपरीत विपरीतार्थक विपरीतार्थी अर्थ अर्थों कौन कौनसा कौनसी कौन-सा कौन-सी सा सी से में " +
+    "निम्न निम्नलिखित एक उचित सही गलत असंगत युग्म चुनिए चुनें बताइए बताइये क्या होगा होता " +
+    "होती है। रूप लिए दिए गए गये गई वाला वाली वाले और या भी इनमें इसका इसके इस उस यह वह शुद्ध " +
+    "अशुद्ध उपयुक्त सर्वाधिक सबसे सटीक प्रयुक्त अन्य अलग ऐसा ऐसी जो जिस"
+  ).split(" "),
+);
+
+// What a question asks of a word: synonyms, opposites or a meaning (null:
+// not a word question).
+export function wordQuestion(text: string): "syn" | "ant" | "meaning" | null {
+  if (/पर्यायवाची|समानार्थ|synonym/i.test(text)) return "syn";
+  if (/विलोम|विपरीतार्थ|antonym|opposite/i.test(text)) return "ant";
+  if (/(का|के|की)\s+(सही\s+|उचित\s+)?अर्थ|अर्थ\s+(क्या|है|बताइ)|meaning of/i.test(text))
+    return "meaning";
+  return null;
+}
+
+// The Hindi words to look up for a word question: the quoted word(s) in it
+// (else its other Hindi words) and each option's words.
+export function wordQuestionWords(question: string, options: string[] = [], max = 14): string[] {
+  const out: string[] = [];
+  const add = (w: string) => {
+    const t = w
+      .replace(/[।?!.:\-–—()[\]{}0-9]+$/g, "")
+      .replace(/^[-–—([{]+/, "")
+      .trim();
+    if (!t || !/[ऀ-ॿ]/.test(t) || QUESTION_WORDS.has(t) || out.includes(t)) return;
+    out.push(t);
+  };
+  const quoted = [...question.matchAll(/['‘’"“”']([^'‘’"“”']{1,40})['‘’"“”']/g)].map((m) => m[1]);
+  if (quoted.length) quoted.forEach((q) => add(q.trim()));
+  else
+    question
+      .split(/[\s,;/]+/)
+      .filter((w) => /^[ऀ-ॿ-]+[।?]?$/.test(w))
+      .forEach(add);
+  for (const o of options)
+    for (const part of o.split(/[,;/]+/)) {
+      const words = part
+        .trim()
+        .split(/\s+/)
+        .filter((w) => /[ऀ-ॿ]/.test(w));
+      // An option of a word or two (a phrase is a meaning, not a word).
+      if (words.length && words.length <= 2) add(words.join(" "));
+    }
+  return out.slice(0, max);
+}
+
+// The words' WordNet meanings as a reference passage (a few lines a word).
+export function wnPassage(found: Record<string, WnSense[]>, chars = 1500): string {
+  const lines: string[] = [];
+  for (const [w, senses] of Object.entries(found)) {
+    if (!senses.length) continue;
+    lines.push(
+      `${w}: ` +
+        senses
+          .slice(0, 3)
+          .map(
+            (s) =>
+              `(${s.pos}) ${s.gloss}` +
+              (s.synonyms.length ? ` — पर्याय: ${s.synonyms.slice(0, 8).join(", ")}` : "") +
+              (s.antonyms.length ? ` — विलोम: ${s.antonyms.slice(0, 4).join(", ")}` : ""),
+          )
+          .join(" | "),
+    );
+  }
+  return lines.join("\n").slice(0, chars);
+}
+
+export const WN_CREDIT = "Hindi WordNet (CFILT, IIT Bombay)";

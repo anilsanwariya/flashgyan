@@ -2688,6 +2688,15 @@ async function wordnetFor(words: string[]): Promise<Map<string, WN.WnSense[]>> {
   return out;
 }
 
+// WordNet's meanings of these words, for the cards list (by word).
+export async function wordnetSenses(words: string[]): Promise<Record<string, WN.WnSense[]>> {
+  const out: Record<string, WN.WnSense[]> = {};
+  // A few dozen a request (the words go in its URL).
+  for (let i = 0; i < words.length; i += 60)
+    for (const [w, s] of await wordnetFor(words.slice(i, i + 60))) out[w] = s;
+  return out;
+}
+
 // What is loaded (null: the table isn't there yet — run the migration).
 export async function wordnetStatus(): Promise<{
   synsets: number;
@@ -2710,6 +2719,25 @@ export async function wordnetStatus(): Promise<{
       ? String(((data ?? []) as Row[])[0].loaded_at)
       : null,
   };
+}
+
+// SAATHI answering word questions with WordNet too (null: the
+// saathi_wordnet migration isn't run yet).
+export async function saathiWordnet(): Promise<boolean | null> {
+  const { data, error } = await from("home_settings").select("*").eq("id", 1).maybeSingle();
+  fail(error);
+  const row = data as Row | null;
+  return row && "saathi_wordnet" in row ? Boolean(row.saathi_wordnet) : null;
+}
+
+export async function setSaathiWordnet(on: boolean): Promise<boolean> {
+  const { error } = await from("home_settings")
+    .update({ saathi_wordnet: on } as never)
+    .eq("id", 1);
+  if (error && /saathi_wordnet/.test(error.message))
+    throw new Error("Run the latest migration (saathi_wordnet) first.");
+  fail(error);
+  return on;
 }
 
 // A batch of synsets loaded (the first batch empties what was there).
