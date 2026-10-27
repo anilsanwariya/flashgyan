@@ -374,10 +374,25 @@ export const fillFlashExplanations = createServerFn({ method: "POST" })
 
 export const checkFlashCards = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ topic_id: id, ids }).parse(d))
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        topic_id: id,
+        ids,
+        with_verified: z.boolean().optional(),
+        // Read again even if unchanged since the last check.
+        force: z.boolean().optional(),
+      })
+      .parse(d),
+  )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    return (await server()).checkCards(data.topic_id, data.ids);
+    return (await server()).checkCards(
+      data.topic_id,
+      data.ids,
+      data.with_verified ?? false,
+      data.force ?? false,
+    );
   });
 
 export const markFlashDownloaded = createServerFn({ method: "POST" })
@@ -532,6 +547,7 @@ export const startFlashServerJob = createServerFn({ method: "POST" })
         kind: z.enum(["check", "fill"]),
         ids: z.array(id).min(1).max(5000),
         with_verified: z.boolean().optional(),
+        force: z.boolean().optional(),
       })
       .parse(d),
   )
@@ -542,6 +558,7 @@ export const startFlashServerJob = createServerFn({ method: "POST" })
       data.kind,
       data.ids,
       data.with_verified ?? false,
+      data.force ?? false,
     );
   });
 
