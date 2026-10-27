@@ -53,6 +53,7 @@ import {
   resetFlashChunks,
   saveFlashAppIds,
   markFlashDownloaded,
+  nameFlashChunk,
   saveFlashCard,
   saveFlashTemplate,
   updateFlashTopic,
@@ -2822,18 +2823,22 @@ function ChunksTab({
   const download = async (chunk: number, work = false) => {
     const rows = chunkRows(topic, cards, chunk, work);
     saveBytes(
-      `${chunkFileName(topic.name, chunk)}${work ? " (working)" : ""}.xlsx`,
+      `${chunkFileName(topic.name, chunk, topic.chunks)}${work ? " (working)" : ""}.xlsx`,
       await xlsxBytes(rows),
       XLSX_TYPE,
     );
     if (!work) await downloaded([chunk]);
   };
   const zipOf = async (ns: number[], name: string) => {
+    // Two chunks given the same name: the second gets its number too.
+    const used = new Set<string>();
     const files = await Promise.all(
-      ns.map(async (n) => ({
-        name: `${chunkFileName(topic.name, n)}.xlsx`,
-        data: await xlsxBytes(chunkRows(topic, cards, n)),
-      })),
+      ns.map(async (n) => {
+        let base = chunkFileName(topic.name, n, topic.chunks);
+        if (used.has(base.toLowerCase())) base = `${base} (${n})`;
+        used.add(base.toLowerCase());
+        return { name: `${base}.xlsx`, data: await xlsxBytes(chunkRows(topic, cards, n)) };
+      }),
     );
     saveBytes(name, zipFiles(files), "application/zip");
     await downloaded(ns);
@@ -3068,6 +3073,7 @@ function ChunksTab({
                   className="flex flex-wrap items-center gap-x-3 gap-y-1 p-3 text-sm"
                 >
                   <span className="font-medium">Chunk {ch.n}</span>
+                  <ChunkName topic={topic} n={ch.n} onSaved={onChanged} />
                   <span className="text-muted-foreground">
                     {ch.from}–{ch.to} · {inChunk.length} cards
                   </span>
@@ -3157,6 +3163,46 @@ function ChunksTab({
   );
 }
 
+// A chunk's name, its file's name when downloaded: typed in place, saved
+// on Enter or on leaving the box (empty: the topic's name and number).
+function ChunkName({ topic, n, onSaved }: { topic: FlashTopic; n: number; onSaved: () => void }) {
+  const nameFn = useServerFn(nameFlashChunk);
+  const saved = topic.chunks.find((c) => c.n === n)?.name ?? "";
+  const [v, setV] = useState(saved);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setV(saved), [saved]);
+  const save = async () => {
+    if (v.trim() === saved.trim()) return;
+    setBusy(true);
+    try {
+      await nameFn({ data: { topic_id: topic.id, n, name: v } });
+      onSaved();
+      toast.success(v.trim() ? `Chunk ${n} is “${v.trim()}”` : `Chunk ${n} named after the topic`);
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't name it"));
+      setV(saved);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Input
+      aria-label={`Name of chunk ${n}`}
+      title="Its file's name when downloaded"
+      className="h-8 w-56 min-w-0 text-sm"
+      placeholder={chunkFileName(topic.name, n)}
+      value={v}
+      disabled={busy}
+      onChange={(e) => setV(e.target.value)}
+      onBlur={() => void save()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") setV(saved);
+      }}
+    />
+  );
+}
+
 function IdReport({ report, onClose }: { report: IdMatch; onClose: () => void }) {
   return (
     <div className="space-y-1 rounded-xl border border-border bg-muted/30 p-3 text-sm">
@@ -3217,7 +3263,8 @@ function SettingsTab({ topic, onChanged }: { topic: FlashTopic; onChanged: () =>
         <span className="font-medium">Topic name</span>
         <Input value={t.name} onChange={(e) => setT({ ...t, name: e.target.value })} />
         <span className="text-xs text-muted-foreground">
-          Chunk files are named “{chunkFileName(t.name, 1)}.xlsx”.
+          Chunk files are named “{chunkFileName(t.name, 1)}.xlsx” unless you name a chunk on the
+          Chunks tab.
         </span>
       </label>
       <PromptField value={t.prompt} onChange={(prompt) => setT({ ...t, prompt })} />

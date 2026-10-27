@@ -13,7 +13,7 @@ export type AppImportPlan = {
   // Explanation column titles (the master's, then any only in the app).
   columns: string[];
   prompt: string;
-  chunks: { n: number; from: number; to: number; cards: number; fromApp: boolean }[];
+  chunks: { n: number; from: number; to: number; cards: number; fromApp: boolean; file?: string }[];
   // Text the app has differently from the master (the app's kept).
   differ: AppDiff[];
   // A different word at the same number: the app's card kept.
@@ -43,7 +43,12 @@ const FIELDS: [keyof SheetCard, string][] = [
   ["back_hint", "backHint"],
 ];
 
-export function planAppImport(master: ParsedSheet | null, apps: ParsedSheet[]): AppImportPlan {
+export function planAppImport(
+  master: ParsedSheet | null,
+  apps: ParsedSheet[],
+  // The app files' names, in the same order (each chunk named after its file).
+  fileNames: string[] = [],
+): AppImportPlan {
   const problems: string[] = [];
   const plan: AppImportPlan = {
     cards: [],
@@ -67,9 +72,10 @@ export function planAppImport(master: ParsedSheet | null, apps: ParsedSheet[]): 
   // Each app file: one chunk (the master's chunk most of its numbers are in;
   // without a master, the files in number order).
   const files = apps
-    .map((a) => ({
+    .map((a, i) => ({
       cards: a.cards.filter((c) => c.order !== null),
       sheet: a,
+      file: (fileNames[i] ?? "").replace(/\.[^.]+$/, "").trim(),
       skipped: a.cards.filter((c) => c.order === null).length,
     }))
     .filter((f) => f.cards.length);
@@ -185,6 +191,7 @@ export function planAppImport(master: ParsedSheet | null, apps: ParsedSheet[]): 
       to: list[list.length - 1].order!,
       cards: list.length,
       fromApp: fromApp.has(n),
+      ...(fromApp.get(n)?.file ? { file: fromApp.get(n)!.file } : {}),
     }))
     .sort((a, b) => a.n - b.n);
   for (let i = 1; i < plan.chunks.length; i++)
