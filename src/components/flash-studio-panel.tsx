@@ -90,6 +90,7 @@ import {
   type IdMatch,
   type ParsedSheet,
   type WordKey,
+  frontIsWrong,
 } from "@/lib/flash-studio";
 import { zipFiles } from "@/lib/zip";
 import { BooksPanel } from "@/components/flash-studio-books";
@@ -546,6 +547,11 @@ function TemplateList() {
               </Button>
             </div>
             <div className="flex flex-wrap gap-1">
+              {t.wrong_front && (
+                <Badge tone="warn" title="Its front's spelling is never flagged or fixed">
+                  front wrong on purpose
+                </Badge>
+              )}
               {t.columns.map((c) => (
                 <Badge key={c.id} title={c.hint}>
                   {c.title}
@@ -583,7 +589,13 @@ function TemplateList() {
   );
 }
 
-type TemplateDraft = { name: string; prompt: string; columns: FlashColumn[]; word_key: WordKey };
+type TemplateDraft = {
+  name: string;
+  prompt: string;
+  columns: FlashColumn[];
+  word_key: WordKey;
+  wrong_front: boolean;
+};
 
 function TemplateDialog({
   template,
@@ -601,6 +613,7 @@ function TemplateDialog({
     prompt: template?.prompt ?? "",
     columns: template?.columns ?? [],
     word_key: template?.word_key ?? "",
+    wrong_front: template?.wrong_front ?? false,
   });
   const [busy, setBusy] = useState(false);
   return (
@@ -616,6 +629,23 @@ function TemplateDialog({
           </label>
           <PromptField value={t.prompt} onChange={(prompt) => setT({ ...t, prompt })} />
           <WordKeyField value={t.word_key} onChange={(word_key) => setT({ ...t, word_key })} />
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={t.wrong_front}
+              onChange={(e) => setT({ ...t, wrong_front: e.target.checked })}
+            />
+            <span>
+              <span className="font-medium">The front is wrong on purpose</span>
+              <span className="block text-xs text-muted-foreground">
+                For शब्द शुद्धि / वाक्य शुद्धि: the front is the incorrect form the student
+                corrects. Its spelling is never flagged or &quot;fixed&quot;, it never counts as a
+                house spelling, and the AI checks that it really has a mistake and that the back
+                corrects only that. The back and explanations are still proofread fully.
+              </span>
+            </span>
+          </label>
           <ColumnsEditor columns={t.columns} onChange={(columns) => setT({ ...t, columns })} />
           <div className="flex flex-wrap gap-2">
             <Button
@@ -1063,13 +1093,23 @@ function CardsTab({
     staleTime: 60_000,
   });
   const house = useMemo(() => houseFromList(houseQ.data ?? []), [houseQ.data]);
+  // The deck types: a शुद्धि deck's front is wrong on purpose (its
+  // spelling never checked); पर्यायवाची / विलोम decks are read with WordNet.
+  const typesFn = useServerFn(listFlashTemplates);
+  const typesQ = useQuery({ queryKey: ["flashTemplates"], queryFn: () => typesFn() });
+  const wrongFront = frontIsWrong(topic, typesQ.data);
   const lintCtx = useMemo(() => {
     const live = cards.filter((c) => !c.removed);
-    return { numbering: numberingOf(live), variants: spellingVariants(live), house };
-  }, [cards, house]);
+    return {
+      numbering: numberingOf(live),
+      variants: spellingVariants(live, wrongFront),
+      house,
+      wrongFront,
+    };
+  }, [cards, house, wrongFront]);
   const lints = useMemo(
-    () => lintTopic(cards, topic.columns, house),
-    [cards, topic.columns, house],
+    () => lintTopic(cards, topic.columns, house, wrongFront),
+    [cards, topic.columns, house, wrongFront],
   );
   // This topic's words that other topics have too.
   const otherFn = useServerFn(otherFlashTopicWords);
@@ -1083,8 +1123,6 @@ function CardsTab({
     [otherQ.data],
   );
   // A पर्यायवाची or विलोम deck against Hindi WordNet (when it is loaded).
-  const typesFn = useServerFn(listFlashTemplates);
-  const typesQ = useQuery({ queryKey: ["flashTemplates"], queryFn: () => typesFn() });
   const kind = wnKind(typesQ.data?.find((t) => t.id === topic.template_id)?.key, topic.prompt);
   const wnWords = useMemo(
     () =>

@@ -100,12 +100,14 @@ const wordsOf = (t: string) => t.normalize("NFC").match(/[ऀ-ॿ]+/g) ?? [];
 // / ं): for each loose form, its spellings and how many cards use each.
 export function spellingVariants(
   cards: Pick<FlashCard, "front" | "back" | "ex" | "removed">[],
+  // The front is wrong on purpose (शुद्धि decks): its words left out.
+  wrongFront = false,
 ): Map<string, Map<string, number>> {
   const by = new Map<string, Map<string, number>>();
   for (const c of cards) {
     if (c.removed) continue;
     const seen = new Set<string>();
-    for (const w of [c.front, c.back, ...Object.values(c.ex)].flatMap(wordsOf)) {
+    for (const w of [wrongFront ? "" : c.front, c.back, ...Object.values(c.ex)].flatMap(wordsOf)) {
       if (w.length < 2 || seen.has(w)) continue;
       seen.add(w);
       const k = loose(w);
@@ -129,6 +131,9 @@ export function lintCard(
     // The house spelling list (all topics' verified cards and the editor's
     // rules): words spelt another way are flagged, with the fix.
     house?: House;
+    // The front is wrong on purpose (शब्द शुद्धि, वाक्य शुद्धि): only its
+    // hidden letter codes are checked, never its spelling or spacing.
+    wrongFront?: boolean;
   },
 ): Lint[] {
   if (c.removed) return [];
@@ -148,6 +153,7 @@ export function lintCard(
         note: "Some letters are stored in another code (looks the same, but search and matching miss it)",
         fix: nfc,
       });
+    if (field === "front" && topic.wrongFront) continue;
     const spaced = fixSpaces(nfc);
     // Spaces only at line ends don't show (the app's own cards have them,
     // e.g. "असार - " before the next line): not flagged on their own.
@@ -213,7 +219,13 @@ export function lintCard(
   }
   if (!c.back.trim()) out.push({ kind: "empty", field: "back", note: "The back is empty" });
   else if (c.front.trim() && c.front.trim() === c.back.trim())
-    out.push({ kind: "same", field: "back", note: "The back is the same as the front" });
+    out.push({
+      kind: "same",
+      field: "back",
+      note: topic.wrongFront
+        ? "The back is the same as the front: the front should be the wrong form"
+        : "The back is the same as the front",
+    });
   return out;
 }
 
@@ -222,9 +234,15 @@ export function lintTopic(
   cards: FlashCard[],
   columns: FlashColumn[],
   house?: House,
+  wrongFront = false,
 ): Map<string, Lint[]> {
   const live = cards.filter((c) => !c.removed);
-  const topic = { numbering: numberingOf(live), variants: spellingVariants(live), house };
+  const topic = {
+    numbering: numberingOf(live),
+    variants: spellingVariants(live, wrongFront),
+    house,
+    wrongFront,
+  };
   const out = new Map<string, Lint[]>();
   for (const c of live) {
     const l = lintCard(c, columns, topic);

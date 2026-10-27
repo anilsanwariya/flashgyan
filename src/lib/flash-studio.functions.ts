@@ -92,6 +92,7 @@ export const saveFlashTemplate = createServerFn({ method: "POST" })
         prompt: z.string().max(1000),
         columns: z.array(column).max(30),
         word_key: wordKey,
+        wrong_front: z.boolean().optional(),
       })
       .parse(d),
   )

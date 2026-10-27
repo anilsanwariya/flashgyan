@@ -19,6 +19,8 @@ import * as SH from "@/lib/flash-sheets";
 import * as S from "@/lib/flash-split";
 import {
   DEFAULT_TEMPLATES,
+  WRONG_FRONT_KEYS,
+  frontIsWrong,
   lastNumbers,
   matchAppIds,
   newColumnId,
@@ -75,6 +77,9 @@ const readTemplate = (r: Row): FlashTemplate => ({
   word_key: wordKeyOf(r.word_key),
   examples: normalizeExamples(r.examples),
   sort: Number(r.sort) || 0,
+  // Before its migration: the शुद्धि deck types.
+  wrong_front:
+    typeof r.wrong_front === "boolean" ? r.wrong_front : WRONG_FRONT_KEYS.includes(String(r.key)),
 });
 
 const readTopic = (r: Row): FlashTopic => ({
@@ -126,7 +131,12 @@ export async function listTemplates(): Promise<FlashTemplate[]> {
   const rows = (data ?? []) as Row[];
   // The deck types the finished sheets use, added the first time.
   if (!rows.length) {
-    const { error: e } = await from("flash_templates").insert(DEFAULT_TEMPLATES as never);
+    let { error: e } = await from("flash_templates").insert(DEFAULT_TEMPLATES as never);
+    // Before the wrong_front migration: added without it (read by key).
+    if (e && /wrong_front/.test(e.message))
+      ({ error: e } = await from("flash_templates").insert(
+        DEFAULT_TEMPLATES.map(({ wrong_front: _, ...t }) => t) as never,
+      ));
     fail(e);
     return listTemplates();
   }
@@ -139,24 +149,33 @@ export async function saveTemplate(t: {
   prompt: string;
   columns: FlashColumn[];
   word_key: WordKey;
+  wrong_front?: boolean;
 }): Promise<FlashTemplate> {
-  const row = {
+  const base = {
     name: t.name.trim() || "Deck type",
     prompt: t.prompt,
     columns: normalizeColumns(t.columns),
     word_key: t.word_key,
     updated_at: now(),
   };
-  const q = t.id
-    ? from("flash_templates")
-        .update(row as never)
-        .eq("id", t.id)
-    : from("flash_templates").insert({
-        ...row,
-        key: `own-${Date.now().toString(36)}`,
-        sort: 100,
-      } as never);
-  const { data, error } = await q.select("*").single();
+  const save = (row: Record<string, unknown>) =>
+    (t.id
+      ? from("flash_templates")
+          .update(row as never)
+          .eq("id", t.id)
+      : from("flash_templates").insert({
+          ...row,
+          key: `own-${Date.now().toString(36)}`,
+          sort: 100,
+        } as never)
+    )
+      .select("*")
+      .single();
+  let { data, error } = await save(
+    t.wrong_front === undefined ? base : { ...base, wrong_front: t.wrong_front },
+  );
+  // Before the wrong_front migration: the rest saved.
+  if (error && /wrong_front/.test(error.message)) ({ data, error } = await save(base));
   fail(error);
   return readTemplate(data as unknown as Row);
 }
@@ -216,7 +235,11 @@ export async function listTopics(): Promise<TopicSummary[]> {
       for (const r of (rows ?? []) as Row[])
         jobs.set(String(r.topic_id), (jobs.get(String(r.topic_id)) ?? 0) + 1);
   }
-  const house = SP.buildHouse(SP.spellCounts([...byTopic.values()].flat()), await spellRules());
+  const wrong = await wrongFronts(topics);
+  const house = SP.buildHouse(
+    SP.spellCounts(topics.flatMap((t) => SP.forHouse(byTopic.get(t.id) ?? [], wrong.has(t.id)))),
+    await spellRules(),
+  );
   return topics.map((t) => {
     const all = byTopic.get(t.id) ?? [];
     const live = all.filter((c) => !c.removed);
@@ -230,7 +253,7 @@ export async function listTopics(): Promise<TopicSummary[]> {
       withId: live.filter((c) => c.app_id).length,
       removed: all.length - live.length,
       ai: live.filter((c) => c.ai?.fixes.length).length,
-      lint: L.lintTopic(live, t.columns, house).size,
+      lint: L.lintTopic(live, t.columns, house, wrong.has(t.id)).size,
       missing: live.filter((c) => M.emptyColumns(c, t.columns).length > 0).length,
       unchecked: live.filter((c) => needsCheck(c, true)).length,
       changedChunks: [...changes]
@@ -1059,6 +1082,7 @@ async function deckOf(topic: FlashTopic) {
     prompt: topic.prompt,
     columns: topic.columns,
     examples: [] as FlashTemplate["examples"],
+    wrongFront: frontIsWrong(topic, []),
   };
   if (topic.template_id) {
     const { data: t } = await from("flash_templates")
@@ -1067,7 +1091,7 @@ async function deckOf(topic: FlashTopic) {
       .maybeSingle();
     if (t) {
       const tpl = readTemplate(t as unknown as Row);
-      deck = { ...deck, name: tpl.name, examples: tpl.examples };
+      deck = { ...deck, name: tpl.name, examples: tpl.examples, wrongFront: tpl.wrong_front };
     }
   }
   return deck;
@@ -1227,12 +1251,20 @@ export async function checkCards(
           (await houseNow()).house,
           items.flatMap((it) => [it.front, it.back, ...Object.values(it.ex)]),
         ),
-        await dictLinesFor(items.map((it) => it.front)),
+        // A शुद्धि deck's front is wrong on purpose: its back's words instead.
+        await dictLinesFor(items.map((it) => (deck.wrongFront ? it.back : it.front))),
+        await spellHintsFor(
+          items.flatMap((it) => [
+            deck.wrongFront ? "" : it.front,
+            it.back,
+            ...Object.values(it.ex),
+          ]),
+        ),
       ),
     ),
     items,
     topic.columns,
-  );
+  ).map((f) => (deck.wrongFront && f.field === "front" ? { ...f, fix: "" } : f));
   const at = now();
   const rows = want.map((c, i) => {
     const mine = flags.filter((f) => f.n === i + 1);
@@ -1623,7 +1655,12 @@ export async function bulkCards(
       });
     }
   else if (action === "fix_lint") {
-    const lints = L.lintTopic(cards, topic.columns, (await houseNow()).house);
+    const lints = L.lintTopic(
+      cards,
+      topic.columns,
+      (await houseNow()).house,
+      (await wrongFronts([topic])).has(topic.id),
+    );
     for (const c of chosen) {
       const mine = (lints.get(c.id) ?? []).filter((l) => l.fix !== undefined);
       if (!mine.length) continue;
@@ -2452,19 +2489,39 @@ async function spellRules(): Promise<SP.SpellRule[]> {
   );
 }
 
+// The topics whose front is wrong on purpose (their deck type's setting).
+async function wrongFronts(
+  topics: { id: string; template_id: string | null; prompt: string }[],
+): Promise<Set<string>> {
+  const { data, error } = await from("flash_templates").select("*");
+  fail(error);
+  const templates = ((data ?? []) as Row[]).map(readTemplate);
+  return new Set(topics.filter((t) => frontIsWrong(t, templates)).map((t) => t.id));
+}
+
 // Every topic's spellings and the rules (read afresh: a topic just added
 // brings its own spellings).
 async function houseNow() {
   const cards: Pick<FlashCard, "front" | "back" | "ex" | "removed" | "verified">[] = [];
+  // A शुद्धि deck's fronts are wrong on purpose: never house spellings.
+  const { data: tops, error: te } = await from("flash_topics").select("id,template_id,prompt");
+  fail(te);
+  const wrong = await wrongFronts(
+    ((tops ?? []) as Row[]).map((t) => ({
+      id: String(t.id),
+      template_id: (t.template_id as string) ?? null,
+      prompt: String(t.prompt ?? ""),
+    })),
+  );
   for (let page = 0; ; page++) {
     const { data, error } = await from("flash_cards")
-      .select("id,front,back,ex,removed,verified")
+      .select("id,topic_id,front,back,ex,removed,verified")
       .order("id")
       .range(page * 1000, page * 1000 + 999);
     fail(error);
     for (const r of (data ?? []) as Row[])
       cards.push({
-        front: String(r.front ?? ""),
+        front: wrong.has(String(r.topic_id)) ? "" : String(r.front ?? ""),
         back: String(r.back ?? ""),
         ex: normalizeEx(r.ex),
         removed: !!r.removed,
@@ -2647,6 +2704,28 @@ async function dictLinesFor(fronts: string[]): Promise<string[]> {
 }
 
 // ---------- Hindi WordNet ----------
+
+// The cards' words WordNet has close to, not as written (see
+// D.spellHintLines), for the AI check; none before WordNet is loaded.
+async function spellHintsFor(texts: string[]): Promise<string[]> {
+  const words = [...new Set(texts.flatMap(SP.wordsIn))].filter((w) => w.length > 1).slice(0, 200);
+  const keys = [...new Set(words.flatMap((w) => [w, ...D.vowelVariants(w)].map(SP.looseWord)))];
+  const byLoose = new Map<string, string[]>();
+  for (let i = 0; i < keys.length; i += 60) {
+    const { data, error } = await from("flash_wn_words")
+      .select("word,loose")
+      .in("loose", keys.slice(i, i + 60));
+    if (wnMissing(error)) return [];
+    fail(error);
+    for (const r of (data ?? []) as Row[]) {
+      const k = String(r.loose);
+      const list = byLoose.get(k) ?? [];
+      if (!list.includes(String(r.word))) list.push(String(r.word));
+      byLoose.set(k, list);
+    }
+  }
+  return D.spellHintLines(words, byLoose);
+}
 
 const wnMissing = (e: { message: string } | null) => !!e && /flash_wn_/.test(e.message);
 

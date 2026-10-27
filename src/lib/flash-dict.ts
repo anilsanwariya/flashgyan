@@ -424,3 +424,47 @@ export function wnDraftCard(
   const words = (kind === "syn" ? sense.synonyms : sense.antonyms).slice(0, 12);
   return { front: word, back: words.join(", "), meaning: sense.gloss };
 }
+
+// ---------- Spelling hints from WordNet ----------
+
+// Spellings a word may have been meant as: one short / long vowel sign
+// swapped (ि / ी, ु / ू), one at a time.
+export function vowelVariants(w: string): string[] {
+  const swap: Record<string, string> = { "ि": "ी", "ी": "ि", "ु": "ू", "ू": "ु" };
+  const out: string[] = [];
+  const chars = [...w.normalize("NFC")];
+  chars.forEach((ch, i) => {
+    if (swap[ch]) out.push([...chars.slice(0, i), swap[ch], ...chars.slice(i + 1)].join(""));
+  });
+  return out;
+}
+
+// Two spellings only a half nasal / ं apart (हिन्दी, हिंदी): both accepted.
+const nasalOnly = (a: string, b: string) =>
+  a.replace(/ङ्(?=[कखगघ])|ञ्(?=[चछजझ])|ण्(?=[टठडढ])|न्(?=[तथदध])|म्(?=[पफबभ])/g, "ं") ===
+  b.replace(/ङ्(?=[कखगघ])|ञ्(?=[चछजझ])|ण्(?=[टठडढ])|न्(?=[तथदध])|म्(?=[पफबभ])/g, "ं");
+
+// One line per word WordNet doesn't have as written but has close to it:
+// spelt with or without a nukta or ँ (same loose form), or with a short /
+// long vowel swapped. `byLoose`: WordNet's words by loose form.
+export function spellHintLines(
+  words: string[],
+  byLoose: Map<string, string[]>,
+  max = 40,
+): string[] {
+  const out: string[] = [];
+  for (const w of words) {
+    const same = byLoose.get(looseWord(w)) ?? [];
+    if (same.includes(w)) continue;
+    const other = same.filter((x) => !nasalOnly(x, w));
+    if (same.length && !other.length) continue;
+    if (other.length) {
+      out.push(`${w}: WordNet writes ${other.slice(0, 2).join(" / ")}`);
+    } else {
+      const near = [...new Set(vowelVariants(w).flatMap((v) => byLoose.get(looseWord(v)) ?? []))];
+      if (near.length) out.push(`${w}: not in WordNet; it has ${near.slice(0, 2).join(" / ")}`);
+    }
+    if (out.length >= max) break;
+  }
+  return out;
+}
