@@ -2442,12 +2442,14 @@ async function spellRules(): Promise<SP.SpellRule[]> {
   const { data, error } = await from("flash_spellings").select("*");
   if (error && /flash_spellings/.test(error.message)) return [];
   fail(error);
-  return ((data ?? []) as Row[]).map((r) => ({
-    key: String(r.key),
-    preferred: typeof r.preferred === "string" && r.preferred ? r.preferred : null,
-    accepted: Array.isArray(r.accepted) ? (r.accepted as string[]) : [],
-    rejected: Array.isArray(r.rejected) ? (r.rejected as string[]) : [],
-  }));
+  return SP.mergeRules(
+    ((data ?? []) as Row[]).map((r) => ({
+      key: String(r.key),
+      preferred: typeof r.preferred === "string" && r.preferred ? r.preferred : null,
+      accepted: Array.isArray(r.accepted) ? (r.accepted as string[]) : [],
+      rejected: Array.isArray(r.rejected) ? (r.rejected as string[]) : [],
+    })),
+  );
 }
 
 // Every topic's spellings and the rules (read afresh: a topic just added
@@ -2497,6 +2499,14 @@ export async function saveSpellRule(rule: SP.SpellRule): Promise<SP.SpellRow[]> 
     (w) => !accepted.includes(w) && w !== rule.preferred,
   );
   const preferred = rule.preferred?.normalize("NFC").trim() || null;
+  // The same word saved under an older loose form: replaced by this one.
+  {
+    const { data } = await from("flash_spellings").select("key");
+    const old = ((data ?? []) as Row[])
+      .map((r) => String(r.key))
+      .filter((k) => k !== key && SP.looseWord(k) === key);
+    if (old.length) fail((await from("flash_spellings").delete().in("key", old)).error);
+  }
   if (!preferred && !accepted.length && !rejected.length)
     fail((await from("flash_spellings").delete().eq("key", key)).error);
   else {
