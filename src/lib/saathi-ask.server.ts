@@ -10,6 +10,7 @@ import {
   saathiNoMaterialReply,
   saathiPrepareQuery,
   saathiRetrieve,
+  type SaathiMatch,
   type SaathiQuery,
   type SaathiRpc,
   type SaathiSource,
@@ -24,6 +25,7 @@ import {
   type MainsPlan,
 } from "../../supabase/functions/_shared/saathi-mains.ts";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import * as WN from "@/lib/flash-wordnet";
 
 const askSchema = z.object({
   question: z.string().trim().min(1).max(2000),
@@ -139,6 +141,43 @@ export async function isSaathiLocked(): Promise<boolean> {
   return Boolean(data?.lock_saathi);
 }
 
+// Whether SAATHI may use Hindi WordNet (off unless switched on in the
+// card studio; off too before its migration).
+export async function saathiUsesWordnet(): Promise<boolean> {
+  const { data } = await supabaseAdmin.from("home_settings").select("*").eq("id", 1).maybeSingle();
+  return Boolean((data as Record<string, unknown> | null)?.saathi_wordnet);
+}
+
+// A word question (पर्यायवाची, विलोम, अर्थ) with WordNet switched on: the
+// words' Hindi WordNet meanings as one more passage (credited as a source).
+// Never blocks an answer.
+async function wordnetMatch(question: string): Promise<SaathiMatch | null> {
+  try {
+    if (!WN.wordQuestion(question) || !(await saathiUsesWordnet())) return null;
+    const words = WN.wordQuestionWords(question, [], 6);
+    if (!words.length) return null;
+    const { wordnetSenses } = await import("@/lib/flash-studio.server");
+    const content = WN.wnPassage(await wordnetSenses(words));
+    if (!content) return null;
+    return {
+      id: "hindi-wordnet",
+      title: WN.WN_CREDIT,
+      subject: "हिन्दी",
+      topic: "शब्दकोश",
+      language: "Hindi",
+      content,
+      source_file: null,
+      source: "CFILT, IIT Bombay",
+      vector_score: 1,
+      keyword_score: 0,
+      similarity: 1,
+    };
+  } catch (e) {
+    console.error("saathi wordnet:", e);
+    return null;
+  }
+}
+
 async function recordKnowledgeGap(question: string) {
   const { error } = await supabaseAdmin.rpc("increment_knowledge_gap", { gap_question: question });
   if (error) console.error("saathi knowledge gap:", error.message);
@@ -198,6 +237,8 @@ export async function handleSaathiAsk(request: Request): Promise<Response> {
       subjects,
       query,
     }));
+    const wn = await wordnetMatch(input.question);
+    if (wn) matches = [...matches, wn];
   } catch (e) {
     console.error("saathi search:", e);
     if (e instanceof SaathiAiError && (e.status === 429 || e.status === 402)) {
@@ -222,6 +263,8 @@ export async function handleSaathiAsk(request: Request): Promise<Response> {
   }
 
   const used = matches;
+  // Not cached with WordNet in it, so switching it off takes effect at once.
+  const withWordnet = matches.some((m) => m.id === "hindi-wordnet");
   const q = query;
   return ndjson(async (emit) => {
     const noAnswerFilter = new NoAnswerFilter();
@@ -243,7 +286,7 @@ export async function handleSaathiAsk(request: Request): Promise<Response> {
     if (noAnswer || general) await recordKnowledgeGap(q.standalone);
     const sources = noAnswer || general ? [] : collectSources(used);
     const followups = noAnswer ? [] : nextFilter.questions;
-    if (!noAnswer && !request.signal.aborted) {
+    if (!noAnswer && !withWordnet && !request.signal.aborted) {
       await cachePut("web", q, subjects, {
         answer: answer.trimEnd(),
         sources,

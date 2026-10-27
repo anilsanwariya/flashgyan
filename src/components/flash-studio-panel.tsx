@@ -11,6 +11,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   AlertTriangle,
+  BookOpen,
   ArrowDown,
   ArrowLeft,
   ArrowRight,
@@ -52,6 +53,7 @@ import {
   listFlashTopics,
   numberFlashCards,
   otherFlashTopicWords,
+  flashWordnetSenses,
   resetFlashChunks,
   saveFlashAppIds,
   markFlashDownloaded,
@@ -132,7 +134,12 @@ import { BOOK_FILE_TYPES, isBookFile } from "@/lib/flash-read";
 import { StudentPreview } from "@/components/flash-studio-preview";
 import { AppImportDialog, CompareWithApp } from "@/components/flash-studio-import";
 import { SpellingList } from "@/components/flash-studio-spellings";
-import { DictionaryPanel, WordnetSettings } from "@/components/flash-studio-dict";
+import {
+  DictionaryPanel,
+  WordnetDraftDialog,
+  WordnetSettings,
+} from "@/components/flash-studio-dict";
+import { wnGap, wnKind, type WnGap } from "@/lib/flash-dict";
 import { houseFromList } from "@/lib/flash-spell";
 import { Badge, PageTabs, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
@@ -937,6 +944,8 @@ type Filter =
   | "lint"
   | "other"
   | "unnumbered"
+  | "wnMissing"
+  | "wnUnlisted"
   | "removed";
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "All" },
@@ -953,6 +962,8 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "other", label: "In other topics" },
   { id: "notes", label: "Notes" },
   { id: "unnumbered", label: "Not numbered" },
+  { id: "wnMissing", label: "WordNet: more words" },
+  { id: "wnUnlisted", label: "WordNet: not listed" },
   { id: "removed", label: "Removed" },
 ];
 
@@ -963,7 +974,10 @@ function passes(
   columns: FlashColumn[],
   lints?: Map<string, Lint[]>,
   other?: Map<string, unknown>,
+  wn?: Map<string, WnGap>,
 ): boolean {
+  if (f === "wnMissing") return !c.removed && !!wn?.get(c.id)?.missing.length;
+  if (f === "wnUnlisted") return !c.removed && !!wn?.get(c.id)?.unlisted.length;
   if (f === "lint") return !c.removed && !!lints?.get(c.id)?.length;
   if (f === "other") return !c.removed && !!other?.has(dupKey(c.front));
   if (f === "removed") return c.removed;
@@ -1023,6 +1037,7 @@ function CardsTab({
   const [reviewing, setReviewing] = useState(false);
   const [finding, setFinding] = useState(false);
   const [trash, setTrash] = useState(false);
+  const [drafting, setDrafting] = useState(false);
   const books = new Map(topic.books.map((b) => [b.code, b]));
   const bookCodes = useMemo(
     () => [...new Set([...topic.books.map((b) => b.code), ...cards.flatMap((c) => booksOf(c))])],
@@ -1067,6 +1082,31 @@ function CardsTab({
     () => new Map((otherQ.data ?? []).map((o) => [o.key, o.topics])),
     [otherQ.data],
   );
+  // A पर्यायवाची or विलोम deck against Hindi WordNet (when it is loaded).
+  const typesFn = useServerFn(listFlashTemplates);
+  const typesQ = useQuery({ queryKey: ["flashTemplates"], queryFn: () => typesFn() });
+  const kind = wnKind(typesQ.data?.find((t) => t.id === topic.template_id)?.key, topic.prompt);
+  const wnWords = useMemo(
+    () =>
+      kind ? [...new Set(cards.map((c) => c.front.trim()).filter((w) => w && w.length <= 80))] : [],
+    [cards, kind],
+  );
+  const wnFn = useServerFn(flashWordnetSenses);
+  const wnQ = useQuery({
+    queryKey: ["flashWnSenses", topic.id, wnWords],
+    queryFn: () => wnFn({ data: { words: wnWords.slice(0, 3000) } }),
+    enabled: wnWords.length > 0,
+    staleTime: 5 * 60_000,
+  });
+  const wnGaps = useMemo(() => {
+    const m = new Map<string, WnGap>();
+    if (!kind || !wnQ.data) return m;
+    for (const c of cards) {
+      const g = wnGap(c.back, wnQ.data[c.front.trim()] ?? [], kind);
+      if (g) m.set(c.id, g);
+    }
+    return m;
+  }, [cards, kind, wnQ.data]);
   // Cards ticked for an action on them all.
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const pickOne = (id: string, on: boolean) =>
@@ -1092,15 +1132,15 @@ function CardsTab({
       Object.fromEntries(
         FILTERS.map((f) => [
           f.id,
-          inBook.filter((c) => passes(c, f.id, topic.columns, lints, inOther)).length,
+          inBook.filter((c) => passes(c, f.id, topic.columns, lints, inOther, wnGaps)).length,
         ]),
       ) as Record<Filter, number>,
-    [inBook, topic.columns, lints, inOther],
+    [inBook, topic.columns, lints, inOther, wnGaps],
   );
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
     const picked = inBook
-      .filter((c) => passes(c, filter, topic.columns, lints, inOther))
+      .filter((c) => passes(c, filter, topic.columns, lints, inOther, wnGaps))
       .filter(
         (c) =>
           !q ||
@@ -1108,7 +1148,7 @@ function CardsTab({
           String(c.card_order) === q,
       );
     return sortCards(picked, sort, desc);
-  }, [inBook, filter, query, topic.columns, sort, desc, lints, inOther]);
+  }, [inBook, filter, query, topic.columns, sort, desc, lints, inOther, wnGaps]);
   const startProof = (from: FlashCard[]) => {
     if (!from.length) return;
     const first = from.findIndex((c) => !c.verified);
@@ -1163,6 +1203,15 @@ function CardsTab({
         onAdd={() => onTab("sheets")}
         onTab={onTab}
       />
+      {drafting && kind && (
+        <WordnetDraftDialog
+          topic={topic}
+          kind={kind}
+          fronts={cards.filter((c) => !c.removed).map((c) => c.front.trim())}
+          onClose={() => setDrafting(false)}
+          onAdded={onChanged}
+        />
+      )}
       <BooksPanel
         topic={topic}
         sources={sources.filter((s) => s.kind !== "sheet")}
@@ -1208,6 +1257,11 @@ function CardsTab({
             <DropdownMenuItem onSelect={() => setPasting(true)}>
               <ClipboardPaste className="mr-2 h-4 w-4" /> Pasted text (AI reads it)
             </DropdownMenuItem>
+            {kind && (
+              <DropdownMenuItem onSelect={() => setDrafting(true)}>
+                <BookOpen className="mr-2 h-4 w-4" /> Drafts from Hindi WordNet…
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
         <input
@@ -1426,6 +1480,22 @@ function CardsTab({
                 {c.app_id && <Badge title={`App id ${c.app_id}`}>app id</Badge>}
                 {c.removed && <Badge tone="warn">Removed</Badge>}
                 <CardFlags topic={topic} card={c} />
+                {!c.removed && !!wnGaps.get(c.id)?.missing.length && (
+                  <Badge
+                    tone="primary"
+                    title={`WordNet also has: ${wnGaps.get(c.id)!.missing.join(", ")}`}
+                  >
+                    WordNet +{wnGaps.get(c.id)!.missing.length}
+                  </Badge>
+                )}
+                {!c.removed && !!wnGaps.get(c.id)?.unlisted.length && (
+                  <Badge
+                    tone="warn"
+                    title={`Not in WordNet for this word: ${wnGaps.get(c.id)!.unlisted.join(", ")}`}
+                  >
+                    not in WordNet: {wnGaps.get(c.id)!.unlisted.length}
+                  </Badge>
+                )}
                 {inOther.get(dupKey(c.front)) && (
                   <Badge
                     tone="primary"

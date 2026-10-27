@@ -765,3 +765,28 @@ export const clearFlashWordnet = createServerFn({ method: "POST" })
     await (await server()).clearWordnet();
     return { ok: true };
   });
+
+export const flashWordnetSenses = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ words: z.array(z.string().min(1).max(80)).max(3000) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).wordnetSenses(data.words);
+  });
+
+export const getFlashSaathiWordnet = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return { on: await (await server()).saathiWordnet() };
+  });
+
+export const setFlashSaathiWordnet = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ on: z.boolean() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return { on: await (await server()).setSaathiWordnet(data.on) };
+  });

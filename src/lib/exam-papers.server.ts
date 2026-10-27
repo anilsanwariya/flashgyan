@@ -48,6 +48,7 @@ import {
 } from "@/lib/exam-papers";
 import type { CaContent, CaFact } from "@/lib/current-affairs";
 import * as CA from "@/lib/current-affairs.server";
+import * as WN from "@/lib/flash-wordnet";
 
 const from = (table: string) => supabaseAdmin.from(table as never);
 const fail = (e: { message: string } | null) => {
@@ -667,14 +668,28 @@ export async function explainStep(
             .then((m) => relevantMatches(m).slice(0, 3))
             .catch(() => [])
         : [];
-      return {
-        q,
-        passages: matches.map((m) => ({
-          k: ++k,
-          title: matchLabel(m),
-          content: m.content.slice(0, 1500),
-        })),
-      };
+      const passages = matches.map((m) => ({
+        k: ++k,
+        title: matchLabel(m),
+        content: m.content.slice(0, 1500),
+      }));
+      // A पर्यायवाची / विलोम / अर्थ question: the words' Hindi WordNet
+      // meanings too (when it is loaded in the card studio).
+      const wq = [q.question_hi, q.question_en].filter(Boolean).join("\n");
+      if (WN.wordQuestion(wq)) {
+        const words = WN.wordQuestionWords(
+          q.question_hi || q.question_en,
+          q.options.map((o) => o.hi || o.en),
+        );
+        const content = words.length
+          ? await import("@/lib/flash-studio.server")
+              .then((m) => m.wordnetSenses(words))
+              .then((f) => WN.wnPassage(f, 2500))
+              .catch(() => "")
+          : "";
+        if (content) passages.push({ k: ++k, title: WN.WN_CREDIT, content });
+      }
+      return { q, passages };
     }),
   );
   const { glossary } = await CA.getMagazineSettings();
