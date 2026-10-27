@@ -22,6 +22,14 @@ export type AppImportPlan = {
   appOnly: { order: number; front: string }[];
   // In the master, missing from the app's export of its chunk: left out.
   notInApp: { order: number; front: string }[];
+  // A master with numbers (order) but no chunks (sheet): the app files'
+  // number ranges are chunks; the cards no app file covers are cut into
+  // chunks of these sizes (by default, each unbroken run of numbers).
+  ordered?: {
+    uncovered: number;
+    runs: { from: number; to: number; count: number }[];
+    sizes: number[];
+  };
   problems: string[];
 };
 
@@ -43,11 +51,89 @@ const FIELDS: [keyof SheetCard, string][] = [
   ["back_hint", "backHint"],
 ];
 
+// A master's cards numbered (order) but not chunked (sheet), given their
+// chunks: each app file's number range is one; the cards outside them are
+// cut, in number order, into chunks of `sizes` (default: each unbroken run
+// of numbers between the app files' ranges). Chunks are numbered by their
+// first card.
+export function chunkByOrder(
+  cards: SheetCard[],
+  ranges: { from: number; to: number }[],
+  sizes?: number[],
+): { cards: SheetCard[]; ordered: NonNullable<AppImportPlan["ordered"]>; problems: string[] } {
+  const problems: string[] = [];
+  const inRange = (o: number) => ranges.findIndex((r) => o >= r.from && o <= r.to);
+  const sorted = [...cards].sort((a, b) => a.order! - b.order!);
+  const rest = sorted.filter((c) => inRange(c.order!) < 0);
+  // Unbroken runs: an app file's range between two cards breaks a run.
+  const runs: SheetCard[][] = [];
+  for (const c of rest) {
+    const last = runs[runs.length - 1];
+    const prev = last?.[last.length - 1];
+    if (prev && !ranges.some((r) => r.from > prev.order! && r.to < c.order!)) last.push(c);
+    else runs.push([c]);
+  }
+  const runSizes = runs.map((r) => r.length);
+  let use = sizes?.length ? sizes : runSizes;
+  const sum = use.reduce((a, b) => a + b, 0);
+  if (sum !== rest.length) {
+    problems.push(
+      `The chunk sizes add up to ${sum}; the cards outside the app files are ${rest.length}.`,
+    );
+    use = runSizes;
+  }
+  // Cut; a chunk mustn't reach across an app file's range.
+  const cut = (list: number[]) => {
+    const segs: SheetCard[][] = [];
+    let at = 0;
+    for (const n of list) {
+      segs.push(rest.slice(at, at + n));
+      at += n;
+    }
+    return segs;
+  };
+  let segs = cut(use);
+  const crosses = segs.some((seg) =>
+    seg.some((c, i) => i > 0 && ranges.some((r) => r.from > seg[i - 1].order! && r.to < c.order!)),
+  );
+  if (crosses) {
+    problems.push("A chunk of those sizes would reach across a chunk from the app: sizes reset.");
+    use = runSizes;
+    segs = cut(use);
+  }
+  const chunks = [
+    ...ranges.map((r) => ({
+      from: r.from,
+      range: r as { from: number; to: number } | null,
+      seg: null as SheetCard[] | null,
+    })),
+    ...segs.filter((x) => x.length).map((seg) => ({ from: seg[0].order!, range: null, seg })),
+  ].sort((a, b) => a.from - b.from);
+  const sheetOf = new Map<SheetCard, number>();
+  chunks.forEach((ch, i) => {
+    if (ch.seg) for (const c of ch.seg) sheetOf.set(c, i + 1);
+    else
+      for (const c of sorted)
+        if (c.order! >= ch.range!.from && c.order! <= ch.range!.to) sheetOf.set(c, i + 1);
+  });
+  return {
+    cards: cards.map((c) => ({ ...c, sheet: sheetOf.get(c) ?? null })),
+    ordered: {
+      uncovered: rest.length,
+      runs: runs.map((r) => ({ from: r[0].order!, to: r[r.length - 1].order!, count: r.length })),
+      sizes: use,
+    },
+    problems,
+  };
+}
+
 export function planAppImport(
   master: ParsedSheet | null,
   apps: ParsedSheet[],
   // The app files' names, in the same order (each chunk named after its file).
   fileNames: string[] = [],
+  // A master without chunks: the sizes for its cards outside the app files.
+  restSizes?: number[],
 ): AppImportPlan {
   const problems: string[] = [];
   const plan: AppImportPlan = {
@@ -61,9 +147,29 @@ export function planAppImport(
     notInApp: [],
     problems,
   };
-  if (master && !master.numbered)
-    problems.push("The master sheet needs a sheet (chunk) and an order number on every card.");
-  const masterCards = master?.numbered ? master.cards : [];
+  let masterCards = master?.numbered ? master.cards : [];
+  // Numbered but not chunked: chunks from the app files and the sizes.
+  const ordered =
+    !!master &&
+    !master.numbered &&
+    master.cards.length > 0 &&
+    master.cards.every((c) => c.order !== null && c.order > 0);
+  if (master && !master.numbered && !ordered)
+    problems.push("The master sheet needs an order number (its number in the app) on every card.");
+  if (ordered) {
+    const ranges = apps
+      .map((a) => a.cards.map((c) => c.order).filter((o): o is number => o !== null))
+      .filter((l) => l.length)
+      .map((l) => ({ from: Math.min(...l), to: Math.max(...l) }))
+      .sort((a, b) => a.from - b.from);
+    for (let i = 1; i < ranges.length; i++)
+      if (ranges[i].from <= ranges[i - 1].to)
+        problems.push("Two app files share card numbers: is one of them added twice?");
+    const got = chunkByOrder(master.cards, ranges, restSizes);
+    masterCards = got.cards;
+    plan.ordered = got.ordered;
+    problems.push(...got.problems);
+  }
   const byOrder = new Map<number, SheetCard>();
   for (const c of masterCards) {
     if (byOrder.has(c.order!)) problems.push(`The master has number ${c.order} twice.`);

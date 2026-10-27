@@ -64,6 +64,13 @@ export function AppImportDialog({
   const [allInApp, setAllInApp] = useState(true);
   const [verified, setVerified] = useState(true);
   const [busy, setBusy] = useState(false);
+  // A master without chunks: the chunk sizes for its cards outside the app
+  // files ("200, 150"; empty: each unbroken run of numbers).
+  const [sizes, setSizes] = useState("");
+  const restSizes = sizes
+    .split(/[,\s]+/)
+    .map(Number)
+    .filter((n) => Number.isInteger(n) && n > 0);
   const plan = useMemo(
     () =>
       master || apps.length
@@ -71,10 +78,13 @@ export function AppImportDialog({
             master?.sheet ?? null,
             apps.map((a) => a.sheet),
             apps.map((a) => a.file),
+            restSizes.length ? restSizes : undefined,
           )
         : null,
-    [master, apps],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [master, apps, sizes],
   );
+  const masterNumbered = !!master && master.sheet.cards.every((c) => c.order !== null);
   const read = async (files: FileList | null, isMaster: boolean) => {
     if (!files?.length) return;
     try {
@@ -93,7 +103,7 @@ export function AppImportDialog({
   const blocked =
     !plan ||
     !plan.cards.length ||
-    (!!master && !master.sheet.numbered) ||
+    (!!master && !masterNumbered) ||
     plan.cards.some((c) => c.sheet === null || c.order === null);
   const run = async () => {
     if (!plan || blocked || !name.trim()) return;
@@ -140,9 +150,9 @@ export function AppImportDialog({
         <DialogHeader className="space-y-1 border-b border-border px-5 pb-3 pr-12 pt-4 text-left">
           <DialogTitle className="text-base">Bring in a topic already in the app</DialogTitle>
           <p className="text-xs text-muted-foreground">
-            Its final master sheet (with sheet and order) and the chunks downloaded from the
-            app&apos;s admin panel. Cards are matched by their number; where they differ, the
-            app&apos;s version is kept.
+            Its final master sheet (with each card's order number, and its sheet if it has one) and
+            the chunks downloaded from the app&apos;s admin panel. Cards are matched by their
+            number; where they differ, the app&apos;s version is kept.
           </p>
         </DialogHeader>
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
@@ -158,8 +168,12 @@ export function AppImportDialog({
               {master && (
                 <span className="block text-xs text-muted-foreground">
                   {master.file}: {master.sheet.cards.length} cards
-                  {!master.sheet.numbered && (
-                    <span className="text-destructive"> · no sheet / order numbers</span>
+                  {!masterNumbered ? (
+                    <span className="text-destructive"> · no order numbers</span>
+                  ) : (
+                    !master.sheet.numbered && (
+                      <span> · numbered, no chunks: the app&apos;s chunk files give them</span>
+                    )
                   )}
                 </span>
               )}
@@ -263,6 +277,30 @@ export function AppImportDialog({
                   ))}
                 </tbody>
               </table>
+              {plan.ordered && plan.ordered.uncovered > 0 && (
+                <div
+                  className="space-y-1 rounded-lg border border-border p-2 text-xs"
+                  aria-label="Chunks for the rest"
+                >
+                  <p>
+                    <b>{plan.ordered.uncovered} cards are in no app file</b> (numbers{" "}
+                    {plan.ordered.runs.map((r) => `${r.from}–${r.to}`).join(", ")}). Chunk sizes for
+                    them, in number order:
+                  </p>
+                  <Input
+                    className="h-8 max-w-xs"
+                    aria-label="Chunk sizes for the rest"
+                    placeholder={plan.ordered.runs.map((r) => r.count).join(", ")}
+                    value={sizes}
+                    onChange={(e) => setSizes(e.target.value)}
+                  />
+                  <p className="text-muted-foreground">
+                    Empty: one chunk for each run of numbers (
+                    {plan.ordered.runs.map((r) => r.count).join(", ")}). Add their app files instead
+                    to take their chunks and ids from the app.
+                  </p>
+                </div>
+              )}
               {plan.problems.map((p) => (
                 <p key={p} className="text-destructive">
                   {p}
