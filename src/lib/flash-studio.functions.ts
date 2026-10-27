@@ -177,7 +177,11 @@ export const importFlashSheet = createServerFn({ method: "POST" })
         replace: id.optional(),
         keep_numbers: z.boolean(),
         from_app: z
-          .object({ verified: z.boolean(), downloaded: z.array(z.number().int()).max(500) })
+          .object({
+            verified: z.boolean(),
+            downloaded: z.array(z.number().int()).max(500),
+            names: z.record(z.string().max(10), z.string().max(200)).optional(),
+          })
           .optional(),
       })
       .parse(d),
@@ -699,4 +703,14 @@ export const lookupFlashDictionary = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return (await server()).lookupDictionary(data.words);
+  });
+
+export const nameFlashChunk = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ topic_id: id, n: z.number().int().min(1), name: z.string().max(200) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).nameChunk(data.topic_id, data.n, data.name);
   });

@@ -70,6 +70,7 @@ export function AppImportDialog({
         ? planAppImport(
             master?.sheet ?? null,
             apps.map((a) => a.sheet),
+            apps.map((a) => a.file),
           )
         : null,
     [master, apps],
@@ -113,6 +114,9 @@ export function AppImportDialog({
           from_app: {
             verified,
             downloaded: plan.chunks.filter((c) => allInApp || c.fromApp).map((c) => c.n),
+            names: Object.fromEntries(
+              plan.chunks.filter((c) => c.file).map((c) => [String(c.n), c.file!]),
+            ),
           },
         },
       });
@@ -248,7 +252,9 @@ export function AppImportDialog({
                       <td>{c.cards}</td>
                       <td>
                         {c.fromApp ? (
-                          <Badge tone="good">from the app file</Badge>
+                          <Badge tone="good" title={c.file ? `Named “${c.file}”` : undefined}>
+                            from {c.file ? `“${c.file}”` : "the app file"}
+                          </Badge>
                         ) : (
                           <Badge>no app file: add the ids later</Badge>
                         )}

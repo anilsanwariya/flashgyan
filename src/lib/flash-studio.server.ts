@@ -343,7 +343,7 @@ export async function importSheet(
   replace?: string,
   // A topic brought in from the app: its cards verified already, and these
   // chunks as in the app now (nothing changed since their download).
-  fromApp?: { verified: boolean; downloaded: number[] },
+  fromApp?: { verified: boolean; downloaded: number[]; names?: Record<string, string> },
 ): Promise<ImportResult> {
   if (replace) await deleteSource(replace);
   const { topic, cards } = await getTopic(topicId);
@@ -441,10 +441,13 @@ export async function importSheet(
   await insertCards(rows);
   // The app's chunks as downloaded when the cards were written (so none
   // counts as changed since).
-  if (keepNumbers && fromApp?.downloaded.length)
-    topicPatch.chunks = (topicPatch.chunks as FlashTopic["chunks"]).map((c) =>
-      fromApp.downloaded.includes(c.n) ? { ...c, downloaded: stamp } : c,
-    );
+  if (keepNumbers && fromApp)
+    topicPatch.chunks = (topicPatch.chunks as FlashTopic["chunks"]).map((c) => ({
+      ...c,
+      // Named after the app's file it came from.
+      ...(fromApp.names?.[String(c.n)] ? { name: fromApp.names[String(c.n)].slice(0, 120) } : {}),
+      ...(fromApp.downloaded.includes(c.n) ? { downloaded: stamp } : {}),
+    }));
   fail(
     (
       await from("flash_topics")
@@ -1274,6 +1277,27 @@ export async function checkCards(
 
 // The chunks just downloaded: their time kept, so later edits show as
 // "changed since download".
+// A chunk's name (its file's name); empty: back to "<topic> - <n>".
+export async function nameChunk(topicId: string, n: number, name: string) {
+  const topic = await topicRow(topicId);
+  if (!topic.chunks.some((c) => c.n === n)) throw new Error(`This topic has no chunk ${n}.`);
+  const clean =
+    name
+      .trim()
+      .replace(/\.xlsx?$/i, "")
+      .trim()
+      .slice(0, 120) || null;
+  const chunks = topic.chunks.map((c) => (c.n === n ? { ...c, name: clean } : c));
+  fail(
+    (
+      await from("flash_topics")
+        .update({ chunks } as never)
+        .eq("id", topicId)
+    ).error,
+  );
+  return chunks;
+}
+
 export async function markDownloaded(topicId: string, ns: number[]) {
   const topic = await topicRow(topicId);
   const at = now();

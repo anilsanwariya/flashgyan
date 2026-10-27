@@ -27,7 +27,14 @@ export type FlashTemplate = {
 export type FlashBook = { code: string; name: string; color: string };
 // A chunk's numbers, and when it was last downloaded (to show what changed
 // since, so only those chunks go back to the app).
-export type FlashChunk = { n: number; from: number; to: number; downloaded?: string | null };
+export type FlashChunk = {
+  n: number;
+  from: number;
+  to: number;
+  downloaded?: string | null;
+  // The editor's name for it (its file's name); none: "<topic> - <n>".
+  name?: string | null;
+};
 
 export type FlashTopic = {
   id: string;
@@ -655,7 +662,8 @@ export function normalizeChunks(v: unknown): FlashChunk[] {
     .map((x) => {
       const o = (x ?? {}) as Record<string, unknown>;
       const downloaded = typeof o.downloaded === "string" && o.downloaded ? o.downloaded : null;
-      return { n: Number(o.n), from: Number(o.from), to: Number(o.to), downloaded };
+      const name = typeof o.name === "string" && o.name.trim() ? o.name.trim().slice(0, 120) : null;
+      return { n: Number(o.n), from: Number(o.from), to: Number(o.to), downloaded, name };
     })
     .filter((c) => [c.n, c.from, c.to].every((n) => Number.isInteger(n) && n > 0))
     .sort((a, b) => a.n - b.n);
@@ -1065,13 +1073,24 @@ export function chunkRows(
   ];
 }
 
-export const chunkFileName = (topicName: string, chunk: number | null) =>
-  `${
-    topicName
-      .replace(/[\\/:*?"<>|]+/g, "_")
-      .trim()
-      .slice(0, 80) || "cards"
-  }${chunk === null ? "" : ` - ${chunk}`}`;
+const fileSafe = (s: string) =>
+  s
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/\.xlsx?$/i, "")
+    .trim()
+    .slice(0, 120);
+
+// A chunk's file name (without .xlsx): its name when it has one, else
+// "<topic> - <n>"; the topic's own name for the zip of all (chunk null).
+export const chunkFileName = (
+  topicName: string,
+  chunk: number | null,
+  chunks: Pick<FlashChunk, "n" | "name">[] = [],
+) => {
+  const named = chunk === null ? null : chunks.find((c) => c.n === chunk)?.name;
+  if (named && fileSafe(named)) return fileSafe(named);
+  return `${fileSafe(topicName).slice(0, 80) || "cards"}${chunk === null ? "" : ` - ${chunk}`}`;
+};
 
 // ---------- The app's ids ----------
 
