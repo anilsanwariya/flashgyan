@@ -262,3 +262,84 @@ export function workingPatch(c: FlashCard, r: WorkingRow): Record<string, unknow
   if (r.note !== null && r.note.trim() !== c.note.trim()) patch.note = r.note;
   return patch;
 }
+
+// ---------- What changed since a chunk's download ----------
+
+export type ChangeRow = {
+  chunk: number;
+  order: number | null;
+  appId: string;
+  word: string;
+  // "front", "back", "explanation_<title>", or "removed".
+  field: string;
+  before: string;
+  after: string;
+};
+
+type Version = { at: string; front: string; back: string; ex: Record<string, string> };
+
+// Each card of these chunks changed since the chunk's download: every
+// field whose text differs from the text at the download (from the card's
+// history: the oldest version saved after it), and cards removed. Cards
+// changed only in their marks (verified, notes, the AI's reading) are
+// counted, not listed: nothing of them goes to the app.
+export function chunkChangeRows(
+  topic: { chunks: { n: number; downloaded?: string | null }[]; columns: FlashColumn[] },
+  cards: FlashCard[],
+  history: Map<string, Version[]>,
+  chunks: number[],
+): { rows: ChangeRow[]; marksOnly: number; older: number } {
+  const rows: ChangeRow[] = [];
+  let marksOnly = 0;
+  let older = 0;
+  for (const ch of topic.chunks) {
+    if (!chunks.includes(ch.n) || !ch.downloaded) continue;
+    const at = Date.parse(ch.downloaded);
+    const changed = cards
+      .filter((c) => c.chunk === ch.n && Date.parse(c.updated_at) > at)
+      .sort((a, b) => (a.card_order ?? 0) - (b.card_order ?? 0));
+    for (const c of changed) {
+      const base = {
+        chunk: ch.n,
+        order: c.card_order,
+        appId: c.app_id ?? "",
+        word: c.front.split("\n")[0].trim(),
+      };
+      if (c.removed) {
+        rows.push({ ...base, field: "removed", before: "", after: "delete this card in the app" });
+        continue;
+      }
+      // Newest first: the last one saved after the download holds the text
+      // as it was then.
+      const after = (history.get(c.id) ?? []).filter((v) => Date.parse(v.at) > at);
+      const then = after[after.length - 1];
+      if (!then) {
+        marksOnly++;
+        continue;
+      }
+      // History keeps 20 versions: with that many since, the oldest may be
+      // later than the download.
+      if (after.length >= 20) older++;
+      const diffs: [string, string, string][] = [
+        ["front", then.front, c.front],
+        ["back", then.back, c.back],
+        ...topic.columns.map((col): [string, string, string] => [
+          `explanation_${col.title}`,
+          then.ex[col.id] ?? "",
+          c.ex[col.id] ?? "",
+        ]),
+      ];
+      const own = diffs.filter(([, b, a]) => b.trim() !== a.trim());
+      if (!own.length) marksOnly++;
+      for (const [field, before, now] of own) rows.push({ ...base, field, before, after: now });
+    }
+  }
+  return { rows, marksOnly, older };
+}
+
+export const CHANGE_HEAD = ["chunk", "order", "id", "word", "field", "before", "after"];
+
+export const changeSheet = (rows: ChangeRow[]): (string | number)[][] => [
+  CHANGE_HEAD,
+  ...rows.map((r) => [r.chunk, r.order ?? "", r.appId, r.word, r.field, r.before, r.after]),
+];

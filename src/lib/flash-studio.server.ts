@@ -2120,7 +2120,51 @@ export async function jobStep(batches = 3): Promise<FlashJob | null> {
     .select(JOB_COLS)
     .maybeSingle();
   fail(e3);
-  return saved ? readJob(saved as unknown as Row) : null;
+  const result = saved ? readJob(saved as unknown as Row) : null;
+  if (result && (result.status === "done" || result.status === "failed"))
+    await notifyJob(result).catch((e) =>
+      console.error("job message:", e instanceof Error ? e.message : e),
+    );
+  return result;
+}
+
+// A server job done (or given up): a message to the editor's test chat on
+// Telegram, the one the magazine's messages go to.
+export function jobMessage(job: FlashJob, topic: string): string {
+  const what = job.kind === "fill" ? "Filling explanations" : "AI check";
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  if (job.status === "failed")
+    return `⚠️ <b>${what}</b> for <b>${esc(topic)}</b> stopped after ${job.done} of ${job.total} cards: ${esc(job.error ?? "the AI failed")}. Start it again from Tools to go on.`;
+  const found =
+    job.kind === "fill"
+      ? job.found
+        ? `${job.found} cards filled`
+        : "nothing to fill"
+      : job.found
+        ? `${job.found} card${job.found === 1 ? "" : "s"} to recheck`
+        : "no problems found";
+  return `✅ <b>${what}</b> done for <b>${esc(topic)}</b>: ${job.total} cards, ${found}.`;
+}
+
+async function notifyJob(job: FlashJob) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  const { getMagazineSettings } = await import("@/lib/current-affairs.server");
+  const chat = (await getMagazineSettings()).test_chat_id;
+  if (!chat) return;
+  const { data } = await from("flash_topics").select("name").eq("id", job.topic_id).maybeSingle();
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chat,
+      text: jobMessage(job, String((data as Row | null)?.name ?? "a topic")),
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+    }),
+  });
+  const json = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string };
+  if (!json.ok) throw new Error(json.description ?? `Telegram error ${res.status}`);
 }
 
 // ---------- Find and replace ----------
@@ -2580,4 +2624,41 @@ async function dictLinesFor(fronts: string[]): Promise<string[]> {
   const words = [...new Set(fronts.flatMap((f) => D.lookupWords(f)))];
   const kept = await cachedEntries(words);
   return words.map((w) => (kept.get(w) ? D.dictLine(kept.get(w)!) : "")).filter(Boolean);
+}
+
+// ---------- What changed since a chunk's download ----------
+
+// The changes in these chunks since each was last downloaded, field by
+// field, for a list to check (and keep) when uploading them to the app.
+export async function chunkChangeList(topicId: string, chunks: number[]) {
+  const { topic, cards } = await getTopic(topicId);
+  const since = new Map(
+    topic.chunks.map((c) => [c.n, c.downloaded ? Date.parse(c.downloaded) : 0]),
+  );
+  const ids = cards
+    .filter(
+      (c) =>
+        c.chunk !== null &&
+        chunks.includes(c.chunk) &&
+        Date.parse(c.updated_at) > (since.get(c.chunk) ?? Infinity),
+    )
+    .map((c) => c.id);
+  const history = new Map<string, CardVersion[]>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await from("flash_cards")
+      .select("id,history")
+      .in("id", ids.slice(i, i + 200));
+    fail(error);
+    for (const r of (data ?? []) as Row[])
+      history.set(
+        String(r.id),
+        (Array.isArray(r.history) ? (r.history as Row[]) : []).map((o) => ({
+          at: String(o.at ?? ""),
+          front: String(o.front ?? ""),
+          back: String(o.back ?? ""),
+          ex: normalizeEx(o.ex),
+        })),
+      );
+  }
+  return SH.chunkChangeRows(topic, cards, history, chunks);
 }
