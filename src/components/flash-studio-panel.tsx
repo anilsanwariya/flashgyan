@@ -26,6 +26,8 @@ import {
   Download,
   FileUp,
   GitCompare,
+  ListChecks,
+  Keyboard,
   KeyRound,
   Lock,
   Pencil,
@@ -54,6 +56,7 @@ import {
   saveFlashAppIds,
   markFlashDownloaded,
   nameFlashChunk,
+  flashChunkChanges,
   saveFlashCard,
   saveFlashTemplate,
   updateFlashTopic,
@@ -98,7 +101,14 @@ import {
   HistoryButton,
   QuickChecks,
 } from "@/components/flash-studio-tools";
-import { lintCard, lintTopic, numberingOf, spellingVariants, type Lint } from "@/lib/flash-lint";
+import {
+  applyLints,
+  lintCard,
+  lintTopic,
+  numberingOf,
+  spellingVariants,
+  type Lint,
+} from "@/lib/flash-lint";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -106,7 +116,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ReplaceDialog, SheetsTab, WorkingDialog } from "@/components/flash-studio-sheets";
-import { parseWorking, workingRows, type WorkingRow } from "@/lib/flash-sheets";
+import { changeSheet, parseWorking, workingRows, type WorkingRow } from "@/lib/flash-sheets";
 import { ProofTools, Versions } from "@/components/flash-studio-proof";
 import {
   booksOf,
@@ -2065,6 +2075,7 @@ function CardDialog({
   const [busy, setBusy] = useState(false);
   const [student, setStudent] = useState(false);
   const [dict, setDict] = useState(false);
+  const [showKeys, setShowKeys] = useState(false);
   // The card changed outside (saved, or the AI check ran in the
   // background): edits not saved yet stay, the check's findings come in.
   const shown = useRef(card);
@@ -2100,12 +2111,35 @@ function CardDialog({
     move();
   };
   // Keys: Alt+→ / Alt+← next and previous, Ctrl+Enter save and verify,
-  // Ctrl+S save.
+  // Ctrl+S save; Alt+A the AI's fixes, Alt+Q the quick fixes, Alt+R to
+  // recheck, Alt+D the dictionary, Alt+P the student view. Letters by
+  // their key (on a Mac, Alt turns them into other characters).
   const keys = useRef<(e: KeyboardEvent) => void>(() => {});
   keys.current = (e: KeyboardEvent) => {
     if (busy) return;
     const mod = e.ctrlKey || e.metaKey;
-    if (mod && e.key === "Enter") {
+    const alt = e.altKey && !mod && !e.shiftKey;
+    const letter = alt && /^Key[A-Z]$/.test(e.code) ? e.code.slice(3) : "";
+    if (letter === "A") {
+      const b = document.querySelector<HTMLButtonElement>('[data-key="apply-ai"]');
+      e.preventDefault();
+      if (b) b.click();
+      else toast("No AI fixes to apply on this card");
+    } else if (letter === "Q") {
+      e.preventDefault();
+      const fixable = lintCard(c, topic.columns, lintCtx).filter((l) => l.fix !== undefined);
+      if (fixable.length) setC({ ...c, ...applyLints(c, fixable) });
+      else toast("No quick fixes on this card");
+    } else if (letter === "R") {
+      e.preventDefault();
+      setC({ ...c, error: !c.error });
+    } else if (letter === "D") {
+      e.preventDefault();
+      setDict((d) => !d);
+    } else if (letter === "P") {
+      e.preventDefault();
+      setStudent((v) => !v);
+    } else if (mod && e.key === "Enter") {
       e.preventDefault();
       void saveAndVerify();
     } else if (mod && e.key.toLowerCase() === "s") {
@@ -2484,6 +2518,15 @@ function CardDialog({
               ""
             )}
           </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="hidden h-7 px-2 text-xs md:inline-flex"
+            aria-pressed={showKeys}
+            onClick={() => setShowKeys(!showKeys)}
+          >
+            <Keyboard className="mr-1 h-3.5 w-3.5" /> Keys
+          </Button>
           {changed && <span className="ml-auto h-2 w-2 rounded-full bg-amber-500 md:hidden" />}
           {nav && (
             <Button
@@ -2499,6 +2542,30 @@ function CardDialog({
             </Button>
           )}
         </div>
+        {showKeys && (
+          <div
+            aria-label="Keys"
+            className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border bg-muted/40 px-5 py-2 text-xs text-muted-foreground"
+          >
+            {[
+              ["Ctrl+Enter", "save, verify and next"],
+              ["Ctrl+S", "save"],
+              ["Alt+← →", "previous / next"],
+              ["Alt+A", "apply the AI's fixes"],
+              ["Alt+Q", "quick fixes"],
+              ["Alt+R", "to recheck"],
+              ["Alt+D", "dictionary"],
+              ["Alt+P", "student view"],
+            ].map(([k, what]) => (
+              <span key={k}>
+                <kbd className="rounded border border-border bg-background px-1 font-mono text-[11px]">
+                  {k}
+                </kbd>{" "}
+                {what}
+              </span>
+            ))}
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -2587,6 +2654,8 @@ function AiSuggestions({
               size="sm"
               variant="outline"
               className="h-7"
+              data-key="apply-ai"
+              title="Apply all (Alt+A)"
               onClick={() => {
                 let next = c;
                 for (const f of fixes) if (canApply(f)) next = put(next, f);
@@ -2820,7 +2889,44 @@ function ChunksTab({
       // The file is saved; only the "changed since" mark is missed.
     }
   };
+  // What changed in these chunks since their download (read before the
+  // download resets it), as a sheet: null when no text changed.
+  const changesFn = useServerFn(flashChunkChanges);
+  const changeList = async (ns: number[]) => {
+    const withChanges = ns.filter((n) => {
+      const x = changes.get(n);
+      return x && !x.never && x.changed.length + x.removed.length > 0;
+    });
+    if (!withChanges.length) return null;
+    const r = await changesFn({ data: { topic_id: topic.id, chunks: withChanges } });
+    return {
+      ...r,
+      bytes: r.rows.length ? await xlsxBytes(changeSheet(r.rows)) : null,
+    };
+  };
+  const listName = (ns: number[]) =>
+    `${ns.length === 1 ? chunkFileName(topic.name, ns[0], topic.chunks) : chunkFileName(topic.name, null)} - changes.xlsx`;
+  const saveChanges = async (ns: number[]) => {
+    try {
+      const l = await changeList(ns);
+      if (l?.bytes) saveBytes(listName(ns), l.bytes, XLSX_TYPE);
+      else
+        toast(
+          l?.marksOnly
+            ? `Only marks changed (verified, notes, AI checks) on ${l.marksOnly} card${l.marksOnly === 1 ? "" : "s"}: nothing new for the app`
+            : "Nothing changed since the download",
+        );
+      if (l?.older)
+        toast.warning(
+          `${l.older} card${l.older === 1 ? "" : "s"} changed more than 20 times: their "before" is the oldest kept`,
+        );
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't list the changes"));
+    }
+  };
   const download = async (chunk: number, work = false) => {
+    // The change list first: the download marks the chunk unchanged.
+    const list = work ? null : await changeList([chunk]).catch(() => null);
     const rows = chunkRows(topic, cards, chunk, work);
     saveBytes(
       `${chunkFileName(topic.name, chunk, topic.chunks)}${work ? " (working)" : ""}.xlsx`,
@@ -2828,8 +2934,20 @@ function ChunksTab({
       XLSX_TYPE,
     );
     if (!work) await downloaded([chunk]);
+    if (list?.bytes)
+      toast.success(
+        `Chunk ${chunk}: ${list.rows.length} change${list.rows.length === 1 ? "" : "s"} since the last download`,
+        {
+          duration: 30_000,
+          action: {
+            label: "Change list",
+            onClick: () => saveBytes(listName([chunk]), list.bytes!, XLSX_TYPE),
+          },
+        },
+      );
   };
   const zipOf = async (ns: number[], name: string) => {
+    const list = await changeList(ns).catch(() => null);
     // Two chunks given the same name: the second gets its number too.
     const used = new Set<string>();
     const files = await Promise.all(
@@ -2840,6 +2958,8 @@ function ChunksTab({
         return { name: `${base}.xlsx`, data: await xlsxBytes(chunkRows(topic, cards, n)) };
       }),
     );
+    // The change list goes in too, to check what is being uploaded.
+    if (list?.bytes) files.push({ name: listName(ns.length === 1 ? ns : []), data: list.bytes });
     saveBytes(name, zipFiles(files), "application/zip");
     await downloaded(ns);
   };
@@ -3113,6 +3233,16 @@ function ChunksTab({
                     >
                       <Smartphone className="mr-1 h-4 w-4" /> Preview
                     </Button>
+                    {edited > 0 && !x?.never && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        title="Every change since the last download, field by field (before → after)"
+                        onClick={() => void saveChanges([ch.n])}
+                      >
+                        <ListChecks className="mr-1 h-4 w-4" /> What changed
+                      </Button>
+                    )}
                     <Button size="sm" variant="outline" onClick={() => void download(ch.n)}>
                       <Download className="mr-1 h-4 w-4" /> .xlsx
                     </Button>

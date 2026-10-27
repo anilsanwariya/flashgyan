@@ -714,3 +714,13 @@ export const nameFlashChunk = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await server()).nameChunk(data.topic_id, data.n, data.name);
   });
+
+export const flashChunkChanges = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ topic_id: id, chunks: z.array(z.number().int().min(1)).min(1).max(500) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).chunkChangeList(data.topic_id, data.chunks);
+  });
