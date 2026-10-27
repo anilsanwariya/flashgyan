@@ -75,6 +75,11 @@ export function BulkBar({
   const withAi = live.filter((c) => c.ai?.fixes.some((f) => f.to && f.field)).length;
   const withLint = live.filter((c) => lints.get(c.id)?.some((l) => l.fix !== undefined)).length;
   const toCheck = live.filter((c) => needsCheck(c)).map((c) => c.id);
+  // Every ticked card read as it is already: the check run again on them
+  // all (verified ones too: suggestions only), the new suggestions replacing
+  // the old.
+  const again = !toCheck.length;
+  const checkIds = again ? live.map((c) => c.id) : toCheck;
   const run = async (action: Action, done: (r: Awaited<ReturnType<typeof bulkFn>>) => string) => {
     setBusy(true);
     try {
@@ -132,19 +137,28 @@ export function BulkBar({
       >
         To recheck
       </Button>
-      {toCheck.length > 0 && (
+      {checkIds.length > 0 && (
         <Button
           size="sm"
           variant="ghost"
           disabled={busy || !!running}
-          title="Only cards not verified and not checked as they are"
+          title={
+            again
+              ? "Read them again, even unchanged and verified ones; new suggestions replace the old"
+              : "Only cards not verified and not checked as they are"
+          }
           onClick={() =>
             void runStudioJob({
-              label: "AI check",
+              label: again ? "AI check again" : "AI check",
               topic: topic.name,
-              ids: toCheck,
+              ids: checkIds,
               size: 20,
-              step: (ids) => checkFn({ data: { topic_id: topic.id, ids } }),
+              step: (ids) =>
+                checkFn({
+                  data: again
+                    ? { topic_id: topic.id, ids, with_verified: true, force: true }
+                    : { topic_id: topic.id, ids },
+                }),
               each: (() => {
                 let flagged = 0;
                 return (r: { flagged: number; cards: FlashCard[] }) => {
@@ -160,7 +174,8 @@ export function BulkBar({
             })
           }
         >
-          <ScanSearch className="mr-1 h-4 w-4" /> AI check ({toCheck.length})
+          <ScanSearch className="mr-1 h-4 w-4" /> {again ? "AI check again" : "AI check"} (
+          {checkIds.length})
         </Button>
       )}
       {withAi > 0 && (

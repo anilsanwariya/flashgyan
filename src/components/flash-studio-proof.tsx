@@ -20,6 +20,7 @@ import {
   Sparkles,
   Split,
   Wand2,
+  RotateCcw,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { kindOfTemplate, wordsOf } from "@/lib/flash-split";
@@ -218,10 +219,15 @@ export function ProofTools({
   const serverFn = useServerFn(startFlashServerJob);
   const qc = useQueryClient();
   // The same on the server: goes on with the browser closed.
-  const onServer = async (kind: "check" | "fill", ids: string[], withVerified = false) => {
+  const onServer = async (
+    kind: "check" | "fill",
+    ids: string[],
+    withVerified = false,
+    force = false,
+  ) => {
     try {
       const j = await serverFn({
-        data: { topic_id: topic.id, kind, ids, with_verified: withVerified },
+        data: { topic_id: topic.id, kind, ids, with_verified: withVerified, force },
       });
       await qc.invalidateQueries({ queryKey: ["flashJobs", topic.id] });
       toast.success(
@@ -266,13 +272,21 @@ export function ProofTools({
       end: (found) =>
         toast.success(found ? `Explanations: ${found} (marked ◇)` : "Nothing to fill"),
     });
-  const check = () =>
+  // Every shown card read again, unchanged and verified ones too (their
+  // new suggestions replacing the old; verified cards stay verified).
+  const againIds = live.map((c) => c.id);
+  const check = (again = false) =>
     runStudioJob({
-      label: "AI check",
+      label: again ? "AI check again" : "AI check",
       topic: topic.name,
-      ids: needCheck,
+      ids: again ? againIds : needCheck,
       size: 20,
-      step: (ids) => checkFn({ data: { topic_id: topic.id, ids } }),
+      step: (ids) =>
+        checkFn({
+          data: again
+            ? { topic_id: topic.id, ids, with_verified: true, force: true }
+            : { topic_id: topic.id, ids },
+        }),
       each: (() => {
         let flagged = 0;
         return (r: { flagged: number; cards: FlashCard[] }) => {
@@ -394,6 +408,16 @@ export function ProofTools({
               )}
             </DropdownMenuItem>
             <DropdownMenuItem
+              disabled={!!running || !againIds.length}
+              onSelect={() => void check(true)}
+            >
+              <RotateCcw className="mr-2 h-4 w-4 shrink-0" />
+              {item(
+                `AI check again, every card shown (${againIds.length})`,
+                "Even unchanged and verified cards; the new suggestions replace the old (verified cards stay verified)",
+              )}
+            </DropdownMenuItem>
+            <DropdownMenuItem
               disabled={!!running || !dictWords.length}
               onSelect={() => void lookUp()}
             >
@@ -434,6 +458,16 @@ export function ProofTools({
                 )}
               </DropdownMenuItem>
             )}
+            <DropdownMenuItem
+              disabled={!againIds.length}
+              onSelect={() => void onServer("check", againIds, true, true)}
+            >
+              <Server className="mr-2 h-4 w-4 shrink-0" />
+              {item(
+                `AI check again on the server (${againIds.length})`,
+                "Every card shown, even unchanged and verified ones",
+              )}
+            </DropdownMenuItem>
             <DropdownMenuItem
               disabled={!needFill.length || !topic.columns.length}
               onSelect={() => void onServer("fill", needFill)}

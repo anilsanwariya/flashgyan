@@ -102,7 +102,35 @@ export type AiFix = { field: string; from: string; to: string; type: string; not
 // checks, to tell how often the AI is right).
 export type AiDone = { type: string; applied: boolean; at: string };
 
-export type FlashAi = { at: string; sig: string; fixes: AiFix[]; done: AiDone[] };
+export type FlashAi = {
+  at: string;
+  sig: string;
+  fixes: AiFix[];
+  done: AiDone[];
+  // The card's "to recheck" mark was set by the AI check (not the editor),
+  // so it goes when its suggestions are settled.
+  flagged?: boolean;
+};
+
+// Whether the AI check set the card's "to recheck" mark (older checks wrote
+// their notes as "AI: …").
+export const aiFlagged = (c: Pick<FlashCard, "ai" | "note">) =>
+  !!c.ai?.flagged || c.note.startsWith("AI:");
+
+// What settling the AI's last suggestions undoes: its "to recheck" mark
+// (and an older check's "AI: …" note); the editor's own note stays.
+export function aiSettled(c: Pick<FlashCard, "ai" | "note">) {
+  return {
+    error: false,
+    error_type: "",
+    note: c.note.startsWith("AI:") ? "" : c.note,
+  };
+}
+
+// The card's note as shown: an older check's "AI: …" note is left out
+// while its suggestions are shown beside it.
+export const shownNote = (c: Pick<FlashCard, "ai" | "note">) =>
+  c.note.startsWith("AI:") && c.ai?.fixes.length ? "" : c.note;
 
 export type FlashCard = {
   id: string;
@@ -179,6 +207,7 @@ export function normalizeAi(v: unknown): FlashAi | null {
       const x = (d ?? {}) as Record<string, unknown>;
       return { type: str(x.type, 60), applied: x.applied === true, at: str(x.at, 40) };
     }),
+    ...(o.flagged === true ? { flagged: true } : {}),
   };
 }
 

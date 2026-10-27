@@ -53,6 +53,7 @@ import {
   listFlashTopics,
   numberFlashCards,
   otherFlashTopicWords,
+  checkFlashCards,
   flashWordnetSenses,
   resetFlashChunks,
   saveFlashAppIds,
@@ -91,6 +92,9 @@ import {
   type ParsedSheet,
   type WordKey,
   frontIsWrong,
+  aiFlagged,
+  aiSettled,
+  shownNote,
 } from "@/lib/flash-studio";
 import { zipFiles } from "@/lib/zip";
 import { BooksPanel } from "@/components/flash-studio-books";
@@ -1024,7 +1028,7 @@ function passes(
   }
   if (f === "own") return c.own.length > 0;
   if (f === "missing") return emptyColumns(c, columns).length > 0;
-  if (f === "notes") return !!c.note || c.sources.some((s) => s.note);
+  if (f === "notes") return !!shownNote(c) || c.sources.some((s) => s.note);
   if (f === "ai") return !!c.ai?.fixes.length;
   return true;
 }
@@ -1592,7 +1596,7 @@ function CardsTab({
                   )}
                 </div>
               )}
-              {c.note && (
+              {shownNote(c) && (
                 <div className="mt-1 text-xs text-red-700 dark:text-red-400" lang="hi">
                   {c.note}
                 </div>
@@ -2212,6 +2216,30 @@ function CardDialog({
     }
   };
   const changed = JSON.stringify(c) !== JSON.stringify(card);
+  // The AI check run again on this card (edits saved first), even if it
+  // hasn't changed: its new suggestions replace the old.
+  const checkFn = useServerFn(checkFlashCards);
+  const [checking, setChecking] = useState(false);
+  const checkAgain = async () => {
+    if (checking) return;
+    if (changed && !(await save(textPatch))) return;
+    setChecking(true);
+    try {
+      const r = await checkFn({
+        data: { topic_id: topic.id, ids: [card.id], with_verified: true, force: true },
+      });
+      const fresh = r.cards.find((x) => x.id === card.id);
+      if (fresh) onSaved(fresh);
+      const n = fresh?.ai?.fixes.length ?? 0;
+      toast.success(
+        n ? `The AI suggests ${n} change${n === 1 ? "" : "s"}` : "The AI found no problems",
+      );
+    } catch (e) {
+      toast.error(errorText(e, "The AI check didn't run"));
+    } finally {
+      setChecking(false);
+    }
+  };
   const saveAndVerify = async () => {
     const ok = await save({ ...textPatch, verified: true });
     if (ok && nav) nav.next();
@@ -2223,7 +2251,8 @@ function CardDialog({
   };
   // Keys: Alt+→ / Alt+← next and previous, Ctrl+Enter save and verify,
   // Ctrl+S save; Alt+A the AI's fixes, Alt+Q the quick fixes, Alt+R to
-  // recheck, Alt+D the dictionary, Alt+P the student view. Letters by
+  // recheck, Alt+D the dictionary, Alt+P the student view, Alt+C the AI
+  // check again. Letters by
   // their key (on a Mac, Alt turns them into other characters).
   const keys = useRef<(e: KeyboardEvent) => void>(() => {});
   keys.current = (e: KeyboardEvent) => {
@@ -2250,6 +2279,9 @@ function CardDialog({
     } else if (letter === "P") {
       e.preventDefault();
       setStudent((v) => !v);
+    } else if (letter === "C") {
+      e.preventDefault();
+      void checkAgain();
     } else if (mod && e.key === "Enter") {
       e.preventDefault();
       void saveAndVerify();
@@ -2385,8 +2417,33 @@ function CardDialog({
           </div>
         </DialogHeader>
         <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
-          {c.ai && c.ai.fixes.length > 0 && (
-            <AiSuggestions topic={topic} card={c} onChange={setC} />
+          {c.ai && c.ai.fixes.length > 0 ? (
+            <AiSuggestions
+              topic={topic}
+              card={c}
+              onChange={setC}
+              checking={checking}
+              onAgain={() => void checkAgain()}
+            />
+          ) : (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>
+                ✦{" "}
+                {c.ai
+                  ? `AI check: nothing to fix${c.ai.at ? ` (${new Date(c.ai.at).toLocaleDateString()})` : ""}${c.ai.sig && c.ai.sig !== cardSig(c) ? " · changed since" : ""}`
+                  : "Not read by the AI check yet"}
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="ml-auto h-7"
+                disabled={checking || busy}
+                title="Alt+C"
+                onClick={() => void checkAgain()}
+              >
+                {checking ? "Checking…" : c.ai ? "Check again with AI" : "Check with AI"}
+              </Button>
+            </div>
           )}
           <QuickChecks topic={topic} card={c} ctx={lintCtx} onChange={setC} />
           {field("front", c.front, (front) => setC({ ...c, front }), true)}
@@ -2404,7 +2461,7 @@ function CardDialog({
               onGone();
             }}
           />
-          {c.note && (
+          {shownNote(c) && (
             <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50/60 p-2 text-sm dark:bg-red-950/20">
               <span className="min-w-0 flex-1" lang="hi">
                 {c.note}
@@ -2667,6 +2724,7 @@ function CardDialog({
               ["Alt+R", "to recheck"],
               ["Alt+D", "dictionary"],
               ["Alt+P", "student view"],
+              ["Alt+C", "AI check again"],
             ].map(([k, what]) => (
               <span key={k}>
                 <kbd className="rounded border border-border bg-background px-1 font-mono text-[11px]">
@@ -2689,10 +2747,15 @@ function AiSuggestions({
   topic,
   card: c,
   onChange,
+  checking,
+  onAgain,
 }: {
   topic: FlashTopic;
   card: FlashCard;
   onChange: (c: FlashCard) => void;
+  checking: boolean;
+  // The AI check run again on this card.
+  onAgain: () => void;
 }) {
   const fixes = c.ai?.fixes ?? [];
   const label = (field: string) =>
@@ -2704,7 +2767,7 @@ function AiSuggestions({
   // `took`: the fixes taken (applied, or a pointer marked done); `not`:
   // those dismissed. Both kept in the card's record.
   const settle = (next: FlashCard, left: AiFix[], took: AiFix[], not: AiFix[]): FlashCard => {
-    const done = !left.length && next.note.startsWith("AI:");
+    const done = !left.length && aiFlagged(next);
     return {
       ...next,
       // The card as it now reads counts as checked.
@@ -2714,9 +2777,10 @@ function AiSuggestions({
             fixes: left,
             sig: cardSig(next),
             done: [...next.ai.done, ...doneOf(took, true), ...doneOf(not, false)].slice(-100),
+            ...(done ? { flagged: false } : {}),
           }
         : null,
-      ...(done ? { note: "", error: false, error_type: "" } : {}),
+      ...(done ? aiSettled(next) : {}),
     };
   };
   const put = (card: FlashCard, f: AiFix): FlashCard =>
@@ -2790,6 +2854,16 @@ function AiSuggestions({
             onClick={() => onChange(settle(c, [], [], fixes))}
           >
             Dismiss all
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7"
+            disabled={checking}
+            title="Read the card again (Alt+C); new suggestions replace these"
+            onClick={onAgain}
+          >
+            {checking ? "Checking…" : "Check again"}
           </Button>
         </span>
       </div>

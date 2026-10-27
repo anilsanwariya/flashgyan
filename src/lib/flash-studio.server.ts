@@ -19,6 +19,8 @@ import * as SH from "@/lib/flash-sheets";
 import * as S from "@/lib/flash-split";
 import {
   DEFAULT_TEMPLATES,
+  aiFlagged,
+  aiSettled,
   WRONG_FRONT_KEYS,
   frontIsWrong,
   lastNumbers,
@@ -1225,10 +1227,17 @@ export async function checkCards(
   ids: string[],
   // Verified cards too (suggestions only: they stay verified).
   withVerified = false,
+  // Read again even if unchanged since the last check (its suggestions
+  // replaced by the new ones).
+  force = false,
 ): Promise<{ checked: number; flagged: number; cards: FlashCard[] }> {
   const { topic, cards } = await getTopic(topicId);
-  // Only cards not read as they are now.
-  const want = cards.filter((c) => ids.includes(c.id) && needsCheck(c, withVerified));
+  // Only cards not read as they are now (unless asked again).
+  const want = cards.filter(
+    (c) =>
+      ids.includes(c.id) &&
+      (force ? !c.removed && (withVerified || !c.verified) : needsCheck(c, withVerified)),
+  );
   if (!want.length) return { checked: 0, flagged: 0, cards: [] };
   const deck = await deckOf(topic);
   const items = want.map((c, i) => ({
@@ -1279,14 +1288,25 @@ export async function checkCards(
         note: f.note,
       };
     });
+    // The AI's findings live in its suggestions (shown once); it marks the
+    // card "to recheck" and owns that mark, unless the editor had set it.
+    const byAi = aiFlagged(c);
+    const owned = fixes.length > 0 && (byAi || !c.error);
+    const after = !fixes.length && byAi ? aiSettled(c) : null;
     // Every row has the same keys (a bulk upsert nulls missing ones).
     return {
       id: c.id,
       topic_id: topicId,
-      ai: { at, sig: cardSig(c), fixes, done: c.ai?.done ?? [] },
-      error: fixes.length ? true : c.error,
-      error_type: fixes.length ? fixes[0].type : c.error_type,
-      note: fixes.length ? `AI: ${fixes.map((f) => f.note).join("; ")}`.slice(0, 2000) : c.note,
+      ai: {
+        at,
+        sig: cardSig(c),
+        fixes,
+        done: c.ai?.done ?? [],
+        ...(owned ? { flagged: true } : {}),
+      },
+      error: fixes.length ? true : (after?.error ?? c.error),
+      error_type: owned ? fixes[0].type : (after?.error_type ?? c.error_type),
+      note: c.note.startsWith("AI:") ? "" : c.note,
       flagged: fixes.length > 0,
     };
   });
@@ -1638,7 +1658,7 @@ export async function bulkCards(
         }
       }
       const left = fixes.filter((f) => !(f.to && f.field));
-      const clear = !left.length && c.note.startsWith("AI:");
+      const clear = !left.length && aiFlagged(c);
       edits.push({
         id: c.id,
         patch: {
@@ -1649,8 +1669,9 @@ export async function bulkCards(
             fixes: left,
             sig: cardSig(next),
             done: [...c.ai!.done, ...doneOf(usable, true)].slice(-100),
+            flagged: false,
           },
-          ...(clear ? { note: "", error: false, error_type: "" } : {}),
+          ...(clear ? aiSettled(c) : {}),
         },
       });
     }
@@ -1725,7 +1746,7 @@ export async function resolveAi(
         own = own.filter((o) => `ex:${o}` !== f.field);
       }
     }
-    const clear = !left.length && c.note.startsWith("AI:");
+    const clear = !left.length && aiFlagged(c);
     const ai = {
       ...c.ai,
       fixes: left,
@@ -1744,7 +1765,7 @@ export async function resolveAi(
       patch: {
         ...(used.length ? { ...next, own } : {}),
         ai,
-        ...(clear ? { note: "", error: false, error_type: "" } : {}),
+        ...(clear ? aiSettled(c) : {}),
       },
     });
   }
@@ -2028,6 +2049,8 @@ export async function startServerJob(
   ids: string[],
   // The check: verified cards too.
   withVerified = false,
+  // The check: read again even if unchanged since the last one.
+  force = false,
 ): Promise<FlashJob> {
   const { topic, cards } = await getTopic(topicId);
   const want = new Set(ids);
@@ -2037,7 +2060,9 @@ export async function startServerJob(
         want.has(c.id) &&
         !c.removed &&
         (kind === "check"
-          ? needsCheck(c, withVerified)
+          ? force
+            ? withVerified || !c.verified
+            : needsCheck(c, withVerified)
           : M.emptyColumns(c, topic.columns).length > 0),
     )
     .map((c) => c.id);
@@ -2055,6 +2080,19 @@ export async function startServerJob(
     .select(JOB_COLS)
     .single();
   jobFail(error);
+  // Asked again: the cards marked unread, so the job reads them.
+  if (kind === "check" && force) {
+    const again = cards.filter((c) => todo.includes(c.id) && c.ai && !needsCheck(c, true));
+    for (let i = 0; i < again.length; i += 200) {
+      const { error: e2 } = await from("flash_cards").upsert(
+        again
+          .slice(i, i + 200)
+          .map((c) => ({ id: c.id, topic_id: topicId, ai: { ...c.ai!, sig: "" } })) as never,
+        { onConflict: "id" },
+      );
+      fail(e2);
+    }
+  }
   return readJob(data as unknown as Row);
 }
 
