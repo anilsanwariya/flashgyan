@@ -3,6 +3,8 @@
 // synonyms, antonyms and other spellings. Pure: the server fetches the
 // pages; this reads them (shared with tests).
 
+import type { WnSense } from "@/lib/flash-wordnet";
+
 export type DictSense = { pos: string; text: string; examples: string[] };
 
 export type DictEntry = {
@@ -15,6 +17,8 @@ export type DictEntry = {
   antonyms: string[];
   // Other spellings (alternative forms).
   forms: string[];
+  // Hindi WordNet's meanings (when it is loaded): each with its words.
+  wn?: WnSense[];
 };
 
 export const emptyEntry = (word: string): DictEntry => ({
@@ -297,9 +301,30 @@ export function buildEntry(
 
 // A short reference for the AI (one line per word): what the dictionary
 // gives, to weigh the card against (it is not always complete).
+// The entry with Hindi WordNet's meanings added: theirs first among the
+// synonyms and antonyms (WordNet is curated; Wiktionary often thin).
+export function withWordnet(e: DictEntry, wn: WnSense[]): DictEntry {
+  if (!wn.length) return e;
+  const syn = wn.flatMap((s) => s.synonyms);
+  const ant = wn.flatMap((s) => s.antonyms);
+  return {
+    ...e,
+    wn,
+    found: true,
+    synonyms: uniq([...syn, ...e.synonyms], e.word),
+    antonyms: uniq([...ant, ...e.antonyms], e.word),
+  };
+}
+
 export function dictLine(e: DictEntry): string {
   if (!e.found) return "";
   const parts = [
+    e.wn?.length
+      ? `WordNet: ${e.wn
+          .slice(0, 3)
+          .map((s) => `${s.pos ? `(${s.pos}) ` : ""}${s.gloss}`)
+          .join("; ")}`
+      : "",
     e.hi.length
       ? `अर्थ: ${e.hi
           .slice(0, 2)

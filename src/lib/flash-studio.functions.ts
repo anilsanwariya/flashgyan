@@ -724,3 +724,44 @@ export const flashChunkChanges = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await server()).chunkChangeList(data.topic_id, data.chunks);
   });
+
+export const flashWordnetStatus = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).wordnetStatus();
+  });
+
+export const loadFlashWordnet = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        first: z.boolean(),
+        synsets: z
+          .array(
+            z.object({
+              id: z.number().int().min(0),
+              pos: z.number().int().min(0).max(9),
+              words: z.array(z.string().max(200)).max(200),
+              gloss: z.string().max(4000),
+              example: z.string().max(4000),
+              antonyms: z.array(z.number().int()).max(100),
+            }),
+          )
+          .max(2000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).loadWordnet(data.synsets, data.first);
+  });
+
+export const clearFlashWordnet = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).clearWordnet();
+    return { ok: true };
+  });

@@ -1,10 +1,21 @@
-// A card's words in Wiktionary, in the card window: meanings (Hindi and
-// English Wiktionary), synonyms and antonyms (ticked when the card's back
-// has them, else added with a tap) and other spellings.
+// A card's words in the dictionaries, in the card window: Hindi WordNet's
+// meanings (when loaded, each with its synonyms and opposites) and
+// Wiktionary's (Hindi and English), their words ticked when the card's back
+// has them, else added with a tap; and the Dictionary tab loading WordNet.
 import { useServerFn } from "@tanstack/react-start";
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Check, ExternalLink, Plus, X } from "lucide-react";
-import { lookupFlashDictionary } from "@/lib/flash-studio.functions";
+import {
+  clearFlashWordnet,
+  flashWordnetStatus,
+  loadFlashWordnet,
+  lookupFlashDictionary,
+} from "@/lib/flash-studio.functions";
+import { parseWordnet } from "@/lib/flash-wordnet";
+import { unzipFile } from "@/lib/zip";
+import { Input } from "@/components/ui/input";
 import { backItems, lookupWords, wiktionaryUrl, type DictEntry } from "@/lib/flash-dict";
 import { looseWord } from "@/lib/flash-spell";
 import { errorText } from "@/components/ca-ui";
@@ -40,7 +51,9 @@ export function DictionaryPanel({
     >
       <div className="flex items-center gap-2">
         <span className="font-medium">Dictionary</span>
-        <span className="text-xs text-muted-foreground">Wiktionary · often incomplete</span>
+        <span className="text-xs text-muted-foreground">
+          Hindi WordNet (when loaded) and Wiktionary · not complete
+        </span>
         <Button
           size="icon"
           variant="ghost"
@@ -81,6 +94,10 @@ function Entry({
   have: Set<string>;
   onAdd: (word: string) => void;
 }) {
+  // Wiktionary's own words (those WordNet's meanings don't already show).
+  const inWn = new Set((e.wn ?? []).flatMap((s) => [...s.synonyms, ...s.antonyms]));
+  const wikiSyn = e.synonyms.filter((w) => !inWn.has(w));
+  const wikiAnt = e.antonyms.filter((w) => !inWn.has(w));
   const chips = (list: string[], kind: string) => (
     <div className="flex flex-wrap items-center gap-1" aria-label={kind}>
       <span className="w-20 shrink-0 text-xs text-muted-foreground">{kind}</span>
@@ -135,9 +152,36 @@ function Entry({
         </a>
       </div>
       {!e.found ? (
-        <p className="text-xs text-muted-foreground">Not in Wiktionary.</p>
+        <p className="text-xs text-muted-foreground">Not in the dictionaries.</p>
       ) : (
         <>
+          {!!e.wn?.length && (
+            <div className="space-y-1.5 rounded-md bg-background/70 p-2" aria-label="Hindi WordNet">
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                हिन्दी वर्डनेट · IIT Bombay
+              </div>
+              <ol className="list-decimal space-y-1.5 pl-5 text-[13px]">
+                {e.wn.slice(0, 6).map((s, i) => (
+                  <li key={i} data-wn-sense={i}>
+                    {s.pos && <span className="text-xs text-muted-foreground">{s.pos} · </span>}
+                    {s.gloss}
+                    {s.example && (
+                      <span className="block text-xs italic text-muted-foreground">
+                        {s.example}
+                      </span>
+                    )}
+                    {s.synonyms.length > 0 && chips(s.synonyms.slice(0, 16), "पर्याय")}
+                    {s.antonyms.length > 0 && chips(s.antonyms, "विलोम")}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {(e.hi.length > 0 || e.en.length > 0) && (
+            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Wiktionary
+            </div>
+          )}
           {e.hi.length > 0 && (
             <ol className="list-decimal space-y-0.5 pl-5 text-[13px]">
               {e.hi.slice(0, 6).map((s, i) => (
@@ -163,8 +207,8 @@ function Entry({
               ))}
             </ol>
           )}
-          {e.synonyms.length > 0 && chips(e.synonyms, "Synonyms")}
-          {e.antonyms.length > 0 && chips(e.antonyms, "Antonyms")}
+          {wikiSyn.length > 0 && chips(wikiSyn, "Synonyms")}
+          {wikiAnt.length > 0 && chips(wikiAnt, "Antonyms")}
           {e.forms.length > 0 && (
             <div className="flex flex-wrap items-center gap-1 text-xs">
               <span className="w-20 shrink-0 text-muted-foreground">Other spellings</span>
@@ -173,6 +217,125 @@ function Entry({
           )}
         </>
       )}
+    </div>
+  );
+}
+
+// The studio's Dictionary tab: Hindi WordNet loaded from its download
+// (the zip as it comes, or its database/data_txt file), read in the
+// browser and saved in batches; or removed.
+export function WordnetSettings() {
+  const statusFn = useServerFn(flashWordnetStatus);
+  const loadFn = useServerFn(loadFlashWordnet);
+  const clearFn = useServerFn(clearFlashWordnet);
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["flashWordnet"], queryFn: () => statusFn() });
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const load = async (file: File) => {
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const data = /\.zip$/i.test(file.name) ? await unzipFile(bytes, "data_txt") : bytes;
+      if (!data)
+        throw new Error("No database/data_txt in this zip: is it the Hindi WordNet download?");
+      const { synsets } = parseWordnet(new TextDecoder().decode(data));
+      if (synsets.length < 100) throw new Error("This doesn't look like Hindi WordNet's data_txt.");
+      setProgress({ done: 0, total: synsets.length });
+      for (let i = 0; i < synsets.length; i += 1000) {
+        await loadFn({ data: { first: i === 0, synsets: synsets.slice(i, i + 1000) } });
+        setProgress({ done: Math.min(synsets.length, i + 1000), total: synsets.length });
+      }
+      toast.success(`Hindi WordNet loaded: ${synsets.length.toLocaleString()} meanings`);
+      await qc.invalidateQueries({ queryKey: ["flashWordnet"] });
+      await qc.invalidateQueries({ queryKey: ["flashDict"] });
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't load it"));
+    } finally {
+      setProgress(null);
+    }
+  };
+  const s = q.data;
+  return (
+    <div className="max-w-2xl space-y-4 text-sm">
+      <section className="space-y-2 rounded-xl border border-border p-4" aria-label="Hindi WordNet">
+        <h2 className="font-semibold">Hindi WordNet</h2>
+        <p className="text-muted-foreground">
+          IIT Bombay&apos;s Hindi WordNet (CFILT): about 40,000 meanings with their synonyms
+          (पर्याय), opposites (विलोम), a gloss and an example. Once loaded, the card window&apos;s
+          Dictionary shows it first and the AI check is told what it says. It stays in your
+          database, used only here in the studio.
+        </p>
+        {q.isLoading ? (
+          <p className="text-muted-foreground">Checking…</p>
+        ) : s === null ? (
+          <p className="text-destructive">
+            The database needs the Hindi WordNet tables first: run the latest migration
+            (flash_wordnet) in Lovable or the SQL editor.
+          </p>
+        ) : s && s.synsets > 0 ? (
+          <p data-wn-status="loaded">
+            <b>Loaded:</b> {s.synsets.toLocaleString()} meanings, {s.words.toLocaleString()} words
+            {s.loadedAt ? ` (${new Date(s.loadedAt).toLocaleDateString()})` : ""}.
+          </p>
+        ) : (
+          <p data-wn-status="empty" className="text-muted-foreground">
+            Not loaded yet.
+          </p>
+        )}
+        {progress ? (
+          <div className="space-y-1" role="status">
+            <div className="h-2 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full bg-primary transition-all"
+                style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Saving {progress.done.toLocaleString()} of {progress.total.toLocaleString()}…
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="space-y-1">
+              <span className="block text-xs text-muted-foreground">
+                The download as it is (HindiWN_1_5.zip), or its database/data_txt file
+              </span>
+              <Input
+                type="file"
+                aria-label="Hindi WordNet file"
+                className="max-w-xs"
+                disabled={s === null}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (f) void load(f);
+                }}
+              />
+            </label>
+            {!!s?.synsets && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive"
+                onClick={async () => {
+                  if (!confirm("Remove Hindi WordNet from the database?")) return;
+                  try {
+                    await clearFn();
+                    await qc.invalidateQueries({ queryKey: ["flashWordnet"] });
+                    toast.success("Removed");
+                  } catch (e) {
+                    toast.error(errorText(e, "Couldn't remove it"));
+                  }
+                }}
+              >
+                Remove
+              </Button>
+            )}
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground">
+          Hindi WordNet 1.5, © IIT Bombay (Center for Indian Language Technology).
+        </p>
+      </section>
     </div>
   );
 }

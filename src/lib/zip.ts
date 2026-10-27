@@ -68,3 +68,40 @@ export function zipFiles(files: { name: string; data: Uint8Array }[]): Uint8Arra
   }
   return out;
 }
+
+// One file out of a zip (stored or deflated), by the end of its name: the
+// browser's own decompression, no library. Null when it isn't there.
+export async function unzipFile(zip: Uint8Array, nameEnd: string): Promise<Uint8Array | null> {
+  const dv = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+  // The end of the central directory: searched from the back.
+  let end = -1;
+  for (let i = zip.length - 22; i >= Math.max(0, zip.length - 65557); i--)
+    if (dv.getUint32(i, true) === 0x06054b50) {
+      end = i;
+      break;
+    }
+  if (end < 0) return null;
+  const count = dv.getUint16(end + 10, true);
+  let at = dv.getUint32(end + 16, true);
+  const dec = new TextDecoder();
+  for (let n = 0; n < count && dv.getUint32(at, true) === 0x02014b50; n++) {
+    const method = dv.getUint16(at + 10, true);
+    const size = dv.getUint32(at + 20, true);
+    const nameLen = dv.getUint16(at + 28, true);
+    const extra = dv.getUint16(at + 30, true);
+    const comment = dv.getUint16(at + 32, true);
+    const local = dv.getUint32(at + 42, true);
+    const name = dec.decode(zip.subarray(at + 46, at + 46 + nameLen));
+    at += 46 + nameLen + extra + comment;
+    if (!name.endsWith(nameEnd)) continue;
+    const start = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
+    const data = zip.subarray(start, start + size);
+    if (method === 0) return data;
+    if (method !== 8) throw new Error(`Can't read ${name}: packed in an unknown way`);
+    const stream = new Blob([data.slice()])
+      .stream()
+      .pipeThrough(new DecompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  return null;
+}

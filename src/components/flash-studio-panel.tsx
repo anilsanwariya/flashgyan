@@ -132,7 +132,7 @@ import { BOOK_FILE_TYPES, isBookFile } from "@/lib/flash-read";
 import { StudentPreview } from "@/components/flash-studio-preview";
 import { AppImportDialog, CompareWithApp } from "@/components/flash-studio-import";
 import { SpellingList } from "@/components/flash-studio-spellings";
-import { DictionaryPanel } from "@/components/flash-studio-dict";
+import { DictionaryPanel, WordnetSettings } from "@/components/flash-studio-dict";
 import { houseFromList } from "@/lib/flash-spell";
 import { Badge, PageTabs, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
@@ -199,7 +199,7 @@ function useOpenTopic(): [string | null, (id: string | null, show?: string) => v
 
 export function FlashStudio() {
   const [open, setOpen] = useOpenTopic();
-  const [tab, setTab] = useState<"topics" | "types" | "spellings">("topics");
+  const [tab, setTab] = useState<"topics" | "types" | "spellings" | "dictionary">("topics");
   if (open)
     return (
       <div className="space-y-3">
@@ -216,6 +216,7 @@ export function FlashStudio() {
           { id: "topics", label: "Topics" },
           { id: "types", label: "Deck types" },
           { id: "spellings", label: "Spellings" },
+          { id: "dictionary", label: "Dictionary" },
         ]}
         value={tab}
         onChange={setTab}
@@ -224,8 +225,10 @@ export function FlashStudio() {
         <TopicList onOpen={setOpen} />
       ) : tab === "types" ? (
         <TemplateList />
-      ) : (
+      ) : tab === "spellings" ? (
         <SpellingList />
+      ) : (
+        <WordnetSettings />
       )}
     </div>
   );

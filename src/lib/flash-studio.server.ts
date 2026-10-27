@@ -14,6 +14,7 @@ import * as M from "@/lib/flash-merge";
 import * as L from "@/lib/flash-lint";
 import * as SP from "@/lib/flash-spell";
 import * as D from "@/lib/flash-dict";
+import * as WN from "@/lib/flash-wordnet";
 import * as SH from "@/lib/flash-sheets";
 import * as S from "@/lib/flash-split";
 import {
@@ -2611,11 +2612,14 @@ export async function lookupDictionary(
         }
       }),
     );
+  // Hindi WordNet (in the database, when loaded) for every word, also
+  // those Wiktionary couldn't be reached for.
+  const wn = await wordnetFor(want);
   for (const w of want) {
-    const e = kept.get(w) ?? fetched.get(w);
-    if (e) entries.push(e);
+    const e = kept.get(w) ?? fetched.get(w) ?? (wn.get(w)?.length ? D.emptyEntry(w) : null);
+    if (e) entries.push(D.withWordnet(e, wn.get(w) ?? []));
   }
-  return { entries, failed };
+  return { entries, failed: failed.filter((w) => !wn.get(w)?.length) };
 }
 
 // The dictionary lines for some cards' fronts, from what is kept (the AI
@@ -2623,7 +2627,134 @@ export async function lookupDictionary(
 async function dictLinesFor(fronts: string[]): Promise<string[]> {
   const words = [...new Set(fronts.flatMap((f) => D.lookupWords(f)))];
   const kept = await cachedEntries(words);
-  return words.map((w) => (kept.get(w) ? D.dictLine(kept.get(w)!) : "")).filter(Boolean);
+  const wn = await wordnetFor(words);
+  return words
+    .map((w) => {
+      const e = kept.get(w) ?? (wn.get(w)?.length ? D.emptyEntry(w) : null);
+      return e ? D.dictLine(D.withWordnet(e, wn.get(w) ?? [])) : "";
+    })
+    .filter(Boolean);
+}
+
+// ---------- Hindi WordNet ----------
+
+const wnMissing = (e: { message: string } | null) => !!e && /flash_wn_/.test(e.message);
+
+// Its meanings for these words (matched loosely: nukta, ँ / ं aside),
+// those spelling the word exactly first; none before it is loaded.
+async function wordnetFor(words: string[]): Promise<Map<string, WN.WnSense[]>> {
+  const out = new Map<string, WN.WnSense[]>();
+  if (!words.length) return out;
+  const looseOf = new Map(words.map((w) => [w, SP.looseWord(WN.wnWord(w))]));
+  const { data: rows, error } = await from("flash_wn_words")
+    .select("loose,synset_id")
+    .in("loose", [...new Set(looseOf.values())]);
+  if (wnMissing(error)) return out;
+  fail(error);
+  const idsOf = new Map<string, Set<number>>();
+  for (const r of (rows ?? []) as Row[]) {
+    const k = String(r.loose);
+    idsOf.set(k, (idsOf.get(k) ?? new Set()).add(Number(r.synset_id)));
+  }
+  const ids = [...new Set([...idsOf.values()].flatMap((x) => [...x]))];
+  if (!ids.length) return out;
+  const byId = new Map<number, WN.WnSynset>();
+  const read = async (list: number[]) => {
+    for (let i = 0; i < list.length; i += 300) {
+      const { data, error: e2 } = await from("flash_wn_synsets")
+        .select("id,pos,words,gloss,example,antonyms")
+        .in("id", list.slice(i, i + 300));
+      fail(e2);
+      for (const r of (data ?? []) as Row[])
+        byId.set(Number(r.id), {
+          id: Number(r.id),
+          pos: Number(r.pos),
+          words: (r.words as string[]) ?? [],
+          gloss: String(r.gloss ?? ""),
+          example: String(r.example ?? ""),
+          antonyms: ((r.antonyms as number[]) ?? []).map(Number),
+        });
+    }
+  };
+  await read(ids);
+  // The antonyms' words too.
+  await read(
+    [...new Set([...byId.values()].flatMap((s) => s.antonyms))].filter((a) => !byId.has(a)),
+  );
+  for (const [w, k] of looseOf) {
+    const list = [...(idsOf.get(k) ?? [])].map((id) => byId.get(id)!).filter(Boolean);
+    if (list.length) out.set(w, WN.wnSenses(w, list, byId).slice(0, 8));
+  }
+  return out;
+}
+
+// What is loaded (null: the table isn't there yet — run the migration).
+export async function wordnetStatus(): Promise<{
+  synsets: number;
+  words: number;
+  loadedAt: string | null;
+} | null> {
+  const s = await from("flash_wn_synsets").select("id", { count: "exact", head: true });
+  if (wnMissing(s.error)) return null;
+  fail(s.error);
+  const w = await from("flash_wn_words").select("synset_id", { count: "exact", head: true });
+  fail(w.error);
+  const { data } = await from("flash_wn_synsets")
+    .select("loaded_at")
+    .order("loaded_at", { ascending: false })
+    .limit(1);
+  return {
+    synsets: s.count ?? 0,
+    words: w.count ?? 0,
+    loadedAt: ((data ?? []) as Row[])[0]?.loaded_at
+      ? String(((data ?? []) as Row[])[0].loaded_at)
+      : null,
+  };
+}
+
+// A batch of synsets loaded (the first batch empties what was there).
+export async function loadWordnet(
+  synsets: WN.WnSynset[],
+  first: boolean,
+): Promise<{ loaded: number }> {
+  if (first) {
+    const { error } = await from("flash_wn_synsets").delete().gte("id", 0);
+    if (wnMissing(error))
+      throw new Error(
+        "Hindi WordNet needs a database update first: run the latest migration (flash_wordnet) in Lovable or the SQL editor.",
+      );
+    fail(error);
+  }
+  const at = now();
+  for (let i = 0; i < synsets.length; i += 500) {
+    const part = synsets.slice(i, i + 500);
+    fail(
+      (
+        await from("flash_wn_synsets").upsert(
+          part.map((s) => ({ ...s, words: s.words, loaded_at: at })) as never,
+          { onConflict: "id" },
+        )
+      ).error,
+    );
+    const words = part.flatMap((s) =>
+      s.words.map((w) => ({ word: w, loose: SP.looseWord(w), synset_id: s.id })),
+    );
+    for (let j = 0; j < words.length; j += 1000)
+      fail(
+        (
+          await from("flash_wn_words").upsert(words.slice(j, j + 1000) as never, {
+            onConflict: "word,synset_id",
+            ignoreDuplicates: true,
+          })
+        ).error,
+      );
+  }
+  return { loaded: synsets.length };
+}
+
+export async function clearWordnet() {
+  const { error } = await from("flash_wn_synsets").delete().gte("id", 0);
+  if (!wnMissing(error)) fail(error);
 }
 
 // ---------- What changed since a chunk's download ----------
