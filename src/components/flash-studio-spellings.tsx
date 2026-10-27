@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { listFlashSpellings, saveFlashSpellRule } from "@/lib/flash-studio.functions";
 import type { SpellRow } from "@/lib/flash-spell";
+import { wiktionaryUrl } from "@/lib/flash-dict";
 import { errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -139,7 +140,15 @@ export function SpellingList() {
                         : "border-border"
                   }`}
                 >
-                  <span className="text-base font-medium">{s.word}</span>
+                  <a
+                    href={wiktionaryUrl(s.word, "hi")}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Look it up in Wiktionary"
+                    className="text-base font-medium hover:underline"
+                  >
+                    {s.word}
+                  </a>
                   {r.preferred === s.word && (
                     <span className="rounded bg-emerald-600 px-1 text-[10px] text-white">
                       house

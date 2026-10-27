@@ -12,6 +12,7 @@ import {
   Eye,
   ListChecks,
   SearchCode,
+  BookA,
   Trash2,
   Server,
   Replace,
@@ -22,6 +23,7 @@ import {
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { kindOfTemplate, wordsOf } from "@/lib/flash-split";
+import { lookupWords, type DictEntry } from "@/lib/flash-dict";
 import {
   checkFlashCards,
   fillFlashExplanations,
@@ -31,6 +33,7 @@ import {
   mergeFlashCards,
   splitFlashVariant,
   startFlashServerJob,
+  lookupFlashDictionary,
   deleteFlashCard,
   setFlashExplanation,
 } from "@/lib/flash-studio.functions";
@@ -283,6 +286,31 @@ export function ProofTools({
           `${stopped ? "AI check stopped" : "AI check done"}: ${found || "no problems found"}`,
         ),
     });
+  // The shown cards' words looked up in Wiktionary (kept a month), so the
+  // AI check can weigh the cards against the dictionary.
+  const lookupFn = useServerFn(lookupFlashDictionary);
+  const dictWords = [...new Set(live.flatMap((c) => lookupWords(c.front)))];
+  const lookUp = () =>
+    runStudioJob({
+      label: "Looking up in Wiktionary",
+      topic: topic.name,
+      ids: dictWords,
+      size: 9,
+      step: (words) => lookupFn({ data: { words } }),
+      each: (() => {
+        let found = 0;
+        let failed = 0;
+        return (r: { entries: DictEntry[]; failed: string[] }) => {
+          found += r.entries.filter((e) => e.found).length;
+          failed += r.failed.length;
+          return `${found} found${failed ? `, ${failed} couldn't be reached` : ""}`;
+        };
+      })(),
+      end: (found, stopped) =>
+        toast.success(
+          `${stopped ? "Lookup stopped" : "Lookup done"}: ${found || "none found"} (the AI check uses them)`,
+        ),
+    });
   const split = () => {
     if (
       !confirm(
@@ -363,6 +391,16 @@ export function ProofTools({
               {item(
                 `AI check (${needCheck.length})`,
                 "Front, back and explanations; fixes to apply or dismiss. Skips verified and already-checked cards",
+              )}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!!running || !dictWords.length}
+              onSelect={() => void lookUp()}
+            >
+              <BookA className="mr-2 h-4 w-4 shrink-0" />
+              {item(
+                `Look up in Wiktionary (${dictWords.length} words)`,
+                "Meanings, synonyms and antonyms for the AI check to weigh the cards against; kept a month",
               )}
             </DropdownMenuItem>
             <DropdownMenuSeparator />

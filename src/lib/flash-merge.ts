@@ -347,6 +347,8 @@ export function checkMessages(
   items: CheckItem[],
   // The house spellings of the cards' words.
   house: string[] = [],
+  // What Wiktionary says of the cards' words (looked up before).
+  dict: string[] = [],
 ): ChatMessage[] {
   return [
     {
@@ -355,7 +357,7 @@ export function checkMessages(
 Read every field of every card — the front and the back as closely as the explanations. Report only real problems a careful Hindi teacher would fix: a misspelt word (वर्तनी: matras, nukta, halant, anusvara, चन्द्रबिन्दु), a wrong, incomplete or extra answer on the back, a front that isn't the right word or form for this deck, an explanation that is wrong or doesn't fit the card, the wrong rule or type (e.g. a संधि named wrongly), or a form that breaks the deck's style. Don't report style preferences or spellings both of which are accepted. A card with no problem is left out.
 For each problem give the field ("front", "back", or the explanation's name exactly as written), the kind, a short reason, and "fix": the whole field as it should read, changing only what is wrong and keeping its layout (numbering, commas, line breaks). If you can only point the problem out (you would need the book), leave "fix" empty.
 Kinds: ${ERROR_TYPES.filter((t) => t !== "Check in book" && t !== "Other").join(", ")}, Check in book, Other.
-${house.length ? `House spellings (the editor's accepted forms; never report these as misspelt, and when a card spells one of these words another way, that is a Spelling problem): ${house.join("; ")}\n` : ""}Reply with JSON only: {"flags": [{"n": 1, "field": "back", "type": "Spelling", "note": "what is wrong, in a few words", "fix": "the field corrected"}]}`,
+${house.length ? `House spellings (the editor's accepted forms; never report these as misspelt, and when a card spells one of these words another way, that is a Spelling problem): ${house.join("; ")}\n` : ""}${dict.length ? `Dictionary (Wiktionary; often incomplete, so a word missing from it is not wrong by itself, but a clear clash is worth reporting):\n${dict.join("\n")}\n` : ""}Reply with JSON only: {"flags": [{"n": 1, "field": "back", "type": "Spelling", "note": "what is wrong, in a few words", "fix": "the field corrected"}]}`,
     },
     {
       role: "user",
