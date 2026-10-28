@@ -15,6 +15,7 @@ import * as L from "@/lib/flash-lint";
 import * as SP from "@/lib/flash-spell";
 import * as D from "@/lib/flash-dict";
 import * as WN from "@/lib/flash-wordnet";
+import * as W from "@/lib/flash-words";
 import * as SH from "@/lib/flash-sheets";
 import * as S from "@/lib/flash-split";
 import {
@@ -2741,6 +2742,79 @@ async function dictLinesFor(fronts: string[]): Promise<string[]> {
     .filter(Boolean);
 }
 
+// ---------- A topic's word list ----------
+
+const WORDS_NOT_READY =
+  "The word list needs a database update: run the latest migration (flash_words) in Lovable or the SQL editor.";
+const wordsMissing = (e: { message: string } | null) =>
+  !!e && /flash_words|flash_wn_lookup/.test(e.message);
+
+// The editor's list of correct words.
+async function okWords(): Promise<Set<string>> {
+  const out = new Set<string>();
+  for (let page = 0; ; page++) {
+    const { data, error } = await from("flash_words")
+      .select("word")
+      .order("word")
+      .range(page * 1000, page * 1000 + 999);
+    if (wordsMissing(error)) throw new Error(WORDS_NOT_READY);
+    fail(error);
+    for (const r of (data ?? []) as Row[]) out.add(String(r.word));
+    if ((data ?? []).length < 1000) break;
+  }
+  return out;
+}
+
+// WordNet's words among these (as written, their stems, and by loose form).
+async function wordnetHas(words: string[]): Promise<Set<string>> {
+  const keys = W.lookupKeys(words);
+  const out = new Set<string>();
+  if (!keys.words.length) return out;
+  for (let page = 0; ; page++) {
+    const { data, error } = await supabaseAdmin
+      .rpc("flash_wn_lookup" as never, { p_words: keys.words, p_loose: keys.loose } as never)
+      .range(page * 1000, page * 1000 + 999);
+    if (wordsMissing(error)) throw new Error(WORDS_NOT_READY);
+    if (wnMissing(error)) return out;
+    fail(error);
+    for (const r of (data ?? []) as Row[]) out.add(String(r.word));
+    if (((data ?? []) as Row[]).length < 1000) break;
+  }
+  return out;
+}
+
+// Every word a topic's cards use, sorted into known and unknown (see
+// W.classifyWords); `wordnet`: whether WordNet is loaded at all.
+export async function topicWords(
+  topicId: string,
+): Promise<{ words: W.TopicWord[]; wordnet: boolean }> {
+  const { topic, cards } = await getTopic(topicId);
+  const wrong = (await wrongFronts([topic])).has(topic.id);
+  const used = W.wordCards(cards, wrong);
+  const [ok, wn, h, st] = await Promise.all([
+    okWords(),
+    wordnetHas([...used.keys()]),
+    houseNow(),
+    wordnetStatus(),
+  ]);
+  return { words: W.classifyWords(used, wn, h.house, ok), wordnet: !!st?.synsets };
+}
+
+// Words marked correct (shared by every topic), or taken off the list.
+export async function markWords(words: string[], ok: boolean): Promise<number> {
+  const list = [...new Set(words.map((w) => w.normalize("NFC").trim()).filter(Boolean))];
+  if (!list.length) return 0;
+  const { error } = ok
+    ? await from("flash_words").upsert(
+        list.map((word) => ({ word, loose: SP.looseWord(word), updated_at: now() })) as never,
+        { onConflict: "word" },
+      )
+    : await from("flash_words").delete().in("word", list);
+  if (wordsMissing(error)) throw new Error(WORDS_NOT_READY);
+  fail(error);
+  return list.length;
+}
+
 // ---------- Hindi WordNet ----------
 
 // The cards' words WordNet has close to, not as written (see
@@ -2762,7 +2836,12 @@ async function spellHintsFor(texts: string[]): Promise<string[]> {
       byLoose.set(k, list);
     }
   }
-  return D.spellHintLines(words, byLoose);
+  // Words the editor marked correct: no hint.
+  const ok = await okWords().catch(() => new Set<string>());
+  return D.spellHintLines(
+    words.filter((w) => !ok.has(w)),
+    byLoose,
+  );
 }
 
 const wnMissing = (e: { message: string } | null) => !!e && /flash_wn_/.test(e.message);

@@ -808,3 +808,23 @@ export const setFlashSaathiWordnet = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return { on: await (await server()).setSaathiWordnet(data.on) };
   });
+
+export const flashTopicWords = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ topic_id: id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).topicWords(data.topic_id);
+  });
+
+export const markFlashWords = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({ words: z.array(z.string().min(1).max(80)).min(1).max(2000), ok: z.boolean() })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return { marked: await (await server()).markWords(data.words, data.ok) };
+  });
