@@ -3,7 +3,7 @@
 // the day's design and caption, and the album scheduled for the channel.
 // Settings hold the designs, caption template, channel and posting time;
 // History lists every word posted, which never comes back.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -16,43 +16,37 @@ import {
   getIgDay,
   getIgSettings,
   igHistory,
+  moveIgCard,
   pickIgWords,
   postIgNow,
-  recheckIgCard,
   releaseIgWord,
-  saveIgCard,
   saveIgSettings,
-  setIgCheck,
-  setIgChecked,
   setIgDesign,
   startIgDay,
-  swapIgWord,
   type IgDayView,
   type IgWord,
 } from "@/lib/ig.functions";
 import {
   IG_DESIGNS,
   IG_SAMPLES,
-  igCardHtml,
   igDate,
   markWord,
-  type IgCard,
   type IgDesign,
   type IgLang,
 } from "@/lib/ig-cards";
 import {
   CAPTION_FIELDS,
   CAPTION_MAX,
-  FIELD_NAMES,
   channelChatId,
   channelLabel,
   fillCaption,
-  type IgCheck,
   type IgSettings,
 } from "@/lib/ig-words";
 import { istDate } from "@/lib/current-affairs";
 import { playStoreUrl } from "@/lib/app-promo";
 import { Badge, PageTabs, errorText, useUrlTab } from "@/components/ca-ui";
+import { CardPreview } from "@/components/ig-card-preview";
+import { IgCardEditor } from "@/components/ig-card-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -85,8 +79,6 @@ const timeIst = (iso: string) =>
     timeStyle: "short",
   });
 
-const site = () => (typeof window === "undefined" ? "" : window.location.origin);
-
 export function InfographicsPanel() {
   const [tab, setTab] = useUrlTab(TABS, "today");
   return (
@@ -104,55 +96,6 @@ export function InfographicsPanel() {
       {tab === "today" && <DayView />}
       {tab === "history" && <History />}
       {tab === "settings" && <Settings />}
-    </div>
-  );
-}
-
-// ====================== A card's picture ======================
-
-export function CardPreview({
-  card,
-  design,
-  n,
-  total,
-  date,
-  settings,
-  width = 270,
-}: {
-  card: IgCard;
-  design: IgDesign;
-  n: number;
-  total: number;
-  date: string;
-  settings: Pick<IgSettings, "channel" | "watermark">;
-  width?: number;
-}) {
-  const html = useMemo(
-    () =>
-      igCardHtml(card, {
-        design,
-        n,
-        total,
-        date,
-        channel: channelLabel(settings.channel),
-        assetBase: site(),
-        watermark: settings.watermark,
-      }),
-    [card, design, n, total, date, settings.channel, settings.watermark],
-  );
-  const scale = width / 1080;
-  return (
-    <div
-      className="shrink-0 overflow-hidden rounded-lg border border-border bg-muted shadow-sm"
-      style={{ width, height: 1920 * scale }}
-    >
-      <iframe
-        title={`Card ${n}: ${card.word}`}
-        srcDoc={html}
-        sandbox="allow-scripts"
-        className="pointer-events-none origin-top-left border-0"
-        style={{ width: 1080, height: 1920, transform: `scale(${scale})` }}
-      />
     </div>
   );
 }
@@ -530,13 +473,21 @@ function Review({
   date: string;
   onChange: () => Promise<unknown>;
 }) {
-  const [openId, setOpenId] = useState<string | null>(view.cards[0]?.id ?? null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const moveFn = useServerFn(moveIgCard);
+  const move = async (id: string, by: -1 | 1) => {
+    try {
+      await moveFn({ data: { date, id, by } });
+      await onChange();
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't move it"));
+    }
+  };
   const designFn = useServerFn(setIgDesign);
   const approveFn = useServerFn(approveIgDay);
   const [caption, setCaption] = useState(() => view.day?.caption || captionFor(view, date));
   const [busy, setBusy] = useState(false);
   const design = (view.day?.design ?? "paper") as IgDesign;
-  const open = view.cards.find((c) => c.id === openId) ?? view.cards[0];
   const unticked = view.cards.filter((c) => !c.checked);
   const writing = view.day?.status === "writing";
   const approve = async (now: boolean) => {
@@ -606,52 +557,104 @@ function Review({
           </Button>
         </div>
       </div>
-      <div className="flex flex-col gap-4 lg:flex-row">
-        <nav aria-label="Cards" className="flex gap-2 overflow-x-auto lg:w-56 lg:flex-col">
+      <section aria-label="Cards" className="space-y-2">
+        <p className="text-sm text-muted-foreground">
+          Open a card to check it: each part on its own tab, the AI&apos;s notes beside it, and the
+          card as it will look. The arrows change the order.
+        </p>
+        <div className="flex flex-wrap gap-4">
           {view.cards.map((c, i) => {
             const notes = c.checks.filter((x) => x.state === "open").length;
+            const same = view.cards.filter((x) => x.lang === c.lang);
+            const at = same.indexOf(c);
             return (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => setOpenId(c.id)}
-                aria-current={open?.id === c.id}
-                className={`flex shrink-0 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm ${open?.id === c.id ? "border-primary bg-primary/5" : "border-border"}`}
-              >
-                <span>
-                  {i + 1}. {c.card?.word || c.word}{" "}
-                  <span className="text-xs text-muted-foreground">
-                    {c.lang === "en" ? "EN" : "HI"}
+              <div key={c.id} className="w-[170px] space-y-1.5" data-card={c.word}>
+                <button
+                  type="button"
+                  className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label={`Open card ${i + 1}: ${c.card?.word || c.word}`}
+                  onClick={() => setOpenId(c.id)}
+                  disabled={!c.card}
+                >
+                  {c.card ? (
+                    <CardPreview
+                      card={c.card}
+                      design={design}
+                      n={i + 1}
+                      total={view.cards.length}
+                      date={date}
+                      settings={view.settings}
+                      width={170}
+                    />
+                  ) : (
+                    <div className="flex h-[302px] w-[170px] items-center justify-center rounded-lg border border-dashed border-border text-xs text-muted-foreground">
+                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> Writing…
+                    </div>
+                  )}
+                </button>
+                <div className="flex items-center gap-1 text-sm">
+                  <span className="min-w-0 flex-1 truncate font-medium">
+                    {i + 1}. {c.card?.word || c.word}
                   </span>
-                </span>
-                {!c.card || !c.proofed ? (
-                  <Loader2
-                    className="h-3.5 w-3.5 animate-spin text-muted-foreground"
-                    aria-label="being written"
-                  />
-                ) : c.checked ? (
-                  <Badge tone="good">✓</Badge>
-                ) : notes ? (
-                  <Badge tone="warn">{notes}</Badge>
-                ) : (
-                  <Badge>to check</Badge>
-                )}
-              </button>
+                  {!c.card || !c.proofed ? (
+                    <Loader2
+                      className="h-3.5 w-3.5 animate-spin text-muted-foreground"
+                      aria-label="being written"
+                    />
+                  ) : c.checked ? (
+                    <Badge tone="good">✓</Badge>
+                  ) : notes ? (
+                    <Badge tone="warn">{notes}</Badge>
+                  ) : (
+                    <Badge>to check</Badge>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 w-7 p-0"
+                    aria-label={`Move ${c.word} earlier`}
+                    disabled={at === 0}
+                    onClick={() => void move(c.id, -1)}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 w-7 p-0"
+                    aria-label={`Move ${c.word} later`}
+                    disabled={at === same.length - 1}
+                    onClick={() => void move(c.id, 1)}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="ml-auto h-7"
+                    disabled={!c.card}
+                    onClick={() => setOpenId(c.id)}
+                  >
+                    Open
+                  </Button>
+                </div>
+              </div>
             );
           })}
-        </nav>
-        {open && (
-          <CardEditor
-            key={`${open.id}:${open.card ? "y" : "n"}:${open.proofed}`}
-            w={open}
-            n={view.cards.indexOf(open) + 1}
-            view={view}
-            date={date}
-            design={design}
-            onChange={onChange}
-          />
-        )}
-      </div>
+        </div>
+      </section>
+      {openId && view.cards.some((c) => c.id === openId) && (
+        <IgCardEditor
+          view={view}
+          date={date}
+          design={design}
+          startId={openId}
+          onClose={() => setOpenId(null)}
+          onChange={onChange}
+        />
+      )}
       <div className="sticky bottom-0 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-background/95 p-3 backdrop-blur">
         {writing ? (
           <span className="text-sm text-muted-foreground">
@@ -682,275 +685,6 @@ function Review({
           </Button>
         </div>
       </div>
-    </div>
-  );
-}
-
-const csv = (xs: string[]) => xs.join(", ");
-const fromCsv = (s: string) =>
-  s
-    .split(/[,،]/)
-    .map((x) => x.trim())
-    .filter(Boolean);
-
-function CardEditor({
-  w,
-  n,
-  view,
-  date,
-  design,
-  onChange,
-}: {
-  w: IgWord;
-  n: number;
-  view: IgDayView;
-  date: string;
-  design: IgDesign;
-  onChange: () => Promise<unknown>;
-}) {
-  const saveFn = useServerFn(saveIgCard);
-  const checkFn = useServerFn(setIgCheck);
-  const tickFn = useServerFn(setIgChecked);
-  const recheckFn = useServerFn(recheckIgCard);
-  const swapFn = useServerFn(swapIgWord);
-  const [card, setCard] = useState<IgCard | null>(w.card);
-  const [checks, setChecks] = useState<IgCheck[]>(w.checks);
-  const [dirty, setDirty] = useState(false);
-  if (!card)
-    return (
-      <p className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> The card for “{w.word}” is being written…
-      </p>
-    );
-  const set = (patch: Partial<IgCard>) => {
-    setCard({ ...card, ...patch });
-    setDirty(true);
-  };
-  const save = async () => {
-    try {
-      await saveFn({ data: { id: w.id, card } });
-      setDirty(false);
-      if (w.checked) await tickFn({ data: { id: w.id, checked: false } });
-      await onChange();
-      toast.success("Saved");
-    } catch (e) {
-      toast.error(errorText(e, "Couldn't save"));
-    }
-  };
-  const decide = async (c: IgCheck, state: IgCheck["state"]) => {
-    try {
-      if (dirty) await saveFn({ data: { id: w.id, card } });
-      const next = await checkFn({ data: { id: w.id, check: c.id, state } });
-      setCard(next.card);
-      setChecks(next.checks);
-      setDirty(false);
-      await onChange();
-    } catch (e) {
-      toast.error(errorText(e, "Couldn't do it"));
-    }
-  };
-  const open = checks.filter((c) => c.state === "open");
-  const others = [...view.suggestions, ...view.reserve].filter((x) => x.lang === w.lang);
-  const field = (label: string, key: keyof IgCard, multiline = false) => (
-    <label className="block space-y-1 text-sm">
-      <span className="font-medium">{label}</span>
-      {multiline ? (
-        <Textarea
-          rows={2}
-          value={String(card[key] ?? "")}
-          onChange={(e) => set({ [key]: e.target.value } as Partial<IgCard>)}
-        />
-      ) : (
-        <Input
-          value={String(card[key] ?? "")}
-          onChange={(e) => set({ [key]: e.target.value } as Partial<IgCard>)}
-        />
-      )}
-    </label>
-  );
-  return (
-    <div className="flex min-w-0 flex-1 flex-col gap-4 xl:flex-row">
-      <div className="min-w-0 flex-1 space-y-4">
-        {!w.proofed && (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Proofreading…
-          </p>
-        )}
-        {open.length > 0 && (
-          <section
-            className="space-y-2 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3"
-            aria-label="Notes"
-          >
-            <h3 className="text-sm font-semibold">Notes to decide ({open.length})</h3>
-            {open.map((c) => (
-              <div
-                key={c.id}
-                className="space-y-1 rounded-lg bg-background p-2 text-sm"
-                data-check={c.source}
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge tone={c.source === "ai" ? "primary" : "muted"}>
-                    {c.source === "ai" ? "AI" : "Dictionary"}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">{FIELD_NAMES[c.field]}</span>
-                </div>
-                {(c.text || c.fix) && (
-                  <p>
-                    {c.text && <span className="text-destructive line-through">{c.text}</span>}
-                    {c.text && c.fix && " → "}
-                    {c.fix && (
-                      <span className="font-medium text-emerald-700 dark:text-emerald-400">
-                        {c.fix}
-                      </span>
-                    )}
-                    {c.text && !c.fix && <span className="text-muted-foreground"> (remove)</span>}
-                  </p>
-                )}
-                <p className="text-muted-foreground">{c.why}</p>
-                <div className="flex gap-2">
-                  {c.field !== "news" && (c.fix || c.text) && (
-                    <Button size="sm" onClick={() => void decide(c, "accepted")}>
-                      Accept
-                    </Button>
-                  )}
-                  <Button size="sm" variant="outline" onClick={() => void decide(c, "ignored")}>
-                    Ignore
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </section>
-        )}
-        <div className="grid gap-3 sm:grid-cols-2">
-          {field("Word", "word")}
-          {field(w.lang === "en" ? "Part of speech" : "शब्द-भेद", "pos")}
-          {field(w.lang === "en" ? "Say it (Devanagari)" : "In Roman letters", "say")}
-          {w.lang === "en" && field("IPA", "ipa")}
-          {field(w.lang === "en" ? "Hindi meaning (big)" : "अर्थ (big)", "main", true)}
-          {field(w.lang === "en" ? "English meaning" : "English word", "sub", true)}
-        </div>
-        <div className="rounded-lg bg-muted/50 p-3 text-sm">
-          <span className="font-medium">From the news</span> ({card.paper || "paper"}): “{card.news}
-          ”
-        </div>
-        {w.lang === "en" && field("News line in Hindi", "newsHi", true)}
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block space-y-1 text-sm">
-            <span className="font-medium">
-              {w.lang === "en" ? "Synonyms" : "पर्यायवाची"} (commas)
-            </span>
-            <Input
-              value={csv(card.synonyms)}
-              onChange={(e) => set({ synonyms: fromCsv(e.target.value) })}
-            />
-          </label>
-          <label className="block space-y-1 text-sm">
-            <span className="font-medium">{w.lang === "en" ? "Antonyms" : "विलोम"} (commas)</span>
-            <Input
-              value={csv(card.antonyms)}
-              onChange={(e) => set({ antonyms: fromCsv(e.target.value) })}
-            />
-          </label>
-        </div>
-        {[0, 1].map((i) => (
-          <div key={i} className="grid gap-2 sm:grid-cols-[10rem_1fr]">
-            <Input
-              aria-label={`Tip ${i + 1} title`}
-              placeholder="Tip title"
-              value={card.extras[i]?.title ?? ""}
-              onChange={(e) => {
-                const extras = [...card.extras];
-                extras[i] = { title: e.target.value, text: extras[i]?.text ?? "" };
-                set({ extras });
-              }}
-            />
-            <Input
-              aria-label={`Tip ${i + 1}`}
-              placeholder="Tip (**bold**, ~~struck~~)"
-              value={card.extras[i]?.text ?? ""}
-              onChange={(e) => {
-                const extras = [...card.extras];
-                extras[i] = { title: extras[i]?.title ?? "", text: e.target.value };
-                set({ extras: extras.filter((x) => x.title || x.text) });
-              }}
-            />
-          </div>
-        ))}
-        <div className="flex flex-wrap items-center gap-2">
-          <Button disabled={!dirty} onClick={() => void save()}>
-            Save changes
-          </Button>
-          <Button
-            variant="outline"
-            onClick={async () => {
-              try {
-                if (dirty) await saveFn({ data: { id: w.id, card } });
-                await recheckFn({ data: { date, id: w.id } });
-                await onChange();
-              } catch (e) {
-                toast.error(errorText(e, "Couldn't do it"));
-              }
-            }}
-          >
-            Proofread again
-          </Button>
-          {others.length > 0 && (
-            <Select
-              onValueChange={async (to) => {
-                try {
-                  await swapFn({ data: { date, from: w.id, to } });
-                  await onChange();
-                } catch (e) {
-                  toast.error(errorText(e, "Couldn't swap"));
-                }
-              }}
-            >
-              <SelectTrigger className="w-56" aria-label="Swap for another word">
-                <SelectValue placeholder="Swap for another word…" />
-              </SelectTrigger>
-              <SelectContent>
-                {others.map((o) => (
-                  <SelectItem key={o.id} value={o.id}>
-                    {o.word}
-                    {o.status === "reserve" ? ` (reserve, ${igDate(o.day)})` : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
-        <label className="flex items-center gap-2 rounded-lg border border-border p-3 text-sm">
-          <Checkbox
-            checked={w.checked}
-            disabled={!w.proofed || open.length > 0 || dirty}
-            aria-label="Checked"
-            onCheckedChange={async (v) => {
-              try {
-                await tickFn({ data: { id: w.id, checked: v === true } });
-                await onChange();
-              } catch (e) {
-                toast.error(errorText(e, "Couldn't tick it"));
-              }
-            }}
-          />
-          <span>
-            <b>Checked</b> — I have read this card and it is ready to post
-            {open.length > 0 && (
-              <span className="text-muted-foreground"> (decide the notes first)</span>
-            )}
-            {dirty && <span className="text-muted-foreground"> (save first)</span>}
-          </span>
-        </label>
-      </div>
-      <CardPreview
-        card={card}
-        design={design}
-        n={n}
-        total={view.cards.length}
-        date={date}
-        settings={view.settings}
-        width={300}
-      />
     </div>
   );
 }

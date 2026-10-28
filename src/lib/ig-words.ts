@@ -360,6 +360,7 @@ export const CARD_FIELDS = [
   "ipa",
   "main",
   "sub",
+  "news",
   "newsHi",
   "synonyms",
   "antonyms",
@@ -395,23 +396,40 @@ export type IgCheck = {
 
 export function proofMessages(lang: IgLang, cards: (IgCard & { n: number })[]): ChatMessage[] {
   const en = lang === "en";
-  const system = `You proofread vocabulary cards for ${EXAMS} before they are posted to thousands of students. Find real mistakes only: a wrong or misleading meaning, a meaning that doesn't fit the news sentence's sense, a synonym or antonym that is wrong for this sense, a wrong part of speech, wrong pronunciation, a wrong or unnatural Hindi translation, wrong facts in a tip, ${en ? "spelling (British spelling is the house style) and grammar" : "अशुद्ध वर्तनी, wrong लिंग or शब्द-भेद, a non-standard पर्यायवाची or विलोम"}. Don't report matters of taste. Never change the news line ("news"): it is quoted from the paper.`;
+  const system = `You proofread vocabulary cards for ${EXAMS} before they are posted to thousands of students. Find real mistakes only: a wrong or misleading meaning, a meaning that doesn't fit the news sentence's sense, a synonym or antonym that is wrong for this sense, a wrong part of speech, wrong pronunciation, a wrong or unnatural Hindi translation, wrong facts in a tip, ${en ? "spelling (British spelling is the house style) and grammar" : "अशुद्ध वर्तनी, wrong लिंग or शब्द-भेद, a non-standard पर्यायवाची or विलोम"}. Don't report matters of taste. Never change the news line ("news") of a card whose "rewritten" is false: it is quoted from the paper; a rewritten one is proofread like the rest.`;
   const user = `Cards:
 ${JSON.stringify(
-  cards.map(({ n, word, pos, say, ipa, main, sub, news, newsHi, synonyms, antonyms, extras }) => ({
-    n,
-    word,
-    pos,
-    say,
-    ipa,
-    main,
-    sub,
-    news,
-    newsHi,
-    synonyms,
-    antonyms,
-    extras,
-  })),
+  cards.map(
+    ({
+      n,
+      word,
+      pos,
+      say,
+      ipa,
+      main,
+      sub,
+      news,
+      newsHi,
+      synonyms,
+      antonyms,
+      extras,
+      rewritten,
+    }) => ({
+      n,
+      rewritten: !!rewritten,
+      word,
+      pos,
+      say,
+      ipa,
+      main,
+      sub,
+      news,
+      newsHi,
+      synonyms,
+      antonyms,
+      extras,
+    }),
+  ),
   null,
   1,
 )}
@@ -471,6 +489,149 @@ export function applyFix(card: IgCard, field: CardField, text: string, fix: stri
   next[field] = (text && cur.includes(text) ? cur.replace(text, fix) : fix || cur) as never;
   return next;
 }
+
+// ---------- One part written again ----------
+
+export type IgPart = "say" | "meaning" | "sentence" | "words" | "tips";
+
+export const IG_PART_NAMES: Record<IgPart, string> = {
+  say: "the word, part of speech and pronunciation",
+  meaning: "the meanings",
+  sentence: "the news line",
+  words: "the synonyms and antonyms",
+  tips: "the tips",
+};
+
+// A sentence written again: three to choose from.
+export type IgSentence = { news: string; newsHi: string };
+
+export function partMessages(
+  part: IgPart,
+  card: IgCard,
+  opts: { article: string; note: string; glossary?: GlossaryEntry[] },
+): ChatMessage[] {
+  const en = card.lang === "en";
+  const hindi = en ? "" : hindiGuide(opts.glossary ?? []);
+  const system = `You improve one part of a vocabulary card for students preparing for ${EXAMS}. The card explains ${en ? "an English" : "a Hindi"} word from today's news. Be exact: meanings, synonyms and antonyms must be ones dictionaries and exam books give, in the sense the card uses.${en ? " Use British spelling; Hindi must be correct, standard and simple." : ""}${hindi}`;
+  const fields: Record<IgPart, string> = {
+    say: en
+      ? `{"word":"the word, capitalised","pos":"part of speech in English and Hindi, as 'Adjective · विशेषण'","say":"how to say it in Devanagari, syllables joined by hyphens","ipa":"British IPA between slashes"}`
+      : `{"word":"the word","pos":"शब्द-भेद and origin, as 'संज्ञा (पुल्लिंग) · तत्सम'","say":"the word in Roman letters"}`,
+    meaning: en
+      ? `{"main":"its Hindi meaning, 1-3 short meanings joined by '; ' (the card's sense first)","sub":"its English meaning in at most 12 words"}`
+      : `{"main":"its Hindi meaning in at most 14 words (the card's sense first)","sub":"its English equivalent in 1-3 words"}`,
+    sentence: `{"options":[{"news":"a sentence using the word","newsHi":"${en ? "the sentence in natural Hindi" : ""}"}, …3 options]}. Each sentence uses the word "${card.word}" (or a form of it) in the card's sense, says only what the article says (no names, numbers or claims it doesn't have), is at most 22 words and is clear to a student; the three differ`,
+    words: en
+      ? `{"synonyms":[3 English synonyms in the card's sense, capitalised],"antonyms":[2 English antonyms in the card's sense, capitalised, or [] if none is natural]}`
+      : `{"synonyms":[2 or 3 standard पर्यायवाची],"antonyms":[1 or 2 standard विलोम, or []]}`,
+    tips: en
+      ? `{"extras":[1 or 2 tips that best help remember or use it, each {"title","text"}; titles from "Root", "Memory trick", "Don't confuse", "Word family", "Common phrases"; text at most 110 characters, key words in **bold**]}`
+      : `{"extras":[1 or 2 tips, each {"title","text"}; titles from "शब्द-रचना", "संधि-विच्छेद", "समास", "वर्तनी सावधान" (a common wrong spelling struck as ~~wrong~~ ✗ beside the right one ✓), "संबंधित शब्द"; text at most 90 characters, key parts in **bold**]}`,
+  };
+  const user = `The card:
+${JSON.stringify(
+  {
+    word: card.word,
+    pos: card.pos,
+    say: card.say,
+    ipa: card.ipa,
+    main: card.main,
+    sub: card.sub,
+    news: card.news,
+    newsHi: card.newsHi,
+    synonyms: card.synonyms,
+    antonyms: card.antonyms,
+    extras: card.extras,
+  },
+  null,
+  1,
+)}
+${opts.article ? `\nThe article it is from:\n${opts.article}\n` : ""}
+Write ${IG_PART_NAMES[part]} again.${opts.note.trim() ? ` The editor asks: ${opts.note.trim()}` : ""}
+
+Reply with JSON only: ${fields[part]}`;
+  return [
+    { role: "system", content: system },
+    { role: "user", content: user },
+  ];
+}
+
+// What the AI wrote for a part, as a change to the card (or, for the news
+// line, the options to choose from).
+export function parsePart(
+  part: IgPart,
+  raw: string,
+): { patch: Partial<IgCard> } | { options: IgSentence[] } | null {
+  const o = jsonObject(raw) as Record<string, unknown> | null;
+  if (!o) return null;
+  if (part === "sentence") {
+    const options = (Array.isArray(o.options) ? o.options : [])
+      .map((x) => {
+        const r = (x ?? {}) as Record<string, unknown>;
+        return { news: str(r.news, 400), newsHi: str(r.newsHi, 500) };
+      })
+      .filter((x) => x.news)
+      .slice(0, 3);
+    return options.length ? { options } : null;
+  }
+  if (part === "say") {
+    const patch = {
+      word: str(o.word, 60),
+      pos: str(o.pos, 60),
+      say: str(o.say, 60),
+      ipa: str(o.ipa, 60),
+    };
+    return patch.pos || patch.say
+      ? { patch: Object.fromEntries(Object.entries(patch).filter(([, v]) => v)) }
+      : null;
+  }
+  if (part === "meaning") {
+    const main = str(o.main, 200);
+    return main ? { patch: { main, sub: str(o.sub, 160) } } : null;
+  }
+  if (part === "words") {
+    const synonyms = strs(o.synonyms, 4);
+    return synonyms.length ? { patch: { synonyms, antonyms: strs(o.antonyms, 3) } } : null;
+  }
+  const extras = (Array.isArray(o.extras) ? o.extras : [])
+    .map((e) => {
+      const r = (e ?? {}) as Record<string, unknown>;
+      return { title: str(r.title, 40), text: str(r.text, 200) };
+    })
+    .filter((e) => e.title && e.text)
+    .slice(0, 2);
+  return extras.length ? { patch: { extras } } : null;
+}
+
+// The sentences of an article that use the word (or a form of it): the
+// paper's own lines to choose from.
+export function sentencesWith(article: string, word: string, max = 12): string[] {
+  const w = word.trim();
+  if (!w) return [];
+  const stem = /^[A-Za-z]/.test(w) && w.length > 5 ? w.slice(0, -2) : w;
+  const re = /^[A-Za-z]/.test(w)
+    ? new RegExp(`(?<![A-Za-z])${stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i")
+    : null;
+  return [...new Set(sentencesOf(article).filter((s) => (re ? re.test(s) : s.includes(w))))].slice(
+    0,
+    max,
+  );
+}
+
+// Which tab of the card editor a field is on.
+export const PART_OF_FIELD: Record<CardField, IgPart> = {
+  word: "say",
+  pos: "say",
+  say: "say",
+  ipa: "say",
+  main: "meaning",
+  sub: "meaning",
+  news: "sentence",
+  newsHi: "sentence",
+  synonyms: "words",
+  antonyms: "words",
+  extras: "tips",
+};
 
 // ---------- The day's design ----------
 
