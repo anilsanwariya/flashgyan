@@ -13,7 +13,9 @@ import * as CA from "@/lib/current-affairs.server";
 import * as FS from "@/lib/flash-studio.server";
 import { looseWord } from "@/lib/flash-spell";
 import type { WnSense } from "@/lib/flash-wordnet";
-import { igCardHtml, type IgCard, type IgDesign, type IgLang } from "@/lib/ig-cards";
+import { igCardHtml, igDate, type IgCard, type IgDesign, type IgLang } from "@/lib/ig-cards";
+import { roundupHtml, type IgRoundupWord } from "@/lib/ig-roundup";
+import { parseStyleRules, type StyleSuggestion } from "@/lib/ca-style";
 import {
   applyFix,
   cardFrom,
@@ -38,7 +40,14 @@ import {
   suggestMessages,
   writeMessages,
   type CardField,
+  fillWeeklyCaption,
+  pickRuleMessages,
+  weekOf,
+  weeklyDue,
+  PICK_MIN_DAYS,
   type IgArticle,
+  type IgTaste,
+  type PickExample,
   type IgPart,
   type IgCheck,
   type IgSettings,
@@ -393,7 +402,14 @@ async function suggestLang(day: string, lang: IgLang, settings: IgSettings) {
       .trim()
       .slice(0, PROMPT_CHARS),
   }));
-  const raw = await saathiComplete(apiKey(), suggestMessages(lang, shown, count + 3, avoid.words));
+  const taste =
+    settings.learn_from_picks || settings.pick_rules[lang].length
+      ? await tasteOf(lang, settings)
+      : undefined;
+  const raw = await saathiComplete(
+    apiKey(),
+    suggestMessages(lang, shown, count + 3, avoid.words, taste),
+  );
   const list = parseSuggestions(raw);
   if (!list) throw new Error("The AI's word suggestions could not be read.");
   const keys = new Set(avoid.keys);
@@ -864,6 +880,305 @@ export async function igStep(origin?: string): Promise<void> {
       console.error("infographics:", saathiErrorDetail(e));
     }
   }
+  // The weekly round-up, when it is due and not yet posted.
+  const due = weeklyDue(settings);
+  if (due && channelChatId(settings.channel)) {
+    const mark = await weekMark(due);
+    if (!mark || (mark.status === "failed" && (mark.tries ?? 1) < 3)) {
+      try {
+        await postIgWeek(due, origin, true);
+      } catch (e) {
+        console.error("infographics weekly:", saathiErrorDetail(e));
+      }
+    }
+  }
+}
+
+// ---------- Round-ups ----------
+
+// The words posted between two days (inclusive), in the order posted.
+async function postedWords(fromDay: string, toDay: string): Promise<IgRoundupWord[]> {
+  const { data, error } = await from("ig_words")
+    .select("lang,card,posted_on,position")
+    .in("status", ["posted", "released"])
+    .gte("posted_on", fromDay)
+    .lte("posted_on", toDay)
+    .order("posted_on", { ascending: true })
+    .order("lang", { ascending: true })
+    .order("position", { ascending: true });
+  if (missing(error)) return [];
+  fail(error);
+  return ((data ?? []) as Row[])
+    .filter((r) => r.card)
+    .map((r) => ({
+      lang: r.lang as IgLang,
+      card: r.card as IgCard,
+      posted_on: String(r.posted_on),
+    }));
+}
+
+// The monthly magazine's "Words of the month" (none when the page is off).
+export async function monthWords(fromDay: string, toDay: string): Promise<IgRoundupWord[]> {
+  const settings = await getIgSettings();
+  return settings.monthly_page ? postedWords(fromDay, toDay) : [];
+}
+
+type WeekMark = {
+  status: "posting" | "posted" | "failed";
+  at: string;
+  error?: string;
+  tries?: number;
+  message_id?: number | null;
+  path?: string;
+};
+const weekKey = (to: string) => `ig_week:${to}`;
+
+async function weekMark(to: string): Promise<WeekMark | null> {
+  const { data } = await from("bot_settings").select("value").eq("key", weekKey(to)).maybeSingle();
+  return ((data as Row | null)?.value ?? null) as WeekMark | null;
+}
+
+async function setWeekMark(to: string, value: WeekMark) {
+  fail(
+    (
+      await from("bot_settings").upsert({ key: weekKey(to), value, updated_at: now() } as never, {
+        onConflict: "key",
+      })
+    ).error,
+  );
+}
+
+export type IgWeek = {
+  from: string;
+  to: string;
+  count: number;
+  status: WeekMark["status"] | null;
+  at: string | null;
+  error: string | null;
+  url: string | null;
+};
+
+// This week's round-up (still to come) and the last ones, each week ending
+// on the round-up's weekday.
+export async function listIgWeeks(weeks = 8): Promise<IgWeek[]> {
+  const settings = await getIgSettings();
+  const today = new Date(`${istDate()}T00:00:00Z`);
+  const ahead = (settings.weekly_day - today.getUTCDay() + 7) % 7;
+  const out: IgWeek[] = [];
+  for (let i = 0; i < weeks; i++) {
+    const end = new Date(today.getTime() + (ahead - 7 * i) * 86_400_000).toISOString().slice(0, 10);
+    const { from: f, to } = weekOf(end);
+    const [count, mark] = await Promise.all([
+      postedWords(f, to).then((w) => w.length),
+      weekMark(to),
+    ]);
+    out.push({
+      from: f,
+      to,
+      count,
+      status: mark?.status ?? null,
+      at: mark?.at ?? null,
+      error: mark?.error ?? null,
+      url: mark?.path ? publicUrl(mark.path) : null,
+    });
+  }
+  return out;
+}
+
+function weekCaption(settings: IgSettings, f: string, to: string, count: number) {
+  return fillWeeklyCaption(settings.weekly_caption, {
+    from: igDate(f, "long"),
+    to: igDate(to, "long"),
+    count,
+    appLink: settings.weekly_app_link,
+    channel: channelLabel(settings.channel) ? `https://${channelLabel(settings.channel)}` : "",
+  }).slice(0, CAPTION_MAX);
+}
+
+// The week's round-up as a page (for the preview) and its caption.
+export async function igWeekPreview(to: string, origin?: string) {
+  const settings = await getIgSettings();
+  const { from: f } = weekOf(to);
+  const words = await postedWords(f, to);
+  return {
+    html: roundupHtml(words, {
+      from: f,
+      to,
+      assetBase: origin ?? "",
+      channel: channelLabel(settings.channel),
+    }),
+    caption: weekCaption(settings, f, to, words.length),
+    count: words.length,
+  };
+}
+
+// The week's round-up made into a PDF and posted to the channel.
+export async function postIgWeek(to: string, origin?: string, auto = false): Promise<void> {
+  const settings = await getIgSettings();
+  const chat = channelChatId(settings.channel);
+  if (!chat) throw new Error("Add the channel link in Infographics settings.");
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not set.");
+  const { from: f } = weekOf(to);
+  const words = await postedWords(f, to);
+  const before = await weekMark(to);
+  if (!words.length) {
+    if (auto)
+      await setWeekMark(to, {
+        status: "failed",
+        at: now(),
+        error: "No words were posted this week.",
+        tries: 3,
+      });
+    throw new Error("No words were posted that week.");
+  }
+  if (auto && before?.status === "posting") return;
+  await setWeekMark(to, { status: "posting", at: now(), tries: (before?.tries ?? 0) + 1 });
+  try {
+    const html = roundupHtml(words, {
+      from: f,
+      to,
+      assetBase: origin ?? "",
+      channel: channelLabel(settings.channel),
+    });
+    const { pdf } = await CA.renderPdf(html, await CA.getMagazineSettings(), "en");
+    const path = `infographics/weekly/Words-in-the-News-${f}-to-${to}.pdf`;
+    fail(
+      (
+        await supabaseAdmin.storage
+          .from(BUCKET)
+          .upload(path, pdf, { contentType: "application/pdf", upsert: true })
+      ).error,
+    );
+    const form = new FormData();
+    form.append("chat_id", chat);
+    form.append(
+      "document",
+      new Blob([pdf as BlobPart], { type: "application/pdf" }),
+      path.split("/").pop()!,
+    );
+    form.append("caption", weekCaption(settings, f, to, words.length));
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
+      method: "POST",
+      body: form,
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      description?: string;
+      result?: { message_id?: number };
+    };
+    if (!json.ok) throw new Error(`Telegram: ${json.description ?? res.status}`);
+    await setWeekMark(to, {
+      status: "posted",
+      at: now(),
+      tries: (before?.tries ?? 0) + 1,
+      message_id: json.result?.message_id ?? null,
+      path,
+    });
+  } catch (e) {
+    await setWeekMark(to, {
+      status: "failed",
+      at: now(),
+      tries: (before?.tries ?? 0) + 1,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    throw e;
+  }
+}
+
+// ---------- Learning from the editor's picks ----------
+
+const PICK_DAYS = 45;
+
+// The words the editor picked (or added) and passed over lately, newest
+// first, and on how many days they picked.
+async function pickExamples(lang: IgLang): Promise<{
+  chosen: PickExample[];
+  passed: PickExample[];
+  days: number;
+}> {
+  const since = new Date(Date.now() - PICK_DAYS * 86_400_000).toISOString().slice(0, 10);
+  const { data, error } = await from("ig_words")
+    .select("word,pos_hint,why,own,status,day,for_day")
+    .eq("lang", lang)
+    .gte("day", since)
+    .order("day", { ascending: false })
+    .limit(2000);
+  if (missing(error)) return { chosen: [], passed: [], days: 0 };
+  fail(error);
+  const rows = (data ?? []) as Row[];
+  const picked = (r: Row) => ["picked", "posted", "released"].includes(String(r.status));
+  // A passed-over word is one left out on a day the editor picked from.
+  const pickDays = new Set(rows.filter((r) => picked(r) && !r.own).map((r) => String(r.day)));
+  const ex = (r: Row): PickExample => ({
+    word: String(r.word),
+    pos: String(r.pos_hint ?? ""),
+    why: r.own ? "" : String(r.why ?? ""),
+    own: !!r.own,
+  });
+  return {
+    chosen: rows.filter((r) => picked(r) || (r.own && r.status !== "dropped")).map(ex),
+    passed: rows
+      .filter(
+        (r) =>
+          !r.own &&
+          ["reserve", "dropped"].includes(String(r.status)) &&
+          pickDays.has(String(r.day)),
+      )
+      .map(ex),
+    days: new Set(rows.filter(picked).map((r) => String(r.for_day ?? r.day))).size,
+  };
+}
+
+// What the AI is told when it suggests words: the editor's rules and the
+// words picked and passed over lately.
+async function tasteOf(lang: IgLang, settings: IgSettings): Promise<IgTaste> {
+  const rules = settings.pick_rules[lang];
+  if (!settings.learn_from_picks) return { rules, chosen: [], passed: [] };
+  const ex = await pickExamples(lang).catch(() => ({ chosen: [], passed: [], days: 0 }));
+  return {
+    rules,
+    chosen: ex.chosen.slice(0, 25).map((x) => x.word),
+    passed: ex.passed.slice(0, 25).map((x) => x.word),
+  };
+}
+
+export type IgPickStats = Record<
+  IgLang,
+  { days: number; chosen: number; passed: number; own: number }
+>;
+
+export async function igPickStats(): Promise<IgPickStats> {
+  const one = async (lang: IgLang) => {
+    const ex = await pickExamples(lang);
+    return {
+      days: ex.days,
+      chosen: ex.chosen.filter((x) => !x.own).length,
+      passed: ex.passed.length,
+      own: ex.chosen.filter((x) => x.own).length,
+    };
+  };
+  return { en: await one("en"), hi: await one("hi") };
+}
+
+// Picking rules the AI suggests from the editor's picks (the editor
+// chooses which to keep).
+export async function suggestIgPickRules(lang: IgLang): Promise<StyleSuggestion[]> {
+  const settings = await getIgSettings();
+  const ex = await pickExamples(lang);
+  if (ex.days < PICK_MIN_DAYS)
+    throw new Error(`Pick words on at least ${PICK_MIN_DAYS} days first (so far ${ex.days}).`);
+  const raw = await saathiComplete(
+    apiKey(),
+    pickRuleMessages(
+      lang,
+      { chosen: ex.chosen.slice(0, 40), passed: ex.passed.slice(0, 40) },
+      settings.pick_rules[lang],
+    ),
+  );
+  const out = parseStyleRules(raw, settings.pick_rules[lang]);
+  if (!out) throw new Error("The AI's reply could not be read. Try again.");
+  return out;
 }
 
 // ---------- The editor's actions ----------

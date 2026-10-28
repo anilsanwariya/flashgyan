@@ -2,6 +2,7 @@
 // issue and the English issue are made from the same stories. Cloudflare's
 // browser rendering turns it into the PDF; the admin panel shows the same
 // HTML as a preview.
+import { monthWordsPage, type IgRoundupWord } from "@/lib/ig-roundup";
 import type { OneLiners, PracticeSet } from "@/lib/ca-practice";
 import { ASKED_SHOWN, askedLine, type AskedQ } from "@/lib/ca-asked";
 import { HISTORY_LABEL, type StoryHistory } from "@/lib/ca-history";
@@ -1053,6 +1054,8 @@ function renderMagazineInner(opts: {
   // Exam Radar: the editor's choices and the exams' section shares (%).
   radar?: { settings: RadarSettings; shares: Record<string, number> } | null;
   oneliners?: OneLiners | null;
+  // Monthly only: the words posted in Words in the News this month.
+  words?: IgRoundupWord[] | null;
   // Monthly only: draws the "Places in News" maps from its stories' numbers
   // and locations (the server has the outlines).
   placeMaps?: (dots: { n: number; geo: Geo }[], lang: Lang, accent: string) => string;
@@ -1376,6 +1379,7 @@ function renderMagazineInner(opts: {
   const numbersHtml = monthly && !opts.coverOnly ? numbersPage(allGroups, lang, label) : "";
   const onelinersHtml =
     monthly && !opts.coverOnly ? onelinersPage(opts.oneliners, lang, label) : "";
+  const wordsHtml = monthly && !opts.coverOnly ? monthWordsPage(opts.words ?? [], lang) : "";
   const practiceSetHtml = monthly && !opts.coverOnly ? practiceSetPage(opts.practiceSet, lang) : "";
   const index = monthly && !opts.coverOnly ? indexRows(opts.topicIndex, numberOf, lang) : [];
   // Exam Radar, after the cover: the stories to revise first.
@@ -1416,7 +1420,7 @@ function renderMagazineInner(opts: {
     : "";
   const setSize = opts.practiceSet?.questions.length ?? 0;
   const onelinerCount = opts.oneliners?.lines.length ?? 0;
-  const tocHtml = `${radarHtml ? `<div class="toc-row"><span>${icon("practice")} ${t.radar}</span><b>${radar.length}</b></div>` : ""}${blocks.length ? `<div class="toc-row"><span>${icon("events")} ${t.events}</span><b>${blocks.length}</b></div>` : ""}${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${numbersHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.numbers}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${onelinersHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.oneliners}</span><b>${onelinerCount}</b></div>` : ""}${practiceSetHtml ? `<div class="toc-row"><span>${icon("practice")} ${t.practiceSet}</span><b>${setSize}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}${indexHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.topicIndex}</span><b>${indexTerms}</b></div>` : ""}`;
+  const tocHtml = `${radarHtml ? `<div class="toc-row"><span>${icon("practice")} ${t.radar}</span><b>${radar.length}</b></div>` : ""}${blocks.length ? `<div class="toc-row"><span>${icon("events")} ${t.events}</span><b>${blocks.length}</b></div>` : ""}${toc}${fixes.length ? `<div class="toc-row"><span>✏️ ${t.corrections}</span><b>${fixes.length}</b></div>` : ""}${opts.feature ? `<div class="toc-row"><span>${icon("background")} ${t.background}: ${esc(pick(opts.feature.title, lang))}</span><b>1</b></div>` : ""}${numbersHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.numbers}</span><b>1</b></div>` : ""}${revisionCount ? `<div class="toc-row"><span>${icon("revision")} ${t.revision}</span><b>${revisionCount}</b></div>` : ""}${onelinersHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.oneliners}</span><b>${onelinerCount}</b></div>` : ""}${wordsHtml ? `<div class="toc-row"><span>📰 ${lang === "hi" ? "माह के शब्द" : "Words of the Month"}</span><b>${opts.words?.length ?? 0}</b></div>` : ""}${practiceSetHtml ? `<div class="toc-row"><span>${icon("practice")} ${t.practiceSet}</span><b>${setSize}</b></div>` : ""}${questions ? `<div class="toc-row"><span>${icon("practice")} ${t.practice}</span><b>${questions}</b></div>` : ""}${indexHtml ? `<div class="toc-row"><span>${icon("revision")} ${t.topicIndex}</span><b>${indexTerms}</b></div>` : ""}`;
   const parts: CoverParts = {
     lang,
     period: opts.period,
@@ -1487,6 +1491,7 @@ ${opts.feature ? featurePage(opts.feature, lang) : ""}
 ${numbersHtml}
 ${revisionPage(allGroups, lang, label)}
 ${onelinersHtml}
+${wordsHtml}
 ${practiceSetHtml}
 ${practicePage(everything, lang)}
 ${indexHtml}
