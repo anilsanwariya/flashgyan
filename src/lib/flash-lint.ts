@@ -134,6 +134,8 @@ export function lintCard(
     // The front is wrong on purpose (शब्द शुद्धि, वाक्य शुद्धि): only its
     // hidden letter codes are checked, never its spelling or spacing.
     wrongFront?: boolean;
+    // An English deck: Hindi meanings beside English text are expected.
+    english?: boolean;
   },
 ): Lint[] {
   if (c.removed) return [];
@@ -175,7 +177,7 @@ export function lintCard(
           style: topic.numbering,
         });
     }
-    if (DEVA.test(nfc) && LATIN.test(nfc) && field !== "front")
+    if (DEVA.test(nfc) && LATIN.test(nfc) && field !== "front" && !topic.english)
       out.push({
         kind: "latin",
         field,
@@ -235,6 +237,7 @@ export function lintTopic(
   columns: FlashColumn[],
   house?: House,
   wrongFront = false,
+  english = false,
 ): Map<string, Lint[]> {
   const live = cards.filter((c) => !c.removed);
   const topic = {
@@ -242,6 +245,7 @@ export function lintTopic(
     variants: spellingVariants(live, wrongFront),
     house,
     wrongFront,
+    english,
   };
   const out = new Map<string, Lint[]>();
   for (const c of live) {

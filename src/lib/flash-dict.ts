@@ -380,24 +380,36 @@ export type WnGap = {
 export function wnGap(back: string, senses: WnSense[], kind: "syn" | "ant"): WnGap | null {
   if (!senses.length) return null;
   const items = backItems(back);
-  const have = new Set(items.map(looseWord));
+  // Matched loosely (Hindi) and whatever the capitals (English).
+  const key = (w: string) => looseWord(w).toLowerCase();
+  const have = new Set(items.map(key));
   const wordsOf = (s: WnSense) => (kind === "syn" ? s.synonyms : s.antonyms);
-  const all = new Set(senses.flatMap(wordsOf).map(looseWord));
+  const all = new Set(senses.flatMap(wordsOf).map(key));
   if (kind === "ant" && !all.size) return null;
-  const meant = senses.filter((s) => wordsOf(s).some((w) => have.has(looseWord(w))));
+  const meant = senses.filter((s) => wordsOf(s).some((w) => have.has(key(w))));
   const from = meant.length ? meant : kind === "syn" ? senses.slice(0, 1) : senses;
   const missing = [...new Set(from.flatMap(wordsOf))]
-    .filter((w) => !have.has(looseWord(w)))
+    .filter((w) => !have.has(key(w)))
     .slice(0, kind === "syn" ? 12 : 8);
-  const unlisted = items.filter((w) => !all.has(looseWord(w)));
+  const unlisted = items.filter((w) => !all.has(key(w)));
   return { missing, unlisted };
 }
 
 // Which side of WordNet a deck checks against: its deck type's key, else
 // its question (prompt). null: not a पर्यायवाची or विलोम deck.
 export function wnKind(templateKey: string | undefined, prompt: string): "syn" | "ant" | null {
-  if (templateKey === "paryayvachi" || /पर्यायवाची|समानार्थी/.test(prompt)) return "syn";
-  if (templateKey === "vilom" || /विलोम|विपरीतार्थ/.test(prompt)) return "ant";
+  if (
+    templateKey === "paryayvachi" ||
+    templateKey === "en-synonyms" ||
+    /पर्यायवाची|समानार्थी|\bsynonyms?\b/i.test(prompt)
+  )
+    return "syn";
+  if (
+    templateKey === "vilom" ||
+    templateKey === "en-antonyms" ||
+    /विलोम|विपरीतार्थ|\bantonyms?\b/i.test(prompt)
+  )
+    return "ant";
   return null;
 }
 
@@ -422,7 +434,9 @@ export function wnDraftCard(
   kind: "syn" | "ant",
 ): { front: string; back: string; meaning: string } {
   const words = (kind === "syn" ? sense.synonyms : sense.antonyms).slice(0, 12);
-  return { front: word, back: words.join(", "), meaning: sense.gloss };
+  // English words with a capital, as the decks write them (Desert, Forsake).
+  const cap = (w: string) => (/^[a-z]/.test(w) ? w[0].toUpperCase() + w.slice(1) : w);
+  return { front: cap(word), back: words.map(cap).join(", "), meaning: sense.gloss };
 }
 
 // ---------- Spelling hints from WordNet ----------

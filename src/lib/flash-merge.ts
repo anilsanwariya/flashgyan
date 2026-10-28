@@ -249,6 +249,8 @@ type Deck = {
   examples: FlashExample[];
   // The front is the wrong form on purpose (शब्द शुद्धि, वाक्य शुद्धि).
   wrongFront?: boolean;
+  // English cards (Hindi meanings may be in them).
+  language?: "hi" | "en";
 };
 
 export type FillItem = {
@@ -362,17 +364,21 @@ export function checkMessages(
   return [
     {
       role: "system",
-      content: `You proofread Hindi flashcards for FlashGyan (Rajasthan's competitive exams: RPSC, RSSB) before students see them. Deck type: ${deck.name}; each card asks "${deck.prompt.trim()}" about its front, and the back is the answer.
+      content: `You proofread ${deck.language === "en" ? "English" : "Hindi"} flashcards for FlashGyan (${deck.language === "en" ? "India's competitive exams: RPSC, RSSB, SSC and others" : "Rajasthan's competitive exams: RPSC, RSSB"}) before students see them. Deck type: ${deck.name}; each card asks "${deck.prompt.trim()}" about its front, and the back is the answer.
 Read every field of every card — the front and the back as closely as the explanations.${
         deck.wrongFront
           ? `
 THIS DECK'S FRONT IS WRONG ON PURPOSE: each front is the incorrect form the student must correct, and the back is its correct form. Never report the front's spelling or grammar as a mistake and never give a fix for the front. Instead check that: the front really has a mistake (a front that is already correct is a problem: report it on the front, without a fix); the back is the front with only that mistake corrected, nothing else changed, and is itself fully correct; the अशुद्धि column (if any) names the kind of mistake the front actually has; the explanation gives the right rule. Proofread the back and every explanation fully for spelling.`
           : ""
       }
-Report only real problems a careful Hindi teacher would fix: a misspelt word (वर्तनी: matras, nukta, halant, anusvara, चन्द्रबिन्दु), a wrong, incomplete or extra answer on the back, a front that isn't the right word or form for this deck, an explanation that is wrong or doesn't fit the card, the wrong rule or type (e.g. a संधि named wrongly), or a form that breaks the deck's style. Don't report style preferences or spellings both of which are accepted. A card with no problem is left out.
+${
+  deck.language === "en"
+    ? `Report only real problems a careful English teacher would fix: a misspelt word (British spelling is the house standard: colour, organise, centre, travelled, programme; an American spelling is a Spelling problem), wrong grammar or usage (a preposition, an article, a tense, a phrasal verb or idiom used wrongly), a wrong, incomplete or extra answer on the back, a wrong part of speech, a Hindi meaning (हिंदी अर्थ) that is wrong or misspelt,`
+    : `Report only real problems a careful Hindi teacher would fix: a misspelt word (वर्तनी: matras, nukta, halant, anusvara, चन्द्रबिन्दु), a wrong, incomplete or extra answer on the back,`
+} a front that isn't the right word or form for this deck, an explanation that is wrong or doesn't fit the card, the wrong rule or type (e.g. a संधि named wrongly), or a form that breaks the deck's style. Don't report style preferences or spellings both of which are accepted. A card with no problem is left out.
 For each problem give the field ("front", "back", or the explanation's name exactly as written), the kind, a short reason, and "fix": the whole field as it should read, changing only what is wrong and keeping its layout (numbering, commas, line breaks). If you can only point the problem out (you would need the book), leave "fix" empty.
 Kinds: ${ERROR_TYPES.filter((t) => t !== "Check in book" && t !== "Other").join(", ")}, Check in book, Other.
-${house.length ? `House spellings (the editor's accepted forms; never report these as misspelt, and when a card spells one of these words another way, that is a Spelling problem): ${house.join("; ")}\n` : ""}${dict.length ? `Dictionary (Wiktionary; often incomplete, so a word missing from it is not wrong by itself, but a clear clash is worth reporting):\n${dict.join("\n")}\n` : ""}${hints.length ? `Spelling hints from Hindi WordNet for words of the backs and explanations (a word WordNet spells another way, or a word it lacks whose near spelling it has; an inflected form, a name or a second accepted spelling can be fine, so judge each in its sentence):\n${hints.join("\n")}\n` : ""}Reply with JSON only: {"flags": [{"n": 1, "field": "back", "type": "Spelling", "note": "what is wrong, in a few words", "fix": "the field corrected"}]}`,
+${house.length ? `House spellings (the editor's accepted forms; never report these as misspelt, and when a card spells one of these words another way, that is a Spelling problem): ${house.join("; ")}\n` : ""}${dict.length ? `Dictionary (Wiktionary; often incomplete, so a word missing from it is not wrong by itself, but a clear clash is worth reporting):\n${dict.join("\n")}\n` : ""}${hints.length ? `Spelling hints from ${deck.language === "en" ? "the British spelling list and Hindi WordNet" : "Hindi WordNet"} for words of the backs and explanations (a word WordNet spells another way, or a word it lacks whose near spelling it has; an inflected form, a name or a second accepted spelling can be fine, so judge each in its sentence):\n${hints.join("\n")}\n` : ""}Reply with JSON only: {"flags": [{"n": 1, "field": "back", "type": "Spelling", "note": "what is wrong, in a few words", "fix": "the field corrected"}]}`,
     },
     {
       role: "user",

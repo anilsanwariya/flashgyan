@@ -16,6 +16,7 @@ import * as SP from "@/lib/flash-spell";
 import * as D from "@/lib/flash-dict";
 import * as WN from "@/lib/flash-wordnet";
 import * as W from "@/lib/flash-words";
+import * as EN from "@/lib/flash-english";
 import * as SH from "@/lib/flash-sheets";
 import * as S from "@/lib/flash-split";
 import {
@@ -24,6 +25,7 @@ import {
   aiSettled,
   WRONG_FRONT_KEYS,
   frontIsWrong,
+  deckLanguage,
   lastNumbers,
   matchAppIds,
   newColumnId,
@@ -83,6 +85,13 @@ const readTemplate = (r: Row): FlashTemplate => ({
   // Before its migration: the शुद्धि deck types.
   wrong_front:
     typeof r.wrong_front === "boolean" ? r.wrong_front : WRONG_FRONT_KEYS.includes(String(r.key)),
+  // Before its migration: English for the English deck types (key "en-…").
+  language:
+    r.language === "en" || r.language === "hi"
+      ? r.language
+      : String(r.key).startsWith("en-")
+        ? "en"
+        : "hi",
 });
 
 const readTopic = (r: Row): FlashTopic => ({
@@ -135,10 +144,11 @@ export async function listTemplates(): Promise<FlashTemplate[]> {
   // The deck types the finished sheets use, added the first time.
   if (!rows.length) {
     let { error: e } = await from("flash_templates").insert(DEFAULT_TEMPLATES as never);
-    // Before the wrong_front migration: added without it (read by key).
-    if (e && /wrong_front/.test(e.message))
+    // Before the wrong_front / language migrations: added without them
+    // (read by key).
+    if (e && /wrong_front|language/.test(e.message))
       ({ error: e } = await from("flash_templates").insert(
-        DEFAULT_TEMPLATES.map(({ wrong_front: _, ...t }) => t) as never,
+        DEFAULT_TEMPLATES.map(({ wrong_front: _, language: _l, ...t }) => t) as never,
       ));
     fail(e);
     return listTemplates();
@@ -153,6 +163,7 @@ export async function saveTemplate(t: {
   columns: FlashColumn[];
   word_key: WordKey;
   wrong_front?: boolean;
+  language?: "hi" | "en";
 }): Promise<FlashTemplate> {
   const base = {
     name: t.name.trim() || "Deck type",
@@ -174,11 +185,13 @@ export async function saveTemplate(t: {
     )
       .select("*")
       .single();
-  let { data, error } = await save(
-    t.wrong_front === undefined ? base : { ...base, wrong_front: t.wrong_front },
-  );
-  // Before the wrong_front migration: the rest saved.
-  if (error && /wrong_front/.test(error.message)) ({ data, error } = await save(base));
+  let { data, error } = await save({
+    ...base,
+    ...(t.wrong_front === undefined ? {} : { wrong_front: t.wrong_front }),
+    ...(t.language === undefined ? {} : { language: t.language }),
+  });
+  // Before the wrong_front / language migrations: the rest saved.
+  if (error && /wrong_front|language/.test(error.message)) ({ data, error } = await save(base));
   fail(error);
   return readTemplate(data as unknown as Row);
 }
@@ -238,7 +251,7 @@ export async function listTopics(): Promise<TopicSummary[]> {
       for (const r of (rows ?? []) as Row[])
         jobs.set(String(r.topic_id), (jobs.get(String(r.topic_id)) ?? 0) + 1);
   }
-  const wrong = await wrongFronts(topics);
+  const { wrong, english } = await topicKinds(topics);
   const house = SP.buildHouse(
     SP.spellCounts(topics.flatMap((t) => SP.forHouse(byTopic.get(t.id) ?? [], wrong.has(t.id)))),
     await spellRules(),
@@ -256,7 +269,7 @@ export async function listTopics(): Promise<TopicSummary[]> {
       withId: live.filter((c) => c.app_id).length,
       removed: all.length - live.length,
       ai: live.filter((c) => c.ai?.fixes.length).length,
-      lint: L.lintTopic(live, t.columns, house, wrong.has(t.id)).size,
+      lint: L.lintTopic(live, t.columns, house, wrong.has(t.id), english.has(t.id)).size,
       missing: live.filter((c) => M.emptyColumns(c, t.columns).length > 0).length,
       unchecked: live.filter((c) => needsCheck(c, true)).length,
       changedChunks: [...changes]
@@ -1086,6 +1099,7 @@ async function deckOf(topic: FlashTopic) {
     columns: topic.columns,
     examples: [] as FlashTemplate["examples"],
     wrongFront: frontIsWrong(topic, []),
+    language: deckLanguage(topic, []),
   };
   if (topic.template_id) {
     const { data: t } = await from("flash_templates")
@@ -1094,7 +1108,13 @@ async function deckOf(topic: FlashTopic) {
       .maybeSingle();
     if (t) {
       const tpl = readTemplate(t as unknown as Row);
-      deck = { ...deck, name: tpl.name, examples: tpl.examples, wrongFront: tpl.wrong_front };
+      deck = {
+        ...deck,
+        name: tpl.name,
+        examples: tpl.examples,
+        wrongFront: tpl.wrong_front,
+        language: tpl.language,
+      };
     }
   }
   return deck;
@@ -1262,7 +1282,9 @@ export async function checkCards(
           items.flatMap((it) => [it.front, it.back, ...Object.values(it.ex)]),
         ),
         // A शुद्धि deck's front is wrong on purpose: its back's words instead.
-        await dictLinesFor(items.map((it) => (deck.wrongFront ? it.back : it.front))),
+        deck.language === "en"
+          ? await enDictLines(items.map((it) => (deck.wrongFront ? it.back : it.front)))
+          : await dictLinesFor(items.map((it) => (deck.wrongFront ? it.back : it.front))),
         await spellHintsFor(
           items.flatMap((it) => [
             deck.wrongFront ? "" : it.front,
@@ -1677,11 +1699,13 @@ export async function bulkCards(
       });
     }
   else if (action === "fix_lint") {
+    const kinds = await topicKinds([topic]);
     const lints = L.lintTopic(
       cards,
       topic.columns,
       (await houseNow()).house,
-      (await wrongFronts([topic])).has(topic.id),
+      kinds.wrong.has(topic.id),
+      kinds.english.has(topic.id),
     );
     for (const c of chosen) {
       const mine = (lints.get(c.id) ?? []).filter((l) => l.fix !== undefined);
@@ -2532,10 +2556,21 @@ async function spellRules(): Promise<SP.SpellRule[]> {
 async function wrongFronts(
   topics: { id: string; template_id: string | null; prompt: string }[],
 ): Promise<Set<string>> {
+  return (await topicKinds(topics)).wrong;
+}
+
+// The topics whose front is wrong on purpose, and the English ones (their
+// deck types' settings).
+async function topicKinds(
+  topics: { id: string; template_id: string | null; prompt: string }[],
+): Promise<{ wrong: Set<string>; english: Set<string> }> {
   const { data, error } = await from("flash_templates").select("*");
   fail(error);
   const templates = ((data ?? []) as Row[]).map(readTemplate);
-  return new Set(topics.filter((t) => frontIsWrong(t, templates)).map((t) => t.id));
+  return {
+    wrong: new Set(topics.filter((t) => frontIsWrong(t, templates)).map((t) => t.id)),
+    english: new Set(topics.filter((t) => deckLanguage(t, templates) === "en").map((t) => t.id)),
+  };
 }
 
 // Every topic's spellings and the rules (read afresh: a topic just added
@@ -2785,19 +2820,32 @@ async function wordnetHas(words: string[]): Promise<Set<string>> {
 
 // Every word a topic's cards use, sorted into known and unknown (see
 // W.classifyWords); `wordnet`: whether WordNet is loaded at all.
-export async function topicWords(
-  topicId: string,
-): Promise<{ words: W.TopicWord[]; wordnet: boolean }> {
+export async function topicWords(topicId: string): Promise<{
+  words: W.TopicWord[];
+  // Hindi WordNet loaded; the British spelling list loaded (null: not
+  // needed, no English words).
+  wordnet: boolean;
+  english: boolean | null;
+}> {
   const { topic, cards } = await getTopic(topicId);
   const wrong = (await wrongFronts([topic])).has(topic.id);
   const used = W.wordCards(cards, wrong);
-  const [ok, wn, h, st] = await Promise.all([
+  const usedEn = W.enWordCards(cards, wrong);
+  const [ok, wn, h, st, en] = await Promise.all([
     okWords(),
     wordnetHas([...used.keys()]),
     houseNow(),
     wordnetStatus(),
+    usedEn.size ? englishStatus() : Promise.resolve(null),
   ]);
-  return { words: W.classifyWords(used, wn, h.house, ok), wordnet: !!st?.synsets };
+  const okEn = new Set([...ok].map((w) => w.toLowerCase()));
+  const english = usedEn.size ? await englishWords(usedEn, new Set([...ok, ...okEn])) : [];
+  return {
+    words: W.sortWords([...(used.size ? W.classifyWords(used, wn, h.house, ok) : []), ...english]),
+    // No Hindi words: nothing waits on Hindi WordNet.
+    wordnet: !!st?.synsets || !used.size,
+    english: usedEn.size ? !!en?.spellings : null,
+  };
 }
 
 // Words marked correct (shared by every topic), or taken off the list.
@@ -2838,10 +2886,52 @@ async function spellHintsFor(texts: string[]): Promise<string[]> {
   }
   // Words the editor marked correct: no hint.
   const ok = await okWords().catch(() => new Set<string>());
-  return D.spellHintLines(
-    words.filter((w) => !ok.has(w)),
-    byLoose,
+  // English words the British list lacks but has a close spelling of.
+  const en = new Map(
+    [...new Set(texts.flatMap(EN.englishWordsIn))].slice(0, 300).map((w) => [w, new Set([""])]),
   );
+  const okEn = new Set([...ok, ...[...ok].map((w) => w.toLowerCase())]);
+  const enLines = (await englishWords(en, okEn).catch(() => []))
+    .filter((w) => w.status === "unknown" && w.near.length)
+    .slice(0, 40)
+    .map((w) => `${w.word}: not in the British spelling list; it has ${w.near.join(" / ")}`);
+  return [
+    ...D.spellHintLines(
+      words.filter((w) => !ok.has(w)),
+      byLoose,
+    ),
+    ...enLines,
+  ];
+}
+
+// English WordNet's meanings of the cards' fronts (a phrase whole, else
+// its words), for the AI check of an English deck.
+async function enDictLines(fronts: string[]): Promise<string[]> {
+  const asks = [
+    ...new Set(
+      fronts.flatMap((f) => {
+        const t = f
+          .replace(/[^A-Za-z' -]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        return t.split(" ").length <= 4 ? [t, ...EN.englishWordsIn(t)] : EN.englishWordsIn(t);
+      }),
+    ),
+  ].slice(0, 120);
+  const found = await enWordnetSenses(asks).catch(() => ({}) as Record<string, WN.WnSense[]>);
+  return Object.entries(found)
+    .filter(([, senses]) => senses.length)
+    .slice(0, 60)
+    .map(
+      ([w, senses]) =>
+        `${w} — WordNet: ${senses
+          .slice(0, 3)
+          .map(
+            (x) =>
+              `(${x.pos}) ${x.gloss}${x.synonyms.length ? ` · synonyms: ${x.synonyms.slice(0, 6).join(", ")}` : ""}${x.antonyms.length ? ` · antonyms: ${x.antonyms.slice(0, 4).join(", ")}` : ""}`,
+          )
+          .join("; ")}`,
+    );
 }
 
 const wnMissing = (e: { message: string } | null) => !!e && /flash_wn_/.test(e.message);
@@ -2989,6 +3079,197 @@ export async function loadWordnet(
 export async function clearWordnet() {
   const { error } = await from("flash_wn_synsets").delete().gte("id", 0);
   if (!wnMissing(error)) fail(error);
+}
+
+// ---------- English: Open English WordNet and the British spelling list ----------
+
+const EN_NOT_READY =
+  "English needs a database update first: run the latest migration (flash_english) in Lovable or the SQL editor.";
+const enMissing = (e: { message: string } | null) =>
+  !!e && /flash_enwn_|flash_en_spell|flash_en_lookup/.test(e.message);
+
+// What is loaded (null: the tables aren't there yet — run the migration).
+export async function englishStatus(): Promise<{
+  synsets: number;
+  words: number;
+  spellings: number;
+} | null> {
+  const s = await from("flash_enwn_synsets").select("id", { count: "exact", head: true });
+  if (enMissing(s.error)) return null;
+  fail(s.error);
+  const w = await from("flash_enwn_words").select("synset_id", { count: "exact", head: true });
+  fail(w.error);
+  const sp = await from("flash_en_spell").select("word", { count: "exact", head: true });
+  fail(sp.error);
+  return { synsets: s.count ?? 0, words: w.count ?? 0, spellings: sp.count ?? 0 };
+}
+
+// A batch of English WordNet (the first batch empties what was there).
+export async function loadEnWordnet(
+  synsets: EN.EnSynset[],
+  words: EN.EnWordRow[],
+  first: boolean,
+): Promise<{ loaded: number }> {
+  if (first) {
+    const { error } = await from("flash_enwn_synsets").delete().neq("id", "");
+    if (enMissing(error)) throw new Error(EN_NOT_READY);
+    fail(error);
+  }
+  const at = now();
+  for (let i = 0; i < synsets.length; i += 500)
+    fail(
+      (
+        await from("flash_enwn_synsets").upsert(
+          synsets.slice(i, i + 500).map((x) => ({ ...x, loaded_at: at })) as never,
+          { onConflict: "id" },
+        )
+      ).error,
+    );
+  for (let j = 0; j < words.length; j += 1000)
+    fail(
+      (
+        await from("flash_enwn_words").upsert(words.slice(j, j + 1000) as never, {
+          onConflict: "word,synset_id",
+          ignoreDuplicates: true,
+        })
+      ).error,
+    );
+  return { loaded: synsets.length };
+}
+
+// A batch of the British spelling list (the first batch empties it).
+export async function loadEnSpellings(words: string[], first: boolean) {
+  if (first) {
+    const { error } = await from("flash_en_spell").delete().neq("word", "");
+    if (enMissing(error)) throw new Error(EN_NOT_READY);
+    fail(error);
+  }
+  const rows = [...new Set(words)].map((word) => ({ word, lower: word.toLowerCase() }));
+  for (let i = 0; i < rows.length; i += 2000)
+    fail(
+      (
+        await from("flash_en_spell").upsert(rows.slice(i, i + 2000) as never, {
+          onConflict: "word",
+          ignoreDuplicates: true,
+        })
+      ).error,
+    );
+  return { loaded: rows.length };
+}
+
+export async function clearEnglish(which: "wordnet" | "spellings") {
+  const { error } =
+    which === "wordnet"
+      ? await from("flash_enwn_synsets").delete().neq("id", "")
+      : await from("flash_en_spell").delete().neq("word", "");
+  if (!enMissing(error)) fail(error);
+}
+
+// What the British spelling list and WordNet have of these words (by their
+// small-letter form), in one paged lookup.
+async function enFound(words: string[]): Promise<W.EnFound> {
+  const spell = new Map<string, string[]>();
+  const wn = new Map<string, string[]>();
+  const keys = [...new Set(words.map((w) => w.toLowerCase()))];
+  if (!keys.length) return { spell, wn };
+  for (let page = 0; ; page++) {
+    const { data, error } = await supabaseAdmin
+      .rpc("flash_en_lookup" as never, { p_lower: keys } as never)
+      .range(page * 1000, page * 1000 + 999);
+    if (enMissing(error)) return { spell, wn };
+    fail(error);
+    for (const r of (data ?? []) as Row[]) {
+      const m = r.src === "s" ? spell : wn;
+      const k = String(r.lower);
+      m.set(k, [...(m.get(k) ?? []), String(r.word)]);
+    }
+    if (((data ?? []) as Row[]).length < 1000) break;
+  }
+  return { spell, wn };
+}
+
+// English words sorted into known and not known (see W.classifyEnglish),
+// with British spellings close to the unknown ones; none before the
+// spelling list is loaded.
+async function englishWords(
+  used: Map<string, Set<string>>,
+  ok: Set<string>,
+): Promise<W.TopicWord[]> {
+  if (!used.size) return [];
+  const found = await enFound([...used.keys()]);
+  if (!found.spell.size) return [];
+  const first = W.classifyEnglish(used, found, ok);
+  // Close British spellings for at most 300 words the British list lacks
+  // (each a few hundred candidates), the rarest first: those not known, and
+  // those only WordNet knows (an American spelling: color).
+  const lacking = first.filter((w) => w.status === "unknown" || w.why === "WordNet");
+  const ask = [...lacking]
+    .sort((a, b) => a.count - b.count)
+    .slice(0, 300)
+    .map((w) => w.word);
+  const cands = await enFound(W.nearKeys(ask));
+  const near = new Map<string, string[]>();
+  for (const w of ask) {
+    const known = EN.edits1(w).filter((c) => cands.spell.has(c));
+    // Their forms as the list writes them (a name keeps its capital).
+    near.set(
+      w.toLowerCase(),
+      known.flatMap((c) => cands.spell.get(c) ?? []),
+    );
+  }
+  return W.classifyEnglish(used, found, ok, near);
+}
+
+// English WordNet's meanings of these words (or phrases: "give up"), by
+// word; none before it is loaded.
+export async function enWordnetSenses(words: string[]): Promise<Record<string, WN.WnSense[]>> {
+  const out: Record<string, WN.WnSense[]> = {};
+  const keys = [...new Set(words.map((w) => w.trim().toLowerCase()).filter(Boolean))];
+  for (let i = 0; i < keys.length; i += 60) {
+    const part = keys.slice(i, i + 60);
+    const { data: rows, error } = await from("flash_enwn_words")
+      .select("lower,synset_id,rank")
+      .in("lower", part);
+    if (enMissing(error)) return out;
+    fail(error);
+    const idsOf = new Map<string, Map<string, number>>();
+    for (const r of (rows ?? []) as Row[]) {
+      const m = idsOf.get(String(r.lower)) ?? new Map<string, number>();
+      const id = String(r.synset_id);
+      m.set(id, Math.min(m.get(id) ?? 99, Number(r.rank)));
+      idsOf.set(String(r.lower), m);
+    }
+    const ids = [...new Set([...idsOf.values()].flatMap((m) => [...m.keys()]))];
+    const byId = new Map<string, EN.EnSynset>();
+    const read = async (list: string[]) => {
+      for (let j = 0; j < list.length; j += 300) {
+        const { data, error: e2 } = await from("flash_enwn_synsets")
+          .select("id,pos,words,gloss,example,antonyms")
+          .in("id", list.slice(j, j + 300));
+        fail(e2);
+        for (const r of (data ?? []) as Row[])
+          byId.set(String(r.id), {
+            id: String(r.id),
+            pos: String(r.pos) as EN.EnSynset["pos"],
+            words: (r.words as string[]) ?? [],
+            gloss: String(r.gloss ?? ""),
+            example: String(r.example ?? ""),
+            antonyms: (r.antonyms as string[]) ?? [],
+          });
+      }
+    };
+    await read(ids);
+    await read(
+      [...new Set([...byId.values()].flatMap((x) => x.antonyms))].filter((a) => !byId.has(a)),
+    );
+    for (const w of words) {
+      const m = idsOf.get(w.trim().toLowerCase());
+      if (!m) continue;
+      const list = [...m.keys()].map((id) => byId.get(id)!).filter(Boolean);
+      out[w] = EN.enSenses(w.trim(), list, byId, m).slice(0, 8);
+    }
+  }
+  return out;
 }
 
 // ---------- What changed since a chunk's download ----------

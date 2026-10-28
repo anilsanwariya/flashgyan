@@ -130,9 +130,15 @@ export function WordsTab({
         <p className="text-sm text-destructive">{errorText(q.error, "Couldn't read the words")}</p>
       ) : (
         <>
+          {q.data?.english === false && (
+            <p className="rounded-lg border border-amber-300 bg-amber-50/60 p-2 text-sm dark:border-amber-800 dark:bg-amber-950/20">
+              The cards have English words, but the British spelling list isn&apos;t loaded, so they
+              aren&apos;t checked yet: load it on the studio&apos;s Dictionary tab.
+            </p>
+          )}
           {!q.data?.wordnet && (
             <p className="rounded-lg border border-amber-300 bg-amber-50/60 p-2 text-sm dark:border-amber-800 dark:bg-amber-950/20">
-              Hindi WordNet isn&apos;t loaded, so most words show as not known: load it on the
+              Hindi WordNet isn&apos;t loaded, so most Hindi words show as not known: load it on the
               studio&apos;s Dictionary tab first.
             </p>
           )}

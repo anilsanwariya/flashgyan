@@ -55,6 +55,7 @@ import {
   otherFlashTopicWords,
   checkFlashCards,
   flashWordnetSenses,
+  flashEnWordnetSenses,
   resetFlashChunks,
   saveFlashAppIds,
   markFlashDownloaded,
@@ -92,6 +93,7 @@ import {
   type ParsedSheet,
   type WordKey,
   frontIsWrong,
+  deckLanguage,
   aiFlagged,
   aiSettled,
   shownNote,
@@ -139,6 +141,7 @@ import { BOOK_FILE_TYPES, isBookFile } from "@/lib/flash-read";
 import { StudentPreview } from "@/components/flash-studio-preview";
 import { AppImportDialog, CompareWithApp } from "@/components/flash-studio-import";
 import { WordsTab } from "@/components/flash-studio-words";
+import { EnglishSettings } from "@/components/flash-studio-english";
 import { useTopicWords } from "@/lib/flash-topic-words";
 import { chunkIssues, type ChunkIssue } from "@/lib/flash-words";
 import { SpellingList } from "@/components/flash-studio-spellings";
@@ -243,7 +246,12 @@ export function FlashStudio() {
       ) : tab === "spellings" ? (
         <SpellingList />
       ) : (
-        <WordnetSettings />
+        <div className="space-y-4">
+          <WordnetSettings />
+          <div className="max-w-2xl text-sm">
+            <EnglishSettings />
+          </div>
+        </div>
       )}
     </div>
   );
@@ -554,6 +562,7 @@ function TemplateList() {
               </Button>
             </div>
             <div className="flex flex-wrap gap-1">
+              {t.language === "en" && <Badge tone="primary">English</Badge>}
               {t.wrong_front && (
                 <Badge tone="warn" title="Its front's spelling is never flagged or fixed">
                   front wrong on purpose
@@ -602,6 +611,7 @@ type TemplateDraft = {
   columns: FlashColumn[];
   word_key: WordKey;
   wrong_front: boolean;
+  language: "hi" | "en";
 };
 
 function TemplateDialog({
@@ -621,6 +631,7 @@ function TemplateDialog({
     columns: template?.columns ?? [],
     word_key: template?.word_key ?? "",
     wrong_front: template?.wrong_front ?? false,
+    language: template?.language ?? "hi",
   });
   const [busy, setBusy] = useState(false);
   return (
@@ -636,6 +647,22 @@ function TemplateDialog({
           </label>
           <PromptField value={t.prompt} onChange={(prompt) => setT({ ...t, prompt })} />
           <WordKeyField value={t.word_key} onChange={(word_key) => setT({ ...t, word_key })} />
+          <label className="block space-y-1 text-sm">
+            <span className="font-medium">Language</span>
+            <select
+              aria-label="Language"
+              value={t.language}
+              onChange={(e) => setT({ ...t, language: e.target.value as "hi" | "en" })}
+              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+            >
+              <option value="hi">Hindi</option>
+              <option value="en">English (Hindi meanings may be in it)</option>
+            </select>
+            <span className="text-xs text-muted-foreground">
+              English cards are checked with British spelling and English WordNet; their Hindi words
+              with Hindi WordNet.
+            </span>
+          </label>
           <label className="flex items-start gap-2 text-sm">
             <input
               type="checkbox"
@@ -1125,6 +1152,7 @@ function CardsTab({
   const typesFn = useServerFn(listFlashTemplates);
   const typesQ = useQuery({ queryKey: ["flashTemplates"], queryFn: () => typesFn() });
   const wrongFront = frontIsWrong(topic, typesQ.data);
+  const english = deckLanguage(topic, typesQ.data) === "en";
   const lintCtx = useMemo(() => {
     const live = cards.filter((c) => !c.removed);
     return {
@@ -1132,11 +1160,12 @@ function CardsTab({
       variants: spellingVariants(live, wrongFront),
       house,
       wrongFront,
+      english,
     };
-  }, [cards, house, wrongFront]);
+  }, [cards, house, wrongFront, english]);
   const lints = useMemo(
-    () => lintTopic(cards, topic.columns, house, wrongFront),
-    [cards, topic.columns, house, wrongFront],
+    () => lintTopic(cards, topic.columns, house, wrongFront, english),
+    [cards, topic.columns, house, wrongFront, english],
   );
   // This topic's words that other topics have too.
   const otherFn = useServerFn(otherFlashTopicWords);
@@ -1149,16 +1178,19 @@ function CardsTab({
     () => new Map((otherQ.data ?? []).map((o) => [o.key, o.topics])),
     [otherQ.data],
   );
-  // A पर्यायवाची or विलोम deck against Hindi WordNet (when it is loaded).
+  // A पर्यायवाची / विलोम deck against Hindi WordNet, a Synonyms / Antonyms
+  // deck against English WordNet (when loaded).
   const kind = wnKind(typesQ.data?.find((t) => t.id === topic.template_id)?.key, topic.prompt);
   const wnWords = useMemo(
     () =>
       kind ? [...new Set(cards.map((c) => c.front.trim()).filter((w) => w && w.length <= 80))] : [],
     [cards, kind],
   );
-  const wnFn = useServerFn(flashWordnetSenses);
+  const hiWnFn = useServerFn(flashWordnetSenses);
+  const enWnFn = useServerFn(flashEnWordnetSenses);
+  const wnFn = english ? enWnFn : hiWnFn;
   const wnQ = useQuery({
-    queryKey: ["flashWnSenses", topic.id, wnWords],
+    queryKey: ["flashWnSenses", topic.id, english, wnWords],
     queryFn: () => wnFn({ data: { words: wnWords.slice(0, 3000) } }),
     enabled: wnWords.length > 0,
     staleTime: 5 * 60_000,
@@ -1286,6 +1318,7 @@ function CardsTab({
         <WordnetDraftDialog
           topic={topic}
           kind={kind}
+          english={english}
           fronts={cards.filter((c) => !c.removed).map((c) => c.front.trim())}
           onClose={() => setDrafting(false)}
           onAdded={onChanged}
@@ -1338,7 +1371,8 @@ function CardsTab({
             </DropdownMenuItem>
             {kind && (
               <DropdownMenuItem onSelect={() => setDrafting(true)}>
-                <BookOpen className="mr-2 h-4 w-4" /> Drafts from Hindi WordNet…
+                <BookOpen className="mr-2 h-4 w-4" /> Drafts from {english ? "English" : "Hindi"}{" "}
+                WordNet…
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>
@@ -3169,10 +3203,24 @@ function ChunksTab({
   const guard = (ns: number[], go: () => void) => {
     const house = houseFromList(houseQ.data ?? []);
     const lintIds = new Set(
-      lintTopic(cards, topic.columns, house, frontIsWrong(topic, typesQ.data)).keys(),
+      lintTopic(
+        cards,
+        topic.columns,
+        house,
+        frontIsWrong(topic, typesQ.data),
+        deckLanguage(topic, typesQ.data) === "en",
+      ).keys(),
     );
-    const unknown = wordsQ.data?.wordnet
-      ? new Set(wordsQ.data.words.filter((w) => w.status === "unknown").flatMap((w) => w.ids))
+    // Unknown words, of the languages whose dictionaries are loaded (Hindi
+    // words wait for Hindi WordNet; English ones come only with the list).
+    const unknown = wordsQ.data
+      ? new Set(
+          wordsQ.data.words
+            .filter(
+              (w) => w.status === "unknown" && (/[A-Za-z]/.test(w.word) || wordsQ.data!.wordnet),
+            )
+            .flatMap((w) => w.ids),
+        )
       : null;
     const issues = chunkIssues(
       cards.filter((c) => c.chunk !== null && ns.includes(c.chunk)),
