@@ -189,14 +189,16 @@ function Entry({
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-base font-semibold">{e.word}</span>
-        <a
-          href={wiktionaryUrl(e.word, "hi")}
-          target="_blank"
-          rel="noreferrer"
-          className="flex items-center gap-0.5 text-xs text-primary hover:underline"
-        >
-          हिन्दी विक्षनरी <ExternalLink className="h-3 w-3" />
-        </a>
+        {!english && (
+          <a
+            href={wiktionaryUrl(e.word, "hi")}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-0.5 text-xs text-primary hover:underline"
+          >
+            हिन्दी विक्षनरी <ExternalLink className="h-3 w-3" />
+          </a>
+        )}
         <a
           href={wiktionaryUrl(e.word, "en")}
           target="_blank"
