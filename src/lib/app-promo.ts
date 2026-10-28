@@ -17,7 +17,9 @@ export type AppPromoPlacement =
   | "mcq_test_complete"
   | "mcq_practice_complete"
   | "mcq_result"
-  | "deck_page";
+  | "deck_page"
+  // The daily "Words in the News" album on the Telegram channel.
+  | "words_in_news";
 
 export type Platform = "android" | "ios" | "desktop";
 

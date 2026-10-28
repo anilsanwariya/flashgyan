@@ -227,6 +227,13 @@ export async function tick(origin?: string): Promise<TickResult> {
   } catch (e) {
     console.error("newspaper clipping:", e);
   }
+  // Words in the News: suggestions after the evening collection, cards
+  // written and proofread, images made, the album posted when due.
+  try {
+    await (await import("@/lib/ig.server")).igStep(origin);
+  } catch (e) {
+    console.error("infographics:", e);
+  }
 
   const { data: claimed, error } = await supabaseAdmin.rpc(
     "ca_claim_run" as never,

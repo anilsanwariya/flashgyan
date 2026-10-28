@@ -29,6 +29,7 @@ import {
   Target,
   Users,
   UserSquare2,
+  Images,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
@@ -45,6 +46,7 @@ export type AdminSectionId =
   | "ca.daily"
   | "ca.monthly"
   | "ca.custom"
+  | "ca.infographics"
   | "ca.schemes"
   | "ca.syllabus"
   | "ca.papers"
@@ -143,6 +145,13 @@ export const ADMIN_GROUPS: { label: string; sections: SectionDef[] }[] = [
         icon: Library,
         description:
           "Special magazines on a theme over any dates, sorted into sections and subsections by the AI.",
+      },
+      {
+        id: "ca.infographics",
+        label: "Infographics",
+        icon: Images,
+        description:
+          "Words in the News: daily image cards of words from the papers, picked, proofread and posted to the channel as an album.",
       },
       {
         id: "ca.schemes",
