@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { Check, ExternalLink, Plus, X } from "lucide-react";
 import {
   clearFlashWordnet,
+  flashEnWordnetSenses,
   flashWordnetSenses,
   flashWordnetStatus,
   getFlashSaathiWordnet,
@@ -19,11 +20,14 @@ import {
   lookupFlashDictionary,
 } from "@/lib/flash-studio.functions";
 import { parseWordnet, type WnSense } from "@/lib/flash-wordnet";
+import { enLookupAsks } from "@/lib/flash-english";
 import { unzipFile } from "@/lib/zip";
 import { Input } from "@/components/ui/input";
 import {
   backItems,
   draftWords,
+  emptyEntry,
+  withWordnet,
   lookupWords,
   wiktionaryUrl,
   wnDraftCard,
@@ -49,7 +53,10 @@ export function DictionaryPanel({
   onClose: () => void;
 }) {
   const lookupFn = useServerFn(lookupFlashDictionary);
+  const enFn = useServerFn(flashEnWordnetSenses);
   const words = lookupWords(front);
+  // No Hindi word, English ones: English WordNet.
+  const enAsks = words.length ? [] : enLookupAsks(front);
   const q = useQuery({
     queryKey: ["flashDict", words.join("|")],
     queryFn: () => lookupFn({ data: { words } }),
@@ -57,8 +64,15 @@ export function DictionaryPanel({
     staleTime: 30 * 60_000,
     retry: false,
   });
-  // The back's items, matched loosely (nukta, ँ / ं aside).
-  const have = new Set(backItems(back).map(looseWord));
+  const enQ = useQuery({
+    queryKey: ["flashEnDict", enAsks.join("|")],
+    queryFn: () => enFn({ data: { words: enAsks } }),
+    enabled: enAsks.length > 0,
+    staleTime: 30 * 60_000,
+    retry: false,
+  });
+  // The back's items, matched loosely (nukta, ँ / ं aside; capitals aside).
+  const have = new Set(backItems(back).map((w) => looseWord(w).toLowerCase()));
   return (
     <section
       aria-label="Dictionary"
@@ -67,7 +81,9 @@ export function DictionaryPanel({
       <div className="flex items-center gap-2">
         <span className="font-medium">Dictionary</span>
         <span className="text-xs text-muted-foreground">
-          Hindi WordNet (when loaded) and Wiktionary · not complete
+          {enAsks.length
+            ? "English WordNet (when loaded) · not complete"
+            : "Hindi WordNet (when loaded) and Wiktionary · not complete"}
         </span>
         <Button
           size="icon"
@@ -79,9 +95,30 @@ export function DictionaryPanel({
           <X className="h-4 w-4" />
         </Button>
       </div>
-      {!words.length && (
-        <p className="text-xs text-muted-foreground">No Hindi word on the front.</p>
+      {!words.length && !enAsks.length && (
+        <p className="text-xs text-muted-foreground">No word on the front to look up.</p>
       )}
+      {enQ.isLoading && (
+        <p className="text-xs text-muted-foreground">Looking up {enAsks.join(", ")}…</p>
+      )}
+      {enQ.data &&
+        (Object.keys(enQ.data).length ? (
+          enAsks
+            .filter((w) => enQ.data![w]?.length)
+            .map((w) => (
+              <Entry
+                key={w}
+                e={withWordnet(emptyEntry(w), enQ.data![w])}
+                have={have}
+                onAdd={onAdd}
+                english
+              />
+            ))
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Not in English WordNet (or it isn&apos;t loaded: see the studio&apos;s Dictionary tab).
+          </p>
+        ))}
       {q.isLoading && (
         <p className="text-xs text-muted-foreground">Looking up {words.join(", ")}…</p>
       )}
@@ -104,10 +141,13 @@ function Entry({
   e,
   have,
   onAdd,
+  english = false,
 }: {
   e: DictEntry;
   have: Set<string>;
   onAdd: (word: string) => void;
+  // From English WordNet (its labels in English).
+  english?: boolean;
 }) {
   // Wiktionary's own words (those WordNet's meanings don't already show).
   const inWn = new Set((e.wn ?? []).flatMap((s) => [...s.synonyms, ...s.antonyms]));
@@ -117,7 +157,7 @@ function Entry({
     <div className="flex flex-wrap items-center gap-1" aria-label={kind}>
       <span className="w-20 shrink-0 text-xs text-muted-foreground">{kind}</span>
       {list.map((w) =>
-        have.has(looseWord(w)) ? (
+        have.has(looseWord(w).toLowerCase()) ? (
           <span
             key={w}
             data-dict-word={w}
@@ -171,9 +211,12 @@ function Entry({
       ) : (
         <>
           {!!e.wn?.length && (
-            <div className="space-y-1.5 rounded-md bg-background/70 p-2" aria-label="Hindi WordNet">
+            <div
+              className="space-y-1.5 rounded-md bg-background/70 p-2"
+              aria-label={english ? "English WordNet" : "Hindi WordNet"}
+            >
               <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                हिन्दी वर्डनेट · IIT Bombay
+                {english ? "English WordNet · Open English WordNet" : "हिन्दी वर्डनेट · IIT Bombay"}
               </div>
               <ol className="list-decimal space-y-1.5 pl-5 text-[13px]">
                 {e.wn.slice(0, 6).map((s, i) => (
@@ -185,8 +228,9 @@ function Entry({
                         {s.example}
                       </span>
                     )}
-                    {s.synonyms.length > 0 && chips(s.synonyms.slice(0, 16), "पर्याय")}
-                    {s.antonyms.length > 0 && chips(s.antonyms, "विलोम")}
+                    {s.synonyms.length > 0 &&
+                      chips(s.synonyms.slice(0, 16), english ? "Synonyms" : "पर्याय")}
+                    {s.antonyms.length > 0 && chips(s.antonyms, english ? "Antonyms" : "विलोम")}
                   </li>
                 ))}
               </ol>
@@ -362,18 +406,23 @@ export function WordnetSettings() {
 export function WordnetDraftDialog({
   topic,
   kind,
+  english = false,
   fronts,
   onClose,
   onAdded,
 }: {
   topic: FlashTopic;
   kind: "syn" | "ant";
+  // An English deck: English WordNet.
+  english?: boolean;
   // The topic's words already on cards (skipped by default).
   fronts: string[];
   onClose: () => void;
   onAdded: () => void;
 }) {
-  const sensesFn = useServerFn(flashWordnetSenses);
+  const hiSensesFn = useServerFn(flashWordnetSenses);
+  const enSensesFn = useServerFn(flashEnWordnetSenses);
+  const sensesFn = english ? enSensesFn : hiSensesFn;
   const importFn = useServerFn(importFlashSheet);
   const [text, setText] = useState("");
   const [found, setFound] = useState<Record<string, WnSense[]> | null>(null);
@@ -381,8 +430,9 @@ export function WordnetDraftDialog({
   // The meaning picked per word (-1: leave the word out).
   const [pick, setPick] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
-  const have = new Set(fronts.map(looseWord));
-  const meaningCol = topic.columns.find((c) => c.title.trim() === "अर्थ");
+  const norm = (w: string) => looseWord(w).toLowerCase();
+  const have = new Set(fronts.map(norm));
+  const meaningCol = topic.columns.find((c) => ["अर्थ", "Meaning"].includes(c.title.trim()));
   const usable = (s: WnSense) => (kind === "syn" ? s.synonyms : s.antonyms).length > 0;
   const look = async () => {
     const ws = draftWords(text).slice(0, 300);
@@ -394,10 +444,7 @@ export function WordnetDraftDialog({
       setWords(ws);
       setPick(
         Object.fromEntries(
-          ws.map((w) => [
-            w,
-            have.has(looseWord(w)) ? -1 : (r[w] ?? []).findIndex((s) => usable(s)),
-          ]),
+          ws.map((w) => [w, have.has(norm(w)) ? -1 : (r[w] ?? []).findIndex((s) => usable(s))]),
         ),
       );
     } catch (err) {
@@ -454,14 +501,17 @@ export function WordnetDraftDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Draft cards from Hindi WordNet</DialogTitle>
+          <DialogTitle>Draft cards from {english ? "English" : "Hindi"} WordNet</DialogTitle>
         </DialogHeader>
         <p className="text-xs text-muted-foreground">
           Type words, one a line or comma-separated. Pick the meaning for each; its{" "}
           {kind === "syn" ? "synonyms" : "opposites"} go on the back
-          {meaningCol ? " and its meaning in अर्थ" : ""}. The cards come in as a sheet from the book
-          &quot;WordNet&quot;, not verified: check them before they reach students, and credit Hindi
-          WordNet (CFILT, IIT Bombay).
+          {meaningCol ? ` and its meaning in ${meaningCol.title}` : ""}. The cards come in as a
+          sheet from the book &quot;WordNet&quot;, not verified: check them before they reach
+          students
+          {english
+            ? " (Open English WordNet, CC BY 4.0)."
+            : ", and credit Hindi WordNet (CFILT, IIT Bombay)."}
         </p>
         <Textarea
           aria-label="Words to draft"
@@ -489,7 +539,7 @@ export function WordnetDraftDialog({
                 <li key={w} className="rounded border p-2 text-sm" aria-label={`Draft ${w}`}>
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{w}</span>
-                    {have.has(looseWord(w)) && (
+                    {have.has(norm(w)) && (
                       <span className="text-xs text-amber-700">already a card here</span>
                     )}
                     {!senses.length && (

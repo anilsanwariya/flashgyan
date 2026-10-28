@@ -93,6 +93,7 @@ export const saveFlashTemplate = createServerFn({ method: "POST" })
         columns: z.array(column).max(30),
         word_key: wordKey,
         wrong_front: z.boolean().optional(),
+        language: z.enum(["hi", "en"]).optional(),
       })
       .parse(d),
   )
@@ -827,4 +828,78 @@ export const markFlashWords = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return { marked: await (await server()).markWords(data.words, data.ok) };
+  });
+
+// ---------- English dictionaries ----------
+
+export const flashEnglishStatus = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).englishStatus();
+  });
+
+export const loadFlashEnWordnet = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        first: z.boolean(),
+        synsets: z
+          .array(
+            z.object({
+              id: z.string().regex(/^[nvar]\d{8}$/),
+              pos: z.enum(["n", "v", "a", "r"]),
+              words: z.array(z.string().max(200)).max(200),
+              gloss: z.string().max(4000),
+              example: z.string().max(4000),
+              antonyms: z.array(z.string().regex(/^[nvar]\d{8}$/)).max(100),
+            }),
+          )
+          .max(2000),
+        words: z
+          .array(
+            z.object({
+              word: z.string().max(200),
+              lower: z.string().max(200),
+              synset_id: z.string().regex(/^[nvar]\d{8}$/),
+              rank: z.number().int().min(0).max(99),
+            }),
+          )
+          .max(6000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).loadEnWordnet(data.synsets, data.words, data.first);
+  });
+
+export const loadFlashEnSpellings = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ first: z.boolean(), words: z.array(z.string().min(1).max(80)).max(10000) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).loadEnSpellings(data.words, data.first);
+  });
+
+export const clearFlashEnglish = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ which: z.enum(["wordnet", "spellings"]) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).clearEnglish(data.which);
+    return { ok: true };
+  });
+
+export const flashEnWordnetSenses = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ words: z.array(z.string().min(1).max(80)).max(3000) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).enWordnetSenses(data.words);
   });

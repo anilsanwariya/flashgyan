@@ -25,7 +25,20 @@ export type FlashTemplate = {
   // The front is the wrong form on purpose (शब्द शुद्धि, वाक्य शुद्धि: the
   // question asks for its correct form), so its spelling is never "fixed".
   wrong_front: boolean;
+  // The cards' language: Hindi, or English (Hindi meanings may be in it).
+  language: "hi" | "en";
 };
+
+// A topic's language: its deck type's, else English when its question is
+// in English letters only.
+export function deckLanguage(
+  topic: { template_id: string | null; prompt: string },
+  templates: Pick<FlashTemplate, "id" | "language">[] | undefined,
+): "hi" | "en" {
+  const t = topic.template_id ? templates?.find((x) => x.id === topic.template_id) : undefined;
+  if (t) return t.language;
+  return /[A-Za-z]/.test(topic.prompt) && !/[\u0900-\u097F]/.test(topic.prompt) ? "en" : "hi";
+}
 
 // The deck types whose front is wrong on purpose, before the setting was
 // saved for them.
@@ -274,6 +287,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "sandhi-swar",
     wrong_front: false,
+    language: "hi",
     name: "00-1 संधि (स्वर)",
     prompt: "संधि करें -",
     columns: cols(
@@ -299,6 +313,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "sandhi-vyanjan",
     wrong_front: false,
+    language: "hi",
     name: "00-2 संधि (व्यंजन)",
     prompt: "संधि करें -",
     columns: cols(
@@ -326,6 +341,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "sandhi-visarg",
     wrong_front: false,
+    language: "hi",
     name: "00-3 संधि (विसर्ग)",
     prompt: "संधि करें -",
     columns: cols(
@@ -353,6 +369,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "samas",
     wrong_front: false,
+    language: "hi",
     name: "01 समास",
     prompt: "समास विग्रह करें -",
     columns: cols(
@@ -381,6 +398,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "upsarg",
     wrong_front: false,
+    language: "hi",
     name: "02 उपसर्ग",
     prompt: "उपसर्ग के योग से शब्द बनायें -",
     columns: cols(
@@ -405,6 +423,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "upsarg-split",
     wrong_front: false,
+    language: "hi",
     name: "02 उपसर्ग (पृथक करें)",
     prompt: "दिए गए शब्द में से उपसर्ग तथा मूल शब्द पृथक करें -",
     columns: cols(
@@ -429,6 +448,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "pratyay",
     wrong_front: false,
+    language: "hi",
     name: "03 प्रत्यय",
     prompt: "प्रत्यय के योग से शब्द बनायें -",
     columns: cols(
@@ -460,6 +480,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "pratyay-split",
     wrong_front: false,
+    language: "hi",
     name: "03 प्रत्यय (पृथक करें)",
     prompt: "दिए गए शब्द में से प्रत्यय तथा मूल शब्द पृथक करें -",
     columns: cols(
@@ -482,6 +503,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "shabd-shuddhi",
     wrong_front: true,
+    language: "hi",
     name: "04 शब्द शुद्धि",
     prompt: "निम्नलिखित शब्द का शुद्ध रूप बतायें - ",
     columns: cols(
@@ -505,6 +527,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "vakya-shuddhi",
     wrong_front: true,
+    language: "hi",
     name: "05 वाक्य शुद्धि",
     prompt: "वाक्य का शुद्ध रूप बतायें - ",
     columns: cols(
@@ -528,6 +551,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "paryayvachi",
     wrong_front: false,
+    language: "hi",
     name: "06 पर्यायवाची",
     prompt: "पर्यायवाची बतायें - ",
     columns: cols(["अर्थ", "the word's meaning, when it has more than one"]),
@@ -538,6 +562,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "vilom",
     wrong_front: false,
+    language: "hi",
     name: "07 विलोम",
     prompt: "विलोम शब्द बतायें - ",
     columns: cols(
@@ -560,6 +585,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "samanarthi-antar",
     wrong_front: false,
+    language: "hi",
     name: "08 समानार्थी शब्दों में अंतर",
     prompt: "समानार्थी शब्दों में अंतर स्पष्ट करें - ",
     columns: cols(["वाक्य-प्रयोग", "a sentence for each word, one per line, each starting '◆ '"]),
@@ -579,6 +605,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "shabd-yugm",
     wrong_front: false,
+    language: "hi",
     name: "09 शब्द-युग्म",
     prompt: "शब्द-युग्म का वाक्य प्रयोग द्वारा अर्थगत अंतर स्पष्ट करें -",
     columns: cols(["वाक्य-प्रयोग", "a sentence for each word, one per line, each starting '◆ '"]),
@@ -598,6 +625,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "vakyansh",
     wrong_front: false,
+    language: "hi",
     name: "10 वाक्यांश के लिए एक शब्द",
     prompt: "वाक्यांश के लिए सार्थक शब्द बतायें - ",
     columns: cols(["व्याख्या", "how the word is made or used, when it helps"]),
@@ -608,6 +636,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "muhavare",
     wrong_front: false,
+    language: "hi",
     name: "11 मुहावरे",
     prompt: "निम्नलिखित मुहावरे का अर्थ बतायें - ",
     columns: cols(["वाक्य-प्रयोग", "one everyday sentence using the मुहावरा"]),
@@ -627,6 +656,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "lokokti",
     wrong_front: false,
+    language: "hi",
     name: "12 लोकोक्तियाँ",
     prompt: "निम्नलिखित लोकोक्ति का अर्थ बतायें - ",
     columns: cols(["वाक्य-प्रयोग", "one everyday sentence using the लोकोक्ति"]),
@@ -646,6 +676,7 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
   {
     key: "paribhashik",
     wrong_front: false,
+    language: "hi",
     name: "13 पारिभाषिक शब्दावली",
     prompt: "निम्नलिखित अंग्रेजी पारिभाषिक शब्द का समानार्थक हिंदी शब्द बतायें -",
     columns: cols(
@@ -668,6 +699,175 @@ export const DEFAULT_TEMPLATES: Omit<FlashTemplate, "id">[] = [
       },
     ],
     sort: 18,
+  },
+  // English decks (Hindi meanings may be in them).
+  {
+    key: "en-preposition",
+    wrong_front: false,
+    language: "en",
+    name: "E01 Prepositions",
+    prompt: "Fill in the blank with the correct preposition - ",
+    columns: cols(
+      ["Explanation", "the rule or usage, in one or two lines"],
+      ["हिंदी अर्थ", "the sentence's meaning in Hindi"],
+    ),
+    word_key: "",
+    examples: [
+      {
+        front: "He is fond ___ music.",
+        back: "of",
+        ex: {
+          Explanation: "'Fond' is always followed by 'of'.",
+          "हिंदी अर्थ": "उसे संगीत का शौक है।",
+        },
+      },
+    ],
+    sort: 30,
+  },
+  {
+    key: "en-pos",
+    wrong_front: false,
+    language: "en",
+    name: "E02 Same Word, Different Parts of Speech",
+    prompt: "Use the word as different parts of speech - ",
+    columns: cols(
+      ["Usage", "one sentence for each part of speech, one per line, each starting '◆ '"],
+      ["हिंदी अर्थ", "the word's meanings in Hindi"],
+    ),
+    word_key: "",
+    examples: [
+      {
+        front: "Light",
+        back: "Noun, Verb, Adjective",
+        ex: {
+          Usage:
+            "◆ Noun: The light in this room is dim.\n◆ Verb: Please light the lamp.\n◆ Adjective: This bag is light.",
+          "हिंदी अर्थ": "प्रकाश; जलाना; हल्का",
+        },
+      },
+    ],
+    sort: 31,
+  },
+  {
+    key: "en-phrasal-idioms",
+    wrong_front: false,
+    language: "en",
+    name: "E03 Phrasal Verbs & Idioms",
+    prompt: "Meaning of - ",
+    columns: cols(
+      ["Example sentence", "one everyday sentence using it"],
+      ["हिंदी अर्थ", "the meaning in Hindi"],
+    ),
+    word_key: "",
+    examples: [
+      {
+        front: "Give up",
+        back: "To stop doing something",
+        ex: { "Example sentence": "He gave up smoking last year.", "हिंदी अर्थ": "छोड़ देना" },
+      },
+    ],
+    sort: 32,
+  },
+  {
+    key: "en-one-word",
+    wrong_front: false,
+    language: "en",
+    name: "E04 One Word Substitution",
+    prompt: "One word for - ",
+    columns: cols(
+      ["Example sentence", "one everyday sentence using the word"],
+      ["हिंदी अर्थ", "the word's meaning in Hindi"],
+    ),
+    word_key: "",
+    examples: [
+      {
+        front: "One who knows everything",
+        back: "Omniscient",
+        ex: { "Example sentence": "No teacher is omniscient.", "हिंदी अर्थ": "सर्वज्ञ" },
+      },
+    ],
+    sort: 33,
+  },
+  {
+    key: "en-confused",
+    wrong_front: false,
+    language: "en",
+    name: "E05 Words Often Confused or Misused",
+    prompt: "Difference between - ",
+    columns: cols(
+      ["Example sentences", "one sentence for each word, one per line, each starting '◆ '"],
+      ["हिंदी अर्थ", "each word's meaning in Hindi"],
+    ),
+    word_key: "",
+    examples: [
+      {
+        front: "Affect / Effect",
+        back: "Affect: to influence (verb)\nEffect: a result (noun)",
+        ex: {
+          "Example sentences":
+            "◆ Lack of sleep can affect your health.\n◆ The new rule had a good effect.",
+          "हिंदी अर्थ": "प्रभावित करना; परिणाम",
+        },
+      },
+    ],
+    sort: 34,
+  },
+  {
+    key: "en-synonyms",
+    wrong_front: false,
+    language: "en",
+    name: "E06 Synonyms",
+    prompt: "Synonyms of - ",
+    columns: cols(
+      ["Meaning", "the word's meaning, when it has more than one"],
+      ["हिंदी अर्थ", "the word's meaning in Hindi"],
+    ),
+    word_key: "",
+    examples: [
+      {
+        front: "Abandon",
+        back: "Desert, Forsake, Leave",
+        ex: { Meaning: "to leave completely", "हिंदी अर्थ": "त्याग देना" },
+      },
+    ],
+    sort: 35,
+  },
+  {
+    key: "en-antonyms",
+    wrong_front: false,
+    language: "en",
+    name: "E07 Antonyms",
+    prompt: "Antonym of - ",
+    columns: cols(
+      ["Meaning", "the word's meaning, when it has more than one"],
+      ["हिंदी अर्थ", "the word's meaning in Hindi"],
+    ),
+    word_key: "",
+    examples: [
+      {
+        front: "Ancient",
+        back: "Modern",
+        ex: { Meaning: "very old", "हिंदी अर्थ": "प्राचीन" },
+      },
+    ],
+    sort: 36,
+  },
+  {
+    key: "en-affix",
+    wrong_front: false,
+    language: "en",
+    name: "E08 Prefix & Suffix",
+    prompt: "Prefix / suffix in - ",
+    columns: cols(["Root word", "the base word"], ["Meaning", "what the prefix or suffix adds"]),
+    word_key: "",
+    examples: [
+      {
+        front: "Unhappy",
+        back: "Prefix: un-",
+        ex: { "Root word": "happy", Meaning: "un- = not" },
+      },
+    ],
+    sort: 37,
   },
 ];
 

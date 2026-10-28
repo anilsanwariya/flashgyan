@@ -7,6 +7,7 @@
 import type { FlashCard } from "@/lib/flash-studio";
 import { looseWord, wordsIn, type House } from "@/lib/flash-spell";
 import { vowelVariants } from "@/lib/flash-dict";
+import { edits1, englishWordsIn, rankNear } from "@/lib/flash-english";
 
 export type WordStatus = "known" | "form" | "unknown";
 
@@ -239,8 +240,10 @@ export function replaceWordIn(
   to: string,
   wrongFront = false,
 ): { field: string; before: string; after: string }[] {
+  // An English word's edges are where Latin letters stop.
+  const edge = /[A-Za-z]/.test(from) ? "[A-Za-z]" : LETTER;
   const re = new RegExp(
-    `(?<!${LETTER})${from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!${LETTER})`,
+    `(?<!${edge})${from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!${edge})`,
     "gu",
   );
   const fields: [string, string][] = [
@@ -283,4 +286,93 @@ export function chunkIssues(
     },
   ];
   return all.filter((i) => i.ids.length);
+}
+
+// ---------- English words ----------
+
+// Each English word the cards use (as written), with the cards using it.
+export function enWordCards(
+  cards: Pick<FlashCard, "id" | "front" | "back" | "ex" | "removed">[],
+  wrongFront = false,
+): Map<string, Set<string>> {
+  const by = new Map<string, Set<string>>();
+  for (const c of cards) {
+    if (c.removed) continue;
+    for (const w of [wrongFront ? "" : c.front, c.back, ...Object.values(c.ex)].flatMap(
+      englishWordsIn,
+    )) {
+      const s = by.get(w) ?? new Set<string>();
+      s.add(c.id);
+      by.set(w, s);
+    }
+  }
+  return by;
+}
+
+// What the English lists say of some words: the British spelling list's
+// forms and WordNet's, both by their small-letter form.
+export type EnFound = { spell: Map<string, string[]>; wn: Map<string, string[]> };
+
+// Whether a list has a word as written (or in small letters, for a word
+// written with a capital or in capitals; a name in the list keeps its
+// capital, so "london" isn't "London").
+function listed(found: Map<string, string[]>, w: string): boolean {
+  const forms = found.get(w.toLowerCase()) ?? [];
+  return forms.includes(w) || (w !== w.toLowerCase() && forms.includes(w.toLowerCase()));
+}
+
+// The English words sorted like the Hindi ones: known (the British spelling
+// list, the editor's list, WordNet for words the British list doesn't
+// spell otherwise), and not known with the British spellings close to them
+// (an American spelling with its British one first: color → colour).
+export function classifyEnglish(
+  used: Map<string, Set<string>>,
+  found: EnFound,
+  // The editor's own list (as written, and in small letters).
+  ok: Set<string>,
+  // British spellings one edit away, by small-letter word (looked up for
+  // the words not known).
+  near: Map<string, string[]> = new Map(),
+): TopicWord[] {
+  const out: TopicWord[] = [];
+  for (const [word, ids] of used) {
+    const base = { word, count: ids.size, near: [] as string[], ids: [] as string[] };
+    if (listed(found.spell, word)) {
+      out.push({ ...base, status: "known", why: "British spelling" });
+      continue;
+    }
+    if (ok.has(word) || ok.has(word.toLowerCase())) {
+      out.push({ ...base, status: "known", why: "your list" });
+      continue;
+    }
+    // Close spellings once each, whatever their capitals (colon / Colon).
+    const close = rankNear(word, near.get(word.toLowerCase()) ?? [])
+      .filter((x, i, all) => all.findIndex((y) => y.toLowerCase() === x.toLowerCase()) === i)
+      .slice(0, 3);
+    // WordNet knows it and the British list has nothing close: a word the
+    // list leaves out (a rare or technical word), not a misspelling.
+    if (listed(found.wn, word) && !close.length) {
+      out.push({ ...base, status: "known", why: "WordNet" });
+      continue;
+    }
+    out.push({ ...base, status: "unknown", why: "", near: close, ids: [...ids] });
+  }
+  return out;
+}
+
+// The words to look up for spellings close to the unknown ones.
+export function nearKeys(words: string[]): string[] {
+  return [...new Set(words.flatMap((w) => edits1(w)))];
+}
+
+// Every sorted word list's order: not known first (with a close spelling,
+// then the rarest), then forms and known by use.
+export function sortWords(words: TopicWord[]): TopicWord[] {
+  const rank = (w: TopicWord) => (w.status === "unknown" ? (w.near.length ? 0 : 1) : 2);
+  return [...words].sort(
+    (a, b) =>
+      rank(a) - rank(b) ||
+      (a.status === "unknown" ? a.count - b.count : b.count - a.count) ||
+      a.word.localeCompare(b.word),
+  );
 }
