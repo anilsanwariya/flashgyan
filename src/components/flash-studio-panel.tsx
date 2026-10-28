@@ -138,6 +138,9 @@ import {
 import { BOOK_FILE_TYPES, isBookFile } from "@/lib/flash-read";
 import { StudentPreview } from "@/components/flash-studio-preview";
 import { AppImportDialog, CompareWithApp } from "@/components/flash-studio-import";
+import { WordsTab } from "@/components/flash-studio-words";
+import { useTopicWords } from "@/lib/flash-topic-words";
+import { chunkIssues, type ChunkIssue } from "@/lib/flash-words";
 import { SpellingList } from "@/components/flash-studio-spellings";
 import {
   DictionaryPanel,
@@ -799,7 +802,7 @@ function ColumnsEditor({
 
 // ---------- One topic ----------
 
-type TopicTab = "cards" | "sheets" | "chunks" | "settings";
+type TopicTab = "cards" | "sheets" | "chunks" | "words" | "settings";
 
 function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
   const getFn = useServerFn(getFlashTopic);
@@ -810,6 +813,13 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
   });
   const qc = useQueryClient();
   const [tab, setTab] = useState<TopicTab>(() => (openedOn() === "chunks" ? "chunks" : "cards"));
+  // Cards asked for from another tab (a word's, a chunk's open ones),
+  // opened one after another in the Cards tab.
+  const [proofIds, setProofIds] = useState<string[] | null>(null);
+  const proofThese = (ids: string[]) => {
+    setProofIds(ids);
+    setTab("cards");
+  };
   // A sheet being added (or replacing one already added).
   const [importing, setImporting] = useState<{
     file: string;
@@ -881,6 +891,7 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
           { id: "cards", label: "Cards" },
           { id: "sheets", label: "Sheets" },
           { id: "chunks", label: "Chunks", dot: topic.chunks.length > 0 && unnumbered > 0 },
+          { id: "words", label: "Words" },
           { id: "settings", label: "Settings" },
         ]}
         value={tab}
@@ -895,6 +906,8 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
           onCard={putCard}
           onSheet={(f) => void pickSheet(f)}
           onTab={setTab}
+          proofIds={proofIds}
+          onProofTaken={() => setProofIds(null)}
         />
       )}
       {tab === "sheets" && (
@@ -913,7 +926,12 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
           onChanged={reload}
         />
       )}
-      {tab === "chunks" && <ChunksTab topic={topic} cards={cards} onChanged={reload} />}
+      {tab === "chunks" && (
+        <ChunksTab topic={topic} cards={cards} onChanged={reload} onProof={proofThese} />
+      )}
+      {tab === "words" && (
+        <WordsTab topic={topic} cards={cards} onCards={putCard} onProof={proofThese} />
+      )}
       {tab === "settings" && <SettingsTab topic={topic} onChanged={reload} />}
       {importing?.replace?.kind === "sheet" && (
         <ReplaceDialog
@@ -1041,6 +1059,8 @@ function CardsTab({
   onCard,
   onSheet,
   onTab,
+  proofIds,
+  onProofTaken,
 }: {
   topic: FlashTopic;
   cards: FlashCard[];
@@ -1049,6 +1069,9 @@ function CardsTab({
   onCard: (c: FlashCard | FlashCard[]) => void;
   onSheet: (file: File) => void;
   onTab: (t: TopicTab) => void;
+  // Cards asked for from another tab: opened one after another.
+  proofIds?: string[] | null;
+  onProofTaken?: () => void;
 }) {
   const addFn = useServerFn(addFlashCard);
   const [filter, setFilter] = useState<Filter>(
@@ -1196,6 +1219,20 @@ function CardsTab({
     const first = from.findIndex((c) => !c.verified);
     setProof({ ids: from.map((c) => c.id), i: Math.max(0, first) });
   };
+  useEffect(() => {
+    if (!proofIds) return;
+    const want = new Set(proofIds);
+    startProof(
+      sortCards(
+        cards.filter((c) => want.has(c.id) && !c.removed),
+        "order",
+        false,
+      ),
+    );
+    onProofTaken?.();
+    // Only when asked (the cards come with the ask).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proofIds]);
   const pick = (f: Filter) => {
     setFilter(f);
     setShown(60);
@@ -3017,10 +3054,13 @@ function ChunksTab({
   topic,
   cards,
   onChanged,
+  onProof,
 }: {
   topic: FlashTopic;
   cards: FlashCard[];
   onChanged: () => void;
+  // These cards opened one after another in the Cards tab.
+  onProof: (ids: string[]) => void;
 }) {
   const numberFn = useServerFn(numberFlashCards);
   const idsFn = useServerFn(saveFlashAppIds);
@@ -3108,6 +3148,39 @@ function ChunksTab({
     } catch (e) {
       toast.error(errorText(e, "Couldn't list the changes"));
     }
+  };
+  // Before chunks go to the app: what is still open in them (not verified,
+  // AI suggestions, quick checks, to recheck, unknown words), to proofread
+  // first or download anyway.
+  const houseFn = useServerFn(getFlashHouse);
+  const houseQ = useQuery({
+    queryKey: ["flashHouse"],
+    queryFn: () => houseFn(),
+    staleTime: 60_000,
+  });
+  const typesFn = useServerFn(listFlashTemplates);
+  const typesQ = useQuery({ queryKey: ["flashTemplates"], queryFn: () => typesFn() });
+  const wordsQ = useTopicWords(topic);
+  const [ready, setReady] = useState<{
+    ns: number[];
+    issues: ChunkIssue[];
+    go: () => void;
+  } | null>(null);
+  const guard = (ns: number[], go: () => void) => {
+    const house = houseFromList(houseQ.data ?? []);
+    const lintIds = new Set(
+      lintTopic(cards, topic.columns, house, frontIsWrong(topic, typesQ.data)).keys(),
+    );
+    const unknown = wordsQ.data?.wordnet
+      ? new Set(wordsQ.data.words.filter((w) => w.status === "unknown").flatMap((w) => w.ids))
+      : null;
+    const issues = chunkIssues(
+      cards.filter((c) => c.chunk !== null && ns.includes(c.chunk)),
+      lintIds,
+      unknown,
+    );
+    if (!issues.length) return go();
+    setReady({ ns, issues, go });
   };
   const download = async (chunk: number, work = false) => {
     // The change list first: the download marks the chunk unchanged.
@@ -3298,7 +3371,11 @@ function ChunksTab({
                 size="sm"
                 className="ml-auto"
                 onClick={() =>
-                  void zipOf(changedChunks, `${chunkFileName(topic.name, null)} (changed).zip`)
+                  guard(
+                    changedChunks,
+                    () =>
+                      void zipOf(changedChunks, `${chunkFileName(topic.name, null)} (changed).zip`),
+                  )
                 }
               >
                 <Download className="mr-1 h-4 w-4" /> Changed chunks ({changedChunks.join(", ")})
@@ -3309,9 +3386,13 @@ function ChunksTab({
               variant="outline"
               className={changedChunks.length ? "" : "ml-auto"}
               onClick={() =>
-                void zipOf(
+                guard(
                   topic.chunks.map((ch) => ch.n),
-                  `${chunkFileName(topic.name, null)}.zip`,
+                  () =>
+                    void zipOf(
+                      topic.chunks.map((ch) => ch.n),
+                      `${chunkFileName(topic.name, null)}.zip`,
+                    ),
                 )
               }
             >
@@ -3428,7 +3509,11 @@ function ChunksTab({
                         <ListChecks className="mr-1 h-4 w-4" /> What changed
                       </Button>
                     )}
-                    <Button size="sm" variant="outline" onClick={() => void download(ch.n)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => guard([ch.n], () => void download(ch.n))}
+                    >
                       <Download className="mr-1 h-4 w-4" /> .xlsx
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => void download(ch.n, true)}>
@@ -3439,6 +3524,22 @@ function ChunksTab({
               );
             })}
           </ul>
+          {ready && (
+            <ReadyCheck
+              ns={ready.ns}
+              issues={ready.issues}
+              onProof={(ids) => {
+                setReady(null);
+                onProof(ids);
+              }}
+              onDownload={() => {
+                const go = ready.go;
+                setReady(null);
+                go();
+              }}
+              onClose={() => setReady(null)}
+            />
+          )}
           {comparing && (
             <CompareWithApp
               topic={topic}
@@ -3475,6 +3576,55 @@ function ChunksTab({
         <p className="text-sm text-muted-foreground">Add cards first.</p>
       )}
     </div>
+  );
+}
+
+// What is still open in chunks about to go to the app: each kind with its
+// cards to proofread, or the download anyway.
+function ReadyCheck({
+  ns,
+  issues,
+  onProof,
+  onDownload,
+  onClose,
+}: {
+  ns: number[];
+  issues: ChunkIssue[];
+  onProof: (ids: string[]) => void;
+  onDownload: () => void;
+  onClose: () => void;
+}) {
+  const all = [...new Set(issues.flatMap((i) => i.ids))];
+  const which = ns.length === 1 ? `Chunk ${ns[0]} isn't` : `Chunks ${ns.join(", ")} aren't`;
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{which} ready for the app yet</DialogTitle>
+        </DialogHeader>
+        <ul className="space-y-2 text-sm" aria-label="Still open">
+          {issues.map((i) => (
+            <li key={i.key} data-issue={i.key} className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+              <span className="flex-1">
+                <b>{i.ids.length}</b> card{i.ids.length === 1 ? "" : "s"} {i.label}
+              </span>
+              <Button size="sm" variant="ghost" className="h-7" onClick={() => onProof(i.ids)}>
+                Proofread
+              </Button>
+            </li>
+          ))}
+        </ul>
+        <div className="flex flex-wrap gap-2 pt-2">
+          <Button onClick={() => onProof(all)}>
+            Proofread these {all.length} card{all.length === 1 ? "" : "s"}
+          </Button>
+          <Button variant="outline" className="ml-auto" onClick={onDownload}>
+            <Download className="mr-1 h-4 w-4" /> Download anyway
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
