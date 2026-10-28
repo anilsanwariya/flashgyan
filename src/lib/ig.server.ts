@@ -30,12 +30,16 @@ import {
   parseCards,
   parseDesign,
   parseIssues,
+  parsePart,
   parseSuggestions,
+  partMessages,
   proofMessages,
+  sentencesWith,
   suggestMessages,
   writeMessages,
   type CardField,
   type IgArticle,
+  type IgPart,
   type IgCheck,
   type IgSettings,
 } from "@/lib/ig-words";
@@ -550,6 +554,8 @@ async function proofLang(day: string, lang: IgLang): Promise<boolean> {
     const card = w.card as IgCard;
     const ai: IgCheck[] = issues
       .filter((x) => x.n === i + 1 && (x.text !== x.fix || !x.fix))
+      // The paper's own sentence is quoted as it stands.
+      .filter((x) => x.field !== "news" || card.rewritten)
       .map((x) => ({ id: checkId(), source: "ai", ...x, state: "open" as const }));
     const dict = await dictionaryChecks(card, w.base || w.word);
     // Kept: notes the editor already decided on.
@@ -982,8 +988,140 @@ export async function swapIgWord(day: string, oldId: string, newId: string): Pro
 }
 
 // The editor's edit of a card. An edited card needs its tick again.
-export async function saveIgCard(id: string, card: IgCard): Promise<void> {
-  await patchWord(id, { card, image_path: null });
+// An earlier version of a card: kept before the AI writes a part again or
+// an old version is restored.
+export type IgVersion = { at: string; label: string; card: IgCard };
+const MAX_VERSIONS = 15;
+const versionsMissing = (e: { message: string } | null) =>
+  !!e && /versions|schema cache|does not exist/i.test(e.message);
+
+// The editor's change to a card (it needs its tick again, and a new image).
+// With a label, the card as it was is kept as a version first.
+export async function saveIgCard(id: string, card: IgCard, label?: string): Promise<void> {
+  const { data, error } = await from("ig_words").select("card,checked").eq("id", id).single();
+  fail(error);
+  const before = (data as unknown as Row).card as IgCard | null;
+  if (JSON.stringify(before) === JSON.stringify(card)) return;
+  const patch: Partial<IgWord> = { card, image_path: null, checked: false };
+  if (label && before) {
+    const { data: v, error: ve } = await from("ig_words").select("versions").eq("id", id).single();
+    if (!versionsMissing(ve)) {
+      fail(ve);
+      const list = (((v as Row | null)?.versions ?? []) as IgVersion[]).slice(0, MAX_VERSIONS - 1);
+      fail(
+        (
+          await from("ig_words")
+            .update({ versions: [{ at: now(), label, card: before }, ...list] } as never)
+            .eq("id", id)
+        ).error,
+      );
+    }
+  }
+  await patchWord(id, patch);
+}
+
+// What the card editor needs beside the card: the article's other lines
+// with the word, the paper's own sentence, WordNet's synonyms and
+// antonyms of the word, and the card's earlier versions.
+export type IgCardAids = {
+  sentences: string[];
+  original: string;
+  wordnet: { synonyms: string[]; antonyms: string[] };
+  versions: IgVersion[];
+};
+
+async function articleOf(sourceId: string | null): Promise<string> {
+  if (!sourceId) return "";
+  const { data } = await from("ca_sources").select("content").eq("id", sourceId).maybeSingle();
+  return String((data as Row | null)?.content ?? "");
+}
+
+export async function igCardAids(id: string): Promise<IgCardAids> {
+  const { data, error } = await from("ig_words")
+    .select("word,base,lang,sentence,source_id,card")
+    .eq("id", id)
+    .single();
+  fail(error);
+  const w = data as unknown as Row;
+  const lang = w.lang as IgLang;
+  const base = String(w.base || w.word);
+  const article = await articleOf((w.source_id as string | null) ?? null);
+  const card = w.card as IgCard | null;
+  const sentences = sentencesWith(article, String(w.word)).filter((x) => x !== card?.news);
+  const found =
+    lang === "en"
+      ? await FS.enWordnetSenses([base]).catch(() => ({}) as Record<string, WnSense[]>)
+      : await FS.wordnetSenses([base]).catch(() => ({}) as Record<string, WnSense[]>);
+  const senses = found[base] ?? [];
+  const said = POS_EN.find((p) => (card?.pos ?? "").toLowerCase().startsWith(p));
+  // The senses in the card's part of speech (all, if WordNet has none in it).
+  const inPos = senses.filter((x) => lang === "en" && said && x.pos === said);
+  const fit = inPos.length ? inPos : senses;
+  const have = new Set(
+    [...(card?.synonyms ?? []), ...(card?.antonyms ?? [])].map((x) => x.toLowerCase()),
+  );
+  const cap = (x: string) => (lang === "en" ? x[0].toUpperCase() + x.slice(1) : x);
+  const pick = (xs: string[]) =>
+    [...new Set(xs.map(cap))]
+      .filter((x) => !have.has(x.toLowerCase()) && x.toLowerCase() !== base.toLowerCase())
+      .slice(0, 10);
+  const { data: v, error: ve } = await from("ig_words").select("versions").eq("id", id).single();
+  return {
+    sentences,
+    original: String(w.sentence ?? ""),
+    wordnet: {
+      synonyms: pick(fit.flatMap((x) => x.synonyms)),
+      antonyms: pick(fit.flatMap((x) => x.antonyms)),
+    },
+    versions: versionsMissing(ve) ? [] : (((v as Row | null)?.versions ?? []) as IgVersion[]),
+  };
+}
+
+// One part of the card written again by the AI (not saved: the editor
+// chooses to use it). The news line comes back as three options.
+export async function rewriteIgPart(id: string, part: IgPart, note: string) {
+  const { data, error } = await from("ig_words")
+    .select("lang,source_id,card")
+    .eq("id", id)
+    .single();
+  fail(error);
+  const w = data as unknown as Row;
+  const card = w.card as IgCard | null;
+  if (!card) throw new Error("The card isn't written yet.");
+  const article = (await articleOf((w.source_id as string | null) ?? null))
+    .replace(/^Source: .*$/gm, "")
+    .replace(/\s+/g, " ")
+    .slice(0, 6000);
+  const glossary = card.lang === "hi" ? ((await CA.getMagazineSettings()).glossary ?? []) : [];
+  const out = parsePart(
+    part,
+    await saathiComplete(apiKey(), partMessages(part, card, { article, note, glossary })),
+  );
+  if (!out) throw new Error("The AI's reply could not be read. Try again.");
+  return out;
+}
+
+// An earlier version back (the card as it is now is kept as a version).
+export async function restoreIgVersion(id: string, at: string): Promise<IgCard> {
+  const aids = await igCardAids(id);
+  const v = aids.versions.find((x) => x.at === at);
+  if (!v) throw new Error("That version is gone.");
+  await saveIgCard(id, v.card, "Before restoring an earlier version");
+  return v.card;
+}
+
+// A card moved up or down among the day's cards of its language.
+export async function moveIgCard(day: string, id: string, by: -1 | 1): Promise<void> {
+  const cards = await cardsOf(day);
+  const c = cards.find((x) => x.id === id);
+  if (!c) throw new Error("That card is not in the day's set.");
+  const same = cards.filter((x) => x.lang === c.lang);
+  const at = same.indexOf(c);
+  const other = same[at + by];
+  if (!other) return;
+  const order = [...same];
+  [order[at], order[at + by]] = [order[at + by], order[at]];
+  for (const [i, x] of order.entries()) await patchWord(x.id, { position: i, image_path: null });
 }
 
 export async function setIgCheck(
@@ -997,7 +1135,7 @@ export async function setIgCheck(
   const check = w.checks.find((c) => c.id === checkIdValue);
   if (!check) throw new Error("That note is gone.");
   let card = w.card as IgCard;
-  if (state === "accepted" && check.field !== "news")
+  if (state === "accepted" && (check.field !== "news" || card.rewritten))
     card = applyFix(card, check.field, check.text, check.fix);
   const checks = w.checks.map((c) => (c.id === checkIdValue ? { ...c, state } : c));
   await patchWord(id, { card, checks, image_path: null });

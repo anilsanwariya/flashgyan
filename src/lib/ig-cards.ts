@@ -27,6 +27,9 @@ export type IgCard = {
   news: string;
   newsHi: string;
   paper: string;
+  // The sentence was written again (by the editor or the AI) from the
+  // news: shown as based on the paper, not quoted from it.
+  rewritten?: boolean;
   synonyms: string[];
   antonyms: string[];
   // One or two tips: root, memory trick, don't confuse, word family,
@@ -430,8 +433,18 @@ const FIT_SCRIPT = `<script>
 </script>`;
 
 const LABELS = {
-  en: { news: "📰 In today's news", syn: "Synonyms", ant: "Antonyms" },
-  hi: { news: "📰 आज की ख़बर में", syn: "पर्यायवाची", ant: "विलोम" },
+  en: {
+    news: "📰 In today's news",
+    based: "📰 Based on today's news",
+    syn: "Synonyms",
+    ant: "Antonyms",
+  },
+  hi: {
+    news: "📰 आज की ख़बर में",
+    based: "📰 आज की ख़बर पर आधारित",
+    syn: "पर्यायवाची",
+    ant: "विलोम",
+  },
 };
 
 // A card's complete page.
@@ -475,8 +488,8 @@ export function igCardHtml(card: IgCard, o: IgRenderOpts): string {
     ${
       card.news.trim()
         ? `<div class="news">
-      <div class="label">${l.news}${card.paper.trim() ? ` <span class="src">· ${esc(card.paper)}</span>` : ""}</div>
-      <div class="quote">“${markWord(card.news.trim(), card.word)}”</div>
+      <div class="label">${card.rewritten ? l.based : l.news}${card.paper.trim() ? ` <span class="src">· ${esc(card.paper)}</span>` : ""}</div>
+      <div class="quote">${card.rewritten ? markWord(card.news.trim(), card.word) : `“${markWord(card.news.trim(), card.word)}”`}</div>
       ${card.newsHi.trim() ? `<div class="quote-hi">${esc(card.newsHi)}</div>` : ""}
     </div>`
         : ""

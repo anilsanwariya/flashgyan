@@ -4,9 +4,9 @@ import { getRequest } from "@tanstack/react-start/server";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { IG_DESIGN_KEYS, type IgDesign } from "@/lib/ig-cards";
-import type { IgDayView, IgHistoryRow, IgWord } from "@/lib/ig.server";
+import type { IgCardAids, IgDayView, IgHistoryRow, IgVersion, IgWord } from "@/lib/ig.server";
 
-export type { IgDayView, IgHistoryRow, IgWord };
+export type { IgCardAids, IgDayView, IgHistoryRow, IgVersion, IgWord };
 
 async function server() {
   return import("@/lib/ig.server");
@@ -49,6 +49,7 @@ const card = z.object({
   news: text(600),
   newsHi: text(600),
   paper: text(120),
+  rewritten: z.boolean().optional(),
   synonyms: z.array(text(80)).max(6),
   antonyms: z.array(text(80)).max(6),
   extras: z.array(z.object({ title: text(60), text: text(300) })).max(3),
@@ -125,10 +126,57 @@ export const swapIgWord = createServerFn({ method: "POST" })
 
 export const saveIgCard = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ id, card }).parse(d))
+  .inputValidator((d: unknown) =>
+    z.object({ id, card, label: z.string().max(120).optional() }).parse(d),
+  )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    await (await server()).saveIgCard(data.id, data.card);
+    await (await server()).saveIgCard(data.id, data.card, data.label);
+    return { ok: true };
+  });
+
+// The card editor's helpers: the article's other lines with the word,
+// WordNet's synonyms and antonyms, and the card's earlier versions.
+export const igCardAids = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).igCardAids(data.id);
+  });
+
+export const rewriteIgPart = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id,
+        part: z.enum(["say", "meaning", "sentence", "words", "tips"]),
+        note: text(500),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).rewriteIgPart(data.id, data.part, data.note);
+  });
+
+export const restoreIgVersion = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id, at: z.string().max(40) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).restoreIgVersion(data.id, data.at);
+  });
+
+export const moveIgCard = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ date, id, by: z.union([z.literal(-1), z.literal(1)]) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).moveIgCard(data.date, data.id, data.by);
     return { ok: true };
   });
 
