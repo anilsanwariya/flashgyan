@@ -2867,7 +2867,7 @@ export async function markWords(words: string[], ok: boolean): Promise<number> {
 
 // The cards' words WordNet has close to, not as written (see
 // D.spellHintLines), for the AI check; none before WordNet is loaded.
-async function spellHintsFor(texts: string[]): Promise<string[]> {
+export async function spellHintsFor(texts: string[]): Promise<string[]> {
   const words = [...new Set(texts.flatMap(SP.wordsIn))].filter((w) => w.length > 1).slice(0, 200);
   const keys = [...new Set(words.flatMap((w) => [w, ...D.vowelVariants(w)].map(SP.looseWord)))];
   const byLoose = new Map<string, string[]>();

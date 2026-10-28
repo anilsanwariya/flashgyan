@@ -12,6 +12,7 @@ import { IndexBox } from "@/components/ca-index-panel";
 import { RadarBox } from "@/components/ca-radar-panel";
 import { PastCollection } from "@/components/ca-past-collection";
 import { EventsPanel } from "@/components/ca-events-panel";
+import { InfographicsPanel } from "@/components/ig-panel";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -126,6 +127,7 @@ export type CaSection =
   | "daily"
   | "monthly"
   | "custom"
+  | "infographics"
   | "schemes"
   | "syllabus"
   | "papers"
@@ -147,6 +149,7 @@ const timeIst = (iso: string) =>
 export function CurrentAffairsPanel({ section }: { section: CaSection }) {
   if (section === "monthly") return <MonthlyPanel />;
   if (section === "custom") return <CustomMagazines />;
+  if (section === "infographics") return <InfographicsPanel />;
   if (section === "schemes") return <SchemeRegister />;
   if (section === "syllabus") return <SyllabusPanel />;
   if (section === "papers") return <ExamPapers />;
