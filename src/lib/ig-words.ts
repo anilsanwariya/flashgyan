@@ -35,7 +35,32 @@ export type IgSettings = {
   caption: string;
   // Message the admin chat when words are suggested and cards are ready.
   notify: boolean;
+  // Learning from the editor's picks: the AI is shown the words recently
+  // picked and passed over, and follows the editor's picking rules.
+  learn_from_picks: boolean;
+  pick_rules: { en: string[]; hi: string[] };
+  // The weekly round-up: a PDF of the week's words, posted on this day of
+  // the week (0 Sunday … 6 Saturday) at this time (IST), with this caption.
+  weekly: boolean;
+  weekly_day: number;
+  weekly_time: string;
+  weekly_caption: string;
+  // The Play Store link for the round-up's caption, made by the settings
+  // page with app-promo's playStoreUrl (the server can't).
+  weekly_app_link: string;
+  // A "Words of the month" page in the monthly magazine.
+  monthly_page: boolean;
 };
+
+export const DEFAULT_IG_WEEKLY_CAPTION = `📚 Words in the News | Weekly Revision
+🗓️ {from} – {to}
+
+इस हफ़्ते के {count} शब्द एक PDF में 👇
+Save करें, प्रिंट करें और दोहराएँ ✅
+
+📲 FlashGyan App: {app_link}
+
+#WordsInTheNews #WeeklyRevision #Vocabulary`;
 
 export const DEFAULT_IG_CAPTION = `📰 Words in the News | {date}
 
@@ -60,6 +85,14 @@ export const DEFAULT_IG_SETTINGS: IgSettings = {
   watermark: 7,
   caption: DEFAULT_IG_CAPTION,
   notify: true,
+  learn_from_picks: true,
+  pick_rules: { en: [], hi: [] },
+  weekly: true,
+  weekly_day: 0,
+  weekly_time: "18:00",
+  weekly_caption: DEFAULT_IG_WEEKLY_CAPTION,
+  weekly_app_link: "",
+  monthly_page: true,
 };
 
 export function igSettingsOf(value: unknown): IgSettings {
@@ -68,7 +101,110 @@ export function igSettingsOf(value: unknown): IgSettings {
   const designs = (Array.isArray(s.designs) ? s.designs : []).filter((d): d is IgDesign =>
     IG_DESIGN_KEYS.includes(d as IgDesign),
   );
-  return { ...s, designs: designs.length ? designs : [...IG_DESIGN_KEYS] };
+  const rules = (x: unknown) =>
+    (Array.isArray(x) ? x : [])
+      .filter((r): r is string => typeof r === "string" && !!r.trim())
+      .map((r) => r.trim().slice(0, 240))
+      .slice(0, PICK_RULES_MAX);
+  const pr = (s.pick_rules ?? {}) as Partial<IgSettings["pick_rules"]>;
+  return {
+    ...s,
+    designs: designs.length ? designs : [...IG_DESIGN_KEYS],
+    pick_rules: { en: rules(pr.en), hi: rules(pr.hi) },
+    weekly_day:
+      Number.isInteger(s.weekly_day) && s.weekly_day >= 0 && s.weekly_day <= 6 ? s.weekly_day : 0,
+  };
+}
+
+// ---------- Weekly round-up ----------
+
+export const WEEKDAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+// The week a round-up posted on `day` covers: the 7 days up to that day.
+export function weekOf(day: string): { from: string; to: string } {
+  const to = new Date(`${day}T00:00:00Z`);
+  const from = new Date(to.getTime() - 6 * 86_400_000);
+  return { from: from.toISOString().slice(0, 10), to: day };
+}
+
+// Whether the round-up is due now: on its weekday, at or after its time
+// (both in India).
+export function weeklyDue(
+  s: Pick<IgSettings, "weekly" | "weekly_day" | "weekly_time">,
+  now = new Date(),
+): string | null {
+  if (!s.weekly) return null;
+  const ist = new Date(now.getTime() + 330 * 60_000);
+  const [h, m] = (/^(\d{1,2}):(\d{2})$/.exec(s.weekly_time) ?? ["", "18", "00"])
+    .slice(1)
+    .map(Number);
+  if (ist.getUTCDay() !== s.weekly_day) return null;
+  if (ist.getUTCHours() * 60 + ist.getUTCMinutes() < h * 60 + m) return null;
+  return ist.toISOString().slice(0, 10);
+}
+
+export function fillWeeklyCaption(
+  template: string,
+  p: { from: string; to: string; count: number; appLink: string; channel: string },
+): string {
+  // Without a link, its line is left out.
+  const t = p.appLink
+    ? template
+    : template
+        .split("\n")
+        .filter((l) => !l.includes("{app_link}"))
+        .join("\n");
+  return t
+    .replace(/\{from\}/g, p.from)
+    .replace(/\{to\}/g, p.to)
+    .replace(/\{count\}/g, String(p.count))
+    .replace(/\{app_link\}/g, p.appLink)
+    .replace(/\{channel\}/g, p.channel)
+    .trim();
+}
+
+// ---------- Learning from the editor's picks ----------
+
+export const PICK_RULES_MAX = 10;
+// Fewer picking days than this say little about the editor's taste.
+export const PICK_MIN_DAYS = 3;
+
+export type IgTaste = {
+  rules: string[];
+  // Recent words the editor picked (or added) and passed over.
+  chosen: string[];
+  passed: string[];
+};
+
+export type PickExample = { word: string; pos: string; why: string; own: boolean };
+
+export function pickRuleMessages(
+  lang: IgLang,
+  ex: { chosen: PickExample[]; passed: PickExample[] },
+  rules: string[],
+): ChatMessage[] {
+  const line = (e: PickExample) =>
+    `${e.word}${e.pos ? ` (${e.pos})` : ""}${e.own ? " [added by the editor]" : ""}${e.why ? ` — ${e.why}` : ""}`;
+  return [
+    {
+      role: "system",
+      content: `You help the AI that suggests ${lang === "en" ? "English" : "Hindi"} vocabulary from the day's newspapers for ${EXAMS} pick words the way the human editor does. Below are the words the editor picked for the channel (or added themselves) and the AI's suggestions the editor passed over. Find the editor's consistent preferences (kind of word, difficulty, part of speech, origin, subject, usefulness for exam questions) and write them as picking rules the AI should follow.
+RULES: At most 5 rules, the clearest first. Each is one specific instruction of at most 30 words, in English. Leave out one-off choices and anything the existing rules already say. Add one short example from the words for each rule. Fewer rules are better than vague ones; reply with an empty list when there is no clear pattern.
+Reply with JSON only: {"rules": [{"rule": "...", "example": "..."}]}`,
+    },
+    {
+      role: "user",
+      content: `Existing picking rules:\n${rules.map((r) => `- ${r}`).join("\n") || "(none)"}\n\nPicked by the editor:\n${ex.chosen.map(line).join("\n") || "(none)"}\n\nPassed over:\n${ex.passed.map(line).join("\n") || "(none)"}`,
+    },
+  ];
 }
 
 // "@flashgyan" or "-100…" for the Telegram API, from what the editor pasted.
@@ -218,8 +354,12 @@ export function suggestMessages(
   articles: IgArticle[],
   count: number,
   avoid: string[],
+  taste?: IgTaste,
 ): ChatMessage[] {
   const en = lang === "en";
+  const tasteText = taste
+    ? `${taste.rules.length ? `\n\nThe editor's picking rules; follow them:\n${taste.rules.map((r) => `- ${r}`).join("\n")}` : ""}${taste.chosen.length ? `\n\nWords the editor picked recently (suggest words like these): ${taste.chosen.join(", ")}` : ""}${taste.passed.length ? `\nWords the editor passed over recently (fewer like these): ${taste.passed.join(", ")}` : ""}`
+    : "";
   const system = en
     ? `You pick vocabulary for students preparing for ${EXAMS} from today's English newspapers. Choose words that exams ask (synonym, antonym, one-word, fill-in-the-blank questions): useful, a little advanced, not everyday words like "government" or "said", not names, places, brands, abbreviations or technical jargon. Prefer a mix of nouns, verbs, adjectives and adverbs, and words whose meaning the sentence shows.`
     : `You pick Hindi vocabulary for students preparing for ${EXAMS} from today's Hindi newspapers. Choose words that Hindi grammar and vocabulary questions ask (पर्यायवाची, विलोम, शुद्ध वर्तनी, उपसर्ग-प्रत्यय, संधि, समास, शब्द-भेद): mostly तत्सम and literary words that a student should know, not everyday words like "सरकार" or "कहा", not names, places, English words written in Devanagari or abbreviations.`;
@@ -227,7 +367,7 @@ export function suggestMessages(
 
 ${articles.map((a) => `[${a.index}] ${a.paper} — ${a.title}\n${a.text}`).join("\n\n")}
 
-Already posted or suggested; do not suggest these or any form of them: ${avoid.length ? avoid.join(", ") : "(none)"}
+Already posted or suggested; do not suggest these or any form of them: ${avoid.length ? avoid.join(", ") : "(none)"}${tasteText}
 
 Suggest ${count} different words, best first. Each must be used in one of the articles above. Reply with JSON only:
 {"words":[{"word":"the word as used in the sentence","base":"its dictionary form","pos":"${en ? "noun|verb|adjective|adverb" : "संज्ञा|सर्वनाम|विशेषण|क्रिया|क्रिया-विशेषण|अव्यय"}","article":<number>,"sentence":"the sentence it is used in, copied exactly from the article","why":"one short line on why students should know it"}]}`;

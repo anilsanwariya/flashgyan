@@ -4,9 +4,17 @@ import { getRequest } from "@tanstack/react-start/server";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { IG_DESIGN_KEYS, type IgDesign } from "@/lib/ig-cards";
-import type { IgCardAids, IgDayView, IgHistoryRow, IgVersion, IgWord } from "@/lib/ig.server";
+import type {
+  IgCardAids,
+  IgDayView,
+  IgHistoryRow,
+  IgPickStats,
+  IgVersion,
+  IgWeek,
+  IgWord,
+} from "@/lib/ig.server";
 
-export type { IgCardAids, IgDayView, IgHistoryRow, IgVersion, IgWord };
+export type { IgCardAids, IgDayView, IgHistoryRow, IgPickStats, IgVersion, IgWeek, IgWord };
 
 async function server() {
   return import("@/lib/ig.server");
@@ -275,6 +283,17 @@ export const saveIgSettings = createServerFn({ method: "POST" })
         watermark: z.number().int().min(0).max(100),
         caption: z.string().min(1).max(3000),
         notify: z.boolean(),
+        learn_from_picks: z.boolean(),
+        pick_rules: z.object({
+          en: z.array(z.string().trim().min(3).max(240)).max(10),
+          hi: z.array(z.string().trim().min(3).max(240)).max(10),
+        }),
+        weekly: z.boolean(),
+        weekly_day: z.number().int().min(0).max(6),
+        weekly_time: z.string().regex(/^\d{1,2}:\d{2}$/, "Use HH:MM"),
+        weekly_caption: z.string().min(1).max(3000),
+        weekly_app_link: z.string().max(400),
+        monthly_page: z.boolean(),
       })
       .refine((s) => s.pick_en + s.pick_hi >= 1 && s.pick_en + s.pick_hi <= 10, {
         message: "A Telegram album holds 1 to 10 cards.",
@@ -301,4 +320,47 @@ export const releaseIgWord = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     await (await server()).releaseIgWord(data.id, data.release);
     return { ok: true };
+  });
+
+// ---------- Round-ups ----------
+
+export const listIgWeeks = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).listIgWeeks();
+  });
+
+export const igWeekPreview = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ to: date }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).igWeekPreview(data.to, origin());
+  });
+
+export const postIgWeek = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ to: date }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).postIgWeek(data.to, origin());
+    return { ok: true };
+  });
+
+// ---------- Learning from the editor's picks ----------
+
+export const igPickStats = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).igPickStats();
+  });
+
+export const suggestIgPickRules = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ lang }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).suggestIgPickRules(data.lang);
   });

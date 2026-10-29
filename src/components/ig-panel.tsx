@@ -16,6 +16,11 @@ import {
   getIgDay,
   getIgSettings,
   igHistory,
+  igPickStats,
+  igWeekPreview,
+  listIgWeeks,
+  postIgWeek,
+  suggestIgPickRules,
   moveIgCard,
   pickIgWords,
   postIgNow,
@@ -40,6 +45,9 @@ import {
   channelChatId,
   channelLabel,
   fillCaption,
+  fillWeeklyCaption,
+  PICK_RULES_MAX,
+  WEEKDAYS,
   type IgSettings,
 } from "@/lib/ig-words";
 import { istDate } from "@/lib/current-affairs";
@@ -53,6 +61,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -61,7 +70,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-const TABS = ["today", "history", "settings"] as const;
+const TABS = ["today", "roundups", "history", "settings"] as const;
 type Tab = (typeof TABS)[number];
 
 const LANG_NAME: Record<IgLang, string> = { en: "English", hi: "Hindi" };
@@ -87,6 +96,7 @@ export function InfographicsPanel() {
         label="Infographics"
         tabs={[
           { id: "today", label: "Day" },
+          { id: "roundups", label: "Round-ups" },
           { id: "history", label: "Posted words" },
           { id: "settings", label: "Settings" },
         ]}
@@ -94,6 +104,7 @@ export function InfographicsPanel() {
         onChange={setTab}
       />
       {tab === "today" && <DayView />}
+      {tab === "roundups" && <Roundups />}
       {tab === "history" && <History />}
       {tab === "settings" && <Settings />}
     </div>
@@ -784,6 +795,130 @@ function Scheduled({
   );
 }
 
+// ====================== Round-ups ======================
+
+function Roundups() {
+  const listFn = useServerFn(listIgWeeks);
+  const previewFn = useServerFn(igWeekPreview);
+  const postFn = useServerFn(postIgWeek);
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["igWeeks"], queryFn: () => listFn() });
+  const [preview, setPreview] = useState<{ to: string; html: string; caption: string } | null>(
+    null,
+  );
+  const [busy, setBusy] = useState<string | null>(null);
+  const post = async (to: string) => {
+    if (!confirm("Post this week's round-up PDF to the channel now?")) return;
+    setBusy(to);
+    try {
+      await postFn({ data: { to } });
+      toast.success("Posted");
+      await qc.invalidateQueries({ queryKey: ["igWeeks"] });
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't post it"));
+      await qc.invalidateQueries({ queryKey: ["igWeeks"] });
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        Every week the posted words go to the channel as one PDF to save and revise, on the day and
+        at the time set in Settings. The monthly magazine has a “Words of the month” page with all
+        of the month&apos;s words.
+      </p>
+      {q.isLoading ? (
+        <p className="text-muted-foreground">Loading…</p>
+      ) : q.error ? (
+        <p className="text-destructive">{errorText(q.error, "Couldn't load")}</p>
+      ) : (
+        <ul className="max-w-3xl space-y-2" aria-label="Weekly round-ups">
+          {q.data!.map((w) => (
+            <li
+              key={w.to}
+              className="flex flex-wrap items-center gap-3 rounded-lg border border-border p-3 text-sm"
+              data-week={w.to}
+            >
+              <div className="min-w-0 flex-1">
+                <p className="font-medium">
+                  {igDate(w.from, "long")} – {igDate(w.to, "long")}
+                  {w.to >= istDate() && !w.status && (
+                    <span className="ml-2 text-xs font-normal text-muted-foreground">
+                      {w.to === istDate() ? "posts today" : "this week, still to come"}
+                    </span>
+                  )}
+                </p>
+                <p className="text-muted-foreground">
+                  {w.count} word{w.count === 1 ? "" : "s"}
+                  {w.status === "posted" && w.at ? ` · posted ${timeIst(w.at)}` : ""}
+                  {w.status === "failed" ? ` · failed: ${w.error ?? ""}` : ""}
+                </p>
+              </div>
+              {w.status === "posted" ? (
+                <Badge tone="good">Posted</Badge>
+              ) : w.status === "failed" ? (
+                <Badge tone="bad">Failed</Badge>
+              ) : w.status === "posting" ? (
+                <Badge tone="primary">Posting</Badge>
+              ) : null}
+              {w.url && (
+                <a className="text-primary underline" href={w.url} target="_blank" rel="noreferrer">
+                  PDF
+                </a>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!w.count}
+                onClick={async () => {
+                  try {
+                    const p = await previewFn({ data: { to: w.to } });
+                    setPreview({ to: w.to, html: p.html, caption: p.caption });
+                  } catch (e) {
+                    toast.error(errorText(e, "Couldn't make the preview"));
+                  }
+                }}
+              >
+                Preview
+              </Button>
+              <Button
+                size="sm"
+                disabled={!w.count || busy === w.to}
+                onClick={() => void post(w.to)}
+              >
+                {busy === w.to && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+                {w.status === "posted" ? "Post again" : "Post now"}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {preview && (
+        <Dialog open onOpenChange={(o) => !o && setPreview(null)}>
+          <DialogContent className="max-h-[92dvh] max-w-4xl overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Round-up to {igDate(preview.to, "long")}</DialogTitle>
+            </DialogHeader>
+            <iframe
+              title="The round-up PDF"
+              srcDoc={preview.html.replace(
+                "</style>",
+                "body{padding:12mm 11mm;background:#fff;max-width:210mm;margin:auto}</style>",
+              )}
+              sandbox=""
+              className="h-[60vh] w-full rounded-lg border border-border bg-white"
+            />
+            <pre className="whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-sm [overflow-wrap:anywhere]">
+              {preview.caption}
+            </pre>
+          </DialogContent>
+        </Dialog>
+      )}
+    </div>
+  );
+}
+
 // ====================== Posted words ======================
 
 function History() {
@@ -857,6 +992,222 @@ function History() {
 
 // ====================== Settings ======================
 
+function RoundupSettings({ s, set }: { s: IgSettings; set: (p: Partial<IgSettings>) => void }) {
+  const sample = fillWeeklyCaption(s.weekly_caption, {
+    from: igDate(shiftDate(istDate(), -6), "long"),
+    to: igDate(istDate(), "long"),
+    count: 7 * (s.pick_en + s.pick_hi),
+    appLink: playStoreUrl("words_in_news_weekly", "telegram_channel"),
+    channel: channelLabel(s.channel) ? `https://${channelLabel(s.channel)}` : "",
+  });
+  return (
+    <section className="space-y-3 rounded-xl border border-border p-4" aria-label="Round-ups">
+      <h2 className="font-semibold">Round-ups</h2>
+      <label className="flex items-center gap-2 text-sm">
+        <Switch
+          checked={s.weekly}
+          onCheckedChange={(v) => set({ weekly: v })}
+          aria-label="Weekly round-up"
+        />
+        Post the week&apos;s words as one PDF every week
+      </label>
+      {s.weekly && (
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="block space-y-1 text-sm">
+            <span className="font-medium">Day</span>
+            <Select
+              value={String(s.weekly_day)}
+              onValueChange={(v) => set({ weekly_day: Number(v) })}
+            >
+              <SelectTrigger className="w-40" aria-label="Round-up day">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {WEEKDAYS.map((d, i) => (
+                  <SelectItem key={d} value={String(i)}>
+                    {d}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="block space-y-1 text-sm">
+            <span className="font-medium">Time (India)</span>
+            <Input
+              type="time"
+              aria-label="Round-up time"
+              value={s.weekly_time}
+              onChange={(e) => set({ weekly_time: e.target.value })}
+              className="w-32"
+            />
+          </label>
+        </div>
+      )}
+      {s.weekly && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <label className="block space-y-1 text-sm">
+            <span className="font-medium">
+              Caption (fill-ins: <code>{"{from}"}</code> <code>{"{to}"}</code>{" "}
+              <code>{"{count}"}</code> <code>{"{app_link}"}</code> <code>{"{channel}"}</code>)
+            </span>
+            <Textarea
+              rows={8}
+              aria-label="Round-up caption"
+              value={s.weekly_caption}
+              onChange={(e) => set({ weekly_caption: e.target.value })}
+            />
+          </label>
+          <pre className="whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-sm [overflow-wrap:anywhere]">
+            {sample}
+          </pre>
+        </div>
+      )}
+      <label className="flex items-center gap-2 text-sm">
+        <Switch
+          checked={s.monthly_page}
+          onCheckedChange={(v) => set({ monthly_page: v })}
+          aria-label="Words of the month page"
+        />
+        A “Words of the month” page in the monthly magazine
+      </label>
+    </section>
+  );
+}
+
+function LearnSettings({ s, set }: { s: IgSettings; set: (p: Partial<IgSettings>) => void }) {
+  const statsFn = useServerFn(igPickStats);
+  const suggestFn = useServerFn(suggestIgPickRules);
+  const stats = useQuery({ queryKey: ["igPickStats"], queryFn: () => statsFn() });
+  const [ideas, setIdeas] = useState<Record<IgLang, { rule: string; example: string }[]>>({
+    en: [],
+    hi: [],
+  });
+  const [busy, setBusy] = useState<IgLang | null>(null);
+  const [own, setOwn] = useState<Record<IgLang, string>>({ en: "", hi: "" });
+  const rules = (lang: IgLang, list: string[]) =>
+    set({ pick_rules: { ...s.pick_rules, [lang]: list.slice(0, PICK_RULES_MAX) } });
+  return (
+    <section
+      className="space-y-3 rounded-xl border border-border p-4"
+      aria-label="Learn from my picks"
+    >
+      <h2 className="font-semibold">Learn from my picks</h2>
+      <label className="flex items-center gap-2 text-sm">
+        <Switch
+          checked={s.learn_from_picks}
+          onCheckedChange={(v) => set({ learn_from_picks: v })}
+          aria-label="Learn from my picks"
+        />
+        Show the AI the words I picked and passed over lately, so it suggests words like the ones I
+        pick
+      </label>
+      <div className="grid gap-4 lg:grid-cols-2">
+        {(["en", "hi"] as IgLang[]).map((lang) => {
+          const st = stats.data?.[lang];
+          return (
+            <div key={lang} className="space-y-2" aria-label={`${LANG_NAME[lang]} picking rules`}>
+              <h3 className="text-sm font-semibold">{LANG_NAME[lang]} words</h3>
+              {st && (
+                <p className="text-xs text-muted-foreground">
+                  Last 45 days: {st.chosen} picked and {st.passed} passed over on {st.days} day
+                  {st.days === 1 ? "" : "s"}
+                  {st.own ? `, ${st.own} added by you` : ""}.
+                </p>
+              )}
+              <ul className="space-y-1">
+                {s.pick_rules[lang].map((r) => (
+                  <li key={r} className="flex items-start gap-2 rounded-lg bg-muted/40 p-2 text-sm">
+                    <span className="flex-1">{r}</span>
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-destructive"
+                      aria-label={`Remove rule: ${r}`}
+                      onClick={() =>
+                        rules(
+                          lang,
+                          s.pick_rules[lang].filter((x) => x !== r),
+                        )
+                      }
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <form
+                className="flex gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (own[lang].trim().length >= 3) {
+                    rules(lang, [...s.pick_rules[lang], own[lang].trim()]);
+                    setOwn({ ...own, [lang]: "" });
+                  }
+                }}
+              >
+                <Input
+                  placeholder="Your own rule, e.g. Prefer tatsam words with a clear viloma"
+                  aria-label={`New ${LANG_NAME[lang]} rule`}
+                  value={own[lang]}
+                  onChange={(e) => setOwn({ ...own, [lang]: e.target.value })}
+                />
+                <Button type="submit" size="sm" variant="outline">
+                  Add
+                </Button>
+              </form>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy === lang}
+                onClick={async () => {
+                  setBusy(lang);
+                  try {
+                    const got = await suggestFn({ data: { lang } });
+                    setIdeas({ ...ideas, [lang]: got });
+                    if (!got.length) toast.info("No clear pattern in your picks yet");
+                  } catch (e) {
+                    toast.error(errorText(e, "Couldn't suggest rules"));
+                  } finally {
+                    setBusy(null);
+                  }
+                }}
+              >
+                {busy === lang ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-1 h-4 w-4" />
+                )}
+                Suggest rules from my picks
+              </Button>
+              {ideas[lang].map((x) => (
+                <div
+                  key={x.rule}
+                  className="space-y-1 rounded-lg border border-dashed border-primary/40 p-2 text-sm"
+                  aria-label="Suggested rule"
+                >
+                  <p>{x.rule}</p>
+                  {x.example && <p className="text-xs text-muted-foreground">e.g. {x.example}</p>}
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      rules(lang, [...s.pick_rules[lang], x.rule]);
+                      setIdeas({ ...ideas, [lang]: ideas[lang].filter((y) => y.rule !== x.rule) });
+                    }}
+                  >
+                    Add this rule
+                  </Button>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Rules are used from the next suggestions on, after you save.
+      </p>
+    </section>
+  );
+}
+
 function Settings() {
   const getFn = useServerFn(getIgSettings);
   const saveFn = useServerFn(saveIgSettings);
@@ -873,7 +1224,9 @@ function Settings() {
   const dirty = JSON.stringify(s) !== JSON.stringify(q.data);
   const save = async () => {
     try {
-      const next = await saveFn({ data: s });
+      const next = await saveFn({
+        data: { ...s, weekly_app_link: playStoreUrl("words_in_news_weekly", "telegram_channel") },
+      });
       qc.setQueryData(["igSettings"], next);
       setS(next);
       toast.success("Settings saved");
@@ -999,6 +1352,9 @@ function Settings() {
           </div>
         </div>
       </section>
+
+      <RoundupSettings s={s} set={set} />
+      <LearnSettings s={s} set={set} />
 
       <section className="space-y-3 rounded-xl border border-border p-4" aria-label="Designs">
         <div className="flex flex-wrap items-center justify-between gap-2">

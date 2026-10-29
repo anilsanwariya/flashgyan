@@ -4624,6 +4624,10 @@ export async function issueHtml(
     kind === "monthly" && !opts.coverOnly ? await import("@/lib/ca-practice.server") : null;
   const practiceSet = practice ? await practice.getPractice(range.from).catch(() => null) : null;
   const oneliners = practice ? await practice.getOneliners(range.from).catch(() => null) : null;
+  // The words posted in Words in the News this month, when the page is on.
+  const words = practice
+    ? await (await import("@/lib/ig.server")).monthWords(range.from, range.to).catch(() => null)
+    : null;
   const topicIndex = practice
     ? await (await import("@/lib/ca-index.server")).getIndex(range.from).catch(() => null)
     : null;
@@ -4661,6 +4665,7 @@ export async function issueHtml(
       feature: feature?.included ? feature : null,
       practiceSet,
       oneliners,
+      words,
       topicIndex,
       radar,
       reports,
