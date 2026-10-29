@@ -42,6 +42,8 @@ import {
 import {
   CAPTION_FIELDS,
   CAPTION_MAX,
+  captionHtml,
+  captionText,
   channelChatId,
   channelLabel,
   fillCaption,
@@ -551,10 +553,10 @@ function Review({
           <div className="flex items-center justify-between">
             <Label htmlFor="ig-caption">Caption</Label>
             <span
-              className={`text-xs ${caption.length > CAPTION_MAX ? "text-destructive" : "text-muted-foreground"}`}
+              className={`text-xs ${captionText(caption).length > CAPTION_MAX ? "text-destructive" : "text-muted-foreground"}`}
               data-caption-count
             >
-              {caption.length}/{CAPTION_MAX}
+              {captionText(caption).length}/{CAPTION_MAX}
             </span>
           </div>
           <Textarea
@@ -563,6 +565,8 @@ function Review({
             value={caption}
             onChange={(e) => setCaption(e.target.value)}
           />
+          <p className="text-xs text-muted-foreground">{LINK_HINT}</p>
+          <CaptionPreview caption={caption} />
           <Button variant="ghost" size="sm" onClick={() => setCaption(captionFor(view, date))}>
             Fill from the template again
           </Button>
@@ -683,13 +687,17 @@ function Review({
         <div className="ml-auto flex gap-2">
           <Button
             variant="outline"
-            disabled={busy || writing || unticked.length > 0 || caption.length > CAPTION_MAX}
+            disabled={
+              busy || writing || unticked.length > 0 || captionText(caption).length > CAPTION_MAX
+            }
             onClick={() => void approve(true)}
           >
             Approve & post now
           </Button>
           <Button
-            disabled={busy || writing || unticked.length > 0 || caption.length > CAPTION_MAX}
+            disabled={
+              busy || writing || unticked.length > 0 || captionText(caption).length > CAPTION_MAX
+            }
             onClick={() => void approve(false)}
           >
             Approve & schedule for {view.settings.post_time} tomorrow
@@ -786,14 +794,30 @@ function Scheduled({
           ),
         )}
       </div>
-      {d.caption && (
-        <pre className="whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-sm [overflow-wrap:anywhere]">
-          {d.caption}
-        </pre>
-      )}
+      {d.caption && <CaptionPreview caption={d.caption} />}
     </div>
   );
 }
+
+// A caption as Telegram shows it: its links as tappable words.
+function CaptionPreview({
+  caption,
+  label = "Caption preview",
+}: {
+  caption: string;
+  label?: string;
+}) {
+  return (
+    <div
+      aria-label={label}
+      className="whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-sm [overflow-wrap:anywhere] [&_a]:font-medium [&_a]:text-primary [&_a]:underline"
+      dangerouslySetInnerHTML={{ __html: captionHtml(caption) }}
+    />
+  );
+}
+
+const LINK_HINT =
+  "A link: [Click here to download FlashGyan]({app_link}) shows the words, tappable.";
 
 // ====================== Round-ups ======================
 
@@ -909,9 +933,7 @@ function Roundups() {
               sandbox=""
               className="h-[60vh] w-full rounded-lg border border-border bg-white"
             />
-            <pre className="whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-sm [overflow-wrap:anywhere]">
-              {preview.caption}
-            </pre>
+            <CaptionPreview caption={preview.caption} />
           </DialogContent>
         </Dialog>
       )}
@@ -1056,10 +1078,9 @@ function RoundupSettings({ s, set }: { s: IgSettings; set: (p: Partial<IgSetting
               value={s.weekly_caption}
               onChange={(e) => set({ weekly_caption: e.target.value })}
             />
+            <span className="block text-xs text-muted-foreground">{LINK_HINT}</span>
           </label>
-          <pre className="whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-sm [overflow-wrap:anywhere]">
-            {sample}
-          </pre>
+          <CaptionPreview caption={sample} label="Round-up caption preview" />
         </div>
       )}
       <label className="flex items-center gap-2 text-sm">
@@ -1342,13 +1363,15 @@ function Settings() {
           <div className="space-y-1">
             <div className="flex justify-between text-xs text-muted-foreground">
               <span>Preview</span>
-              <span className={sampleCaption.length > CAPTION_MAX ? "text-destructive" : ""}>
-                {sampleCaption.length}/{CAPTION_MAX}
+              <span
+                className={
+                  captionText(sampleCaption).length > CAPTION_MAX ? "text-destructive" : ""
+                }
+              >
+                {captionText(sampleCaption).length}/{CAPTION_MAX}
               </span>
             </div>
-            <pre className="whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-sm [overflow-wrap:anywhere]">
-              {sampleCaption}
-            </pre>
+            <CaptionPreview caption={sampleCaption} />
           </div>
         </div>
       </section>
