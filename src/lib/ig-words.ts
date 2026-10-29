@@ -58,6 +58,28 @@ export const DEFAULT_IG_WEEKLY_CAPTION = `📚 Words in the News | Weekly Revisi
 इस हफ़्ते के {count} शब्द एक PDF में 👇
 Save करें, प्रिंट करें और दोहराएँ ✅
 
+📲 [Click here to download FlashGyan]({app_link})
+
+#WordsInTheNews #WeeklyRevision #Vocabulary`;
+
+// What the default captions said before links had their own text; such a
+// saved caption is read as the new default.
+const OLD_DAILY_CAPTION = `📰 Words in the News | {date}
+
+आज की ख़बरों से {count} ज़रूरी शब्द 👇
+🔤 English: {english_words}
+🔠 हिंदी: {hindi_words}
+
+💾 Save करें और रोज़ दोहराएँ
+📲 FlashGyan App: {app_link}
+
+#WordsInTheNews #Vocabulary #RPSC #RSSB #SSC`;
+const OLD_WEEKLY_CAPTION = `📚 Words in the News | Weekly Revision
+🗓️ {from} – {to}
+
+इस हफ़्ते के {count} शब्द एक PDF में 👇
+Save करें, प्रिंट करें और दोहराएँ ✅
+
 📲 FlashGyan App: {app_link}
 
 #WordsInTheNews #WeeklyRevision #Vocabulary`;
@@ -69,7 +91,7 @@ export const DEFAULT_IG_CAPTION = `📰 Words in the News | {date}
 🔠 हिंदी: {hindi_words}
 
 💾 Save करें और रोज़ दोहराएँ
-📲 FlashGyan App: {app_link}
+📲 [Click here to download FlashGyan]({app_link})
 
 #WordsInTheNews #Vocabulary #RPSC #RSSB #SSC`;
 
@@ -109,6 +131,9 @@ export function igSettingsOf(value: unknown): IgSettings {
   const pr = (s.pick_rules ?? {}) as Partial<IgSettings["pick_rules"]>;
   return {
     ...s,
+    caption: s.caption === OLD_DAILY_CAPTION ? DEFAULT_IG_CAPTION : s.caption,
+    weekly_caption:
+      s.weekly_caption === OLD_WEEKLY_CAPTION ? DEFAULT_IG_WEEKLY_CAPTION : s.weekly_caption,
     designs: designs.length ? designs : [...IG_DESIGN_KEYS],
     pick_rules: { en: rules(pr.en), hi: rules(pr.hi) },
     weekly_day:
@@ -314,7 +339,10 @@ export const CAPTION_FIELDS = [
   ["{count}", "how many words"],
   ["{english_words}", "the English words, with •"],
   ["{hindi_words}", "the Hindi words, with •"],
-  ["{app_link}", "the Play Store link"],
+  [
+    "{app_link}",
+    "the Play Store link: [Click here to download FlashGyan]({app_link}) shows the words as a link",
+  ],
   ["{channel}", "the channel link"],
 ] as const;
 
@@ -330,8 +358,29 @@ export function fillCaption(template: string, p: CaptionParts): string {
     .trim();
 }
 
-// Telegram's limit for a photo's caption.
+// Telegram's limit for a photo's caption: its text as students see it
+// (a link counts only its words).
 export const CAPTION_MAX = 1024;
+
+// A link in a caption is written [its words](the link): Telegram shows the
+// words, tappable. Only http(s) links count.
+const CAPTION_LINK = /\[([^\]\n]{1,100})\]\((https?:\/\/[^\s)]+)\)/g;
+
+const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// The caption for Telegram's HTML formatting: everything escaped, links
+// made into links.
+export function captionHtml(caption: string): string {
+  return escHtml(caption).replace(
+    CAPTION_LINK,
+    (_, text: string, url: string) => `<a href="${url.replace(/"/g, "&quot;")}">${text}</a>`,
+  );
+}
+
+// The caption as students read it (links as their words).
+export function captionText(caption: string): string {
+  return caption.replace(CAPTION_LINK, "$1");
+}
 
 // ---------- Suggesting words ----------
 

@@ -23,6 +23,8 @@ import {
   channelChatId,
   channelLabel,
   CAPTION_MAX,
+  captionHtml,
+  captionText,
   designMessages,
   findSentence,
   igSettingsOf,
@@ -706,14 +708,14 @@ async function postAlbum(day: string, settings: IgSettings) {
   const media = cards.slice(0, 10).map((c, i) => ({
     type: "photo",
     media: `${publicUrl(c.image_path)}?v=${Date.now()}`,
-    ...(i === 0 && row?.caption ? { caption: row.caption.slice(0, CAPTION_MAX) } : {}),
+    ...(i === 0 && row?.caption ? telegramCaption(row.caption) : {}),
   }));
   const res = await fetch(`https://api.telegram.org/bot${token}/sendMediaGroup`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ chat_id: chat, media }),
   });
-  const json = (await res.json().catch(() => ({}) as Record<string, WnSense[]>)) as {
+  const json = (await res.json().catch(() => ({}))) as {
     ok?: boolean;
     description?: string;
     result?: { message_id: number }[];
@@ -992,7 +994,15 @@ function weekCaption(settings: IgSettings, f: string, to: string, count: number)
     count,
     appLink: settings.weekly_app_link,
     channel: channelLabel(settings.channel) ? `https://${channelLabel(settings.channel)}` : "",
-  }).slice(0, CAPTION_MAX);
+  });
+}
+
+// A caption as Telegram takes it: with its links (HTML formatting), or as
+// plain text cut to the limit when even its words are too long.
+function telegramCaption(caption: string): { caption: string; parse_mode?: "HTML" } {
+  return captionText(caption).length <= CAPTION_MAX
+    ? { caption: captionHtml(caption), parse_mode: "HTML" }
+    : { caption: captionText(caption).slice(0, CAPTION_MAX) };
 }
 
 // The week's round-up as a page (for the preview) and its caption.
@@ -1057,7 +1067,9 @@ export async function postIgWeek(to: string, origin?: string, auto = false): Pro
       new Blob([pdf as BlobPart], { type: "application/pdf" }),
       path.split("/").pop()!,
     );
-    form.append("caption", weekCaption(settings, f, to, words.length));
+    const cap = telegramCaption(weekCaption(settings, f, to, words.length));
+    form.append("caption", cap.caption);
+    if (cap.parse_mode) form.append("parse_mode", cap.parse_mode);
     const res = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
       method: "POST",
       body: form,
@@ -1494,8 +1506,9 @@ export async function approveIgDay(day: string, caption: string, postNow = false
   const unticked = cards.filter((c) => !c.checked);
   if (unticked.length)
     throw new Error(`Tick every card as checked first: ${unticked.map((c) => c.word).join(", ")}.`);
-  if (caption.length > CAPTION_MAX)
-    throw new Error(`The caption is ${caption.length} characters; Telegram allows ${CAPTION_MAX}.`);
+  const shown = captionText(caption).length;
+  if (shown > CAPTION_MAX)
+    throw new Error(`The caption is ${shown} characters; Telegram allows ${CAPTION_MAX}.`);
   const when = postNow ? new Date() : dailyPostTime(day, settings.post_time);
   await patchDay(day, {
     status: "rendering",
