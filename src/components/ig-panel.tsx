@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, Loader2, RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Loader2, RefreshCw } from "lucide-react";
 import {
   addOwnIgWord,
   advanceIgDay,
@@ -54,6 +54,7 @@ import {
 } from "@/lib/ig-words";
 import { istDate } from "@/lib/current-affairs";
 import { playStoreUrl } from "@/lib/app-promo";
+import { zipFiles } from "@/lib/zip";
 import { Badge, PageTabs, errorText, useUrlTab } from "@/components/ca-ui";
 import { CardPreview } from "@/components/ig-card-preview";
 import { IgCardEditor } from "@/components/ig-card-editor";
@@ -577,16 +578,16 @@ function Review({
           Open a card to check it: each part on its own tab, the AI&apos;s notes beside it, and the
           card as it will look. The arrows change the order.
         </p>
-        <div className="flex flex-wrap gap-4">
+        <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:gap-4">
           {view.cards.map((c, i) => {
             const notes = c.checks.filter((x) => x.state === "open").length;
             const same = view.cards.filter((x) => x.lang === c.lang);
             const at = same.indexOf(c);
             return (
-              <div key={c.id} className="w-[170px] space-y-1.5" data-card={c.word}>
+              <div key={c.id} className="min-w-0 space-y-1.5 sm:w-[170px]" data-card={c.word}>
                 <button
                   type="button"
-                  className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="block w-full rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label={`Open card ${i + 1}: ${c.card?.word || c.word}`}
                   onClick={() => setOpenId(c.id)}
                   disabled={!c.card}
@@ -599,10 +600,10 @@ function Review({
                       total={view.cards.length}
                       date={date}
                       settings={view.settings}
-                      width={170}
+                      width="fill"
                     />
                   ) : (
-                    <div className="flex h-[302px] w-[170px] items-center justify-center rounded-lg border border-dashed border-border text-xs text-muted-foreground">
+                    <div className="flex aspect-[9/16] w-full items-center justify-center rounded-lg border border-dashed border-border text-xs text-muted-foreground">
                       <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> Writing…
                     </div>
                   )}
@@ -670,7 +671,7 @@ function Review({
           onChange={onChange}
         />
       )}
-      <div className="sticky bottom-0 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-background/95 p-3 backdrop-blur">
+      <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-background/95 p-3 backdrop-blur">
         {writing ? (
           <span className="text-sm text-muted-foreground">
             Cards are still being written or proofread…
@@ -684,7 +685,7 @@ function Review({
         ) : (
           <span className="text-sm">All cards checked.</span>
         )}
-        <div className="ml-auto flex gap-2">
+        <div className="flex w-full flex-col gap-2 sm:ml-auto sm:w-auto sm:flex-row">
           <Button
             variant="outline"
             disabled={
@@ -723,6 +724,8 @@ function Scheduled({
   const cancelFn = useServerFn(cancelIgDay);
   const approveFn = useServerFn(approveIgDay);
   const d = view.day!;
+  const [zipping, setZipping] = useState(false);
+  const ready = view.cards.length > 0 && view.cards.every((c) => c.image_url);
   const act = async (f: () => Promise<unknown>) => {
     try {
       await f();
@@ -741,7 +744,30 @@ function Scheduled({
         ) : (
           <span>Posts {d.scheduled_for ? timeIst(d.scheduled_for) : "soon"}.</span>
         )}
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex flex-wrap justify-end gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!ready || zipping}
+            title={ready ? undefined : "The images are still being made"}
+            onClick={async () => {
+              setZipping(true);
+              try {
+                await downloadCards(view, date);
+              } catch (e) {
+                toast.error(errorText(e, "Couldn't download the cards"));
+              } finally {
+                setZipping(false);
+              }
+            }}
+          >
+            {zipping ? (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-1 h-4 w-4" />
+            )}
+            Download all (zip)
+          </Button>
           {d.status === "scheduled" && (
             <Button size="sm" onClick={() => void act(() => nowFn({ data: { date } }))}>
               Post now
@@ -768,28 +794,29 @@ function Scheduled({
           )}
         </div>
       </div>
-      <div className="flex flex-wrap gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:gap-4">
         {view.cards.map((c, i) =>
           c.image_url ? (
-            <a key={c.id} href={c.image_url} target="_blank" rel="noreferrer">
+            <a key={c.id} href={c.image_url} target="_blank" rel="noreferrer" className="min-w-0">
               <img
                 src={c.image_url}
                 alt={`Card ${i + 1}: ${c.word}`}
-                className="h-80 w-[180px] rounded-lg border border-border object-cover"
+                className="aspect-[9/16] w-full rounded-lg border border-border object-cover sm:w-[180px]"
               />
             </a>
           ) : (
             c.card && (
-              <CardPreview
-                key={c.id}
-                card={c.card}
-                design={(d.design ?? "paper") as IgDesign}
-                n={i + 1}
-                total={view.cards.length}
-                date={date}
-                settings={view.settings}
-                width={180}
-              />
+              <div key={c.id} className="min-w-0 sm:w-[180px]">
+                <CardPreview
+                  card={c.card}
+                  design={(d.design ?? "paper") as IgDesign}
+                  n={i + 1}
+                  total={view.cards.length}
+                  date={date}
+                  settings={view.settings}
+                  width="fill"
+                />
+              </div>
             )
           ),
         )}
@@ -797,6 +824,40 @@ function Scheduled({
       {d.caption && <CaptionPreview caption={d.caption} />}
     </div>
   );
+}
+
+// Every card image of the day in one zip, in album order, with the caption.
+async function downloadCards(view: IgDayView, date: string) {
+  const files = await Promise.all(
+    view.cards.map(async (c, i) => {
+      const res = await fetch(c.image_url!, { cache: "no-store" });
+      if (!res.ok) throw new Error(`Couldn't fetch card ${i + 1} (${res.status})`);
+      const word = (c.card?.word || c.word).replace(/[^\p{L}\p{M}\p{N}]+/gu, "-");
+      return {
+        name: `${String(i + 1).padStart(2, "0")}-${word || "card"}.png`,
+        data: new Uint8Array(await res.arrayBuffer()),
+      };
+    }),
+  );
+  const caption = view.day?.caption ?? "";
+  if (caption.trim())
+    files.push({
+      name: "caption.txt",
+      // A link shows as its words and the address, for pasting anywhere.
+      data: new TextEncoder().encode(
+        caption.replace(/\[([^\]\n]{1,100})\]\((https?:\/\/[^\s)]+)\)/g, "$1: $2") + "\n",
+      ),
+    });
+  const url = URL.createObjectURL(
+    new Blob([new Uint8Array(zipFiles(files))], { type: "application/zip" }),
+  );
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `words-in-the-news-${date}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 // A caption as Telegram shows it: its links as tappable words.
@@ -864,7 +925,7 @@ function Roundups() {
               className="flex flex-wrap items-center gap-3 rounded-lg border border-border p-3 text-sm"
               data-week={w.to}
             >
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
                 <p className="font-medium">
                   {igDate(w.from, "long")} – {igDate(w.to, "long")}
                   {w.to >= istDate() && !w.status && (
@@ -1345,14 +1406,14 @@ function Settings() {
 
       <section className="space-y-3 rounded-xl border border-border p-4" aria-label="Caption">
         <h2 className="font-semibold">Caption</h2>
-        <p className="text-sm text-muted-foreground">
-          Sent with the album. Fill-ins:{" "}
+        <p className="text-sm text-muted-foreground">Sent with the album. Fill-ins:</p>
+        <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
           {CAPTION_FIELDS.map(([k, what]) => (
-            <span key={k} className="mr-2 whitespace-nowrap">
+            <li key={k} className="min-w-0 break-words">
               <code className="rounded bg-muted px-1">{k}</code> {what}
-            </span>
+            </li>
           ))}
-        </p>
+        </ul>
         <div className="grid gap-4 lg:grid-cols-2">
           <Textarea
             rows={12}
@@ -1412,13 +1473,13 @@ function Settings() {
           />
           <span className="text-xs text-muted-foreground">0 turns the large faint “F” off.</span>
         </label>
-        <div className="flex flex-wrap gap-4">
+        <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:gap-4">
           {IG_DESIGNS.map((d) => {
             const on = s.designs.includes(d.key);
             return (
               <div
                 key={d.key}
-                className={`space-y-2 ${on ? "" : "opacity-50"}`}
+                className={`min-w-0 space-y-2 sm:w-[170px] ${on ? "" : "opacity-50"}`}
                 data-design={d.key}
               >
                 <CardPreview
@@ -1428,7 +1489,7 @@ function Settings() {
                   total={10}
                   date={istDate()}
                   settings={s}
-                  width={170}
+                  width="fill"
                 />
                 <label className="flex items-center gap-2 text-sm">
                   <Switch
