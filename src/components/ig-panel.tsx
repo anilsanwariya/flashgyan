@@ -51,6 +51,7 @@ import {
   PICK_RULES_MAX,
   WEEKDAYS,
   type IgSettings,
+  igLangsOn,
 } from "@/lib/ig-words";
 import { istDate } from "@/lib/current-affairs";
 import { playStoreUrl } from "@/lib/app-promo";
@@ -284,6 +285,7 @@ function Picking({
   const count = (lang: IgLang) =>
     chosen.filter((id) => all.find((w) => w.id === id)?.lang === lang).length;
   const need: Record<IgLang, number> = { en: s.pick_en, hi: s.pick_hi };
+  const langs = igLangsOn(s);
   const toggle = (w: IgWord) =>
     setChosen((c) =>
       c.includes(w.id)
@@ -308,8 +310,12 @@ function Picking({
     <div className="space-y-4">
       <div className="sticky top-0 z-10 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-background/95 p-3 backdrop-blur">
         <span className="text-sm">
-          English <b data-pick-count="en">{count("en")}</b>/{need.en} · Hindi{" "}
-          <b data-pick-count="hi">{count("hi")}</b>/{need.hi}
+          {langs.map((l, i) => (
+            <span key={l}>
+              {i > 0 && " · "}
+              {LANG_NAME[l]} <b data-pick-count={l}>{count(l)}</b>/{need[l]}
+            </span>
+          ))}
         </span>
         <Button disabled={!ready || saving} onClick={() => void write()}>
           {saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
@@ -319,8 +325,8 @@ function Picking({
           <RefreshCw className="mr-1 h-4 w-4" /> Suggest again
         </Button>
       </div>
-      <div className="grid gap-6 lg:grid-cols-2">
-        {(["en", "hi"] as IgLang[]).map((lang) => (
+      <div className={`grid gap-6 ${langs.length > 1 ? "lg:grid-cols-2" : "max-w-3xl"}`}>
+        {langs.map((lang) => (
           <section key={lang} className="space-y-2" aria-label={`${LANG_NAME[lang]} suggestions`}>
             <h2 className="font-semibold">{LANG_NAME[lang]} words</h2>
             {view.suggestions.filter((w) => w.lang === lang).length === 0 && (
@@ -1304,6 +1310,11 @@ function Settings() {
   if (q.error) return <p className="text-destructive">{errorText(q.error, "Couldn't load")}</p>;
   const set = (patch: Partial<IgSettings>) => setS({ ...s, ...patch });
   const dirty = JSON.stringify(s) !== JSON.stringify(q.data);
+  const bad =
+    s.pick_en + s.pick_hi < 1 ||
+    s.pick_en + s.pick_hi > 10 ||
+    (s.pick_en > 0 && s.suggest_en === 0) ||
+    (s.pick_hi > 0 && s.suggest_hi === 0);
   const save = async () => {
     try {
       const next = await saveFn({
@@ -1377,11 +1388,23 @@ function Settings() {
           />
         </label>
         <div className="flex flex-wrap gap-4">
-          {num("English suggestions", "suggest_en", 1, 20)}
-          {num("Hindi suggestions", "suggest_hi", 1, 20)}
+          {num("English suggestions", "suggest_en", 0, 20)}
+          {num("Hindi suggestions", "suggest_hi", 0, 20)}
           {num("English cards", "pick_en", 0, 10)}
           {num("Hindi cards", "pick_hi", 0, 10)}
         </div>
+        <p className="text-xs text-muted-foreground">
+          Set a language&apos;s cards to 0 to post only the other one: its words are then not
+          suggested.
+        </p>
+        {s.pick_en + s.pick_hi === 0 && (
+          <p className="text-sm text-destructive">Keep at least 1 card.</p>
+        )}
+        {((s.pick_en > 0 && s.suggest_en === 0) || (s.pick_hi > 0 && s.suggest_hi === 0)) && (
+          <p className="text-sm text-destructive">
+            A language with cards needs at least 1 suggestion.
+          </p>
+        )}
         {s.pick_en + s.pick_hi > 10 && (
           <p className="text-sm text-destructive">A Telegram album holds at most 10 cards.</p>
         )}
@@ -1520,7 +1543,7 @@ function Settings() {
         {dirty && (
           <span className="self-center text-sm text-muted-foreground">Unsaved changes</span>
         )}
-        <Button disabled={!dirty} onClick={() => void save()}>
+        <Button disabled={!dirty || bad} onClick={() => void save()}>
           Save settings
         </Button>
       </div>

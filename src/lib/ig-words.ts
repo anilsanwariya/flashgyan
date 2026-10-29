@@ -117,6 +117,11 @@ export const DEFAULT_IG_SETTINGS: IgSettings = {
   monthly_page: true,
 };
 
+// The languages with cards each day (a count of 0 turns one off).
+export function igLangsOn(s: Pick<IgSettings, "pick_en" | "pick_hi">): IgLang[] {
+  return (["en", "hi"] as IgLang[]).filter((l) => (l === "en" ? s.pick_en : s.pick_hi) > 0);
+}
+
 export function igSettingsOf(value: unknown): IgSettings {
   const v = (value && typeof value === "object" ? value : {}) as Partial<IgSettings>;
   const s = { ...DEFAULT_IG_SETTINGS, ...v };
@@ -348,7 +353,15 @@ export const CAPTION_FIELDS = [
 
 export function fillCaption(template: string, p: CaptionParts): string {
   const count = p.english.length + p.hindi.length;
+  // A language with no cards today: its words' line is left out.
+  const empty = [
+    ...(p.english.length ? [] : ["{english_words}"]),
+    ...(p.hindi.length ? [] : ["{hindi_words}"]),
+  ];
   return template
+    .split("\n")
+    .filter((l) => !empty.some((f) => l.includes(f)))
+    .join("\n")
     .replace(/\{date\}/g, p.date)
     .replace(/\{count\}/g, String(count))
     .replace(/\{english_words\}/g, p.english.join(" • "))

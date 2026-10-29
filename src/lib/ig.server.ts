@@ -53,6 +53,7 @@ import {
   type IgPart,
   type IgCheck,
   type IgSettings,
+  igLangsOn,
 } from "@/lib/ig-words";
 
 const from = (table: string) => supabaseAdmin.from(table as never);
@@ -754,7 +755,14 @@ async function notify(day: string, kind: "suggested" | "review", origin: string 
     const rows = (data ?? []) as Row[];
     const en = rows.filter((r) => r.lang === "en").length;
     const hi = rows.filter((r) => r.lang === "hi").length;
-    text = `📝 Words in the News, ${formatDate(day, "en")}: ${en} English and ${hi} Hindi words suggested. Pick ${settings.pick_en} + ${settings.pick_hi} for tomorrow's cards.`;
+    const langs = igLangsOn(settings);
+    const got = langs.map((l) => `${l === "en" ? en : hi} ${l === "en" ? "English" : "Hindi"}`);
+    const want = langs.map((l) =>
+      langs.length > 1
+        ? String(l === "en" ? settings.pick_en : settings.pick_hi)
+        : `${l === "en" ? settings.pick_en : settings.pick_hi} ${l === "en" ? "English" : "Hindi"}`,
+    );
+    text = `📝 Words in the News, ${formatDate(day, "en")}: ${got.join(" and ")} words suggested. Pick ${want.join(" + ")} for tomorrow's cards.`;
   } else {
     const cards = await cardsOf(day);
     const open = cards.reduce((n, c) => n + c.checks.filter((x) => x.state === "open").length, 0);
@@ -807,7 +815,11 @@ export async function advanceDay(day: string, origin?: string): Promise<IgStatus
     if (row.status === "suggesting") {
       const lang = (["en", "hi"] as IgLang[]).find((l) => !row.suggested.includes(l));
       if (lang) {
-        await suggestLang(day, lang, settings);
+        // A language turned off (0 cards or 0 suggestions) is skipped.
+        const on =
+          igLangsOn(settings).includes(lang) &&
+          (lang === "en" ? settings.suggest_en : settings.suggest_hi) > 0;
+        if (on) await suggestLang(day, lang, settings);
         await patchDay(day, { suggested: [...row.suggested, lang], error: null });
       } else {
         await patchDay(day, { status: "picking", error: null });
@@ -1266,7 +1278,11 @@ export async function pickIgWords(day: string, ids: string[]): Promise<void> {
   const en = ids.filter((id) => words.find((w) => w.id === id)?.lang === "en");
   const hi = ids.filter((id) => words.find((w) => w.id === id)?.lang === "hi");
   if (en.length !== settings.pick_en || hi.length !== settings.pick_hi)
-    throw new Error(`Pick ${settings.pick_en} English and ${settings.pick_hi} Hindi words.`);
+    throw new Error(
+      `Pick ${igLangsOn(settings)
+        .map((l) => (l === "en" ? `${settings.pick_en} English` : `${settings.pick_hi} Hindi`))
+        .join(" and ")} words.`,
+    );
   const posted = await postedKeys();
   const repeat = words.find((w) => posted.has(`${w.lang}:${w.key}`));
   if (repeat) throw new Error(`"${repeat.word}" was already posted.`);
