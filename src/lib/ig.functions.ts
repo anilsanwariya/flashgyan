@@ -275,8 +275,8 @@ export const saveIgSettings = createServerFn({ method: "POST" })
         auto_suggest: z.boolean(),
         channel: text(200),
         post_time: z.string().regex(/^\d{1,2}:\d{2}$/, "Use HH:MM"),
-        suggest_en: z.number().int().min(1).max(20),
-        suggest_hi: z.number().int().min(1).max(20),
+        suggest_en: z.number().int().min(0).max(20),
+        suggest_hi: z.number().int().min(0).max(20),
         pick_en: z.number().int().min(0).max(10),
         pick_hi: z.number().int().min(0).max(10),
         designs: z.array(design).min(1),
@@ -297,6 +297,9 @@ export const saveIgSettings = createServerFn({ method: "POST" })
       })
       .refine((s) => s.pick_en + s.pick_hi >= 1 && s.pick_en + s.pick_hi <= 10, {
         message: "A Telegram album holds 1 to 10 cards.",
+      })
+      .refine((s) => (!s.pick_en || s.suggest_en > 0) && (!s.pick_hi || s.suggest_hi > 0), {
+        message: "A language with cards needs at least 1 suggestion.",
       })
       .parse(d),
   )
