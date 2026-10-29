@@ -99,7 +99,7 @@ export function IgCardEditor({
   const tickFn = useServerFn(setIgChecked);
   const recheckFn = useServerFn(recheckIgCard);
   const [id, setId] = useState(startId);
-  const [tab, setTab] = useState<TabId>("say");
+  const [tab, setTab] = useState<TabId>("preview");
   const [card, setCard] = useState<IgCard | null>(null);
   const [saving, setSaving] = useState(0);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
@@ -301,7 +301,7 @@ export function IgCardEditor({
                   aria-selected={on}
                   title={`${t.label} (Alt+${i + 1})`}
                   onClick={() => setTab(t.id)}
-                  className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${t.id === "preview" ? "lg:hidden" : ""} ${on ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-muted"}`}
+                  className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${on ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-muted"}`}
                 >
                   <Icon className="h-4 w-4 shrink-0" />
                   <span className="flex-1">{t.label}</span>
@@ -325,16 +325,38 @@ export function IgCardEditor({
               ) : !card ? (
                 <p className="text-sm text-muted-foreground">The card is being written…</p>
               ) : tab === "preview" ? (
-                <div className="flex justify-center">
-                  <CardPreview
-                    card={card}
-                    design={design}
-                    n={at + 1}
-                    total={cards.length}
-                    date={date}
-                    settings={view.settings}
-                    width={320}
-                  />
+                <div className="space-y-3">
+                  {/* As large as fits the screen without scrolling. */}
+                  <div
+                    className="mx-auto w-full"
+                    style={{ maxWidth: "min(420px, calc((100dvh - 17rem) * 9 / 16))" }}
+                  >
+                    <CardPreview
+                      card={card}
+                      design={design}
+                      n={at + 1}
+                      total={cards.length}
+                      date={date}
+                      settings={view.settings}
+                      width="fill"
+                    />
+                  </div>
+                  <p className="text-center text-xs text-muted-foreground">
+                    Open a part above to change it.
+                    {openChecks.length > 0 && (
+                      <>
+                        {" "}
+                        <button
+                          type="button"
+                          className="font-medium text-primary underline-offset-2 hover:underline"
+                          onClick={() => setTab("notes")}
+                        >
+                          Decide the {openChecks.length} note
+                          {openChecks.length === 1 ? "" : "s"}
+                        </button>
+                      </>
+                    )}
+                  </p>
                 </div>
               ) : tab === "notes" ? (
                 <NotesTab w={w} onCard={replace} onChange={onChange} />
@@ -367,7 +389,7 @@ export function IgCardEditor({
               )}
             </div>
           </main>
-          {card && (
+          {card && tab !== "preview" && (
             <aside
               aria-label="The card"
               className="hidden shrink-0 flex-col items-center gap-2 overflow-y-auto border-l border-border bg-muted/20 p-3 lg:flex"

@@ -1,5 +1,5 @@
 // A card's picture: its page in a small frame, as the channel will see it.
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { igCardHtml, type IgCard, type IgDesign } from "@/lib/ig-cards";
 import { channelLabel, type IgSettings } from "@/lib/ig-words";
 
@@ -20,8 +20,18 @@ export function CardPreview({
   total: number;
   date: string;
   settings: Pick<IgSettings, "channel" | "watermark">;
-  width?: number;
+  /** Pixels, or "fill" for the width of its box (a grid cell on a phone). */
+  width?: number | "fill";
 }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [boxWidth, setBoxWidth] = useState(170);
+  useEffect(() => {
+    const el = box.current;
+    if (width !== "fill" || !el) return;
+    const ro = new ResizeObserver(([e]) => setBoxWidth(e.contentRect.width || 170));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [width]);
   const html = useMemo(
     () =>
       igCardHtml(card, {
@@ -35,11 +45,13 @@ export function CardPreview({
       }),
     [card, design, n, total, date, settings.channel, settings.watermark],
   );
-  const scale = width / 1080;
+  const fill = width === "fill";
+  const scale = (fill ? boxWidth : width) / 1080;
   return (
     <div
-      className="shrink-0 overflow-hidden rounded-lg border border-border bg-muted shadow-sm"
-      style={{ width, height: 1920 * scale }}
+      ref={box}
+      className={`overflow-hidden rounded-lg border border-border bg-muted shadow-sm ${fill ? "w-full" : "shrink-0"}`}
+      style={fill ? { aspectRatio: "9 / 16" } : { width, height: 1920 * scale }}
     >
       <iframe
         title={`Card ${n}: ${card.word}`}
