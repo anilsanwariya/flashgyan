@@ -672,14 +672,40 @@ export function storyText(item: { headline: string; facts: { text: string }[] })
 
 // Adds facts from another source about the same story, skipping repeats and
 // slots the story already has a fact for (repeatable slots excepted).
-export function mergeFacts(base: CaFact[], extra: CaFact[], max = 8): CaFact[] {
+// A fact's names and numbers ("Nobel", "Physics", "2026"), to tell one
+// prize's or person's fact from another's.
+const keyTokens = (text: string) =>
+  new Set((text.match(/\b(?:[A-Z][\p{L}-]*|\d[\d,.]*)/gu) ?? []).map((t) => t.toLowerCase()));
+
+// The same fact said another way: one's names and numbers all in the other's.
+function sameFact(a: string, b: string): boolean {
+  const x = keyTokens(a);
+  const y = keyTokens(b);
+  if (!x.size || !y.size) return false;
+  const within = (p: Set<string>, q: Set<string>) => [...p].every((t) => q.has(t));
+  return within(x, y) || within(y, x);
+}
+
+// Facts added to a story's. Merging copies of one story (`distinct` off),
+// a slot that holds one fact keeps the first. Merging different stories
+// the editor picked (`distinct` on: the Nobel prizes of the year), each
+// story's facts are kept unless they say the same thing.
+export function mergeFacts(
+  base: CaFact[],
+  extra: CaFact[],
+  max = 8,
+  opts: { distinct?: boolean } = {},
+): CaFact[] {
   const seen = new Set(base.map((f) => normalizeForMatch(f.text)));
   const filled = new Set(base.map((f) => f.slot).filter(Boolean));
   const out = [...base];
   for (const f of extra) {
     const key = normalizeForMatch(f.text);
     if (seen.has(key)) continue;
-    if (f.slot && filled.has(f.slot) && !REPEATABLE_SLOTS.has(f.slot)) continue;
+    if (f.slot && filled.has(f.slot) && !REPEATABLE_SLOTS.has(f.slot)) {
+      if (!opts.distinct) continue;
+      if (out.some((o) => o.slot === f.slot && sameFact(o.text, f.text))) continue;
+    }
     seen.add(key);
     if (f.slot) filled.add(f.slot);
     out.push(f);
@@ -704,6 +730,22 @@ export function styleBlock(rules: string[] | undefined): string {
 // prompts: the whole news in context, not one line lifted from it.
 export function summaryRule(words: number): string {
   return `THE SUMMARY gives the complete context of the news in about ${words} words (3-4 connected sentences, never more than ${words + 15} words): what happened, who did it and where, the background as far as the facts and Context say (why it happened or what led to it), and what it means or what comes next. It reads as a short explanation a student can understand on its own, never one line copied from the news. Exact figures stay in the points; name one in the summary only where the story needs it.`;
+}
+
+// Merged stories with several facts of one kind (several awards, several
+// appointments): written as one story covering all of them.
+const COMBINED_NOTE = `\nTHIS STORY COMBINES SEVERAL RELATED NEWS ITEMS the editor merged (e.g. each Nobel prize of the year, several appointments, several MoUs): the headline covers all of them, not just the first (e.g. "Nobel Prizes 2026: winners in all six categories"); each item keeps its own point(s), one prize, winner, person or decision per point, never two merged into one, in the order of the facts; the summary links them. When a visual is asked for, prefer a table with one row per item.`;
+
+// A merged story covers several items when a slot that holds one fact in
+// a story (the award, the post) has several.
+export function isCombined(facts: CaFact[]): boolean {
+  const seen = new Set<string>();
+  for (const f of facts) {
+    if (!f.slot || REPEATABLE_SLOTS.has(f.slot)) continue;
+    if (seen.has(f.slot)) return true;
+    seen.add(f.slot);
+  }
+  return false;
 }
 
 export function enrichMessages(opts: {
@@ -736,6 +778,9 @@ export function enrichMessages(opts: {
   event?: string | null;
   // Its kind (a sports event's roundup is a medal list).
   eventKind?: string | null;
+  // Several related stories the editor merged into one (the year's Nobel
+  // prizes): one story covering them all.
+  combined?: boolean;
 }): ChatMessage[] {
   const words = clampSummaryWords(opts.summaryWords);
   const facts = opts.facts
@@ -758,7 +803,7 @@ export function enrichMessages(opts: {
       role: "system",
       content: `You write a bilingual (Hindi and English) current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). Write one news item from the numbered facts.
 RULES: Use only the facts given (numbered facts and any Context). Never add a number, name, date or claim that is not in them. Follow the editor's instruction when one is given, and an [Editor's note] on a fact (for example: put it in the headline, build the MCQ or the Mains question on it, keep it word for word), within these rules.
-BE BRIEF: students revise from this, so less theory, more memorable facts. ${summaryRule(words)} Nothing is repeated between the points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}${opts.event ? roundupNote(opts.event, opts.eventKind) : ""}${styleBlock(opts.style)}
+BE BRIEF: students revise from this, so less theory, more memorable facts. ${summaryRule(words)} Nothing is repeated between the points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}${opts.event ? roundupNote(opts.event, opts.eventKind) : opts.combined ? COMBINED_NOTE : ""}${styleBlock(opts.style)}
 STATIC CONNECT links the news to the static syllabus. "keywords" lists up to ${MAX_KEYWORDS} static concepts the news links to that RPSC could ask about (constitutional articles, acts, institutions, technologies, schemes, places, conventions, terms), most important first (the "Static concept" in the message, when given), whether or not the passages explain them; each is a short name of at most 5 words. "statics" explains the first 1 or 2 keywords the way a textbook does: what it is, what it says, how it works, in 1-2 sentences of at most 40 words each, without retelling the news. Base each on the knowledge-base passages [K…] that explain it, even if they never mention the news, and list them in "from"; when no passage explains it, write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. Use [] for both when the news has no static concept worth explaining.${hindiGuide(opts.glossary)}
 Reply with JSON only:
 {"headline": {"en": "...", "hi": "..."},
