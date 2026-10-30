@@ -7,7 +7,7 @@ import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronDown, ChevronRight, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import {
   type EventWithStories,
   createCaEvent,
@@ -22,6 +22,7 @@ import { EVENT_KINDS, summaryMonth, type CaEvent, type EventKind } from "@/lib/c
 import { formatDate, type CaContent } from "@/lib/current-affairs";
 import { Badge, errorText, SavesInstantly } from "@/components/ca-ui";
 import { MedalBox } from "@/components/ca-medals-panel";
+import { EventSummaryEditor } from "@/components/ca-event-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -422,7 +423,7 @@ function EventCard({
                 e.summary ? "Summary written again" : "Summary written",
               )
             }
-            onSave={(summary) => save({ summary }, "Summary saved")}
+            onChanged={onChanged}
           />
           {e.kind === "sports" && <MedalBox eventId={e.id} eventName={e.name} />}
         </div>
@@ -441,17 +442,17 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 // The complete summary: written by the AI from all the event's stories, and
-// editable by hand (headline, summary and points in both languages).
+// edited in its own full-screen editor like a daily story.
 function SummaryBox({
   event: e,
   busy,
   onWrite,
-  onSave,
+  onChanged,
 }: {
   event: EventWithStories;
   busy: string;
   onWrite: () => Promise<unknown>;
-  onSave: (s: CaContent) => Promise<unknown>;
+  onChanged: () => Promise<unknown>;
 }) {
   const [editing, setEditing] = useState(false);
   const s = e.summary;
@@ -472,9 +473,9 @@ function SummaryBox({
           )}
           {busy === "write" ? "Writing…" : s ? "Write again" : "Write summary"}
         </Button>
-        {s && !editing && (
+        {s && (
           <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
-            Edit
+            <Pencil className="h-4 w-4" /> Open editor
           </Button>
         )}
       </div>
@@ -484,15 +485,6 @@ function SummaryBox({
             ? "Not written yet. The evening collection writes it, or write it now."
             : "Written when the event concludes (or now, to see it)."}
         </p>
-      ) : editing ? (
-        <SummaryEditor
-          summary={s}
-          onCancel={() => setEditing(false)}
-          onSave={async (next) => {
-            await onSave(next);
-            setEditing(false);
-          }}
-        />
       ) : (
         <div className="grid gap-3 text-sm md:grid-cols-2" data-testid="event-summary">
           {(["hi", "en"] as const).map((l) => (
@@ -508,94 +500,9 @@ function SummaryBox({
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-function SummaryEditor({
-  summary,
-  onSave,
-  onCancel,
-}: {
-  summary: CaContent;
-  onSave: (s: CaContent) => Promise<unknown>;
-  onCancel: () => void;
-}) {
-  const [draft, setDraft] = useState({
-    headline: { ...summary.headline },
-    summary: { ...summary.summary },
-    points: {
-      en: summary.points.map((p) => p.en).join("\n"),
-      hi: summary.points.map((p) => p.hi).join("\n"),
-    },
-  });
-  const [saving, setSaving] = useState(false);
-  const lines = (s: string) =>
-    s
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
-  async function save() {
-    const en = lines(draft.points.en);
-    const hi = lines(draft.points.hi);
-    setSaving(true);
-    try {
-      await onSave({
-        ...summary,
-        headline: draft.headline,
-        summary: draft.summary,
-        points: Array.from({ length: Math.max(en.length, hi.length) }, (_, i) => ({
-          en: en[i] ?? "",
-          hi: hi[i] ?? "",
-        })),
-      });
-    } finally {
-      setSaving(false);
-    }
-  }
-  return (
-    <div className="space-y-2">
-      <div className="grid gap-2 md:grid-cols-2">
-        {(["hi", "en"] as const).map((l) => (
-          <div key={l} className="space-y-2">
-            <Input
-              aria-label={`Summary headline (${l === "hi" ? "Hindi" : "English"})`}
-              lang={l}
-              value={draft.headline[l]}
-              onChange={(ev) =>
-                setDraft({ ...draft, headline: { ...draft.headline, [l]: ev.target.value } })
-              }
-            />
-            <Textarea
-              aria-label={`Summary text (${l === "hi" ? "Hindi" : "English"})`}
-              lang={l}
-              rows={4}
-              value={draft.summary[l]}
-              onChange={(ev) =>
-                setDraft({ ...draft, summary: { ...draft.summary, [l]: ev.target.value } })
-              }
-            />
-            <Textarea
-              aria-label={`Summary points (${l === "hi" ? "Hindi" : "English"})`}
-              lang={l}
-              rows={6}
-              placeholder="One point per line"
-              value={draft.points[l]}
-              onChange={(ev) =>
-                setDraft({ ...draft, points: { ...draft.points, [l]: ev.target.value } })
-              }
-            />
-          </div>
-        ))}
-      </div>
-      <div className="flex gap-2">
-        <Button size="sm" disabled={saving} onClick={() => void save()}>
-          {saving ? "Saving…" : "Save summary"}
-        </Button>
-        <Button size="sm" variant="ghost" disabled={saving} onClick={onCancel}>
-          Cancel
-        </Button>
-      </div>
+      {editing && s && (
+        <EventSummaryEditor event={e} onClose={() => setEditing(false)} onChanged={onChanged} />
+      )}
     </div>
   );
 }

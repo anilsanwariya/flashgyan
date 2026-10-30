@@ -124,14 +124,51 @@ For this sports event: the headline gives India's medals of the day (e.g. "Para 
 
 export const EVENT_POINTS_MAX = 14;
 
+// A part of the summary the editor asks the AI to write again.
+export const EVENT_PARTS = ["headline", "summary", "points", "why", "questions"] as const;
+export type EventPart = (typeof EVENT_PARTS)[number];
+export const EVENT_PART_NAMES: Record<EventPart, string> = {
+  headline: "the headline",
+  summary: "the summary text",
+  points: "the points",
+  why: "the Exam Angle (why)",
+  questions: "the MCQ and the Mains question",
+};
+export type EventAsk = { part: EventPart; note: string; current: CaContent };
+
+// Only that part of what the AI wrote.
+export function eventPartPatch(part: EventPart, c: CaContent): Partial<CaContent> {
+  if (part === "headline") return { headline: c.headline };
+  if (part === "summary") return { summary: c.summary };
+  if (part === "points") return { points: c.points };
+  if (part === "why") return { why: c.why };
+  return { mcq: c.mcq, mains: c.mains };
+}
+
 // The complete summary of a concluded event, from all its daily stories.
 export function eventSummaryMessages(opts: {
   event: Pick<CaEvent, "name" | "kind" | "place" | "starts_on" | "ends_on">;
   stories: { date: string; headline: string; facts: CaFact[] }[];
   glossary?: GlossaryEntry[];
   summaryWords?: number;
+  // One part written again: the summary as it is, and the editor's ask.
+  ask?: EventAsk;
 }): ChatMessage[] {
   const words = Math.round((opts.summaryWords ?? 70) * 1.6);
+  const ask = opts.ask
+    ? `\n\nThe summary as it is now (the editor has edited it):\n${JSON.stringify(
+        {
+          headline: opts.ask.current.headline,
+          summary: opts.ask.current.summary,
+          points: opts.ask.current.points,
+          why: opts.ask.current.why,
+          mcq: opts.ask.current.mcq,
+          mains: opts.ask.current.mains,
+        },
+        null,
+        1,
+      )}\n\nWrite ${EVENT_PART_NAMES[opts.ask.part]} again, fitting the rest as it is now.${opts.ask.note.trim() ? ` The editor asks: ${opts.ask.note.trim()}` : ""} Reply with the whole JSON as above (only that part is used).`
+    : "";
   const stories = opts.stories
     .slice(0, 40)
     .map(
@@ -154,7 +191,7 @@ Reply with JSON only:
     },
     {
       role: "user",
-      content: `Event: ${opts.event.name} (${opts.event.kind}${opts.event.place ? `, ${opts.event.place}` : ""})${opts.event.starts_on ? `\nFirst news: ${opts.event.starts_on}` : ""}${opts.event.ends_on ? `\nConcluded: ${opts.event.ends_on}` : ""}\n\nDaily stories, oldest first:\n${stories}`,
+      content: `Event: ${opts.event.name} (${opts.event.kind}${opts.event.place ? `, ${opts.event.place}` : ""})${opts.event.starts_on ? `\nFirst news: ${opts.event.starts_on}` : ""}${opts.event.ends_on ? `\nConcluded: ${opts.event.ends_on}` : ""}\n\nDaily stories, oldest first:\n${stories}${ask}`,
     },
   ];
 }
