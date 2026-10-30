@@ -102,6 +102,7 @@ import {
   normalizeCategory,
   CATEGORIES,
   mergeFacts,
+  isCombined,
   monthRange,
   parseChanges,
   parseContent,
@@ -880,11 +881,16 @@ export async function deleteSources(ids: string[]): Promise<number> {
 // Merges stories into one: the kept story takes every fact (up to 10) and
 // source, the highest importance, and is written again; corrections and
 // follow-ups pointing at the others move to it.
-async function mergeGroup(members: DayStoryRow[]): Promise<string> {
+// Stories the editor picked (`distinct`) are different news of one kind,
+// so each keeps its facts (up to 20).
+async function mergeGroup(members: DayStoryRow[], distinct = false): Promise<string> {
   const keeper = members[pickKeeper(members)];
   const others = members.filter((m) => m.id !== keeper.id);
   const otherIds = others.map((o) => o.id);
-  const facts = others.reduce((acc, o) => mergeFacts(acc, o.facts, 10), keeper.facts);
+  const facts = others.reduce(
+    (acc, o) => mergeFacts(acc, o.facts, distinct ? 20 : 10, { distinct }),
+    keeper.facts,
+  );
   const keyed = members.find((m) => m.story_key && m.keyVec);
   const update: Record<string, unknown> = {
     facts,
@@ -1083,7 +1089,7 @@ export async function mergeStories(date: string, ids: string[]): Promise<string>
     throw new Error("Only stories of the same day can be merged.");
   if (new Set(rows.map((r) => r.category === "editorial")).size > 1)
     throw new Error("A news story and an editorial can't be merged.");
-  const keeper = await mergeGroup(rows);
+  const keeper = await mergeGroup(rows, true);
   const memo = await getDupesMemo(date);
   await saveDupesMemo(date, {
     ...memo,
@@ -1277,6 +1283,7 @@ export async function enrichItem(
           : null,
         event: event?.name ?? null,
         eventKind: event?.kind ?? null,
+        combined: isCombined(item.facts),
       }),
     );
     const parsed = parseContent(
