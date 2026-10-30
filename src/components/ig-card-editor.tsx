@@ -15,6 +15,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  ExternalLink,
   Eye,
   History,
   Lightbulb,
@@ -24,6 +25,7 @@ import {
   Plus,
   RefreshCw,
   Repeat,
+  Shapes,
   Sparkles,
   Type,
   X,
@@ -40,7 +42,15 @@ import {
   type IgDayView,
   type IgWord,
 } from "@/lib/ig.functions";
-import { igDate, igMarkup, markWord, type IgCard, type IgDesign } from "@/lib/ig-cards";
+import {
+  formPos,
+  igDate,
+  igMarkup,
+  markWord,
+  type IgCard,
+  type IgDesign,
+  type IgForm,
+} from "@/lib/ig-cards";
 import { FIELD_NAMES, PART_OF_FIELD, type IgCheck, type IgPart } from "@/lib/ig-words";
 import { CardPreview } from "@/components/ig-card-preview";
 import { Badge, errorText } from "@/components/ca-ui";
@@ -65,13 +75,14 @@ const TABS: { id: TabId; label: string; icon: typeof Type }[] = [
   { id: "meaning", label: "Meaning", icon: BookA },
   { id: "sentence", label: "News line", icon: Newspaper },
   { id: "words", label: "Synonyms & antonyms", icon: Repeat },
+  { id: "forms", label: "Forms & phrases", icon: Shapes },
   { id: "tips", label: "Tips", icon: Lightbulb },
   { id: "notes", label: "Proofreading", icon: ListChecks },
 ];
 
 const TIP_TITLES = {
-  en: ["Root", "Memory trick", "Don't confuse", "Word family", "Common phrases"],
-  hi: ["शब्द-रचना", "संधि-विच्छेद", "समास", "वर्तनी सावधान", "संबंधित शब्द"],
+  en: ["Root", "Memory trick", "Don't confuse"],
+  hi: ["शब्द-रचना", "संधि-विच्छेद", "समास", "वर्तनी सावधान"],
 };
 
 const SENTENCE_ASKS = {
@@ -363,8 +374,16 @@ export function IgCardEditor({
               ) : (
                 <>
                   <NotesTab w={w} only={tab} onCard={replace} onChange={onChange} />
+                  {["say", "meaning", "words", "forms"].includes(tab) && (
+                    <WebCheck word={card.word || w.word} lang={lang} />
+                  )}
                   {tab === "say" && <WordTab card={card} set={set} keep={keep} id={id} />}
-                  {tab === "meaning" && <MeaningTab card={card} set={set} keep={keep} id={id} />}
+                  {tab === "meaning" && (
+                    <>
+                      <MeaningTab card={card} set={set} keep={keep} id={id} />
+                      <DictionaryBox card={card} dict={aids.data?.dictionary} />
+                    </>
+                  )}
                   {tab === "sentence" && (
                     <SentenceTab
                       card={card}
@@ -382,6 +401,18 @@ export function IgCardEditor({
                       keep={keep}
                       id={id}
                       wordnet={aids.data?.wordnet}
+                    />
+                  )}
+                  {tab === "words" && (
+                    <DictionaryBox card={card} dict={aids.data?.dictionary} words />
+                  )}
+                  {tab === "forms" && (
+                    <FormsTab
+                      card={card}
+                      set={set}
+                      keep={keep}
+                      id={id}
+                      ideas={aids.data?.dictionary.forms ?? []}
                     />
                   )}
                   {tab === "tips" && <TipsTab card={card} set={set} keep={keep} id={id} />}
@@ -1076,6 +1107,223 @@ function TipsTab({ card, set, keep, id }: TabProps) {
         )}
       />
     </Section>
+  );
+}
+
+const FORM_POS = {
+  en: ["noun", "verb", "adjective", "adverb"],
+  hi: ["संज्ञा", "विशेषण", "क्रिया", "क्रिया-विशेषण"],
+};
+
+function FormsTab({ card, set, keep, id, ideas }: TabProps & { ideas: IgForm[] }) {
+  const en = card.lang === "en";
+  const forms = card.forms ?? [];
+  const put = (next: IgForm[]) => set({ forms: next.slice(0, 3) });
+  const have = (w: string) => forms.some((f) => f.word.toLowerCase() === w.toLowerCase());
+  return (
+    <Section
+      title={en ? "Word forms and phrases" : "शब्द रूप और प्रयोग"}
+      hint="Other forms of the word in other parts of speech (up to 3), and common phrases it is used in (up to 3). With both on the card, it shows one tip."
+    >
+      <datalist id="ig-form-pos">
+        {FORM_POS[card.lang].map((p) => (
+          <option key={p} value={p} />
+        ))}
+      </datalist>
+      <div className="space-y-2" aria-label="Word forms">
+        <h3 className="text-sm font-semibold">{en ? "Forms" : "शब्द रूप"}</h3>
+        {forms.map((f, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <Input
+              className="min-w-0 flex-1"
+              aria-label={`Form ${i + 1}`}
+              value={f.word}
+              onChange={(e) =>
+                put(forms.map((x, j) => (j === i ? { ...x, word: e.target.value } : x)))
+              }
+            />
+            <Input
+              className="w-36"
+              list="ig-form-pos"
+              aria-label={`Form ${i + 1} part of speech`}
+              value={f.pos}
+              onChange={(e) =>
+                put(forms.map((x, j) => (j === i ? { ...x, pos: e.target.value } : x)))
+              }
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 w-8 p-0"
+              aria-label={`Remove ${f.word || `form ${i + 1}`}`}
+              onClick={() => put(forms.filter((_, j) => j !== i))}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        ))}
+        {forms.length < 3 && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => put([...forms, { word: "", pos: FORM_POS[card.lang][0] }])}
+          >
+            <Plus className="mr-1 h-4 w-4" /> Add a form
+          </Button>
+        )}
+        {ideas.filter((f) => !have(f.word)).length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-muted-foreground">WordNet has:</span>
+            {ideas
+              .filter((f) => !have(f.word))
+              .map((f) => (
+                <button
+                  key={f.word}
+                  type="button"
+                  disabled={forms.length >= 3}
+                  className="inline-flex items-center gap-0.5 rounded-full border border-border px-2 py-0.5 hover:bg-muted disabled:opacity-50"
+                  onClick={() => put([...forms, f])}
+                  aria-label={`Add ${f.word}`}
+                >
+                  <Plus className="h-3 w-3" /> {f.word}{" "}
+                  <span className="text-muted-foreground">({formPos(f.pos)})</span>
+                </button>
+              ))}
+          </div>
+        )}
+      </div>
+      <Chips
+        label={en ? "Common phrases" : "प्रयोग"}
+        items={card.phrases ?? []}
+        onChange={(phrases) => set({ phrases: phrases.slice(0, 3) })}
+        ideas={[]}
+      />
+      <PartAI
+        id={id}
+        part="forms"
+        keep={keep}
+        show={(p) => (
+          <>
+            {line(
+              en ? "Forms" : "शब्द रूप",
+              (p.forms ?? []).map((f) => `${f.word} (${formPos(f.pos)})`).join(", ") || "—",
+            )}
+            {line(en ? "Phrases" : "प्रयोग", (p.phrases ?? []).join(", "))}
+          </>
+        )}
+      />
+    </Section>
+  );
+}
+
+// Searches that open in a new tab, to check the card against the web.
+function webChecks(word: string, lang: "en" | "hi"): { label: string; url: string }[] {
+  const w = word.trim();
+  const g = (q: string) => `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+  const e = encodeURIComponent(w.toLowerCase());
+  return lang === "en"
+    ? [
+        { label: "Google: define", url: g(`define ${w}`) },
+        { label: "Google: synonyms & antonyms", url: g(`${w} synonyms and antonyms`) },
+        { label: "Google: meaning in Hindi", url: g(`${w} meaning in Hindi`) },
+        { label: "Cambridge", url: `https://dictionary.cambridge.org/dictionary/english/${e}` },
+        { label: "Merriam-Webster", url: `https://www.merriam-webster.com/dictionary/${e}` },
+      ]
+    : [
+        { label: "Google: अर्थ", url: g(`${w} का अर्थ`) },
+        { label: "Google: पर्यायवाची, विलोम", url: g(`${w} पर्यायवाची शब्द विलोम शब्द`) },
+        { label: "Google: meaning in English", url: g(`${w} meaning in English`) },
+        {
+          label: "Hindi Wiktionary",
+          url: `https://hi.wiktionary.org/wiki/${encodeURIComponent(w)}`,
+        },
+      ];
+}
+
+function WebCheck({ word, lang }: { word: string; lang: "en" | "hi" }) {
+  if (!word.trim()) return null;
+  return (
+    <nav
+      aria-label="Check on the web"
+      className="flex flex-wrap items-center gap-1.5 rounded-lg bg-muted/40 p-2 text-xs"
+    >
+      <span className="font-medium text-muted-foreground">Check on the web:</span>
+      {webChecks(word, lang).map((x) => (
+        <a
+          key={x.label}
+          href={x.url}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2 py-0.5 hover:bg-muted"
+        >
+          {x.label} <ExternalLink className="h-3 w-3" />
+        </a>
+      ))}
+    </nav>
+  );
+}
+
+type Dictionary = {
+  senses: { pos: string; gloss: string }[];
+  synonyms: string[];
+  antonyms: string[];
+};
+
+// What WordNet says beside the card: its meanings, and (on the synonyms
+// tab) which of the card's synonyms and antonyms it doesn't give.
+function DictionaryBox({
+  card,
+  dict,
+  words,
+}: {
+  card: IgCard;
+  dict?: Dictionary;
+  words?: boolean;
+}) {
+  if (!dict?.senses.length) return null;
+  const low = (xs: string[]) => new Set(xs.map((x) => x.toLowerCase()));
+  const syn = low(dict.synonyms);
+  const ant = low(dict.antonyms);
+  const notSyn = card.synonyms.filter((x) => !syn.has(x.toLowerCase()));
+  const notAnt = card.antonyms.filter((x) => !ant.has(x.toLowerCase()));
+  return (
+    <section
+      aria-label="Dictionary says"
+      className="space-y-2 rounded-lg border border-border bg-muted/20 p-3 text-sm"
+    >
+      <h3 className="font-semibold">WordNet says</h3>
+      <ol className="list-decimal space-y-1 pl-5">
+        {dict.senses.map((s, i) => (
+          <li key={i}>
+            <span className="text-xs text-muted-foreground">{s.pos}</span> {s.gloss}
+          </li>
+        ))}
+      </ol>
+      {words && (
+        <>
+          {notSyn.length > 0 && (
+            <p className="text-xs">
+              <span className="text-muted-foreground">Synonyms WordNet doesn&apos;t give: </span>
+              {notSyn.join(", ")}
+            </p>
+          )}
+          {card.antonyms.length > 0 && notAnt.length > 0 && (
+            <p className="text-xs">
+              <span className="text-muted-foreground">Antonyms WordNet doesn&apos;t give: </span>
+              {notAnt.join(", ")}
+            </p>
+          )}
+          {!notSyn.length && !notAnt.length && (
+            <p className="text-xs text-emerald-700 dark:text-emerald-400">
+              WordNet gives every synonym and antonym on the card.
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Not in WordNet isn&apos;t always wrong: check on the web above.
+          </p>
+        </>
+      )}
+    </section>
   );
 }
 

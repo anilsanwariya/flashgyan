@@ -60,6 +60,11 @@ const card = z.object({
   rewritten: z.boolean().optional(),
   synonyms: z.array(text(80)).max(6),
   antonyms: z.array(text(80)).max(6),
+  forms: z
+    .array(z.object({ word: text(80), pos: text(40) }))
+    .max(4)
+    .optional(),
+  phrases: z.array(text(80)).max(4).optional(),
   extras: z.array(z.object({ title: text(60), text: text(300) })).max(3),
 });
 
@@ -159,7 +164,7 @@ export const rewriteIgPart = createServerFn({ method: "POST" })
     z
       .object({
         id,
-        part: z.enum(["say", "meaning", "sentence", "words", "tips"]),
+        part: z.enum(["say", "meaning", "sentence", "words", "forms", "tips"]),
         note: text(500),
       })
       .parse(d),
@@ -234,11 +239,18 @@ export const setIgDesign = createServerFn({ method: "POST" })
 export const approveIgDay = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({ date, caption: text(4000), now: z.boolean().optional() }).parse(d),
+    z
+      .object({
+        date,
+        caption: text(4000),
+        now: z.boolean().optional(),
+        at: z.string().datetime().optional(),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    await (await server()).approveIgDay(data.date, data.caption, data.now ?? false);
+    await (await server()).approveIgDay(data.date, data.caption, data.now ?? false, data.at);
     return { ok: true };
   });
 

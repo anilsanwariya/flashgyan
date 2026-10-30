@@ -8,6 +8,7 @@ import {
   IG_DESIGN_KEYS,
   IG_DESIGNS,
   type IgCard,
+  type IgForm,
   type IgDesign,
   type IgLang,
 } from "@/lib/ig-cards";
@@ -497,7 +498,9 @@ export function writeMessages(
 "newsHi": the news sentence in natural Hindi;
 "synonyms": 3 English synonyms in this sense (single words or short phrases), capitalised;
 "antonyms": 2 English antonyms in this sense, capitalised, or [] if none is natural;
-"extras": 1 or 2 tips that best help remember or use it, each {"title","text"}; titles from: "Root", "Memory trick", "Don't confuse", "Word family", "Common phrases"; text at most 110 characters, key words in **bold** (e.g. {"title":"Root","text":"Latin **bellum** = war → bellicose, rebellion"}).`
+"forms": up to 3 other forms of the word in other parts of speech that dictionaries give, each {"word","pos"} with pos one of noun, verb, adjective, adverb (e.g. [{"word":"belligerence","pos":"noun"},{"word":"belligerently","pos":"adverb"}]), [] if none; no plurals or verb tenses;
+"phrases": 2 or 3 common phrases (collocations) exam papers and news use with the word, at most 4 words each (e.g. ["belligerent nations","belligerent attitude"]);
+"extras": 1 or 2 tips that best help remember or use it, each {"title","text"}; titles from: "Root", "Memory trick", "Don't confuse"; text at most 110 characters, key words in **bold** (e.g. {"title":"Root","text":"Latin **bellum** = war → bellicose, rebellion"}).`
     : `"pos": शब्द-भेद and origin, as "संज्ञा (पुल्लिंग) · तत्सम" or "विशेषण · तद्भव";
 "say": the word in Roman letters ("Atikraman");
 "ipa": "";
@@ -506,7 +509,9 @@ export function writeMessages(
 "newsHi": "";
 "synonyms": 2 or 3 standard पर्यायवाची, or [] if none;
 "antonyms": 1 or 2 standard विलोम, or [] if none is standard;
-"extras": 1 or 2 tips that best help, each {"title","text"}; titles from: "शब्द-रचना" (उपसर्ग/मूल/प्रत्यय), "संधि-विच्छेद", "समास", "वर्तनी सावधान" (a common wrong spelling struck as ~~wrong~~ ✗ beside the right one ✓), "संबंधित शब्द"; text at most 90 characters, key parts in **bold**.`;
+"forms": up to 3 other forms of the word in other शब्द-भेद, each {"word","pos"} with pos one of संज्ञा, विशेषण, क्रिया, क्रिया-विशेषण (e.g. [{"word":"आत्मनिर्भरता","pos":"संज्ञा"}]), [] if none;
+"phrases": 2 or 3 common phrases (प्रयोग) with the word, at most 4 words each (e.g. ["अतिक्रमण हटाना","अवैध अतिक्रमण"]);
+"extras": 1 or 2 tips that best help, each {"title","text"}; titles from: "शब्द-रचना" (उपसर्ग/मूल/प्रत्यय), "संधि-विच्छेद", "समास", "वर्तनी सावधान" (a common wrong spelling struck as ~~wrong~~ ✗ beside the right one ✓); text at most 90 characters, key parts in **bold**; don't repeat the forms.`;
   const user = `Words, each with its sentence from today's news:
 
 ${words.map((w) => `${w.n}. ${w.word} — "${w.sentence}" (${w.paper || "newspaper"})`).join("\n")}
@@ -522,6 +527,24 @@ Reply with JSON only: {"cards":[{"n":<number>,"word":"the word in its dictionary
 }
 
 export type IgWritten = Omit<IgCard, "lang" | "news" | "paper"> & { n: number };
+
+// Forms as the AI writes them: {"word","pos"} or "word (pos)".
+export function parseForms(v: unknown): IgForm[] {
+  return (Array.isArray(v) ? v : [])
+    .map((x) => {
+      if (typeof x === "string") {
+        const m = /^(.+?)\s*\(([^)]+)\)\s*$/.exec(x.trim());
+        return { word: str(m ? m[1] : x, 60), pos: str(m ? m[2] : "", 30) };
+      }
+      const r = (x ?? {}) as Record<string, unknown>;
+      return { word: str(r.word, 60), pos: str(r.pos, 30) };
+    })
+    .filter((f) => f.word)
+    .slice(0, 3);
+}
+
+// A form as one line of text: "belligerence (noun)".
+export const formText = (f: IgForm) => (f.pos ? `${f.word} (${f.pos})` : f.word);
 
 export function parseCards(raw: string): IgWritten[] | null {
   const o = jsonObject(raw) as { cards?: unknown } | null;
@@ -547,6 +570,8 @@ export function parseCards(raw: string): IgWritten[] | null {
         newsHi: str(c.newsHi, 500),
         synonyms: strs(c.synonyms, 4),
         antonyms: strs(c.antonyms, 3),
+        forms: parseForms(c.forms),
+        phrases: strs(c.phrases, 3),
         extras,
       };
     })
@@ -566,6 +591,8 @@ export const CARD_FIELDS = [
   "newsHi",
   "synonyms",
   "antonyms",
+  "forms",
+  "phrases",
   "extras",
 ] as const;
 export type CardField = (typeof CARD_FIELDS)[number];
@@ -581,6 +608,8 @@ export const FIELD_NAMES: Record<CardField | "news", string> = {
   newsHi: "News line in Hindi",
   synonyms: "Synonyms",
   antonyms: "Antonyms",
+  forms: "Word forms",
+  phrases: "Common phrases",
   extras: "Tips",
 };
 
@@ -598,7 +627,7 @@ export type IgCheck = {
 
 export function proofMessages(lang: IgLang, cards: (IgCard & { n: number })[]): ChatMessage[] {
   const en = lang === "en";
-  const system = `You proofread vocabulary cards for ${EXAMS} before they are posted to thousands of students. Find real mistakes only: a wrong or misleading meaning, a meaning that doesn't fit the news sentence's sense, a synonym or antonym that is wrong for this sense, a wrong part of speech, wrong pronunciation, a wrong or unnatural Hindi translation, wrong facts in a tip, ${en ? "spelling (British spelling is the house style) and grammar" : "अशुद्ध वर्तनी, wrong लिंग or शब्द-भेद, a non-standard पर्यायवाची or विलोम"}. Don't report matters of taste. Never change the news line ("news") of a card whose "rewritten" is false: it is quoted from the paper; a rewritten one is proofread like the rest.`;
+  const system = `You proofread vocabulary cards for ${EXAMS} before they are posted to thousands of students. Find real mistakes only: a wrong or misleading meaning, a meaning that doesn't fit the news sentence's sense, a synonym or antonym that is wrong for this sense, a wrong part of speech, a word form that doesn't exist or has the wrong part of speech, an unnatural phrase, wrong pronunciation, a wrong or unnatural Hindi translation, wrong facts in a tip, ${en ? "spelling (British spelling is the house style) and grammar" : "अशुद्ध वर्तनी, wrong लिंग or शब्द-भेद, a non-standard पर्यायवाची or विलोम"}. Don't report matters of taste. Never change the news line ("news") of a card whose "rewritten" is false: it is quoted from the paper; a rewritten one is proofread like the rest.`;
   const user = `Cards:
 ${JSON.stringify(
   cards.map(
@@ -614,6 +643,8 @@ ${JSON.stringify(
       newsHi,
       synonyms,
       antonyms,
+      forms,
+      phrases,
       extras,
       rewritten,
     }) => ({
@@ -629,6 +660,8 @@ ${JSON.stringify(
       newsHi,
       synonyms,
       antonyms,
+      forms: (forms ?? []).map(formText),
+      phrases: phrases ?? [],
       extras,
     }),
   ),
@@ -636,7 +669,7 @@ ${JSON.stringify(
   1,
 )}
 
-Reply with JSON only: {"issues":[{"n":<card number>,"field":"${CARD_FIELDS.join("|")}","text":"the wrong text exactly as it stands (for synonyms/antonyms the one item)","fix":"the corrected text, or \\"\\" to remove the item","why":"short reason"}]}. Reply {"issues":[]} if a card has no mistakes.`;
+Reply with JSON only: {"issues":[{"n":<card number>,"field":"${CARD_FIELDS.join("|")}","text":"the wrong text exactly as it stands (for synonyms/antonyms/forms/phrases the one item)","fix":"the corrected text, or \\"\\" to remove the item","why":"short reason"}]}. Reply {"issues":[]} if a card has no mistakes.`;
   return [
     { role: "system", content: system },
     { role: "user", content: user },
@@ -669,10 +702,23 @@ export function applyFix(card: IgCard, field: CardField, text: string, fix: stri
     ...card,
     synonyms: [...card.synonyms],
     antonyms: [...card.antonyms],
+    forms: (card.forms ?? []).map((f) => ({ ...f })),
+    phrases: [...(card.phrases ?? [])],
     extras: card.extras.map((e) => ({ ...e })),
   };
-  if (field === "synonyms" || field === "antonyms") {
-    const list = next[field];
+  if (field === "forms") {
+    const list = next.forms!;
+    const t = text.toLowerCase();
+    const at = list.findIndex((f) => f.word.toLowerCase() === t || formText(f).toLowerCase() === t);
+    const [fixed] = fix ? parseForms([fix]) : [];
+    if (at >= 0) {
+      if (fixed) list[at] = { word: fixed.word, pos: fixed.pos || list[at].pos };
+      else list.splice(at, 1);
+    } else if (fixed && !text) list.push(fixed);
+    return next;
+  }
+  if (field === "synonyms" || field === "antonyms" || field === "phrases") {
+    const list = next[field]!;
     const at = list.findIndex((x) => x.toLowerCase() === text.toLowerCase());
     if (at >= 0) {
       if (fix) list[at] = fix;
@@ -694,13 +740,14 @@ export function applyFix(card: IgCard, field: CardField, text: string, fix: stri
 
 // ---------- One part written again ----------
 
-export type IgPart = "say" | "meaning" | "sentence" | "words" | "tips";
+export type IgPart = "say" | "meaning" | "sentence" | "words" | "forms" | "tips";
 
 export const IG_PART_NAMES: Record<IgPart, string> = {
   say: "the word, part of speech and pronunciation",
   meaning: "the meanings",
   sentence: "the news line",
   words: "the synonyms and antonyms",
+  forms: "the word forms and common phrases",
   tips: "the tips",
 };
 
@@ -726,9 +773,12 @@ export function partMessages(
     words: en
       ? `{"synonyms":[3 English synonyms in the card's sense, capitalised],"antonyms":[2 English antonyms in the card's sense, capitalised, or [] if none is natural]}`
       : `{"synonyms":[2 or 3 standard पर्यायवाची],"antonyms":[1 or 2 standard विलोम, or []]}`,
+    forms: en
+      ? `{"forms":[up to 3 other forms in other parts of speech that dictionaries give, each {"word","pos"} with pos noun, verb, adjective or adverb; no plurals or verb tenses],"phrases":[2 or 3 common phrases (collocations) with the word, at most 4 words each]}`
+      : `{"forms":[up to 3 other forms in other शब्द-भेद, each {"word","pos"} with pos संज्ञा, विशेषण, क्रिया or क्रिया-विशेषण],"phrases":[2 or 3 common phrases (प्रयोग) with the word, at most 4 words each]}`,
     tips: en
-      ? `{"extras":[1 or 2 tips that best help remember or use it, each {"title","text"}; titles from "Root", "Memory trick", "Don't confuse", "Word family", "Common phrases"; text at most 110 characters, key words in **bold**]}`
-      : `{"extras":[1 or 2 tips, each {"title","text"}; titles from "शब्द-रचना", "संधि-विच्छेद", "समास", "वर्तनी सावधान" (a common wrong spelling struck as ~~wrong~~ ✗ beside the right one ✓), "संबंधित शब्द"; text at most 90 characters, key parts in **bold**]}`,
+      ? `{"extras":[1 or 2 tips that best help remember or use it, each {"title","text"}; titles from "Root", "Memory trick", "Don't confuse"; text at most 110 characters, key words in **bold**]}`
+      : `{"extras":[1 or 2 tips, each {"title","text"}; titles from "शब्द-रचना", "संधि-विच्छेद", "समास", "वर्तनी सावधान" (a common wrong spelling struck as ~~wrong~~ ✗ beside the right one ✓); text at most 90 characters, key parts in **bold**; not the word forms]}`,
   };
   const user = `The card:
 ${JSON.stringify(
@@ -743,6 +793,8 @@ ${JSON.stringify(
     newsHi: card.newsHi,
     synonyms: card.synonyms,
     antonyms: card.antonyms,
+    forms: (card.forms ?? []).map(formText),
+    phrases: card.phrases ?? [],
     extras: card.extras,
   },
   null,
@@ -795,6 +847,11 @@ export function parsePart(
     const synonyms = strs(o.synonyms, 4);
     return synonyms.length ? { patch: { synonyms, antonyms: strs(o.antonyms, 3) } } : null;
   }
+  if (part === "forms") {
+    const forms = parseForms(o.forms);
+    const phrases = strs(o.phrases, 3);
+    return forms.length || phrases.length ? { patch: { forms, phrases } } : null;
+  }
   const extras = (Array.isArray(o.extras) ? o.extras : [])
     .map((e) => {
       const r = (e ?? {}) as Record<string, unknown>;
@@ -832,6 +889,8 @@ export const PART_OF_FIELD: Record<CardField, IgPart> = {
   newsHi: "sentence",
   synonyms: "words",
   antonyms: "words",
+  forms: "forms",
+  phrases: "forms",
   extras: "tips",
 };
 
@@ -895,6 +954,8 @@ export function cardFrom(
     paper,
     synonyms: w?.synonyms ?? [],
     antonyms: w?.antonyms ?? [],
+    forms: w?.forms ?? [],
+    phrases: w?.phrases ?? [],
     extras: w?.extras ?? [],
   };
 }
@@ -908,5 +969,120 @@ export const cardTexts = (c: IgCard) => [
   c.newsHi,
   ...c.synonyms,
   ...c.antonyms,
+  ...(c.forms ?? []).map((f) => f.word),
+  ...(c.phrases ?? []),
   ...c.extras.map((e) => e.text.replace(/\*\*.+?\*\*/g, " ")),
 ];
+
+// ---------- Word forms to look up ----------
+
+const STEM_ENDS = [
+  "ically",
+  "ation",
+  "ition",
+  "ence",
+  "ance",
+  "ency",
+  "ancy",
+  "ment",
+  "ness",
+  "ious",
+  "ize",
+  "ise",
+  "ity",
+  "ive",
+  "ous",
+  "ful",
+  "able",
+  "ible",
+  "ant",
+  "ent",
+  "ate",
+  "ion",
+  "ly",
+  "al",
+  "ic",
+  "e",
+  "y",
+];
+const FORM_ENDS = [
+  "",
+  "e",
+  "ly",
+  "ally",
+  "ically",
+  "ness",
+  "ity",
+  "ion",
+  "ation",
+  "ition",
+  "ment",
+  "ence",
+  "ance",
+  "ency",
+  "ancy",
+  "ent",
+  "ant",
+  "ive",
+  "ous",
+  "ious",
+  "al",
+  "ic",
+  "ful",
+  "able",
+  "ible",
+  "ize",
+  "ise",
+  "ate",
+  "er",
+  "or",
+  "ist",
+  "ism",
+  "y",
+  "ily",
+];
+
+// Spellings that may be other forms of an English word (belligerent →
+// belligerence, belligerently): only those a dictionary knows are kept.
+export function formCandidates(word: string): string[] {
+  const w = word.trim().toLowerCase();
+  if (!/^[a-z]{4,}$/.test(w)) return [];
+  const stems = new Set([w]);
+  for (const end of STEM_ENDS)
+    if (w.endsWith(end) && w.length - end.length >= 4) stems.add(w.slice(0, -end.length));
+  for (const s of [...stems]) if (s.endsWith("i")) stems.add(`${s.slice(0, -1)}y`);
+  const out = new Set<string>();
+  for (const s of stems)
+    for (const end of FORM_ENDS) {
+      const c = s + end;
+      if (c !== w && c.length >= 4) out.add(c);
+    }
+  return [...out];
+}
+
+// ---------- When the album posts ----------
+
+const IST_MS = 330 * 60_000;
+
+// A time as typed in a date-and-time box, in India time: "2026-10-30T09:00".
+export function istInput(d: Date): string {
+  return new Date(d.getTime() + IST_MS).toISOString().slice(0, 16);
+}
+
+// The other way round (null when it isn't a time).
+export function fromIstInput(s: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) return null;
+  const t = Date.parse(`${s}:00Z`) - IST_MS;
+  return Number.isFinite(t) ? new Date(t) : null;
+}
+
+// The album's time when approved: the posting time today (India), or, once
+// that has passed, 15 minutes from now (on a 5-minute mark).
+export function igPostDefault(postTime: string, now = new Date()): Date {
+  const [h, m] = (/^(\d{1,2}):(\d{2})$/.exec(postTime) ?? ["", "9", "00"]).slice(1).map(Number);
+  const today = istInput(now).slice(0, 10);
+  const at = fromIstInput(`${today}T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`)!;
+  if (at.getTime() > now.getTime() + 5 * 60_000) return at;
+  const soon = now.getTime() + 15 * 60_000;
+  return new Date(Math.ceil(soon / 300_000) * 300_000);
+}
