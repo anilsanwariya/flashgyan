@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, BookOpen, Layers, MapPin, Search, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Gamepad2, Layers, MapPin, Search, X } from "lucide-react";
 import {
   atlasBaseFn,
   atlasEntityFactsFn,
@@ -273,6 +273,12 @@ function AtlasPage() {
             </ul>
           )}
         </div>
+        <Link
+          to="/atlas/quiz"
+          className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-sm hover:bg-muted"
+        >
+          <Gamepad2 className="h-4 w-4" /> {L(lang, "क्विज़", "Quiz")}
+        </Link>
         <LangToggle lang={lang} onChange={setLang} />
         <button
           type="button"

@@ -14,10 +14,23 @@ import type {
   PublicPlace,
 } from "@/lib/atlas.server";
 
-export type { AtlasBase, DistrictListRow, ImportResult, OverviewCheck, PublicFact, PublicPlace };
+import type { AtlasMcqRow } from "@/lib/atlas-practice.server";
+
+export type {
+  AtlasBase,
+  AtlasMcqRow,
+  DistrictListRow,
+  ImportResult,
+  OverviewCheck,
+  PublicFact,
+  PublicPlace,
+};
 
 async function server() {
   return import("@/lib/atlas.server");
+}
+async function practice() {
+  return import("@/lib/atlas-practice.server");
 }
 
 async function assertAdmin(userId: string) {
@@ -327,4 +340,98 @@ export const atlasPlacesOfFn = createServerFn({ method: "POST" })
       lon: p.lon,
       district: p.district,
     }));
+  });
+
+// ---------- Practice: MCQs and flashcards (admin) ----------
+
+const bi = z.object({ en: z.string().max(600), hi: z.string().max(600) });
+
+export const atlasPracticeStatus = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await practice()).practiceStatus();
+  });
+
+export const generateAtlasMcqs = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await practice()).generateMcqs();
+  });
+
+export const resumeAtlasMcqOptions = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    await (await practice()).resumeDistractors();
+    return { ok: true };
+  });
+
+export const listAtlasMcqs = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        status: z.enum(["draft", "approved", "rejected", "waiting"]).optional(),
+        kind: z.enum(["place-district", "district-division", "district-zone", "notes"]).optional(),
+        set: z.string().max(300).optional(),
+        q: z.string().max(100).optional(),
+        page: z.number().int().min(0).max(1000).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await practice()).listMcqs(data);
+  });
+
+export const saveAtlasMcq = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        question: bi,
+        options: z.array(bi).length(4),
+        answer: z.number().int().min(1).max(4),
+        explanation: bi,
+        set_name: z.string().max(300),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    const { id, ...p } = data;
+    return (await practice()).saveMcq(id, p);
+  });
+
+export const setAtlasMcqStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        ids: z.array(z.string().uuid()).min(1).max(2000),
+        status: z.enum(["draft", "approved", "rejected"]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await practice()).setMcqStatus(data.ids, data.status);
+    return { ok: true };
+  });
+
+export const publishAtlasMcqs = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await practice()).publishMcqs();
+  });
+
+export const sendAtlasCards = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await practice()).sendCardsToStudio();
   });

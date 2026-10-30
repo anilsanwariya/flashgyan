@@ -23,6 +23,7 @@ import { Route as TermsRouteImport } from './routes/terms'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 import { Route as AtlasIndexRouteImport } from './routes/atlas.index'
 import { Route as AtlasDistrictRouteImport } from './routes/atlas.$district'
+import { Route as AtlasQuizRouteImport } from './routes/atlas.quiz'
 import { Route as DecksDeckIdRouteImport } from './routes/decks.$deckId'
 import { Route as McqResultTestIdRouteImport } from './routes/mcq-result.$testId'
 import { Route as McqTestIdRouteImport } from './routes/mcq.$testId'
@@ -101,6 +102,11 @@ const AtlasDistrictRoute = AtlasDistrictRouteImport.update({
   path: '/atlas/$district',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AtlasQuizRoute = AtlasQuizRouteImport.update({
+  id: '/atlas/quiz',
+  path: '/atlas/quiz',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DecksDeckIdRoute = DecksDeckIdRouteImport.update({
   id: '/decks/$deckId',
   path: '/decks/$deckId',
@@ -155,6 +161,7 @@ export interface FileRoutesByFullPath {
   '/terms': typeof TermsRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/atlas/$district': typeof AtlasDistrictRoute
+  '/atlas/quiz': typeof AtlasQuizRoute
   '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
@@ -178,6 +185,7 @@ export interface FileRoutesByTo {
   '/terms': typeof TermsRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/atlas/$district': typeof AtlasDistrictRoute
+  '/atlas/quiz': typeof AtlasQuizRoute
   '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
@@ -203,6 +211,7 @@ export interface FileRoutesById {
   '/terms': typeof TermsRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
   '/atlas/$district': typeof AtlasDistrictRoute
+  '/atlas/quiz': typeof AtlasQuizRoute
   '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
@@ -228,6 +237,7 @@ export interface FileRouteTypes {
     | '/terms'
     | '/admin'
     | '/atlas/$district'
+    | '/atlas/quiz'
     | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
@@ -251,6 +261,7 @@ export interface FileRouteTypes {
     | '/terms'
     | '/admin'
     | '/atlas/$district'
+    | '/atlas/quiz'
     | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
@@ -275,6 +286,7 @@ export interface FileRouteTypes {
     | '/terms'
     | '/_authenticated/admin'
     | '/atlas/$district'
+    | '/atlas/quiz'
     | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
@@ -299,6 +311,7 @@ export interface RootRouteChildren {
   SummaryRoute: typeof SummaryRoute
   TermsRoute: typeof TermsRoute
   AtlasDistrictRoute: typeof AtlasDistrictRoute
+  AtlasQuizRoute: typeof AtlasQuizRoute
   DecksDeckIdRoute: typeof DecksDeckIdRoute
   McqResultTestIdRoute: typeof McqResultTestIdRoute
   McqTestIdRoute: typeof McqTestIdRoute
@@ -410,6 +423,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtlasDistrictRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/atlas/quiz': {
+      id: '/atlas/quiz'
+      path: '/atlas/quiz'
+      fullPath: '/atlas/quiz'
+      preLoaderRoute: typeof AtlasQuizRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/decks/$deckId': {
       id: '/decks/$deckId'
       path: '/decks/$deckId'
@@ -493,6 +513,7 @@ const rootRouteChildren: RootRouteChildren = {
   SummaryRoute: SummaryRoute,
   TermsRoute: TermsRoute,
   AtlasDistrictRoute: AtlasDistrictRoute,
+  AtlasQuizRoute: AtlasQuizRoute,
   DecksDeckIdRoute: DecksDeckIdRoute,
   McqResultTestIdRoute: McqResultTestIdRoute,
   McqTestIdRoute: McqTestIdRoute,
