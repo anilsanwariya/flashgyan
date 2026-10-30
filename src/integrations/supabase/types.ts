@@ -2093,6 +2093,7 @@ export type Database = {
           hide_google_play: boolean
           hide_mcq: boolean
           hide_mcq_practice: boolean
+          hide_atlas: boolean
           hide_saathi: boolean
           id: number
           lock_cta: boolean
@@ -2112,6 +2113,7 @@ export type Database = {
           hide_google_play?: boolean
           hide_mcq?: boolean
           hide_mcq_practice?: boolean
+          hide_atlas?: boolean
           hide_saathi?: boolean
           id?: number
           lock_cta?: boolean
@@ -2131,6 +2133,7 @@ export type Database = {
           hide_google_play?: boolean
           hide_mcq?: boolean
           hide_mcq_practice?: boolean
+          hide_atlas?: boolean
           hide_saathi?: boolean
           id?: number
           lock_cta?: boolean

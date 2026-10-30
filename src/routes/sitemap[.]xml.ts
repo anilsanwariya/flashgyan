@@ -9,6 +9,7 @@ const STATIC_PATHS = [
   { path: "/mcq-practice", priority: "0.8", changefreq: "weekly" },
   { path: "/mcq-tests", priority: "0.8", changefreq: "weekly" },
   { path: "/saathi", priority: "0.5", changefreq: "monthly" },
+  { path: "/atlas", priority: "0.8", changefreq: "weekly" },
   { path: "/privacy-policy", priority: "0.2", changefreq: "yearly" },
   { path: "/terms", priority: "0.2", changefreq: "yearly" },
 ];
@@ -31,21 +32,25 @@ export const Route = createFileRoute("/sitemap.xml")({
         );
         const [{ data: decks, error }, { data: settings }] = await Promise.all([
           supabase.from("flashcard_decks").select("id"),
-          supabase
-            .from("home_settings")
-            .select("lock_saathi, hide_saathi")
-            .eq("id", 1)
-            .maybeSingle(),
+          supabase.from("home_settings").select("*").eq("id", 1).maybeSingle(),
         ]);
         if (error) console.error("sitemap: could not list decks", error.message);
 
         // Don't advertise SAATHI to search engines while it is locked or hidden.
         const saathiOff = Boolean(settings?.lock_saathi || settings?.hide_saathi);
+        // The atlas while its card is shown, with every published district page.
+        const atlasOff = Boolean((settings as { hide_atlas?: boolean } | null)?.hide_atlas);
+        const districts = atlasOff
+          ? []
+          : await (await import("@/lib/atlas.server")).publishedDistricts().catch(() => []);
         const entries = [
-          ...STATIC_PATHS.filter((p) => !(saathiOff && p.path === "/saathi")).map((p) =>
-            urlEntry(`${SITE_URL}${p.path}`, p.priority, p.changefreq),
-          ),
+          ...STATIC_PATHS.filter(
+            (p) => !(saathiOff && p.path === "/saathi") && !(atlasOff && p.path === "/atlas"),
+          ).map((p) => urlEntry(`${SITE_URL}${p.path}`, p.priority, p.changefreq)),
           ...(decks ?? []).map((d) => urlEntry(`${SITE_URL}/decks/${d.id}`, "0.7", "weekly")),
+          ...districts.map((d) =>
+            urlEntry(`${SITE_URL}/atlas/${encodeURIComponent(d.district)}`, "0.7", "monthly"),
+          ),
         ];
         const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries.join("\n")}\n</urlset>\n`;
         return new Response(xml, {
