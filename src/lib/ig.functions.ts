@@ -292,6 +292,7 @@ export const saveIgSettings = createServerFn({ method: "POST" })
         pick_en: z.number().int().min(0).max(10),
         pick_hi: z.number().int().min(0).max(10),
         designs: z.array(design).min(1),
+        design,
         watermark: z.number().int().min(0).max(100),
         caption: z.string().min(1).max(3000),
         notify: z.boolean(),

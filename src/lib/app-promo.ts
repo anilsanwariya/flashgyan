@@ -20,6 +20,8 @@ export type AppPromoPlacement =
   | "deck_page"
   // The daily "Words in the News" album on the Telegram channel.
   | "words_in_news"
+  // The daily GK infographics albums (Hindi and English).
+  | "gk_infographics"
   // The weekly round-up PDF's caption.
   | "words_in_news_weekly";
 

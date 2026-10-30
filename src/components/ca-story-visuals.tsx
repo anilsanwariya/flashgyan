@@ -85,7 +85,7 @@ const ICONS: Record<VisualType, typeof BarChart3> = {
 };
 
 // The visual as the magazine prints it, both languages, in a frame.
-function VisualFrame({ visual }: { visual: Visual }) {
+export function VisualFrame({ visual }: { visual: Visual }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(160);
   const html = useMemo(() => visualPreviewHtml(visual), [visual]);
@@ -430,7 +430,7 @@ export function PickedPointsVisual({
 
 // ---------- Choosing a type ----------
 
-function VisualPicker({
+export function VisualPicker({
   item,
   slot,
   current,
@@ -860,7 +860,7 @@ function Field({
   );
 }
 
-function VisualEditor({
+export function VisualEditor({
   item,
   visual,
   covers,

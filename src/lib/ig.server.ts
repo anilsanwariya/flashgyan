@@ -32,14 +32,11 @@ import {
   CAPTION_MAX,
   captionHtml,
   captionText,
-  designMessages,
   findSentence,
   igSettingsOf,
   igWordKey,
   isHindiText,
-  nextDesign,
   parseCards,
-  parseDesign,
   parseIssues,
   parsePart,
   parseSuggestions,
@@ -626,41 +623,17 @@ async function proofLang(day: string, lang: IgLang): Promise<boolean> {
   return true;
 }
 
+// The day's design: the channel's one design (Settings), the same every day.
 async function chooseDesign(day: string, settings: IgSettings) {
-  const cards = await cardsOf(day);
-  const { data } = await from("ig_days")
-    .select("design")
-    .lt("day", day)
-    .order("day", { ascending: false })
-    .limit(1);
-  const yesterday = (((data ?? []) as Row[])[0]?.design as string | undefined) ?? null;
-  const allowed = settings.designs.filter((d) => d !== yesterday);
-  let choice: { design: IgDesign; reason: string } | null = null;
-  try {
-    choice = parseDesign(
-      await saathiComplete(
-        apiKey(),
-        designMessages(
-          cards.map((c) => c.card?.word || c.word),
-          settings.designs,
-          yesterday,
-        ),
-      ),
-      allowed.length ? allowed : settings.designs,
-    );
-  } catch (e) {
-    console.error("infographic design:", saathiErrorDetail(e));
-  }
-  const design = choice?.design ?? nextDesign(settings.designs, yesterday);
   await patchDay(day, {
-    design,
-    design_reason: choice?.reason ?? "Next in turn after yesterday's design.",
+    design: settings.design,
+    design_reason: "The channel's design (Settings).",
   });
 }
 
 // ---------- Making the images ----------
 
-async function screenshot(html: string): Promise<Uint8Array> {
+export async function screenshot(html: string): Promise<Uint8Array> {
   const account = process.env.CLOUDFLARE_ACCOUNT_ID;
   const token = process.env.CLOUDFLARE_API_TOKEN;
   if (!account || !token)
@@ -1053,7 +1026,7 @@ function weekCaption(settings: IgSettings, f: string, to: string, count: number)
 
 // A caption as Telegram takes it: with its links (HTML formatting), or as
 // plain text cut to the limit when even its words are too long.
-function telegramCaption(caption: string): { caption: string; parse_mode?: "HTML" } {
+export function telegramCaption(caption: string): { caption: string; parse_mode?: "HTML" } {
   return captionText(caption).length <= CAPTION_MAX
     ? { caption: captionHtml(caption), parse_mode: "HTML" }
     : { caption: captionText(caption).slice(0, CAPTION_MAX) };

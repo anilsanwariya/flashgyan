@@ -13,6 +13,7 @@ import { RadarBox } from "@/components/ca-radar-panel";
 import { PastCollection } from "@/components/ca-past-collection";
 import { EventsPanel } from "@/components/ca-events-panel";
 import { InfographicsPanel } from "@/components/ig-panel";
+import { GkPanel } from "@/components/gk-panel";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -128,6 +129,7 @@ export type CaSection =
   | "monthly"
   | "custom"
   | "infographics"
+  | "gk"
   | "schemes"
   | "syllabus"
   | "papers"
@@ -150,6 +152,7 @@ export function CurrentAffairsPanel({ section }: { section: CaSection }) {
   if (section === "monthly") return <MonthlyPanel />;
   if (section === "custom") return <CustomMagazines />;
   if (section === "infographics") return <InfographicsPanel />;
+  if (section === "gk") return <GkPanel />;
   if (section === "schemes") return <SchemeRegister />;
   if (section === "syllabus") return <SyllabusPanel />;
   if (section === "papers") return <ExamPapers />;

@@ -30,6 +30,10 @@ export type IgSettings = {
   pick_en: number;
   pick_hi: number;
   // Designs the AI may choose from.
+  // The design every day's cards use, in both languages (students know the
+  // channel's cards by it).
+  design: IgDesign;
+  // Earlier: the designs the AI chose from each day (kept for old settings).
   designs: IgDesign[];
   // The watermark's strength, 0 (off) to 100.
   watermark: number;
@@ -104,6 +108,7 @@ export const DEFAULT_IG_SETTINGS: IgSettings = {
   suggest_hi: 10,
   pick_en: 5,
   pick_hi: 5,
+  design: "paper",
   designs: [...IG_DESIGN_KEYS],
   watermark: 7,
   caption: DEFAULT_IG_CAPTION,
@@ -141,6 +146,9 @@ export function igSettingsOf(value: unknown): IgSettings {
     weekly_caption:
       s.weekly_caption === OLD_WEEKLY_CAPTION ? DEFAULT_IG_WEEKLY_CAPTION : s.weekly_caption,
     designs: designs.length ? designs : [...IG_DESIGN_KEYS],
+    design: IG_DESIGN_KEYS.includes(s.design as IgDesign)
+      ? (s.design as IgDesign)
+      : (designs[0] ?? "paper"),
     pick_rules: { en: rules(pr.en), hi: rules(pr.hi) },
     weekly_day:
       Number.isInteger(s.weekly_day) && s.weekly_day >= 0 && s.weekly_day <= 6 ? s.weekly_day : 0,

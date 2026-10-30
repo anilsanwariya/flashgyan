@@ -234,6 +234,12 @@ export async function tick(origin?: string): Promise<TickResult> {
   } catch (e) {
     console.error("infographics:", e);
   }
+  // GK infographics: the day's cards planned, written, made and posted.
+  try {
+    await (await import("@/lib/gk.server")).gkStep(origin);
+  } catch (e) {
+    console.error("gk infographics:", e);
+  }
 
   const { data: claimed, error } = await supabaseAdmin.rpc(
     "ca_claim_run" as never,

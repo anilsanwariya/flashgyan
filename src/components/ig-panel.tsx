@@ -26,7 +26,6 @@ import {
   postIgNow,
   releaseIgWord,
   saveIgSettings,
-  setIgDesign,
   startIgDay,
   type IgDayView,
   type IgWord,
@@ -506,7 +505,6 @@ function Review({
       toast.error(errorText(e, "Couldn't move it"));
     }
   };
-  const designFn = useServerFn(setIgDesign);
   const approveFn = useServerFn(approveIgDay);
   const [caption, setCaption] = useState(() => view.day?.caption || captionFor(view, date));
   const [busy, setBusy] = useState(false);
@@ -539,33 +537,13 @@ function Review({
     <div className="space-y-4">
       <div className="grid gap-4 rounded-xl border border-border p-4 lg:grid-cols-2">
         <div className="space-y-2">
-          <Label htmlFor="ig-design">Today&apos;s design (all cards)</Label>
-          <Select
-            value={design}
-            onValueChange={async (d) => {
-              try {
-                await designFn({ data: { date, design: d as IgDesign } });
-                await onChange();
-              } catch (e) {
-                toast.error(errorText(e, "Couldn't change it"));
-              }
-            }}
-          >
-            <SelectTrigger id="ig-design" aria-label="Design">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {IG_DESIGNS.map((d) => (
-                <SelectItem key={d.key} value={d.key} disabled={d.key === view.yesterdayDesign}>
-                  {d.name} — {d.note}
-                  {d.key === view.yesterdayDesign ? " (yesterday)" : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {view.day?.design_reason && (
-            <p className="text-xs text-muted-foreground">{view.day.design_reason}</p>
-          )}
+          <p className="text-sm font-medium">Design</p>
+          <p className="text-sm" data-day-design>
+            {IG_DESIGNS.find((d) => d.key === design)?.name ?? design}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            The channel&apos;s design, the same every day. Change it in Settings.
+          </p>
         </div>
         <div className="space-y-2">
           <div className="flex items-center justify-between">
@@ -1508,8 +1486,8 @@ function Settings() {
           </div>
         </div>
         <p className="text-sm text-muted-foreground">
-          The AI chooses one design a day for all the cards, never yesterday&apos;s, from the ones
-          switched on.
+          One design for every day&apos;s cards, Hindi and English, so students know the
+          channel&apos;s cards at a glance.
         </p>
         <label className="block max-w-sm space-y-1 text-sm">
           <span className="font-medium">Watermark strength: {s.watermark}%</span>
@@ -1526,11 +1504,11 @@ function Settings() {
         </label>
         <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:gap-4">
           {IG_DESIGNS.map((d) => {
-            const on = s.designs.includes(d.key);
+            const on = s.design === d.key;
             return (
               <div
                 key={d.key}
-                className={`min-w-0 space-y-2 sm:w-[170px] ${on ? "" : "opacity-50"}`}
+                className={`min-w-0 space-y-2 rounded-lg p-1 sm:w-[178px] ${on ? "ring-2 ring-primary" : ""}`}
                 data-design={d.key}
               >
                 <CardPreview
@@ -1543,18 +1521,12 @@ function Settings() {
                   width="fill"
                 />
                 <label className="flex items-center gap-2 text-sm">
-                  <Switch
+                  <input
+                    type="radio"
+                    name="ig-design"
                     checked={on}
                     aria-label={`Use ${d.name}`}
-                    onCheckedChange={(v) =>
-                      set({
-                        designs: v
-                          ? [...s.designs, d.key]
-                          : s.designs.length > 1
-                            ? s.designs.filter((x) => x !== d.key)
-                            : s.designs,
-                      })
-                    }
+                    onChange={() => set({ design: d.key })}
                   />
                   <span>
                     <b>{d.name}</b>
