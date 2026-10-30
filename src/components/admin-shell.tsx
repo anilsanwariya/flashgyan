@@ -31,6 +31,7 @@ import {
   Users,
   UserSquare2,
   Images,
+  MapPinned,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
@@ -48,6 +49,7 @@ export type AdminSectionId =
   | "ca.monthly"
   | "ca.custom"
   | "ca.infographics"
+  | "ca.gk"
   | "ca.schemes"
   | "ca.syllabus"
   | "ca.papers"
@@ -154,6 +156,13 @@ export const ADMIN_GROUPS: { label: string; sections: SectionDef[] }[] = [
         icon: Images,
         description:
           "Words in the News: daily image cards of words from the papers, picked, proofread and posted to the channel as an album.",
+      },
+      {
+        id: "ca.gk",
+        label: "GK infographics",
+        icon: MapPinned,
+        description:
+          "A subject's topics, a topic a day, as image cards from its books (maps and visuals), posted as Hindi and English albums.",
       },
       {
         id: "ca.schemes",
