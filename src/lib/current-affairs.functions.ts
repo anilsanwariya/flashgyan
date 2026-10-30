@@ -16,9 +16,11 @@ import {
   MAX_STATICS,
   UPLOAD_SECTIONS,
   cleanDomains,
+  type CaContent,
   type MagazineSettings,
 } from "@/lib/current-affairs";
 import { VISUAL_TYPES, type VisualType } from "@/lib/ca-visuals";
+import { EVENT_PARTS } from "@/lib/ca-events";
 import type {
   CaCorrection,
   CaIssue,
@@ -1554,6 +1556,76 @@ export const linkCaStoryEvent = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     await (await server()).linkStoryToEvent(data.itemId, data.eventId);
     return { ok: true };
+  });
+
+// The event summary's editor: every fact of its stories, their visuals
+// and images to reuse, and the summary's versions.
+export const getCaEventEditor = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).getEventEditor(data.id);
+  });
+
+export const saveCaEventSummary = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        summary: contentSchema,
+        reason: z.enum(["edit", "ai"]).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).saveEventSummary(data.id, data.summary as CaContent, data.reason);
+  });
+
+export const restoreCaEventVersion = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), at: z.string().min(10).max(40) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).restoreEventVersion(data.id, data.at);
+  });
+
+export const previewCaEventVisual = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        slot: z.number().int().min(1).max(4),
+        type: z.enum(VISUAL_TYPES as [VisualType, ...VisualType[]]).optional(),
+        note: z.string().max(300).optional(),
+        facts: z.array(z.number().int().min(0).max(100)).min(2).max(30).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).previewEventVisual(data.id, data);
+  });
+
+export const rewriteCaEventPart = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        part: z.enum(EVENT_PARTS),
+        note: z.string().max(400),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).rewriteEventPart(data.id, data.part, data.note);
   });
 
 export const writeCaEventSummary = createServerFn({ method: "POST" })

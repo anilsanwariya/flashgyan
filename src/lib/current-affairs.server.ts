@@ -7,8 +7,11 @@ import {
   EVENT_POINTS_MAX,
   eventNameKey,
   eventSummaryMessages,
+  eventPartPatch,
   monthlyEvents,
   type CaEvent,
+  type EventAsk,
+  type EventPart,
   type EventBlock,
   type EventKind,
   type RawEvent,
@@ -1697,25 +1700,50 @@ export async function linkStoryToEvent(itemId: string, eventId: string | null) {
   );
 }
 
-// The complete summary of an event, from all its stories (included ones;
-// all of them when none is).
-export async function writeEventSummary(id: string): Promise<CaEvent> {
-  const [e] = await eventsById([id]);
-  if (!e) throw new Error("No such event");
-  const { data } = await from("ca_items")
-    .select("issue_date,headline,facts,status,content")
+type EventStoryRow = Pick<
+  CaItem,
+  "id" | "issue_date" | "headline" | "facts" | "status" | "content" | "category"
+>;
+
+// An event's stories, oldest first: the included ones (all of them when
+// none is).
+async function eventStories(id: string): Promise<{ all: EventStoryRow[]; used: EventStoryRow[] }> {
+  const { data, error } = await from("ca_items")
+    .select("id,issue_date,headline,facts,status,content,category")
     .eq("event_id", id)
     .order("issue_date");
-  const all = (data ?? []) as Pick<
-    CaItem,
-    "issue_date" | "headline" | "facts" | "status" | "content"
-  >[];
+  fail(error);
+  const all = (data ?? []) as EventStoryRow[];
   const used = all.some((s) => s.status === "included")
     ? all.filter((s) => s.status === "included")
     : all;
-  if (!used.length) throw new Error("This event has no stories yet.");
+  return { all, used };
+}
+
+// Every fact of the event's stories, once each (for its visuals).
+function eventFacts(used: EventStoryRow[]): CaFact[] {
+  const seen = new Set<string>();
+  const out: CaFact[] = [];
+  for (const s of used)
+    for (const f of s.facts) {
+      const k = normalizeForMatch(f.text);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(f);
+    }
+  return out.slice(0, 60);
+}
+
+// The section most of the event's stories are in.
+const eventCategory = (used: EventStoryRow[]) => {
+  const n = new Map<string, number>();
+  for (const s of used) n.set(s.category, (n.get(s.category) ?? 0) + 1);
+  return [...n.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "misc";
+};
+
+async function eventSummaryRaw(e: CaEvent, used: EventStoryRow[], ask?: EventAsk) {
   const { glossary, summary_words } = await getMagazineSettings();
-  const raw = await saathiComplete(
+  return saathiComplete(
     apiKey(),
     eventSummaryMessages({
       event: e,
@@ -1726,13 +1754,177 @@ export async function writeEventSummary(id: string): Promise<CaEvent> {
       })),
       glossary,
       summaryWords: summary_words,
+      ...(ask ? { ask } : {}),
     }),
   );
+}
+
+// The summary's earlier versions (before the AI wrote it again, before a
+// restore, and the editor's own edits at most every 15 minutes).
+export type EventVersion = { at: string; reason: string; summary: CaContent };
+const eventVersionsKey = (id: string) => `ca_event_versions:${id}`;
+
+async function eventVersions(id: string): Promise<EventVersion[]> {
+  const { data } = await from("bot_settings")
+    .select("value")
+    .eq("key", eventVersionsKey(id))
+    .maybeSingle();
+  const list = ((data as { value?: { list?: unknown } } | null)?.value?.list ?? []) as unknown;
+  return Array.isArray(list) ? (list as EventVersion[]) : [];
+}
+
+async function keepEventVersion(id: string, summary: CaContent | null, reason: string) {
+  if (!summary) return;
+  const list = await eventVersions(id);
+  // A run of hand edits keeps one version every 15 minutes.
+  if (
+    reason === "edit" &&
+    list[0]?.reason === "edit" &&
+    Date.now() - Date.parse(list[0].at) < 15 * 60_000
+  )
+    return;
+  const next = [{ at: new Date().toISOString(), reason, summary }, ...list].slice(0, 20);
+  fail(
+    (
+      await from("bot_settings").upsert({
+        key: eventVersionsKey(id),
+        value: { list: next },
+        updated_at: new Date().toISOString(),
+      } as never)
+    ).error,
+  );
+}
+
+// The complete summary of an event, from all its stories (included ones;
+// all of them when none is). Written again, it keeps the editor's images,
+// the visuals whose numbers are still in the stories, and the parts they
+// chose to leave out; the summary before is kept as a version.
+export async function writeEventSummary(id: string): Promise<CaEvent> {
+  const [e] = await eventsById([id]);
+  if (!e) throw new Error("No such event");
+  const { used } = await eventStories(id);
+  if (!used.length) throw new Error("This event has no stories yet.");
+  const raw = await eventSummaryRaw(e, used);
   const parsed = parseContent(raw, EVENT_POINTS_MAX);
   if (!parsed) throw new Error("The AI's reply could not be read. Try again.");
   // A sports event's medal tally, made from the same stories.
   if (e.kind === "sports") await (await import("@/lib/ca-medals.server")).makeMedalsSafe(id);
-  return updateEvent(id, { summary: fixShortFormsDeep(parsed.content) });
+  const old = e.summary;
+  const facts = eventFacts(used);
+  const kept = old
+    ? visualsPatch(
+        storyVisuals(old)
+          .filter((v) => !unverifiedNumbers(v.visual, facts).length)
+          .map((v) => ({ ...v, covers: [] })),
+      )
+    : {};
+  await keepEventVersion(id, old, "write");
+  return updateEvent(id, {
+    summary: {
+      ...fixShortFormsDeep(parsed.content),
+      ...(old ? kept : {}),
+      ...(old?.visual_pair ? { visual_pair: true } : {}),
+      ...(old?.images?.length ? { images: old.images } : {}),
+      ...(old?.hide_summary ? { hide_summary: true } : {}),
+      ...(old?.hide_why ? { hide_why: true } : {}),
+    },
+  });
+}
+
+// ---------- The event summary's editor ----------
+
+export type EventStoryLook = {
+  id: string;
+  issue_date: string;
+  headline: string;
+  visuals: ReturnType<typeof storyVisuals>;
+  images: NonNullable<CaContent["images"]>;
+};
+
+// What the editor needs: the event, every fact of its stories (for the
+// visuals), each story's visuals and images (to reuse), and the versions.
+export async function getEventEditor(id: string): Promise<{
+  event: CaEvent;
+  category: string;
+  facts: CaFact[];
+  stories: EventStoryLook[];
+  versions: EventVersion[];
+}> {
+  const [e] = await eventsById([id]);
+  if (!e) throw new Error("No such event");
+  const { all, used } = await eventStories(id);
+  return {
+    event: e,
+    category: eventCategory(used),
+    facts: eventFacts(used),
+    stories: all.map((s) => ({
+      id: s.id,
+      issue_date: s.issue_date,
+      headline: s.content?.headline.en || s.headline,
+      visuals: storyVisuals(s.content),
+      images: s.content?.images ?? [],
+    })),
+    versions: await eventVersions(id),
+  };
+}
+
+// The editor's changes to the summary (a version kept now and then).
+// A change from the AI (`reason` "ai") keeps the summary before it.
+export async function saveEventSummary(
+  id: string,
+  summary: CaContent,
+  reason: "edit" | "ai" = "edit",
+): Promise<CaEvent> {
+  const [e] = await eventsById([id]);
+  if (!e) throw new Error("No such event");
+  await keepEventVersion(id, e.summary, reason);
+  return updateEvent(id, { summary });
+}
+
+export async function restoreEventVersion(id: string, at: string): Promise<CaEvent> {
+  const [e] = await eventsById([id]);
+  if (!e) throw new Error("No such event");
+  const v = (await eventVersions(id)).find((x) => x.at === at);
+  if (!v) throw new Error("That version is no longer kept.");
+  await keepEventVersion(id, e.summary, "restore");
+  return updateEvent(id, { summary: v.summary });
+}
+
+// A visual for the summary from all the event's facts. It covers none of
+// the summary's points (those are written apart from the facts).
+export async function previewEventVisual(
+  id: string,
+  opts: { slot: number; type?: VisualType; note?: string; facts?: number[] },
+): Promise<{ visual: Visual; covers: number[] }> {
+  const [e] = await eventsById([id]);
+  if (!e?.summary) throw new Error("Write the summary first");
+  const { used } = await eventStories(id);
+  const facts = eventFacts(used);
+  const r = await visualFrom(
+    {
+      headline: e.summary.headline.en || e.name,
+      category: eventCategory(used),
+      facts,
+      content: e.summary,
+    },
+    opts,
+  );
+  return { visual: r.visual, covers: [] };
+}
+
+// One part of the summary written again (not saved: the editor chooses).
+export async function rewriteEventPart(
+  id: string,
+  part: EventPart,
+  note: string,
+): Promise<Partial<CaContent>> {
+  const [e] = await eventsById([id]);
+  if (!e?.summary) throw new Error("Write the summary first");
+  const { used } = await eventStories(id);
+  const raw = await eventSummaryRaw(e, used, { part, note, current: e.summary });
+  const parsed = parseContent(raw, EVENT_POINTS_MAX);
+  if (!parsed) throw new Error("The AI's reply could not be read. Try again.");
+  return fixShortFormsDeep(eventPartPatch(part, parsed.content));
 }
 
 // The next concluded event with stories and no summary, for the evening
@@ -1983,9 +2175,18 @@ export async function previewVisual(
 ): Promise<{ visual: Visual; covers: number[] }> {
   const item = await getItem(itemId);
   if (!item.content) throw new Error("Write the text first");
+  return visualFrom({ ...item, content: item.content }, opts);
+}
+
+// A visual from a story's facts (or an event's): the editor's pick of type
+// and points, made again once when it fails the number check.
+async function visualFrom(
+  item: { headline: string; category: string; facts: CaFact[]; content: CaContent },
+  opts: { slot: number; type?: VisualType; note?: string; facts?: number[] },
+): Promise<{ visual: Visual; covers: number[] }> {
   // The other visuals (all of them for a new one).
   const others = VISUAL_SLOTS.filter((_, i) => i !== opts.slot - 1)
-    .map(([key]) => item.content![key])
+    .map(([key]) => item.content[key])
     .filter((v): v is Visual => !!v);
   // Only the key points the editor picked, when they did: those leave the
   // text, as the visual shows them.
@@ -1999,7 +2200,7 @@ export async function previewVisual(
       visualMessages({
         glossary: await glossaryNow(),
         headline: item.headline,
-        category: item.category,
+        category: item.category as Category,
         facts,
         problem,
         type: opts.type,
