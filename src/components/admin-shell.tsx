@@ -32,6 +32,7 @@ import {
   UserSquare2,
   Images,
   MapPinned,
+  Compass,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
@@ -43,6 +44,7 @@ export type AdminSectionId =
   | "mcq"
   | "mcqPractice"
   | "cardStudio"
+  | "atlas"
   | "saathi"
   | "saathiAnswers"
   | "ca.daily"
@@ -106,6 +108,13 @@ export const ADMIN_GROUPS: { label: string; sections: SectionDef[] }[] = [
         label: "Card studio",
         icon: Layers,
         description: "Make decks from several books: proofread, chunk and download.",
+      },
+      {
+        id: "atlas",
+        label: "Rajasthan atlas",
+        icon: Compass,
+        description:
+          "Your master map's places, facts and layers, district overviews, and the students' atlas pages.",
       },
     ],
   },

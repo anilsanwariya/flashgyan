@@ -54,6 +54,7 @@ export const previewMap = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     const { normalizeMap, MAP_CSS } = await import("@/lib/map-spec");
     const { noteMapHtml } = await import("@/lib/notes-map");
+    await (await import("@/lib/atlas.server")).primeAtlasLayers();
     const map = normalizeMap(data.map);
     if (!map) return { html: "" };
     const accent = data.accent ?? "#6d28d9";

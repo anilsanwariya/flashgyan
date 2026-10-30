@@ -577,7 +577,11 @@ async function postedTitles(subjectId: string): Promise<string[]> {
     .eq("status", "posted");
   const ds = ((days ?? []) as Row[]).map((r) => String(r.day));
   if (!ds.length) return [];
-  const { data } = await from("gk_cards").select("card").in("day", ds);
+  const { data } = await from("gk_cards")
+    .select("card")
+    .in("day", ds)
+    .order("day")
+    .order("position");
   return ((data ?? []) as Row[])
     .map((r) => (r.card as GkCard | null)?.title.en ?? "")
     .filter(Boolean);
@@ -693,17 +697,49 @@ async function visualFor(
 
 // A map of the card's places, put where the place list says they are.
 async function mapFor(card: GkCard): Promise<MapSpec | null> {
-  const map = parseStoryMap(
-    await saathiComplete(
-      apiKey(),
-      storyMapMessages(
-        card.title.en,
-        card.facts.map((f) => f.text),
-        hindiGuide(await glossary()),
-      ),
-    ),
+  const atlas = await import("@/lib/atlas.server");
+  const layers = await atlas.atlasLayerChoices().catch(() => []);
+  const { ATLAS_CATS } = await import("@/lib/atlas");
+  const messages = storyMapMessages(
+    card.title.en,
+    card.facts.map((f) => f.text),
+    hindiGuide(await glossary()),
   );
+  // The editor's atlas: thematic layers, and every place of a kind.
+  messages.splice(1, 0, {
+    role: "system",
+    content: `This map is for a GK infographic card. The editor's Rajasthan atlas can also draw, under the places:
+- a thematic layer, when the card is about it (at most one): ${layers.map((l) => `"${l.key}" ${l.name.en}`).join("; ")}. Add it in the map as "layers": ["key"].
+- every place of one kind from the atlas, when the card is about all of them (e.g. all passes, all copper mines): add "atlas": {"cat": category, "district": "" or one district} beside "map". Categories: ${ATLAS_CATS.map((c) => `"${c.key}" ${c.name.en}`).join("; ")}.`,
+  });
+  const raw = await saathiComplete(apiKey(), messages);
+  const map = parseStoryMap(raw);
   if (!map) return null;
+  // Every place of the kind asked for (the atlas's verified ones).
+  let pick: { cat?: string; district?: string } = {};
+  try {
+    const t = raw.replace(/```(?:json)?/g, "");
+    pick =
+      (JSON.parse(t.slice(t.indexOf("{"), t.lastIndexOf("}") + 1)) as { atlas?: typeof pick })
+        .atlas ?? {};
+  } catch {
+    // No atlas places asked for.
+  }
+  if (pick.cat) {
+    const { MAX_PLACES } = await import("@/lib/map-spec");
+    const found = await atlas.atlasPlacesOf(pick.cat, pick.district || undefined);
+    const have = new Set(map.places.map((p) => p.name.en.toLowerCase()));
+    for (const p of found) {
+      if (map.places.length >= MAX_PLACES) break;
+      if (have.has(p.name_en.toLowerCase())) continue;
+      map.places.push({
+        name: { en: p.name_en, hi: p.name_hi },
+        lat: p.lat,
+        lon: p.lon,
+        src: "list",
+      });
+    }
+  }
   const { checkMapPlaces } = await import("@/lib/geo-places");
   return checkMapPlaces(map);
 }
@@ -800,6 +836,7 @@ async function proofAll(cards: GkCardRow[]): Promise<boolean> {
 async function renderOne(d: GkDay, cards: GkCardRow[], origin: string, settings: GkSettings) {
   const { subject } = await subjectAndTopic(d);
   const { noteMapHtml } = await import("@/lib/notes-map");
+  await (await import("@/lib/atlas.server")).primeAtlasLayers();
   for (const lang of ["en", "hi"] as GkLang[]) {
     const c = cards.find((x) => !(lang === "en" ? x.image_en : x.image_hi));
     if (!c?.card) continue;
@@ -843,6 +880,7 @@ export async function gkCardPreview(id: string, lang: GkLang, origin: string): P
   const settings = await getGkSettings();
   const { subject } = await subjectAndTopic(d);
   const { noteMapHtml } = await import("@/lib/notes-map");
+  await (await import("@/lib/atlas.server")).primeAtlasLayers();
   return gkCardHtml(c.card, {
     lang,
     design: lang === "en" ? settings.design_en : settings.design_hi,

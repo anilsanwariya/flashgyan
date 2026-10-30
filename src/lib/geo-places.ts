@@ -229,7 +229,20 @@ export async function checkMapPlaces<
     m.places.map(async (p) => {
       if (p.src === "you" || p.src === "list") return p;
       const hit = await matchPlace(p.name, p, 60);
-      if (!hit) return { ...p, src: "ai" as const };
+      if (!hit) {
+        // The editor's atlas (mines, passes, peaks… the list lacks).
+        const a = await import("@/lib/atlas.server")
+          .then((m) => m.matchAtlasPlace(p.name, p, 60))
+          .catch(() => null);
+        if (!a) return { ...p, src: "ai" as const };
+        return {
+          ...p,
+          name: { en: p.name.en || a.name_en, hi: p.name.hi || a.name_hi },
+          lat: a.lat,
+          lon: a.lon,
+          src: "list" as const,
+        };
+      }
       return {
         ...p,
         name: { en: p.name.en || hit.place.en, hi: p.name.hi || hit.place.hi },

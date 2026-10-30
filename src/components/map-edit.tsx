@@ -8,9 +8,13 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Check, ExternalLink, MapPin, Plus, Search, X } from "lucide-react";
 import { findMapPlaces } from "@/lib/geo.functions";
+import { atlasMapChoices, atlasPlacesOfFn } from "@/lib/atlas.functions";
+import { ATLAS_CATS } from "@/lib/atlas";
+import { useQuery } from "@tanstack/react-query";
 import {
   EMPTY_MAP,
   googleMapsUrl,
+  MAX_MAP_LAYERS,
   MAX_PLACES,
   PLACE_KIND_NAMES,
   type MapPlace,
@@ -80,6 +84,7 @@ export function MapEdit({
           Remove the map
         </Button>
       </div>
+      {raj && <AtlasExtras map={m} onChange={onChange} />}
       <ol className="space-y-2" aria-label="Places">
         {m.places.map((p, i) => (
           <li
@@ -326,6 +331,86 @@ function PlaceFinder({
             Not in the place list. Add it by hand and check it on Google Maps.
           </p>
         ))}
+    </div>
+  );
+}
+
+// The atlas's thematic layers under the places, and every place of a kind
+// from the atlas added at once ("all the passes of the Aravalli").
+function AtlasExtras({ map: m, onChange }: { map: MapSpec; onChange: (m: MapSpec) => void }) {
+  const choicesFn = useServerFn(atlasMapChoices);
+  const placesFn = useServerFn(atlasPlacesOfFn);
+  const q = useQuery({ queryKey: ["atlasMapChoices"], queryFn: () => choicesFn() });
+  const [cat, setCat] = useState("");
+  const [busy, setBusy] = useState(false);
+  const on = m.layers ?? [];
+  if (!q.data?.length) return null;
+  const toggle = (key: string) =>
+    onChange({
+      ...m,
+      layers: on.includes(key) ? on.filter((k) => k !== key) : [...on, key].slice(-MAX_MAP_LAYERS),
+    });
+  return (
+    <div className="space-y-2 rounded-xl border border-dashed border-border p-2 text-sm">
+      <p className="text-xs font-medium text-muted-foreground">
+        From the Rajasthan atlas (up to {MAX_MAP_LAYERS} layers)
+      </p>
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Atlas layers">
+        {q.data.map((l) => (
+          <button
+            key={l.key}
+            type="button"
+            aria-pressed={on.includes(l.key)}
+            onClick={() => toggle(l.key)}
+            className={`rounded-full border px-2 py-0.5 text-xs ${on.includes(l.key) ? "border-primary bg-primary text-primary-foreground" : "border-border hover:bg-muted"}`}
+          >
+            {l.name.en}
+          </button>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          aria-label="Atlas category"
+          value={cat}
+          onChange={(e) => setCat(e.target.value)}
+          className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+        >
+          <option value="">Add every place of a kind…</option>
+          {ATLAS_CATS.map((c) => (
+            <option key={c.key} value={c.key}>
+              {c.icon} {c.name.en}
+            </option>
+          ))}
+        </select>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!cat || busy || m.places.length >= MAX_PLACES}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const found = await placesFn({ data: { cat } });
+              const have = new Set(m.places.map((p) => p.name.en.toLowerCase()));
+              const add = found
+                .filter((p) => !have.has(p.name.en.toLowerCase()))
+                .slice(0, MAX_PLACES - m.places.length)
+                .map((p) => ({ name: p.name, lat: p.lat, lon: p.lon, src: "list" as const }));
+              onChange({ ...m, places: [...m.places, ...add] });
+              toast.success(
+                found.length > add.length
+                  ? `${add.length} of ${found.length} added (a map holds ${MAX_PLACES})`
+                  : `${add.length} added`,
+              );
+            } catch (e) {
+              toast.error(errorText(e, "Couldn't add them"));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Add from the atlas
+        </Button>
+      </div>
     </div>
   );
 }

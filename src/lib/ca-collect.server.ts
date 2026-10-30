@@ -240,6 +240,13 @@ export async function tick(origin?: string): Promise<TickResult> {
   } catch (e) {
     console.error("gk infographics:", e);
   }
+  // The atlas: Hindi filled in, the knowledge base kept up to date, the
+  // district overviews' jobs moved on.
+  try {
+    await (await import("@/lib/atlas.server")).atlasStep();
+  } catch (e) {
+    console.error("atlas:", e);
+  }
 
   const { data: claimed, error } = await supabaseAdmin.rpc(
     "ca_claim_run" as never,
