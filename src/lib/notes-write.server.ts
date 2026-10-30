@@ -621,6 +621,8 @@ export async function deleteNote(bookId: string, topicId: string) {
 // ---------- Pages ----------
 
 async function pagesFor(bookId: string, only?: string, draft?: unknown) {
+  // The maps' thematic layers from the atlas.
+  await (await import("@/lib/atlas.server")).primeAtlasLayers().catch(() => undefined);
   const book = await getBook(bookId);
   const [plan, have, { topics }] = await Promise.all([
     getPlan(bookId),

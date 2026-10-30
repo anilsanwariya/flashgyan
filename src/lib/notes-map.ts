@@ -10,6 +10,18 @@ import { RAJ_CANALS, RAJ_PROTECTED, RAJ_RIVERS, type GeoLine } from "@/lib/geo-d
 import { RAJ_CONSTITUENCIES, RAJ_DISTRICTS } from "@/lib/geo-admin";
 import type { Bi } from "@/lib/current-affairs";
 import { MAP_CSS, type MapPlace as NotePlace, type MapSpec as NoteMap } from "@/lib/map-spec";
+import { layerLegend, layerSvg, pickBi, type AtlasLayer } from "@/lib/atlas";
+
+// The atlas's thematic layers, as the server last read them (the atlas
+// keeps them up to date: see primeAtlasLayers).
+let atlasLayers: AtlasLayer[] = [];
+export function setAtlasLayers(list: AtlasLayer[]) {
+  atlasLayers = list;
+}
+const mapLayers = (m: NoteMap) =>
+  (m.layers ?? [])
+    .map((k) => atlasLayers.find((l) => l.key === k))
+    .filter((l): l is AtlasLayer => !!l);
 
 type Lang = "en" | "hi";
 
@@ -128,6 +140,20 @@ export function noteMapSvg(m: NoteMap, lang: Lang, accent: string): string {
   };
   let layers = "";
   let labels = "";
+  // The atlas's layers, kept inside Rajasthan (they are drawn from the
+  // notes' sketch maps).
+  if (!india && mapLayers(m).length) layers += `<g clip-path="url(#nm-raj)">`;
+  if (!india)
+    for (const l of mapLayers(m))
+      layers += layerSvg(
+        l,
+        (lon, lat) => project(pr, lon, lat),
+        k,
+        lang,
+        (name) => RAJ_DISTRICTS.find((d) => d.en === name)?.rings ?? null,
+        { opacity: 0.38, labels: false },
+      );
+  if (!india && mapLayers(m).length) layers += `</g>`;
   // District names go last: rivers and canals matter more.
   const distLabels: [number, number, string][] = [];
   const acLabels: [number, number, string][] = [];
@@ -213,7 +239,7 @@ export function noteMapSvg(m: NoteMap, lang: Lang, accent: string): string {
     .join("");
   const nx = vx + vw - 14 * k;
   const ny = vy + 18 * k;
-  return `<svg viewBox="${box}" class="nm" role="img" aria-label="${esc(pick(m.title, lang))}"><defs><clipPath id="nm-clip"><rect x="${(vx - pad).toFixed(1)}" y="${(vy - pad).toFixed(1)}" width="${(vw + 2 * pad).toFixed(1)}" height="${(vh + 2 * pad).toFixed(1)}"/></clipPath></defs><rect x="${(vx - pad).toFixed(1)}" y="${(vy - pad).toFixed(1)}" width="${(vw + 2 * pad).toFixed(1)}" height="${(vh + 2 * pad).toFixed(1)}" fill="#fbfaf7"/><g clip-path="url(#nm-clip)">${base}${layers}${labels}${dots}</g><g transform="translate(${nx.toFixed(1)},${ny.toFixed(1)}) scale(${k.toFixed(3)})"><path d="M0,-14 L6,4 L0,0 L-6,4 Z" fill="#1f2430"/><text y="17" text-anchor="middle" class="nm-n">N</text></g></svg>`;
+  return `<svg viewBox="${box}" class="nm" role="img" aria-label="${esc(pick(m.title, lang))}"><defs>${india ? "" : `<clipPath id="nm-raj"><path d="${RAJASTHAN_MAP.outline}"/></clipPath>`}<clipPath id="nm-clip"><rect x="${(vx - pad).toFixed(1)}" y="${(vy - pad).toFixed(1)}" width="${(vw + 2 * pad).toFixed(1)}" height="${(vh + 2 * pad).toFixed(1)}"/></clipPath></defs><rect x="${(vx - pad).toFixed(1)}" y="${(vy - pad).toFixed(1)}" width="${(vw + 2 * pad).toFixed(1)}" height="${(vh + 2 * pad).toFixed(1)}" fill="#fbfaf7"/><g clip-path="url(#nm-clip)">${base}${layers}${labels}${dots}</g><g transform="translate(${nx.toFixed(1)},${ny.toFixed(1)}) scale(${k.toFixed(3)})"><path d="M0,-14 L6,4 L0,0 L-6,4 Z" fill="#1f2430"/><text y="17" text-anchor="middle" class="nm-n">N</text></g></svg>`;
 }
 
 function inRing(ring: [number, number][], lon: number, lat: number) {
@@ -233,9 +259,22 @@ export function noteMapHtml(m: NoteMap, lang: Lang, accent: string, review = fal
   const places = m.places.filter((p) => onMap(m, p));
   const mark = (p: NotePlace) =>
     review && p.src === "ai" ? `<sup class="ai" title="Position not checked">◇</sup>` : "";
-  return `<figure class="nmap"><div class="nmap-svg">${noteMapSvg(m, lang, accent)}</div><div class="nmap-side"><ol class="nmap-list">${places.map((p, i) => `<li><span class="dn">${i + 1}</span>${esc(pick(p.name, lang))}${mark(p)}</li>`).join("")}</ol><div class="nmap-credit">${
+  return `<figure class="nmap"><div class="nmap-svg">${noteMapSvg(m, lang, accent)}</div><div class="nmap-side"><ol class="nmap-list">${places.map((p, i) => `<li><span class="dn">${i + 1}</span>${esc(pick(p.name, lang))}${mark(p)}</li>`).join("")}</ol>${legendHtml(m, lang)}<div class="nmap-credit">${
     lang === "hi" ? "मानचित्र पैमाने पर नहीं" : "Map not to scale"
   }</div></div></figure>`;
 }
 
 export const NOTE_MAP_CSS = MAP_CSS;
+
+// The thematic layers' keys (colour → name) under the places.
+function legendHtml(m: NoteMap, lang: Lang): string {
+  const items = mapLayers(m).flatMap((l) => layerLegend(l));
+  if (!items.length) return "";
+  return `<ul class="nmap-legend">${items
+    .slice(0, 14)
+    .map(
+      (x) =>
+        `<li><i class="${x.kind === "line" ? "ln" : ""}" style="background:${x.color}"></i>${esc(pickBi(x.name, lang))}</li>`,
+    )
+    .join("")}</ul>`;
+}

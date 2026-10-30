@@ -21,6 +21,8 @@ import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as SummaryRouteImport } from './routes/summary'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
+import { Route as AtlasIndexRouteImport } from './routes/atlas.index'
+import { Route as AtlasDistrictRouteImport } from './routes/atlas.$district'
 import { Route as DecksDeckIdRouteImport } from './routes/decks.$deckId'
 import { Route as McqResultTestIdRouteImport } from './routes/mcq-result.$testId'
 import { Route as McqTestIdRouteImport } from './routes/mcq.$testId'
@@ -89,6 +91,16 @@ const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AtlasIndexRoute = AtlasIndexRouteImport.update({
+  id: '/atlas/',
+  path: '/atlas/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AtlasDistrictRoute = AtlasDistrictRouteImport.update({
+  id: '/atlas/$district',
+  path: '/atlas/$district',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DecksDeckIdRoute = DecksDeckIdRouteImport.update({
   id: '/decks/$deckId',
   path: '/decks/$deckId',
@@ -142,11 +154,13 @@ export interface FileRoutesByFullPath {
   '/summary': typeof SummaryRoute
   '/terms': typeof TermsRoute
   '/admin': typeof AuthenticatedAdminRoute
+  '/atlas/$district': typeof AtlasDistrictRoute
   '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
+  '/atlas/': typeof AtlasIndexRoute
   '/api/ca/tick': typeof ApiCaTickRoute
   '/api/saathi/ask': typeof ApiSaathiAskRoute
   '/api/saathi/check': typeof ApiSaathiCheckRoute
@@ -163,11 +177,13 @@ export interface FileRoutesByTo {
   '/summary': typeof SummaryRoute
   '/terms': typeof TermsRoute
   '/admin': typeof AuthenticatedAdminRoute
+  '/atlas/$district': typeof AtlasDistrictRoute
   '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
+  '/atlas': typeof AtlasIndexRoute
   '/api/ca/tick': typeof ApiCaTickRoute
   '/api/saathi/ask': typeof ApiSaathiAskRoute
   '/api/saathi/check': typeof ApiSaathiCheckRoute
@@ -186,11 +202,13 @@ export interface FileRoutesById {
   '/summary': typeof SummaryRoute
   '/terms': typeof TermsRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
+  '/atlas/$district': typeof AtlasDistrictRoute
   '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
+  '/atlas/': typeof AtlasIndexRoute
   '/api/ca/tick': typeof ApiCaTickRoute
   '/api/saathi/ask': typeof ApiSaathiAskRoute
   '/api/saathi/check': typeof ApiSaathiCheckRoute
@@ -209,11 +227,13 @@ export interface FileRouteTypes {
     | '/summary'
     | '/terms'
     | '/admin'
+    | '/atlas/$district'
     | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
     | '/practice/$deckId'
+    | '/atlas/'
     | '/api/ca/tick'
     | '/api/saathi/ask'
     | '/api/saathi/check'
@@ -230,11 +250,13 @@ export interface FileRouteTypes {
     | '/summary'
     | '/terms'
     | '/admin'
+    | '/atlas/$district'
     | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
     | '/practice/$deckId'
+    | '/atlas'
     | '/api/ca/tick'
     | '/api/saathi/ask'
     | '/api/saathi/check'
@@ -252,11 +274,13 @@ export interface FileRouteTypes {
     | '/summary'
     | '/terms'
     | '/_authenticated/admin'
+    | '/atlas/$district'
     | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
     | '/practice/$deckId'
+    | '/atlas/'
     | '/api/ca/tick'
     | '/api/saathi/ask'
     | '/api/saathi/check'
@@ -274,11 +298,13 @@ export interface RootRouteChildren {
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   SummaryRoute: typeof SummaryRoute
   TermsRoute: typeof TermsRoute
+  AtlasDistrictRoute: typeof AtlasDistrictRoute
   DecksDeckIdRoute: typeof DecksDeckIdRoute
   McqResultTestIdRoute: typeof McqResultTestIdRoute
   McqTestIdRoute: typeof McqTestIdRoute
   PracticeMcqTestIdRoute: typeof PracticeMcqTestIdRoute
   PracticeDeckIdRoute: typeof PracticeDeckIdRoute
+  AtlasIndexRoute: typeof AtlasIndexRoute
   ApiCaTickRoute: typeof ApiCaTickRoute
   ApiSaathiAskRoute: typeof ApiSaathiAskRoute
   ApiSaathiCheckRoute: typeof ApiSaathiCheckRoute
@@ -370,6 +396,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/atlas/': {
+      id: '/atlas/'
+      path: '/atlas'
+      fullPath: '/atlas/'
+      preLoaderRoute: typeof AtlasIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/atlas/$district': {
+      id: '/atlas/$district'
+      path: '/atlas/$district'
+      fullPath: '/atlas/$district'
+      preLoaderRoute: typeof AtlasDistrictRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/decks/$deckId': {
       id: '/decks/$deckId'
       path: '/decks/$deckId'
@@ -452,11 +492,13 @@ const rootRouteChildren: RootRouteChildren = {
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   SummaryRoute: SummaryRoute,
   TermsRoute: TermsRoute,
+  AtlasDistrictRoute: AtlasDistrictRoute,
   DecksDeckIdRoute: DecksDeckIdRoute,
   McqResultTestIdRoute: McqResultTestIdRoute,
   McqTestIdRoute: McqTestIdRoute,
   PracticeMcqTestIdRoute: PracticeMcqTestIdRoute,
   PracticeDeckIdRoute: PracticeDeckIdRoute,
+  AtlasIndexRoute: AtlasIndexRoute,
   ApiCaTickRoute: ApiCaTickRoute,
   ApiSaathiAskRoute: ApiSaathiAskRoute,
   ApiSaathiCheckRoute: ApiSaathiCheckRoute,

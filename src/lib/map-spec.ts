@@ -22,9 +22,14 @@ export type MapSpec = {
   constituencies?: boolean;
   protected?: boolean;
   canals?: boolean;
+  // The atlas's thematic layers drawn under the places (their keys:
+  // "agro", "koppen", "physio"…).
+  layers?: string[];
   title: Bi;
   places: MapPlace[];
 };
+
+export const MAX_MAP_LAYERS = 2;
 
 export const MAX_PLACES = 12;
 
@@ -86,6 +91,19 @@ export function normalizeMap(v: unknown): MapSpec | null {
           constituencies: m.constituencies === true,
           protected: m.protected === true,
           canals: m.canals === true,
+          ...(Array.isArray(m.layers) && m.layers.length
+            ? {
+                layers: [
+                  ...new Set(
+                    m.layers
+                      .filter(
+                        (x): x is string => typeof x === "string" && /^[a-z0-9-]{2,30}$/.test(x),
+                      )
+                      .slice(0, MAX_MAP_LAYERS),
+                  ),
+                ],
+              }
+            : {}),
         }
       : {}),
     title: bi(m.title, 100),
@@ -132,4 +150,8 @@ export const MAP_CSS = `
 .nmap-list { list-style: none; padding: 0; margin: 0; font-size: 9.2pt; columns: 1; }
 .nmap-list li { display: flex; align-items: center; gap: 1.5mm; padding: 0.6mm 0; }
 .nmap-credit { font-size: 7pt; color: #6b7080; margin-top: 2mm; }
+.nmap-legend { list-style: none; padding: 0; margin: 2mm 0 0; font-size: 8pt; }
+.nmap-legend li { display: flex; align-items: center; gap: 1.5mm; padding: 0.3mm 0; }
+.nmap-legend i { flex: none; width: 3mm; height: 3mm; border-radius: 0.6mm; }
+.nmap-legend i.ln { height: 0.8mm; border-radius: 0; }
 `;
