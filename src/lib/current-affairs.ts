@@ -795,15 +795,19 @@ export function enrichMessages(opts: {
     : "(none)";
   const editorial = opts.category === "editorial";
   const covered = opts.visual?.covers.map((i) => i + 1) ?? [];
+  // This story's own notes (its visual, an event roundup, a merged story)
+  // follow the fixed instructions, so those stay the same for every story
+  // and are read from the prompt cache.
   const visualNote = opts.visual
     ? `\nA ${opts.visual.type} printed with this story already shows ${covered.length ? `facts ${covered.join(", ")}` : "some of the facts"}. Do not restate ${covered.length ? "those facts" : "what it shows"} in the summary or "why"; still write their points (they are only printed if the visual is removed).`
     : "";
+  const storyNotes = `${visualNote}${opts.event ? roundupNote(opts.event, opts.eventKind) : opts.combined ? COMBINED_NOTE : ""}`;
   return [
     {
       role: "system",
       content: `You write a bilingual (Hindi and English) current affairs magazine for Rajasthan competitive exam aspirants (RPSC and RSSB exams, with depth for RAS Mains). Write one news item from the numbered facts.
 RULES: Use only the facts given (numbered facts and any Context). Never add a number, name, date or claim that is not in them. Follow the editor's instruction when one is given, and an [Editor's note] on a fact (for example: put it in the headline, build the MCQ or the Mains question on it, keep it word for word), within these rules.
-BE BRIEF: students revise from this, so less theory, more memorable facts. ${summaryRule(words)} Nothing is repeated between the points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${visualNote}${opts.event ? roundupNote(opts.event, opts.eventKind) : opts.combined ? COMBINED_NOTE : ""}${styleBlock(opts.style)}
+BE BRIEF: students revise from this, so less theory, more memorable facts. ${summaryRule(words)} Nothing is repeated between the points and "why". Points are short phrases (at most 15 words) that start with the key term or number, not full explanatory sentences. No filler such as "This is a significant step".${styleBlock(opts.style)}
 STATIC CONNECT links the news to the static syllabus. "keywords" lists up to ${MAX_KEYWORDS} static concepts the news links to that RPSC could ask about (constitutional articles, acts, institutions, technologies, schemes, places, conventions, terms), most important first (the "Static concept" in the message, when given), whether or not the passages explain them; each is a short name of at most 5 words. "statics" explains the first 1 or 2 keywords the way a textbook does: what it is, what it says, how it works, in 1-2 sentences of at most 40 words each, without retelling the news. Base each on the knowledge-base passages [K…] that explain it, even if they never mention the news, and list them in "from"; when no passage explains it, write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. Use [] for both when the news has no static concept worth explaining.${hindiGuide(opts.glossary)}
 Reply with JSON only:
 {"headline": {"en": "...", "hi": "..."},
@@ -835,6 +839,9 @@ PRACTICE QUESTIONS follow the RPSC (RAS) pattern and difficulty:
   }
   - End with the marks and word limit: "(5 marks, 50 words)" or "(10 marks, 150 words)"; in Hindi "(5 अंक, 50 शब्द)" or "(10 अंक, 150 शब्द)", using RPSC's Hindi phrasing (e.g. "के प्रमुख उद्देश्य लिखिए", "की मुख्य विशेषताओं का उल्लेख कीजिए").`,
     },
+    ...(storyNotes
+      ? [{ role: "system" as const, content: `NOTES FOR THIS STORY:${storyNotes}` }]
+      : []),
     {
       role: "user",
       content: `Category: ${opts.category}\nHeadline: ${opts.headline}\n${opts.syllabus ? `RAS syllabus topic: ${opts.syllabus}\n` : opts.papers ? `No syllabus topic matched; pick the paper and subject from: ${opts.papers}\n` : ""}${opts.concept ? `Static concept: ${opts.concept}\n` : ""}${opts.mainsSet?.length ? `Mains questions already set for this issue:\n${opts.mainsSet.map((q) => `- ${q}`).join("\n")}\n` : ""}\nFacts:\n${facts}${context}${note}\n\nKnowledge-base passages:\n${kb}`,
