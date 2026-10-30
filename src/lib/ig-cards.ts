@@ -11,6 +11,18 @@ export type IgLang = "en" | "hi";
 // One word's card. For an English word `main` is its Hindi meaning and
 // `sub` its English one; for a Hindi word `main` is its Hindi meaning and
 // `sub` the English word for it.
+// "noun", "adverb"… for an English word; "संज्ञा", "क्रिया"… for a Hindi one.
+export type IgForm = { word: string; pos: string };
+
+// "noun" → "n.": the short form shown on the card.
+const POS_SHORT: Record<string, string> = {
+  noun: "n.",
+  verb: "v.",
+  adjective: "adj.",
+  adverb: "adv.",
+};
+export const formPos = (pos: string) => POS_SHORT[pos.trim().toLowerCase()] ?? pos.trim();
+
 export type IgCard = {
   lang: IgLang;
   word: string;
@@ -32,6 +44,12 @@ export type IgCard = {
   rewritten?: boolean;
   synonyms: string[];
   antonyms: string[];
+  // Other forms of the word, another part of speech each: belligerence
+  // (noun), belligerently (adverb). Up to 3.
+  forms?: IgForm[];
+  // Common phrases (collocations) with the word: "belligerent attitude".
+  // Up to 3.
+  phrases?: string[];
   // One or two tips: root, memory trick, don't confuse, word family,
   // समास, शब्द-रचना, वर्तनी सावधान… **bold** and ~~struck~~ allowed.
   extras: { title: string; text: string }[];
@@ -195,6 +213,9 @@ const BASE = `
   .rows { display: flex; flex-direction: column; gap: 18px; }
   .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
   .rl { font-size: 30px; font-weight: 800; text-transform: uppercase; width: 220px; }
+  .rt { flex: 1; min-width: 0; font-size: 34px; line-height: 1.35; }
+  .rt i { font-style: normal; opacity: .7; font-size: .8em; }
+  .rt .dot { opacity: .45; padding: 0 6px; }
   .chip { font-size: 34px; font-weight: 600; padding: 8px 24px; border-radius: 40px; }
   .extra { font-size: 36px; line-height: 1.45; display: flex; flex-direction: column; gap: 14px; }
   .extra + .extra { margin-top: 0; }
@@ -438,12 +459,16 @@ const LABELS = {
     based: "📰 Based on today's news",
     syn: "Synonyms",
     ant: "Antonyms",
+    forms: "Forms",
+    phrases: "Phrases",
   },
   hi: {
     news: "📰 आज की ख़बर में",
     based: "📰 आज की ख़बर पर आधारित",
     syn: "पर्यायवाची",
     ant: "विलोम",
+    forms: "शब्द रूप",
+    phrases: "प्रयोग",
   },
 };
 
@@ -468,7 +493,13 @@ export function igCardHtml(card: IgCard, o: IgRenderOpts): string {
       <div class="title"><span>Words in the News</span><span class="date">${esc(date)}</span></div>`;
   const syn = card.synonyms.filter((x) => x.trim());
   const ant = card.antonyms.filter((x) => x.trim());
-  const extras = card.extras.filter((x) => x.text.trim()).slice(0, 2);
+  const forms = (card.forms ?? []).filter((x) => x.word.trim()).slice(0, 3);
+  const phrases = (card.phrases ?? []).filter((x) => x.trim()).slice(0, 3);
+  const dot = `<span class="dot">·</span>`;
+  // With both forms and phrases, one tip keeps the card readable.
+  const extras = card.extras
+    .filter((x) => x.text.trim())
+    .slice(0, forms.length && phrases.length ? 1 : 2);
   const strength = Math.max(0, Math.min(100, o.watermark)) / 100;
   const dark = IG_DESIGNS.find((d) => d.key === o.design)?.dark;
   const wmk =
@@ -502,6 +533,14 @@ export function igCardHtml(card: IgCard, o: IgRenderOpts): string {
     </div>`
         : ""
     }
+    ${
+      forms.length || phrases.length
+        ? `<div class="rows">
+      ${forms.length ? `<div class="row" data-forms><span class="rl">${l.forms}</span><span class="rt">${forms.map((f) => `<b>${esc(f.word)}</b>${f.pos.trim() ? ` <i>(${esc(formPos(f.pos))})</i>` : ""}`).join(dot)}</span></div>` : ""}
+      ${phrases.length ? `<div class="row" data-phrases><span class="rl">${l.phrases}</span><span class="rt">${phrases.map((p) => markWord(p, card.word).replace(/(<\/?)mark>/g, "$1b>")).join(dot)}</span></div>` : ""}
+    </div>`
+        : ""
+    }
     ${extras
       .map(
         (x) =>
@@ -531,12 +570,12 @@ export const IG_SAMPLES: Record<IgLang, IgCard> = {
     paper: "Sample",
     synonyms: ["Warring", "Hostile", "Combative"],
     antonyms: ["Peaceable", "Friendly"],
-    extras: [
-      {
-        title: "Root",
-        text: "Latin **bellum** = war → bellicose, rebellion. belligerence (N.) · belligerently (Adv.)",
-      },
+    forms: [
+      { word: "belligerence", pos: "noun" },
+      { word: "belligerently", pos: "adverb" },
     ],
+    phrases: ["belligerent nations", "belligerent attitude"],
+    extras: [{ title: "Root", text: "Latin **bellum** = war → bellicose, rebellion" }],
   },
   hi: {
     lang: "hi",
@@ -551,8 +590,8 @@ export const IG_SAMPLES: Record<IgLang, IgCard> = {
     paper: "Sample",
     synonyms: ["स्वावलंबी", "स्वाश्रयी"],
     antonyms: ["परावलंबी", "पराश्रित"],
-    extras: [
-      { title: "समास", text: "आत्म पर निर्भर → **तत्पुरुष समास** · संज्ञा रूप: **आत्मनिर्भरता**" },
-    ],
+    forms: [{ word: "आत्मनिर्भरता", pos: "संज्ञा" }],
+    phrases: ["आत्मनिर्भर बनाना", "आत्मनिर्भर भारत"],
+    extras: [{ title: "समास", text: "आत्म पर निर्भर → **तत्पुरुष समास**" }],
   },
 };

@@ -52,6 +52,9 @@ import {
   WEEKDAYS,
   type IgSettings,
   igLangsOn,
+  igPostDefault,
+  istInput,
+  fromIstInput,
 } from "@/lib/ig-words";
 import { istDate } from "@/lib/current-affairs";
 import { playStoreUrl } from "@/lib/app-promo";
@@ -507,15 +510,23 @@ function Review({
   const approveFn = useServerFn(approveIgDay);
   const [caption, setCaption] = useState(() => view.day?.caption || captionFor(view, date));
   const [busy, setBusy] = useState(false);
+  // When it posts: the posting time today, or soon once that has passed.
+  const [postAt, setPostAt] = useState(() => istInput(igPostDefault(view.settings.post_time)));
+  const at = fromIstInput(postAt);
+  const atBad = !at || at.getTime() < Date.now() - 60_000;
   const design = (view.day?.design ?? "paper") as IgDesign;
   const unticked = view.cards.filter((c) => !c.checked);
   const writing = view.day?.status === "writing";
   const approve = async (now: boolean) => {
     setBusy(true);
     try {
-      await approveFn({ data: { date, caption, now } });
+      await approveFn({
+        data: { date, caption, now, ...(!now && at ? { at: at.toISOString() } : {}) },
+      });
       toast.success(
-        now ? "Approved: posting as soon as the images are made" : "Approved and scheduled",
+        now
+          ? "Approved: posting as soon as the images are made"
+          : `Approved: posts ${timeIst(at!.toISOString())}`,
       );
       await onChange();
     } catch (e) {
@@ -691,7 +702,7 @@ function Review({
         ) : (
           <span className="text-sm">All cards checked.</span>
         )}
-        <div className="flex w-full flex-col gap-2 sm:ml-auto sm:w-auto sm:flex-row">
+        <div className="grid w-full grid-cols-2 gap-2 sm:ml-auto sm:flex sm:w-auto">
           <Button
             variant="outline"
             disabled={
@@ -701,13 +712,26 @@ function Review({
           >
             Approve & post now
           </Button>
+          <Input
+            type="datetime-local"
+            aria-label="Posting time (India)"
+            title="Posting time (India)"
+            value={postAt}
+            min={istInput(new Date())}
+            onChange={(e) => setPostAt(e.target.value)}
+            className={`order-first col-span-2 sm:order-none sm:w-52 ${atBad ? "border-destructive" : ""}`}
+          />
           <Button
             disabled={
-              busy || writing || unticked.length > 0 || captionText(caption).length > CAPTION_MAX
+              busy ||
+              writing ||
+              atBad ||
+              unticked.length > 0 ||
+              captionText(caption).length > CAPTION_MAX
             }
             onClick={() => void approve(false)}
           >
-            Approve & schedule for {view.settings.post_time} tomorrow
+            Approve & schedule
           </Button>
         </div>
       </div>
@@ -1378,7 +1402,7 @@ function Settings() {
           </span>
         </label>
         <label className="block space-y-1 text-sm">
-          <span className="font-medium">Posting time (India), the day after the news</span>
+          <span className="font-medium">Posting time (India)</span>
           <Input
             type="time"
             aria-label="Posting time"
@@ -1386,6 +1410,10 @@ function Settings() {
             onChange={(e) => set({ post_time: e.target.value })}
             className="w-32"
           />
+          <span className="block text-xs text-muted-foreground">
+            Approving schedules the album for this time on the same day (15 minutes later if it has
+            passed). You can change the time before approving.
+          </span>
         </label>
         <div className="flex flex-wrap gap-4">
           {num("English suggestions", "suggest_en", 0, 20)}

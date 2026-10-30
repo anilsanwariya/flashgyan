@@ -8,12 +8,19 @@
 // the minute tick or by the editor's page, whichever comes first.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { saathiComplete, saathiErrorDetail } from "../../supabase/functions/_shared/saathi-core.ts";
-import { dailyPostTime, formatDate, istDate } from "@/lib/current-affairs";
+import { formatDate, istDate } from "@/lib/current-affairs";
 import * as CA from "@/lib/current-affairs.server";
 import * as FS from "@/lib/flash-studio.server";
 import { looseWord } from "@/lib/flash-spell";
 import type { WnSense } from "@/lib/flash-wordnet";
-import { igCardHtml, igDate, type IgCard, type IgDesign, type IgLang } from "@/lib/ig-cards";
+import {
+  igCardHtml,
+  igDate,
+  type IgCard,
+  type IgDesign,
+  type IgForm,
+  type IgLang,
+} from "@/lib/ig-cards";
 import { roundupHtml, type IgRoundupWord } from "@/lib/ig-roundup";
 import { parseStyleRules, type StyleSuggestion } from "@/lib/ca-style";
 import {
@@ -54,6 +61,8 @@ import {
   type IgCheck,
   type IgSettings,
   igLangsOn,
+  formCandidates,
+  igPostDefault,
 } from "@/lib/ig-words";
 
 const from = (table: string) => supabaseAdmin.from(table as never);
@@ -493,6 +502,8 @@ function fieldWith(card: IgCard, word: string): CardField {
   if (has(card.newsHi)) return "newsHi";
   if (card.synonyms.some(has)) return "synonyms";
   if (card.antonyms.some(has)) return "antonyms";
+  if ((card.forms ?? []).some((f) => has(f.word))) return "forms";
+  if ((card.phrases ?? []).some(has)) return "phrases";
   return "extras";
 }
 
@@ -523,8 +534,27 @@ async function dictionaryChecks(card: IgCard, base: string): Promise<IgCheck[]> 
     (card.lang === "en" ? FS.enWordnetSenses(words) : FS.wordnetSenses(words)).catch(
       () => ({}) as Record<string, WnSense[]>,
     );
-  const items = [...card.synonyms, ...card.antonyms].filter((x) => !x.includes(" "));
+  const forms = card.lang === "en" ? (card.forms ?? []).filter((f) => f.word.trim()) : [];
+  const items = [...card.synonyms, ...card.antonyms, ...forms.map((f) => f.word)].filter(
+    (x) => !x.includes(" "),
+  );
   const found = await look([base, ...items]);
+  // An English word form WordNet doesn't know, or knows only as another
+  // part of speech.
+  for (const f of forms) {
+    if (f.word.includes(" ")) continue;
+    const ps = [...new Set((found[f.word] ?? []).map((s) => s.pos))];
+    const said = POS_EN.find((p) => f.pos.toLowerCase().startsWith(p));
+    if (!ps.length)
+      note("forms", f.word, "", `WordNet doesn't have "${f.word}": check that the form exists.`);
+    else if (said && !ps.includes(said))
+      note(
+        "forms",
+        f.word,
+        `${f.word} (${ps[0]})`,
+        `WordNet has "${f.word}" as ${ps.join(" / ")}, not as ${said}.`,
+      );
+  }
   const senses = found[base] ?? [];
   if (senses.length) {
     // The card's part of speech, else every one WordNet knows the word as.
@@ -558,6 +588,18 @@ async function dictionaryChecks(card: IgCard, base: string): Promise<IgCheck[]> 
             `WordNet has "${x}" only as ${ps}, but ${base} is used as ${[...want].join(" / ")}: not a fitting ${what}.`,
           );
       }
+    // An "antonym" WordNet gives as a synonym of the word, or a "synonym"
+    // it gives as an antonym.
+    const fit = senses.filter((s) => want.has(s.pos));
+    const low = (xs: string[]) => new Set(xs.map((x) => x.toLowerCase()));
+    const wnSyn = low(fit.flatMap((s) => s.synonyms));
+    const wnAnt = low(fit.flatMap((s) => s.antonyms));
+    for (const x of card.antonyms)
+      if (wnSyn.has(x.toLowerCase()) && !wnAnt.has(x.toLowerCase()))
+        note("antonyms", x, "", `WordNet gives "${x}" as a synonym of ${base}, not an antonym.`);
+    for (const x of card.synonyms)
+      if (wnAnt.has(x.toLowerCase()) && !wnSyn.has(x.toLowerCase()))
+        note("synonyms", x, "", `WordNet gives "${x}" as an antonym of ${base}, not a synonym.`);
   }
   return out;
 }
@@ -766,7 +808,7 @@ async function notify(day: string, kind: "suggested" | "review", origin: string 
   } else {
     const cards = await cardsOf(day);
     const open = cards.reduce((n, c) => n + c.checks.filter((x) => x.state === "open").length, 0);
-    text = `🖼️ Words in the News, ${formatDate(day, "en")}: ${cards.length} cards are written and proofread${open ? ` (${open} notes to look at)` : ""}. Review and approve them before ${settings.post_time} tomorrow.`;
+    text = `🖼️ Words in the News, ${formatDate(day, "en")}: ${cards.length} cards are written and proofread${open ? ` (${open} notes to look at)` : ""}. Review and approve them: they post at ${settings.post_time} on the day you approve, or at the time you choose.`;
   }
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
@@ -1370,6 +1412,15 @@ export type IgCardAids = {
   sentences: string[];
   original: string;
   wordnet: { synonyms: string[]; antonyms: string[] };
+  // What the dictionary says, beside the card: its meanings (the card's
+  // part of speech first), every synonym and antonym it gives, and other
+  // forms of an English word it knows.
+  dictionary: {
+    senses: { pos: string; gloss: string }[];
+    synonyms: string[];
+    antonyms: string[];
+    forms: IgForm[];
+  };
   versions: IgVersion[];
 };
 
@@ -1409,12 +1460,33 @@ export async function igCardAids(id: string): Promise<IgCardAids> {
       .filter((x) => !have.has(x.toLowerCase()) && x.toLowerCase() !== base.toLowerCase())
       .slice(0, 10);
   const { data: v, error: ve } = await from("ig_words").select("versions").eq("id", id).single();
+  // Other forms: the spellings a form could have that WordNet knows.
+  let forms: IgForm[] = [];
+  if (lang === "en") {
+    const cands = formCandidates(base);
+    const known = cands.length
+      ? await FS.enWordnetSenses(cands).catch(() => ({}) as Record<string, WnSense[]>)
+      : {};
+    const onCard = new Set((card?.forms ?? []).map((f) => f.word.toLowerCase()));
+    forms = cands
+      .filter((c) => known[c]?.length && !onCard.has(c))
+      .map((c) => ({ word: c, pos: known[c][0].pos }))
+      .filter((f) => !said || f.pos !== said)
+      .slice(0, 8);
+  }
+  const ordered = [...fit, ...senses.filter((x) => !fit.includes(x))];
   return {
     sentences,
     original: String(w.sentence ?? ""),
     wordnet: {
       synonyms: pick(fit.flatMap((x) => x.synonyms)),
       antonyms: pick(fit.flatMap((x) => x.antonyms)),
+    },
+    dictionary: {
+      senses: ordered.slice(0, 4).map((x) => ({ pos: x.pos, gloss: x.gloss })),
+      synonyms: [...new Set(fit.flatMap((x) => x.synonyms))],
+      antonyms: [...new Set(fit.flatMap((x) => x.antonyms))],
+      forms,
     },
     versions: versionsMissing(ve) ? [] : (((v as Row | null)?.versions ?? []) as IgVersion[]),
   };
@@ -1509,7 +1581,14 @@ export async function setIgDesign(day: string, design: IgDesign): Promise<void> 
 
 // Approved: the cards are made into images and posted at the set time
 // (or now).
-export async function approveIgDay(day: string, caption: string, postNow = false): Promise<void> {
+// Approved: posted now, at the time chosen, or at the posting time today
+// (15 minutes from now once that has passed).
+export async function approveIgDay(
+  day: string,
+  caption: string,
+  postNow = false,
+  at?: string,
+): Promise<void> {
   const row = await readDay(day);
   if (!row || !["review", "failed", "cancelled"].includes(row.status))
     throw new Error("Only cards waiting for review can be approved.");
@@ -1525,7 +1604,16 @@ export async function approveIgDay(day: string, caption: string, postNow = false
   const shown = captionText(caption).length;
   if (shown > CAPTION_MAX)
     throw new Error(`The caption is ${shown} characters; Telegram allows ${CAPTION_MAX}.`);
-  const when = postNow ? new Date() : dailyPostTime(day, settings.post_time);
+  let when = postNow ? new Date() : igPostDefault(settings.post_time);
+  if (!postNow && at) {
+    const t = new Date(at);
+    if (!Number.isFinite(t.getTime())) throw new Error("That posting time isn't a time.");
+    if (t.getTime() < Date.now() - 2 * 60_000)
+      throw new Error("That posting time has passed: choose a later one.");
+    if (t.getTime() > Date.now() + 7 * 86_400_000)
+      throw new Error("Choose a posting time within the next 7 days.");
+    when = t;
+  }
   await patchDay(day, {
     status: "rendering",
     caption,
