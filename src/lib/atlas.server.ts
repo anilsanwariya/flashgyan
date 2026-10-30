@@ -1509,3 +1509,17 @@ export async function atlasPlacesOf(cat: string, district?: string): Promise<Atl
     (p) => p.cat === cat && (!district || p.district === district),
   );
 }
+
+// The published district pages (for the sitemap); none before the
+// migration.
+export async function publishedDistricts(): Promise<{ district: string; at: string | null }[]> {
+  const { data, error } = await from("atlas_districts")
+    .select("district,published_at")
+    .eq("status", "published")
+    .order("district");
+  if (error) return [];
+  return ((data ?? []) as Row[]).map((r) => ({
+    district: String(r.district),
+    at: (r.published_at as string | null) ?? null,
+  }));
+}

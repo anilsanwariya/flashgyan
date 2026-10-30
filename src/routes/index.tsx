@@ -8,6 +8,7 @@ import {
   ArrowDown,
   Brain,
   ChevronRight,
+  Compass,
   ExternalLink,
   GraduationCap,
   Layers,
@@ -826,7 +827,7 @@ function BannerCarousel({ banners }: { banners: HomeData["banners"] }) {
 
 function FeaturePicker({ settings }: { settings: HomeData["settings"] }) {
   const navigate = useNavigate();
-  if (settings.hide_flashcards && settings.hide_mcq_practice && settings.hide_mcq && settings.hide_saathi) return null;
+  if (settings.hide_flashcards && settings.hide_mcq_practice && settings.hide_mcq && settings.hide_saathi && settings.hide_atlas) return null;
   return (
     <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
       {!settings.hide_flashcards && <FeatureCard
@@ -861,6 +862,17 @@ function FeaturePicker({ settings }: { settings: HomeData["settings"] }) {
         locked={settings.lock_saathi}
         onClick={() => navigate({ to: "/saathi" })}
       />}
+      {!settings.hide_atlas && (
+        <div className="md:col-span-2 lg:col-span-4">
+          <FeatureCard
+            title="Rajasthan Atlas · राजस्थान एटलस"
+            subtitle="Every district, fort, river, mine and pass on one map, with exam facts."
+            icon={<Compass className="h-6 w-6 text-sky-700" />}
+            gradient="bg-gradient-to-br from-sky-100 to-amber-50 border-sky-200"
+            onClick={() => navigate({ to: "/atlas" })}
+          />
+        </div>
+      )}
     </section>
   );
 }

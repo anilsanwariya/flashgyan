@@ -29,6 +29,8 @@ export type HomeSettings = {
   hide_mcq_practice: boolean;
   hide_mcq: boolean;
   hide_saathi: boolean;
+  // The Rajasthan atlas card (false where the column isn't there yet).
+  hide_atlas: boolean;
 };
 
 export type HomeData = {
@@ -83,22 +85,28 @@ const DEFAULT_SETTINGS: HomeSettings = {
   hide_mcq_practice: false,
   hide_mcq: false,
   hide_saathi: false,
+  hide_atlas: false,
 };
 
 export const getHomeData = createServerFn({ method: "GET" }).handler(
   async (): Promise<HomeData> => {
     const supabase = publicClient();
+    const COLS =
+      "cta_label, cta_subtitle, cta_url, cta_caption, lock_flashcards, lock_mcq, lock_mcq_practice, lock_saathi, lock_cta, hide_app_store, hide_google_play, hide_flashcards, hide_mcq_practice, hide_mcq, hide_saathi";
+    const readSettings = async () => {
+      const r = await supabase.from("home_settings").select(`${COLS}, hide_atlas`).eq("id", 1).maybeSingle();
+      // Before the atlas migration: the settings without its column.
+      if (r.error && /hide_atlas/.test(r.error.message))
+        return supabase.from("home_settings").select(COLS).eq("id", 1).maybeSingle();
+      return r;
+    };
     const [{ data: banners, error: bErr }, { data: settings, error: sErr }] = await Promise.all([
       supabase
         .from("home_banners")
         .select("id, storage_path, order_index")
         .order("order_index", { ascending: true })
         .order("created_at", { ascending: true }),
-      supabase
-        .from("home_settings")
-        .select("cta_label, cta_subtitle, cta_url, cta_caption, lock_flashcards, lock_mcq, lock_mcq_practice, lock_saathi, lock_cta, hide_app_store, hide_google_play, hide_flashcards, hide_mcq_practice, hide_mcq, hide_saathi")
-        .eq("id", 1)
-        .maybeSingle(),
+      readSettings(),
     ]);
     if (bErr) throw new Error(bErr.message);
     if (sErr) throw new Error(sErr.message);
@@ -109,7 +117,7 @@ export const getHomeData = createServerFn({ method: "GET" }).handler(
         order_index: b.order_index,
         url: publicUrl(supabase, b.storage_path),
       })),
-      settings: (settings as HomeSettings | null) ?? DEFAULT_SETTINGS,
+      settings: { ...DEFAULT_SETTINGS, ...((settings as Partial<HomeSettings> | null) ?? {}) },
     };
   },
 );
@@ -204,14 +212,13 @@ export const updateHomeSettings = createServerFn({ method: "POST" })
         hide_mcq_practice: z.boolean().optional(),
         hide_mcq: z.boolean().optional(),
         hide_saathi: z.boolean().optional(),
+        hide_atlas: z.boolean().optional(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
     const admin = await assertAdmin(context.userId);
-    const { error } = await admin
-      .from("home_settings")
-      .update({
+    const patch = {
         cta_label: data.cta_label.trim(),
         cta_subtitle: data.cta_subtitle.trim(),
         cta_url: data.cta_url.trim(),
@@ -227,9 +234,15 @@ export const updateHomeSettings = createServerFn({ method: "POST" })
         hide_mcq_practice: data.hide_mcq_practice,
         hide_mcq: data.hide_mcq,
         hide_saathi: data.hide_saathi,
+        ...(data.hide_atlas !== undefined ? { hide_atlas: data.hide_atlas } : {}),
         updated_at: new Date().toISOString(),
-      })
-      .eq("id", 1);
+    };
+    let { error } = await admin.from("home_settings").update(patch).eq("id", 1);
+    // Before the atlas migration: saved without its column.
+    if (error && /hide_atlas/.test(error.message)) {
+      const { hide_atlas: _, ...rest } = patch as typeof patch & { hide_atlas?: boolean };
+      ({ error } = await admin.from("home_settings").update(rest).eq("id", 1));
+    }
     if (error) throw new Error(error.message);
     return { ok: true };
   });
