@@ -225,11 +225,20 @@ function anthropicKey(): string {
 }
 
 // Anthropic takes the system prompt separately and needs alternating user/assistant turns.
+// Each system message is its own block. Prompt caching: the first block (a
+// prompt's fixed instructions) is marked for the cache, so the next call
+// starting with the same instructions within 5 minutes reads them at a tenth
+// of the price; later system messages (a per-call note) follow it uncached.
+// Instructions shorter than the model's minimum (about 1,000 tokens) are
+// simply not cached.
 function toAnthropic(messages: ChatMessage[]) {
   const system = messages
-    .filter((m) => m.role === "system")
-    .map((m) => m.content)
-    .join("\n\n");
+    .filter((m) => m.role === "system" && m.content.trim())
+    .map((m, i) => ({
+      type: "text" as const,
+      text: m.content,
+      ...(i === 0 ? { cache_control: { type: "ephemeral" as const } } : {}),
+    }));
   const turns: { role: "user" | "assistant"; content: string }[] = [];
   for (const m of messages) {
     if (m.role === "system" || !m.content.trim()) continue;
@@ -239,7 +248,67 @@ function toAnthropic(messages: ChatMessage[]) {
   }
   if (!turns.length || turns[0].role !== "user")
     turns.unshift({ role: "user", content: "(start)" });
-  return { system: system || undefined, messages: turns };
+  return { system: system.length ? system : undefined, messages: turns };
+}
+
+// A conversation (SAATHI chat, the answer checker): the turns before the new
+// question are cached too, so the next message reads the whole conversation
+// so far from the cache. The new question (with its study material) is left
+// out: it changes every time.
+function cacheHistory(turns: { role: "user" | "assistant"; content: unknown }[]) {
+  if (turns.length < 3) return;
+  const t = turns[turns.length - 2];
+  if (typeof t.content === "string")
+    t.content = [{ type: "text", text: t.content, cache_control: { type: "ephemeral" } }];
+}
+
+// ---------- Token usage ----------
+
+export type SaathiUsage = {
+  input_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  output_tokens: number;
+};
+
+// A call's kind, for the usage table: the first two sentences of its
+// instructions ("You write vocabulary cards for … Each card explains …").
+export function usageLabel(messages: ChatMessage[]): string {
+  const sys = messages.find((m) => m.role === "system")?.content.trim() ?? "";
+  if (!sys) return "(no instructions)";
+  const two = /^[\s\S]*?[.?!:](?:\s|$)[\s\S]*?[.?!:](?:\s|$)/.exec(sys)?.[0] ?? sys;
+  return two.replace(/\s+/g, " ").trim().slice(0, 140);
+}
+
+let usageOff = false;
+
+// Adds a call's tokens to the day's usage (ai_usage_add). Never fails the
+// call: without the table or the keys it does nothing.
+async function recordUsage(label: string, u: SaathiUsage) {
+  if (usageOff) return;
+  const url = envGet("SUPABASE_URL");
+  const key = envGet("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) return;
+  try {
+    const res = await fetch(`${url.replace(/\/$/, "")}/rest/v1/rpc/ai_usage_add`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: key, Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        p_label: label,
+        p_model: SAATHI_CHAT_MODEL,
+        p_input: u.input_tokens,
+        p_cache_write: u.cache_creation_input_tokens,
+        p_cache_read: u.cache_read_input_tokens,
+        p_output: u.output_tokens,
+      }),
+      signal: AbortSignal.timeout(3000),
+    });
+    // The migration isn't run yet: stop trying until the next start.
+    if (res.status === 404) usageOff = true;
+    await res.body?.cancel().catch(() => undefined);
+  } catch {
+    // Usage is a report, not part of the answer.
+  }
 }
 
 // A photo sent with a message (e.g. a page of a handwritten answer): base64 data,
@@ -253,6 +322,7 @@ function anthropicRequest(messages: ChatMessage[], signal?: AbortSignal, images?
   const body = toAnthropic(messages);
   // Photos go first in the last user turn, before its text.
   const turns: { role: "user" | "assistant"; content: unknown }[] = body.messages;
+  cacheHistory(turns);
   if (images?.length) {
     const last = turns[turns.length - 1];
     last.content = [
@@ -290,7 +360,7 @@ export async function saathiComplete(
   const res = await anthropicRequest(messages, signal, images);
   if (!res.ok || !res.body) throw gatewayError(res.status, await res.text(), "Anthropic (Claude)");
   let out = "";
-  for await (const d of readSseDeltas(res.body)) out += d;
+  for await (const d of readSseDeltas(res.body, usageLabel(messages))) out += d;
   return out.trim();
 }
 
@@ -303,13 +373,18 @@ export async function saathiCompleteStream(
 ): Promise<AsyncGenerator<string>> {
   const res = await anthropicRequest(messages, signal);
   if (!res.ok || !res.body) throw gatewayError(res.status, await res.text(), "Anthropic (Claude)");
-  return readSseDeltas(res.body);
+  return readSseDeltas(res.body, usageLabel(messages));
 }
 
-async function* readSseDeltas(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+// The reply's text as it streams; its token usage is recorded at the end.
+async function* readSseDeltas(
+  body: ReadableStream<Uint8Array>,
+  label: string,
+): AsyncGenerator<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let usage: SaathiUsage | null = null;
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -325,7 +400,20 @@ async function* readSseDeltas(body: ReadableStream<Uint8Array>): AsyncGenerator<
             type?: string;
             delta?: { type?: string; text?: string; stop_reason?: string };
             error?: { message?: string };
+            message?: { usage?: Partial<SaathiUsage> };
+            usage?: Partial<SaathiUsage>;
           };
+          if (json.type === "message_start" && json.message?.usage) {
+            const u = json.message.usage;
+            usage = {
+              input_tokens: u.input_tokens ?? 0,
+              cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0,
+              cache_read_input_tokens: u.cache_read_input_tokens ?? 0,
+              output_tokens: u.output_tokens ?? 0,
+            };
+          } else if (json.type === "message_delta" && usage && json.usage?.output_tokens != null) {
+            usage.output_tokens = json.usage.output_tokens;
+          }
           if (json.type === "content_block_delta" && json.delta?.type === "text_delta") {
             if (json.delta.text) yield json.delta.text;
           } else if (json.type === "message_delta" && json.delta?.stop_reason === "refusal") {
@@ -343,6 +431,7 @@ async function* readSseDeltas(body: ReadableStream<Uint8Array>): AsyncGenerator<
     }
   } finally {
     reader.releaseLock();
+    if (usage) await recordUsage(label, usage);
   }
 }
 

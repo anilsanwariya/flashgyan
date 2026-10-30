@@ -10,6 +10,7 @@ import {
   Bot,
   ExternalLink,
   FileQuestion,
+  Gauge,
   Home,
   Keyboard,
   Layers,
@@ -60,7 +61,8 @@ export type AdminSectionId =
   | "bot.connection"
   | "bot.flashcards"
   | "bot.mcq"
-  | "users";
+  | "users"
+  | "aiUsage";
 
 type SectionDef = { id: AdminSectionId; label: string; icon: Icon; description: string };
 
@@ -249,6 +251,18 @@ export const ADMIN_GROUPS: { label: string; sections: SectionDef[] }[] = [
         label: "Mini App users",
         icon: UserSquare2,
         description: "People who signed in through the Telegram Mini App.",
+      },
+    ],
+  },
+  {
+    label: "System",
+    sections: [
+      {
+        id: "aiUsage",
+        label: "AI usage",
+        icon: Gauge,
+        description:
+          "What the AI costs: tokens by kind of call and by day, and what caching saves.",
       },
     ],
   },

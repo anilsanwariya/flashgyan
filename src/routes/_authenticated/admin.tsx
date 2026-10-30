@@ -138,6 +138,7 @@ import { SaathiPanel } from "@/components/saathi-panel";
 import { SaathiAnswersPanel } from "@/components/saathi-answers-panel";
 import { CurrentAffairsPanel, type CaSection } from "@/components/current-affairs-panel";
 import { HomePanel } from "@/components/home-panel";
+import { AiUsagePanel } from "@/components/ai-usage-panel";
 import { FlashStudio } from "@/components/flash-studio-panel";
 import { BotManagerPanel, type BotSection } from "@/components/bot-manager-panel";
 import { AdminShell, isAdminSection, type AdminSectionId } from "@/components/admin-shell";
@@ -290,6 +291,8 @@ function Admin() {
         <CurrentAffairsPanel section={section.slice(3) as CaSection} />
       ) : section === "users" ? (
         <TelegramUsersPanel />
+      ) : section === "aiUsage" ? (
+        <AiUsagePanel />
       ) : (
         <BotManagerPanel section={section.slice(4) as BotSection} />
       )}
