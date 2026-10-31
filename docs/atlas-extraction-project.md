@@ -112,7 +112,7 @@ File name: <Subject>-<NN>-<Chapter>.en.md, e.g. Rajasthan-History-03-Guhils-of-M
 - Copy the chapters' text exactly; do not rewrite them when combining.
 
 7. HINDI
-- When I ask for Hindi, translate the final English file with the same headings, the same "Place:" lines (name and kind translated, district in Hindi), the same order and the same number of bullets, in standard exam Hindi as in RPSC papers (जिला, तहसील, दुर्ग, अभयारण्य). Keep numbers in international digits. Keep [verify: …] and (as of …) markers, translated.
+- When I ask for Hindi, translate the final English file with the same headings, the same order and the same number of bullets, in standard exam Hindi as in RPSC papers (जिला, तहसील, दुर्ग, अभयारण्य), following the Hindi template and the spelling list. Keep in English, exactly: "## Places", "### Place:" (and "#### Place:" in the subject file), the place's kind, "Trick:", "## Revision questions", "[verify: …]" and "(as of …)" (their contents may be Hindi). Write the place's name and district in Hindi. Keep numbers in international digits.
 
 8. HOW TO WORK
 - One chapter per turn. When I attach a chapter's sources, first reply with a short list: the sources found (as "Authentic: …" and "Coaching notes A/B…"), the topics they cover against the syllabus outline, and any syllabus topic none of them covers. Then write the chapter file.
@@ -128,12 +128,12 @@ File name: <Subject>-<NN>-<Chapter>.en.md, e.g. Rajasthan-History-03-Guhils-of-M
 **Settings**
 - Turn on **file creation / code execution** (in Settings → Capabilities, or in the project's tools). Claude then writes each chapter as a downloadable `.md` file, and builds the subject file by joining the files with code instead of retyping them. Retyping long text risks cutting it short or changing it.
 
-**Knowledge files** (uploaded once to the project)
-1. **The syllabus outline for each subject.** For example `Syllabus-Rajasthan-History.md`, with its chapters and topics numbered in order. You can copy it from the master outline in Syllabus → Master outlines.
-2. **District names** (`district-names.md`). The 41 districts as `English | हिंदी | division`, the 9 districts cancelled in Dec 2024, and the 8 made in Aug 2023 that remain, with the districts they came from.
-3. **Spelling list** (`spellings.md`). House spellings of tricky names, in English and Hindi.
-4. **One finished chapter file,** as the example to copy. Claude copies style best from an example.
-5. **Exam-style Hindi glossary** (optional).
+**Knowledge files** (uploaded once to the project; ready-made in `docs/atlas-project/`)
+1. `01-Syllabus-Rajasthan-History.md`: the 14 chapters and their numbered topics, in English and Hindi. This is the order to work in, and it sets the file names. Make one like it for each later subject (Art & Culture, Geography, Polity, Economy) before you start that subject.
+2. `02-District-names.md`: the 7 divisions, the 41 districts in English and Hindi with their divisions, the 2023 and 2024 changes, and old spellings to replace.
+3. `03-Spellings.md`: house spellings of terms, dynasties, regions and often-misspelt places, in English and Hindi, plus rules for numbers and dates. Add to it as you go.
+4. `04-Chapter-template.en.md` and `04-Chapter-template.hi.md`: the exact shape of a chapter file, including the "Place:" block.
+5. Later: your first finished and checked chapter file, as an example. Claude copies style best from a real example.
 
 Attach the source PDFs in the chat, not as project knowledge, so each chapter only uses its own sources.
 
