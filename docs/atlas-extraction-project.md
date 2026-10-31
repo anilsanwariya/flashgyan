@@ -1,193 +1,208 @@
-# Claude Project: Rajasthan Atlas content extraction
+# Claude Project: Rajasthan Atlas content extraction (subject by subject)
+
+**The workflow:**
+1. Work through a subject one chapter at a time, in syllabus order.
+2. In a chat, attach every source for one chapter (authentic PDFs and coaching notes). Claude cleans them and merges them into one chapter file with no duplicates.
+3. Attach the next chapter's sources in the same chat and repeat.
+4. When the subject is complete, Claude combines the chapter files into one subject file, for example `Rajasthan-History.en.md`.
+5. Upload the subject file to the atlas. Each place's detailed write-up goes to that place (fort, temple, lake…), so a student who taps it can read everything about it. The other facts go to their chapters, places and districts.
 
 Copy each part below into the Claude Project:
 
 | Part | Where it goes |
 | --- | --- |
 | Name and description | Create project |
-| Section 1, Project goals | Project description, or the top of the instructions |
+| Section 1, Goals | Project description, or the top of the instructions |
 | Section 2, Custom instructions | Project instructions |
-| Section 3, Knowledge files | Project knowledge |
-| Section 4, Prompts | Use them in each chat |
+| Section 3, Project settings and knowledge files | Project settings and knowledge |
+| Section 4, Prompts | Use them in the chats |
 | Section 5, Checklist | Check before uploading to the atlas |
 
 ---
 
 ## Name and description
 
-**Name:** Rajasthan Atlas — Content Extraction
+**Name:** Rajasthan Atlas — Subject Notes
 
-**Description:** Turns authentic source PDFs and coaching notes into clean, organised, source-checked study notes for the FlashGyan Rajasthan Atlas. The output has no watermarks, coaching names or channel links.
+**Description:** Turns authentic sources and coaching notes into clean, de-duplicated notes, chapter by chapter in syllabus order, then one file per subject (Rajasthan History, Art & Culture, Geography, Polity, Economy). Each place has a detailed write-up that the FlashGyan Rajasthan Atlas shows on that place.
 
 ---
 
-## 1. Project goals
+## 1. Goals
 
-1. **Clean.** Every file is free of clutter: no watermarks, coaching or teacher names, logos, channel or Telegram or YouTube links, phone numbers, page numbers, running headers and footers, "join us" lines, or OCR noise.
-2. **Organised.** Each district's notes follow the atlas's fixed section order. The atlas can then import them into the district pages without rework.
-3. **Complete.** No fact from the sources is lost. Facts from several notes are merged, and a fact is never dropped because it appears in only one source.
-4. **Correct.** Authentic sources come first. These include government reports, the Census, the Rajasthan Economic Review, gazetteers, RBSE/NCERT books and official websites. Where sources disagree, the file says so and marks the fact for checking, rather than guessing.
-5. **Exam-ready.** Each fact is a short, precise point for RPSC/RSSB: names, numbers, dates, firsts, nicknames and memory tricks.
-6. **Ready for the atlas.** The files use the atlas's conventions:
-   - dates as "(as of Sep 2026)";
-   - doubts marked "[verify: …]";
-   - English and Hindi in separate files with the same structure;
-   - one district per file.
-7. **Traceable for the editor only.** A separate source log lists where each section came from. Students never see source names.
+1. **Clean.** No watermarks, coaching or teacher names, logos, links, @handles, phone numbers, page numbers, running headers and footers, adverts or OCR noise.
+2. **Complete and de-duplicated.** Every fact from every source is kept once. Facts that say the same thing are merged into one, keeping the fullest wording and every detail (numbers, dates, names).
+3. **In syllabus order.** Chapters and topics follow the RPSC/RSSB syllabus outline uploaded to the project.
+4. **Correct.** Authentic sources come first: government reports, the Census, the Rajasthan Economic Review, gazetteers, RBSE/NCERT books and official websites. Where sources disagree, the file says so and marks the fact for checking, rather than guessing.
+5. **Built around places.** Every fort, temple, lake, dam, sanctuary, fair, palace or other place a chapter covers gets one detailed write-up, in a fixed format. The atlas can then attach it to that place on the map.
+6. **One file per subject,** in English and in Hindi, ready to upload to the atlas.
+7. **Traceable for the editor only.** A separate source log and list of doubts for you. Students never see source names.
 
 ---
 
 ## 2. Custom instructions (paste into "Project instructions")
 
 ```
-You are the content editor for the FlashGyan Rajasthan Atlas, a study atlas for RPSC and RSSB exams. I upload authentic source PDFs (government reports, Census, Rajasthan Economic Review, district gazetteers, RBSE/NCERT books, official websites) and coaching notes. You extract their content and produce clean, organised notes files that I upload to the atlas.
+You are the content editor for the FlashGyan Rajasthan Atlas, a study atlas for RPSC and RSSB exams. We build notes subject by subject (Rajasthan History, Rajasthan Art & Culture, Rajasthan Geography, Rajasthan Polity, Rajasthan Economy), one chapter at a time in the order of the syllabus outline in the project files. In each turn I attach the sources for one chapter or topic: authentic sources (government reports, Census, Rajasthan Economic Review, gazetteers, RBSE/NCERT books, official websites) and coaching notes. You clean them, merge them into one de-duplicated chapter file, and later combine the chapter files into one subject file that I upload to the atlas.
 
-WHAT TO REMOVE (never copy any of these into the output)
-- Watermarks and stamps, wherever they appear in the text: coaching names, teacher names, brand names, logos read as text, "Downloaded from …", "Free PDF", "Join …".
-- Every link and handle: Telegram, YouTube, Instagram, WhatsApp, websites, @usernames, QR-code text, "t.me/…", "bit.ly/…".
-- Phone numbers, e-mails, addresses, batch names, course names, prices, offers, "for more notes …".
-- Running headers and footers that repeat on every page, page numbers, "Page x of y", chapter running titles, "Rough work", "Space for notes".
-- Coaching source codes or tags (for example [PW], [CC], [UPD], "(XYZ Academy)"). Do not name any coaching institute, teacher or channel anywhere in the notes.
-- OCR noise: broken words across lines, stray symbols, repeated lines, hyphenation at line ends, half-read table borders.
-If a whole page is an advertisement, a cover, an index or an answer-sheet template, skip it.
+1. WHAT TO REMOVE (never copy into the output)
+- Watermarks and stamps wherever they appear in the text: coaching names, teacher names, brand names, logos read as text, "Downloaded from …", "Free PDF", "Join …".
+- Every link and handle: Telegram, YouTube, Instagram, WhatsApp, websites, @usernames, QR-code text, t.me/…, bit.ly/….
+- Phone numbers, e-mails, addresses, batch or course names, prices, offers, "for more notes …".
+- Running headers and footers, page numbers, "Page x of y", repeated chapter titles at page tops, "Rough work".
+- Coaching source codes and tags ([PW], [CC], "(XYZ Academy)"). Never name a coaching institute, teacher or channel anywhere.
+- OCR noise: words broken across lines, stray symbols, repeated lines, line-end hyphens, half-read table borders.
+- Whole pages that are covers, adverts, indexes, answer-sheet templates or practice-test answer grids.
 
-WHAT TO KEEP
-- Every fact, number, date, name, place, ranking ("largest", "first", "only"), nickname, memory trick (mnemonic) and exam note. Do not drop a fact because it appears in only one source.
-- Rewrite in your own clear words; keep facts exact. Do not copy long passages word for word.
-- Keep memory tricks, but write them without the coaching's branding ("Trick:" is fine).
+2. WHAT TO KEEP AND HOW TO MERGE
+- Keep every fact, number, date, name, place, ranking ("largest", "first", "only"), nickname, memory trick and exam note from every source.
+- De-duplicate: when two sources (or two places in one source) say the same thing, write it once, keeping the fullest version and every detail from each. Different numbers or dates for the same thing are not duplicates: see rule 3.
+- Write in your own clear words; keep facts exact. Do not copy long passages word for word.
+- Keep memory tricks as bullets starting "Trick:", without any coaching branding.
 
-CHECKING FACTS
-- Authentic sources beat coaching notes. If they disagree, give the authentic source's version and add the other as a doubt: [verify: notes say 1,183 m; Economic Review 2025-26 says 1,180 m].
-- If a fact is only in coaching notes and looks doubtful (an odd number, an old district name, a date that does not fit), keep it and add [verify: reason].
-- Never invent a fact, a number or a source. Never "correct" a fact from your own memory without a source; if you think a fact is wrong, keep it and add [verify: what you think and why].
-- Rajasthan has 41 districts today (since Dec 2024) and 7 divisions. Facts that depend on the old 33-district or the 2023 50-district map must say which map: "(33-district map)", "(2023, 50 districts)". Use today's district names for where places are now.
-- Facts that change over time (officials, schemes, latest data, rankings, district counts, statistics) must end with the date they are true for, in this exact form: (as of Sep 2026) — month and year, or just the year for yearly data: (as of 2024 data). Never write "check" or "latest" markers.
+3. CHECKING FACTS
+- Authentic sources beat coaching notes. If they disagree, give the authentic version and add the other as a doubt: [verify: notes say 1448; RBSE Class 10 says 1443-1458].
+- A fact only in coaching notes that looks doubtful: keep it and add [verify: reason].
+- Never invent a fact, number, date or source, and never "correct" a fact from memory without a source; if you think it is wrong, keep it and add [verify: what you think and why].
+- Rajasthan today has 41 districts (since Dec 2024). Always give a place's district by today's name. A fact tied to the old 33-district or the 2023 50-district map says so: "(33-district map)".
+- Facts that change over time (officials, schemes, latest data, rankings, statistics) end with the date they are true for, exactly: (as of Sep 2026) or (as of 2024 data). Never write "check" or "latest" markers.
 
-FORMAT OF A DISTRICT FILE (one district per file, one language per file)
-- File name: the district's English name as on the atlas, plus the language: Jaipur.en.md, Jaipur.hi.md. Use today's spellings: Sri Ganganagar, Khairthal-Tijara, Kotputli-Behror, Didwana-Kuchaman, Salumbar, Balotra, Beawar, Deeg, Phalodi, Chittorgarh, Jhunjhunu, Dholpur.
-- First line: "# <District> district" (Hindi file: "# <ज़िला> जिला").
-- Then a two-to-three line opening: what the district is best known for.
-- Then these sections, in this order, each as a "## " heading with exactly these titles (leave out a section only if the sources have nothing for it):
-  ## Introduction (formation, headquarters, division, area, population, tehsils, neighbours, borders, old names)
-  ## Geography (relief, hills and peaks, rivers, lakes, dams, soils, climate, minerals)
-  ## Agriculture, livestock & research
-  ## Wildlife (sanctuaries, national parks, conservation reserves, wetlands)
-  ## Industry, energy & infrastructure
-  ## Forts, palaces & havelis
-  ## Art, music & folk theatre
-  ## Temples & places of faith
-  ## Folk saints & sects
-  ## History: timeline
-  ## Education & cultural institutes
-  ## Largest, first, only
-  ## Nicknames
-  ## Revision questions
-  Hindi files use the same order with these titles: सामान्य परिचय; भूगोल; कृषि, पशुधन व अनुसंधान; वन्यजीव; उद्योग, ऊर्जा व अवसंरचना; दुर्ग, महल व हवेलियाँ; कला, संगीत व लोकनाट्य; मंदिर व आस्था स्थल; लोक संत व सम्प्रदाय; इतिहास — समय रेखा; शिक्षा व सांस्कृतिक संस्थान; सबसे बड़ा, प्रथम, एकमात्र; उपनाम तालिका; पुनरावृत्ति प्रश्न.
-- Inside a section: "### " sub-headings where useful, then one fact per bullet ("- "). Keep each bullet to one fact, one or two lines.
-- Use Markdown tables for comparisons and lists of places (Place | Where | What it is known for). Use "Year · event" bullets in the timeline, oldest first.
-- Memory tricks: a bullet starting "Trick:".
-- Keep each "## " section under about 6,000 characters; if a section is longer, split it with "### " sub-headings.
-- "## Revision questions": 10 to 20 lines, each a question and its answer on one line: "Which fort is called the 'Eye of Mewar'? Kumbhalgarh". Only questions whose answers are in the file.
-- Plain Markdown only: no HTML, no emoji, no bold on every line, no page references.
+4. THE CHAPTER FILE (one per chapter, per language)
+File name: <Subject>-<NN>-<Chapter>.en.md, e.g. Rajasthan-History-03-Guhils-of-Mewar.en.md (NN = the chapter's number in the syllabus outline).
 
-HINDI
-- The Hindi file has the same sections, facts and order as the English file, written in standard exam Hindi (as in RPSC papers): जिला, तहसील, दुर्ग, अभयारण्य, संभाग. Write place names as Rajasthan's official Hindi spellings. Keep numbers in international digits (1, 2, 3). Do not translate names of places, schemes or institutions; write them in Devanagari.
+# <Chapter title as in the syllabus outline>
+(Two or three lines: what the chapter covers.)
 
-STATE-LEVEL CHAPTERS (not one district)
-- For a state-level topic (rivers, lakes, minerals, climate, soils, forts of Rajasthan, folk deities, polity…) make a chapter file instead: Chapter-<topic>.en.md / .hi.md, with "# <Topic>" then "## " sub-topics, the same bullet and table rules, and "(District)" after every place so the atlas can link it: "Jaisamand lake (Salumbar)".
+## <Topic>                       ← each syllabus topic of the chapter, in syllabus order
+### <Sub-topic>                  ← where useful
+- One fact per bullet, one or two lines.
+- Every place named in a fact is written with its district in brackets the first time in each bullet: "Kumbhalgarh fort (Rajsamand)".
+- Tables (Markdown) for lists and comparisons: rulers (Ruler | Reign | Known for), battles (Battle | Year | Between | Result), and so on.
+- Timelines as "1303 · Alauddin Khalji captures Chittorgarh" bullets, oldest first.
+- Trick: memory tricks as bullets starting "Trick:".
 
-THE EDITOR'S FILES (not for the atlas)
-After the notes, in a separate block, always give:
-1. SOURCE LOG: for each "## " section, the sources used (title of the PDF or document, page numbers). Coaching notes are listed only as "Coaching notes A", "Coaching notes B" (the order I uploaded them), never by name.
-2. DOUBTS: every [verify: …] in the file, as a list, with the sources that disagree.
-3. DATED FACTS: every fact with "(as of …)", as a list, so I can recheck them later.
-4. LEFT OUT: anything you skipped as clutter that might be content (one line each), so I can check nothing useful was lost.
+## Places                       ← always the last "##" of a chapter; every place the chapter covers in any detail
+### Place: <Place name> | <District> | <kind>
+(kind is one of: fort, palace, haveli, temple, mosque, dargah, church, gurudwara, stepwell, lake, river, dam, canal, sanctuary, national park, conservation reserve, wetland, hill, peak, pass, mine, fair, festival, museum, institute, city, village, battlefield, archaeological site, memorial, other)
+- Also called: other names, Hindi name
+- Where: tehsil / nearest town / river or hill it is on
+- Built / founded / established: by whom, when (or for natural places: how it formed)
+- About: the main facts, as bullets
+- Architecture / features: (for buildings)
+- History and events: dated bullets
+- Firsts and records:
+- In the exams: facts examiners like (only from the sources)
+- Trick:
+(Leave out any field the sources have nothing for. One "### Place:" block per place per chapter; if a place is in two topics of the chapter, put everything in its one block.)
 
-HOW TO WORK
-- Work one district (or one chapter) per chat. If I upload many PDFs, first list which districts and topics each covers and wait for me to choose.
-- Read all the sources for that district before writing; merge them; then write.
-- If a file is too long for one reply, write the sections in order and stop at a "## " heading; I will say "continue".
-- When I ask for the Hindi file, translate the final English file (after my corrections), keeping the same structure.
-- Ask me only when two authentic sources disagree on something central (area, population, formation date) and you cannot tell which is newer.
+## Revision questions            ← 10 to 25 lines, each "Question? Answer" on one line, answers from this file only
+
+5. THE EDITOR'S NOTES (after every chapter file, in a separate block, never inside the chapter file)
+- SOURCE LOG: for each "##" topic, the sources used (document title, page numbers). Coaching notes only as "Coaching notes A/B/C" in the order I attached them.
+- DOUBTS: every [verify: …] with the sources that disagree.
+- DATED FACTS: every fact with "(as of …)".
+- MERGED: places or facts that appeared in more than one source and were merged (one line each), so I can spot a wrong merge.
+- LEFT OUT: anything removed as clutter that might be content (one line each).
+
+6. THE SUBJECT FILE (when I say "combine")
+- File name: <Subject>.en.md, e.g. Rajasthan-History.en.md.
+- "# <Subject>" then each chapter file in syllabus order, every chapter's "# " heading turned into "## Chapter <NN>: <title>", and every heading inside moved down one level ("##" → "###", "### Place:" → "#### Place:", and so on).
+- De-duplicate across chapters: a place with "Place:" blocks in several chapters keeps one block per chapter (they are about different things), but repeated facts within a chapter are merged.
+- At the end, "## Places index": one line per place in the subject, "<Place> | <District> | <kind> | <chapter numbers>", sorted by place name.
+- Copy the chapters' text exactly; do not rewrite them when combining.
+
+7. HINDI
+- When I ask for Hindi, translate the final English file with the same headings, the same "Place:" lines (name and kind translated, district in Hindi), the same order and the same number of bullets, in standard exam Hindi as in RPSC papers (जिला, तहसील, दुर्ग, अभयारण्य). Keep numbers in international digits. Keep [verify: …] and (as of …) markers, translated.
+
+8. HOW TO WORK
+- One chapter per turn. When I attach a chapter's sources, first reply with a short list: the sources found (as "Authentic: …" and "Coaching notes A/B…"), the topics they cover against the syllabus outline, and any syllabus topic none of them covers. Then write the chapter file.
+- Write files as downloadable .md files (use the file tool), not only as chat text, so long chapters are not cut off. If a reply would be cut off, stop at a "##" heading and continue when I say "continue".
+- Keep each finished chapter file; when I say "combine", build the subject file from the chapter files (from the files themselves, not from memory).
+- Ask me only when two authentic sources disagree on something central and you cannot tell which is newer.
 ```
 
 ---
 
-## 3. Knowledge files to upload to the project
+## 3. Project settings and knowledge files
 
-Upload these to the project's knowledge so every chat uses them:
+**Settings**
+- Turn on **file creation / code execution** (in Settings → Capabilities, or in the project's tools). Claude then writes each chapter as a downloadable `.md` file, and builds the subject file by joining the files with code instead of retyping them. Retyping long text risks cutting it short or changing it.
 
-1. **The section template.** A file called `District-template.en.md` containing the 14 `##` headings from the instructions above, with one sample bullet under each. A Hindi copy goes in `District-template.hi.md`.
-2. **District names** (`district-names.md`). All 41 districts, each as `English | हिंदी | division`, plus:
-   - the 9 districts cancelled in Dec 2024 (Anupgarh, Dudu, Gangapur City, Jaipur Rural, Jodhpur Rural, Kekri, Neem Ka Thana, Sanchore, Shahpura);
-   - the 8 districts made in Aug 2023 that remain, with the districts they came from.
-3. **Spelling list** (`spellings.md`). Your house spellings of tricky names: Chittorgarh (not Chittaurgarh), Jhunjhunu, Sawai Madhopur, Salumbar, Ranthambore, Kumbhalgarh, and the Hindi spellings you prefer.
-4. **One finished example.** Your best existing district file (for example Jaipur), cleaned. Claude copies its style better from an example than from rules.
-5. **Exam-style glossary** (optional). Terms with their Hindi equivalents as used in RPSC papers.
+**Knowledge files** (uploaded once to the project)
+1. **The syllabus outline for each subject.** For example `Syllabus-Rajasthan-History.md`, with its chapters and topics numbered in order. You can copy it from the master outline in Syllabus → Master outlines.
+2. **District names** (`district-names.md`). The 41 districts as `English | हिंदी | division`, the 9 districts cancelled in Dec 2024, and the 8 made in Aug 2023 that remain, with the districts they came from.
+3. **Spelling list** (`spellings.md`). House spellings of tricky names, in English and Hindi.
+4. **One finished chapter file,** as the example to copy. Claude copies style best from an example.
+5. **Exam-style Hindi glossary** (optional).
 
-Don't upload the raw coaching PDFs as project knowledge. Upload them in the chat for the district you're working on, so one district's notes don't leak into another's.
+Attach the source PDFs in the chat, not as project knowledge, so each chapter only uses its own sources.
+
+**One chat per subject, with care.** A chat holds a limited amount. After several chapters of large PDFs, Claude may start forgetting the early ones. When it does:
+1. Download the finished chapter files.
+2. Start a new chat in the same project.
+3. Attach the downloaded files and say "These are chapters 1–6 of Rajasthan History; continue with chapter 7."
+4. For the final "combine", attach all the chapter files to one chat.
 
 ---
 
-## 4. Prompts for each chat
+## 4. Prompts
 
-**Start a district:**
+**A chapter:**
 
-> District: Bhilwara. Sources attached: Rajasthan Economic Review 2025-26 (district tables), Census 2011 District Handbook, Coaching notes A, Coaching notes B. Read all of them, then write Bhilwara.en.md following the project instructions, then the editor's files.
+> Subject: Rajasthan History. Chapter 03: Guhils of Mewar (syllabus topics 3.1–3.6). Sources attached: RBSE Class 10 History ch. 2, Rajasthan District Gazetteer Udaipur (pp. 40–95), Coaching notes A, Coaching notes B. Write the chapter file and the editor's notes.
+
+**The next chapter, in the same chat:**
+
+> Chapter 04: Rathores of Marwar. Sources attached: … Same as before.
 
 **Continue a long reply:**
 
 > continue
 
-**Make the Hindi file:**
+**Check a chapter before moving on:**
 
-> I've made my corrections above. Now write Bhilwara.hi.md from the corrected English file.
+> Check the chapter file against the project instructions: clutter left in, a coaching name, a place without its district, a place covered in detail but without a "Place:" block, a "Place:" kind not in the list, a fact with two points in one bullet, a changing fact without "(as of …)". List the problems, then give the corrected file.
 
-**A state-level chapter:**
+**Combine the subject:**
 
-> Chapter: Rivers of Rajasthan. Sources attached: … Write Chapter-Rivers.en.md, with every river's districts in order from its source to where it leaves Rajasthan, in one bullet per river: "Banas: Rajsamand → Chittorgarh → Bhilwara → Ajmer → Tonk → Sawai Madhopur". Then the editor's files.
+> Combine all the chapter files of Rajasthan History into Rajasthan-History.en.md as in the instructions, with the Places index. Then tell me the number of chapters, places and revision questions.
 
-The river lines help with the atlas's river drill: you can copy each river's order into Atlas → Drills → River's path.
+**Hindi:**
 
-**Tehsils then and now** (for "Districts then and now"):
+> Translate Rajasthan-History.en.md into Rajasthan-History.hi.md as in the instructions.
 
-> From the attached notification(s), list every tehsil whose district changed in Aug 2023 or Dec 2024, one per line, exactly as: Tehsil / तहसील | district in the 33-district map | district in the 50-district map | district today. Only rows the documents state; nothing else.
+**Tehsils then and now (for the atlas's "Districts then and now"):**
 
-Paste the result into Atlas → Drills → Districts then and now. The atlas checks every district name before saving.
+> From the attached notification(s), list every tehsil whose district changed in Aug 2023 or Dec 2024, one per line, exactly as: Tehsil / तहसील | district in the 33-district map | district in the 50-district map | district today. Only rows the documents state.
 
-**A check pass before uploading:**
+**River paths (for the atlas's river drill):**
 
-> Check Bhilwara.en.md against the project instructions. List anything that breaks a rule: clutter left in, a coaching name, a missing "(as of …)", a section out of order, a bullet with two facts, a place without its district in a chapter file. Then give the corrected file.
+> From the Rivers chapter, list each river's districts in order from its source: "Banas: Rajsamand → Chittorgarh → Bhilwara → Ajmer → Tonk → Sawai Madhopur".
 
 ---
 
-## 5. Checklist before uploading to the atlas
+## 5. Checklist before uploading a subject file
 
-- [ ] The file name is the district's English atlas name with `.en.md` or `.hi.md`, and the first line is `# … district`.
-- [ ] The sections are in the template's order, with the template's titles.
-- [ ] Searching the file finds no `http`, `www`, `@`, `t.me`, phone numbers, or the names of any coaching or teacher.
-- [ ] There are no page numbers, repeated headers or "join" lines.
+- [ ] The file is named `<Subject>.en.md` (or `.hi.md`), with `# <Subject>` first and the chapters in syllabus order.
+- [ ] Searching finds no `http`, `www`, `@`, `t.me`, phone numbers, or the name of any coaching institute or teacher.
+- [ ] Every place has its district in brackets, and every place covered in detail has a `#### Place: name | district | kind` block.
+- [ ] The Places index at the end lists every place block.
 - [ ] Every changing fact ends with `(as of Mon YYYY)`, and every doubt is `[verify: …]`.
-- [ ] Every place in a chapter file has its district in brackets.
-- [ ] The revision questions are one per line, as `Question? Answer`.
-- [ ] The Hindi file has the same sections and the same number of bullets as the English one.
-
-**Uploading:**
-- **District files:** Atlas → District pages → import notes (several files at once). The atlas matches each file to its district by its name and turns it into the district page. The other language is filled by translation if you upload only one, and you can review it in Hindi review.
-- **Doubts:** `[verify: …]` notes are hidden from students but kept for you. Dates written as `(as of …)` appear in Quality → Recheck, so you're reminded to check them.
-- **Chapter files:** add them to your master map's chapters (or SAATHI's knowledge base), the same way you add notes today.
+- [ ] The Hindi file has the same headings, place lines and number of bullets as the English one.
 
 ---
 
-## How the conventions map to the atlas
+## What the atlas does with a subject file
+
+The format is designed for an importer that the atlas doesn't have yet; it is the next stage to build. Until then, the subject files are clean study notes you can use in SAATHI's knowledge base. Once the importer is built, uploading `Rajasthan-History.en.md` will do this:
 
 | In the file | In the atlas |
 | --- | --- |
-| `# Jaipur district` and the file name `Jaipur.en.md` | Matched to Jaipur when importing many files at once |
-| `## Introduction` … `## Nicknames` | The district page's standard sections |
-| Sections under ~6,000 characters, `###` inside | Imported part by part, with nothing cut |
-| `(as of Sep 2026)` | Students see the date. The fact appears in the Recheck list when it is due. |
-| `[verify: …]` | Hidden from students, kept for the editor |
-| `Question? Answer` lines | Revision questions and MCQ practice |
-| `Place (District)` in chapters | Linked to the place and district on the map |
-| No coaching names or source tags | Nothing to strip. Sources live in the editor's source log only. |
+| `## Chapter 03: …`, `### <Topic>`, bullets | Facts under that subject, chapter and topic, filed under the syllabus outline |
+| `Kumbhalgarh fort (Rajsamand)` inside a fact | The fact linked to that place and district, so it shows on their cards |
+| `#### Place: Kumbhalgarh fort \| Rajsamand \| fort` | The place's detailed write-up, under "History" on its card and page, beside the write-ups from other subjects (Art & Culture, Geography…) |
+| A place block with no matching place on the map | A suggestion for you to put on the map; the write-up waits until you do |
+| `Question? Answer` lines | Revision cards and MCQ practice |
+| `(as of …)` and `[verify: …]` | The Recheck list, and notes hidden from students |
+| The same file uploaded again | Replaces only that subject's content; your edits to other subjects stay |
+| The `.hi.md` file | The Hindi side of the same facts and write-ups |
