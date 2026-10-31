@@ -56,16 +56,24 @@ export function groupDuplicates(cards: FlashCard[]): DupGroup[] {
 
 // The main card of a group: from the first book in the topic's order (then
 // the earliest), so a merge keeps the preferred book's version in front.
-export function mainOf(cards: FlashCard[], bookOrder: string[]): FlashCard {
+// `proofread`: the sheets marked proofread.
+export function mainOf(
+  cards: FlashCard[],
+  bookOrder: string[],
+  proofread: ReadonlySet<string> = new Set(),
+): FlashCard {
   const rank = (c: FlashCard) => {
     const i = bookOrder.indexOf(c.sources[0]?.book ?? "");
     return i < 0 ? bookOrder.length : i;
   };
-  // A numbered card first (its number is in the app), then the one with
-  // the most explanations, then the books' order.
+  const fromProofread = (c: FlashCard) => proofread.has(c.sources[0]?.src ?? "");
+  // A numbered card first (its number is in the app), then one from a
+  // proofread sheet, then the one with the most explanations, then the
+  // books' order.
   return [...cards].sort(
     (a, b) =>
       Number(a.card_order === null) - Number(b.card_order === null) ||
+      Number(fromProofread(b)) - Number(fromProofread(a)) ||
       filledCount(b) - filledCount(a) ||
       rank(a) - rank(b) ||
       a.pos - b.pos,
@@ -87,15 +95,35 @@ export function exConflicts(cards: Pick<FlashCard, "ex">[], columns: FlashColumn
   });
 }
 
-export type Version = { book: string; front: string; back: string; ex: Record<string, string> };
+// `src`: the sheet it came from (none for cards added before sheets were
+// kept).
+export type Version = {
+  book: string;
+  front: string;
+  back: string;
+  ex: Record<string, string>;
+  src?: string;
+};
 
 // A card's own version and the other books' it was merged with.
 export function versionsOf(
   c: Pick<FlashCard, "front" | "back" | "ex" | "sources" | "variants">,
 ): Version[] {
   return [
-    { book: c.sources[0]?.book ?? "", front: c.front, back: c.back, ex: c.ex },
-    ...c.variants.map((v) => ({ book: v.book, front: v.front, back: v.back, ex: v.ex })),
+    {
+      book: c.sources[0]?.book ?? "",
+      front: c.front,
+      back: c.back,
+      ex: c.ex,
+      src: c.sources[0]?.src,
+    },
+    ...c.variants.map((v) => ({
+      book: v.book,
+      front: v.front,
+      back: v.back,
+      ex: v.ex,
+      src: v.source?.src,
+    })),
   ];
 }
 
@@ -131,6 +159,8 @@ export type Chip = {
   meaning: number;
   books: string[];
   spellings: string[];
+  // The sheets that give it.
+  srcs: string[];
 };
 
 // Every item any book gives, once, with the books that give it (spellings
@@ -146,6 +176,7 @@ export function combineItems(versions: Version[]): Chip[] {
       if (found) {
         if (v.book && !found.books.includes(v.book)) found.books.push(v.book);
         if (!found.spellings.includes(it.text)) found.spellings.push(it.text);
+        if (v.src && !found.srcs.includes(v.src)) found.srcs.push(v.src);
       } else
         chips.push({
           text: it.text,
@@ -153,6 +184,7 @@ export function combineItems(versions: Version[]): Chip[] {
           meaning: it.meaning,
           books: v.book ? [v.book] : [],
           spellings: [it.text],
+          srcs: v.src ? [v.src] : [],
           first: n++,
         });
     }
@@ -195,6 +227,68 @@ export function disagreement(c: Pick<FlashCard, "front" | "back" | "ex" | "sourc
 // Whether a card's answer is a list worth combining (any version has two
 // or more items).
 export const isList = (vs: Version[]) => vs.some((v) => listItems(v.back).length > 1);
+
+// ---------- Proofread sheets ----------
+
+// Whether a version (by its sheet) or a word chip (by the sheets that give
+// it) is backed by a proofread sheet: "yes" ✓, "no" ✗ (only sheets not
+// proofread), null when it can't tell (no sheet known).
+export type ProofMark = "yes" | "no" | null;
+export const sheetMark = (src: string | undefined, proofread: ReadonlySet<string>): ProofMark =>
+  !src ? null : proofread.has(src) ? "yes" : "no";
+export const chipMark = (chip: Pick<Chip, "srcs">, proofread: ReadonlySet<string>): ProofMark =>
+  !chip.srcs.length ? null : chip.srcs.some((s) => proofread.has(s)) ? "yes" : "no";
+
+// Marks are shown (and decide what starts ticked) only where at least one
+// version compared is from a proofread sheet.
+export const anyProofread = (vs: Pick<Version, "src">[], proofread: ReadonlySet<string>) =>
+  vs.some((v) => !!v.src && proofread.has(v.src));
+
+// The word chips ticked to begin with: those a proofread sheet gives (all,
+// when no version is from one).
+export function startTicked(
+  chips: Pick<Chip, "key" | "srcs">[],
+  vs: Pick<Version, "src">[],
+  proofread: ReadonlySet<string>,
+): Set<string> {
+  if (!anyProofread(vs, proofread)) return new Set(chips.map((c) => c.key));
+  return new Set(chips.filter((c) => chipMark(c, proofread) === "yes").map((c) => c.key));
+}
+
+// Whether two or more proofread sheets give different answers (as a set of
+// items, spelling folded), front spellings or explanations.
+export function proofreadDisagree(
+  vs: Version[],
+  proofread: ReadonlySet<string>,
+): { answer: boolean; front: boolean; columns: string[] } {
+  const pv = vs.filter((v) => !!v.src && proofread.has(v.src));
+  if (pv.length < 2) return { answer: false, front: false, columns: [] };
+  const set = (back: string) =>
+    listItems(back)
+      .map((i) => `${i.meaning}:${wordKey(i.text)}`)
+      .sort()
+      .join("|");
+  const norm = (t: string) => t.replace(/\s+/g, " ").trim().replace(/[।.]$/, "");
+  const cols = [...new Set(pv.flatMap((v) => Object.keys(v.ex)))].filter(
+    (id) => new Set(pv.map((v) => norm(v.ex[id] ?? "")).filter(Boolean)).size > 1,
+  );
+  return {
+    answer: new Set(pv.map((v) => set(v.back))).size > 1,
+    front: new Set(pv.map((v) => norm(v.front))).size > 1,
+    columns: cols,
+  };
+}
+
+// A card's own mark: from its sheet, or (merged) ✓ when any of its
+// versions is from a proofread sheet.
+export function cardMark(
+  c: Pick<FlashCard, "front" | "back" | "ex" | "sources" | "variants">,
+  proofread: ReadonlySet<string>,
+): ProofMark {
+  const marks = versionsOf(c).map((v) => sheetMark(v.src, proofread));
+  if (marks.includes("yes")) return "yes";
+  return marks.includes("no") ? "no" : null;
+}
 
 // ---------- Explanations from the books ----------
 

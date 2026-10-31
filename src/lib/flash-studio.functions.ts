@@ -178,6 +178,7 @@ export const importFlashSheet = createServerFn({ method: "POST" })
         name: z.string().max(200).optional(),
         replace: id.optional(),
         keep_numbers: z.boolean(),
+        proofread: z.boolean().optional(),
         from_app: z
           .object({
             verified: z.boolean(),
@@ -495,12 +496,23 @@ export const replaceFlashSheet = createServerFn({ method: "POST" })
         columns: z.array(z.string().max(80)).max(30),
         book: z.string().max(30),
         name: z.string().max(200).optional(),
+        proofread: z.boolean(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return (await server()).replaceSheet(data.topic_id, data.source_id, data);
+  });
+
+// A sheet marked (or unmarked) as already proofread.
+export const setFlashSheetProofread = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id, on: z.boolean() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).setSheetProofread(data.id, data.on);
+    return { ok: true };
   });
 
 export const applyFlashWorking = createServerFn({ method: "POST" })

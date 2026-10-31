@@ -11,7 +11,9 @@ import {
   applyFlashWorking,
   deleteFlashSource,
   replaceFlashSheet,
+  setFlashSheetProofread,
 } from "@/lib/flash-studio.functions";
+import { ProofreadBox } from "@/components/flash-proofread";
 import { sheetStatus } from "@/lib/flash-merge";
 import type { FlashCard, FlashSourceRow, FlashTopic, ParsedSheet } from "@/lib/flash-studio";
 import { planReplace, planWorking, type WorkingRow } from "@/lib/flash-sheets";
@@ -44,6 +46,7 @@ export function SheetsTab({
   onChanged: () => void;
 }) {
   const deleteFn = useServerFn(deleteFlashSource);
+  const proofFn = useServerFn(setFlashSheetProofread);
   const fileRef = useRef<HTMLInputElement>(null);
   const [replacing, setReplacing] = useState<FlashSourceRow | null>(null);
   const color = (book: string) =>
@@ -128,6 +131,21 @@ export function SheetsTab({
                   {KIND[s.kind]} · added {new Date(s.created_at).toLocaleDateString("en-IN")}
                 </span>
                 {s.kind === "sheet" && (
+                  <ProofToggle
+                    source={s}
+                    onSave={async (on) => {
+                      try {
+                        await proofFn({ data: { id: s.id, on } });
+                        onChanged();
+                      } catch (err) {
+                        toast.error(errorText(err, "Couldn't save"));
+                        return false;
+                      }
+                      return true;
+                    }}
+                  />
+                )}
+                {s.kind === "sheet" && (
                   <Button
                     aria-label={`Replace ${s.name || s.book}`}
                     size="sm"
@@ -210,6 +228,36 @@ export function SheetsTab({
   );
 }
 
+// A sheet's "Proofread" mark, switched at any time.
+function ProofToggle({
+  source,
+  onSave,
+}: {
+  source: FlashSourceRow;
+  onSave: (on: boolean) => Promise<boolean>;
+}) {
+  const [on, setOn] = useState(source.proofread);
+  return (
+    <label
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${on ? "border-emerald-400 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "border-border text-muted-foreground"}`}
+      title="Its words get a green ✓ when books are compared; words only from sheets not proofread get a red ✗"
+      data-proofread={on ? "yes" : "no"}
+    >
+      <input
+        type="checkbox"
+        aria-label={`${source.name || source.book} is proofread`}
+        checked={on}
+        onChange={async (e) => {
+          const next = e.target.checked;
+          setOn(next);
+          if (!(await onSave(next))) setOn(!next);
+        }}
+      />
+      {on ? "✓ Proofread" : "Not proofread"}
+    </label>
+  );
+}
+
 const n = (k: number, what = "card") => `${k} ${what}${k === 1 ? "" : "s"}`;
 const firstLine = (t: string) => t.split("\n")[0] || "—";
 
@@ -235,6 +283,8 @@ export function ReplaceDialog({
 }) {
   const replaceFn = useServerFn(replaceFlashSheet);
   const [busy, setBusy] = useState(false);
+  // Asked again for the new version.
+  const [proofread, setProofread] = useState(false);
   const idOf = new Map(topic.columns.map((c) => [c.title.trim(), c.id]));
   const plan = planReplace(cards, replace.id, sheet.cards, idOf);
   const known = new Set(topic.columns.map((c) => c.title.trim()));
@@ -312,6 +362,7 @@ export function ReplaceDialog({
               New explanation columns for this topic: {newCols.join(", ")}.
             </p>
           )}
+          <ProofreadBox checked={proofread} onChange={setProofread} before={replace.proofread} />
           <Button
             disabled={busy}
             onClick={async () => {
@@ -325,6 +376,7 @@ export function ReplaceDialog({
                     columns: sheet.columns,
                     book: replace.book,
                     name: file,
+                    proofread,
                   },
                 });
                 toast.success(
