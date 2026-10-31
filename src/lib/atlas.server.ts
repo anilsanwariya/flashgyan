@@ -302,13 +302,21 @@ async function translateStep(): Promise<boolean> {
   if (ps.length) {
     const items = ps.flatMap((p) => [String(p.name_en), String(p.label_en || p.name_en)]);
     const hi = await translateBatch(items);
-    for (const [i, p] of ps.entries())
-      await from("atlas_places")
-        .update({
-          name_hi: String(p.name_hi) || hi[i * 2] || String(p.name_en),
-          label_hi: String(p.label_hi) || hi[i * 2 + 1] || hi[i * 2] || String(p.label_en),
-        } as never)
+    for (const [i, p] of ps.entries()) {
+      const patch = {
+        name_hi: String(p.name_hi) || hi[i * 2] || String(p.name_en),
+        label_hi: String(p.label_hi) || hi[i * 2 + 1] || hi[i * 2] || String(p.label_en),
+      };
+      // Marked as the AI's for the Hindi review (once its migration is in).
+      const { error } = await from("atlas_places")
+        .update({ ...patch, hi_ai: true } as never)
         .eq("id", String(p.id));
+      if (error && /hi_ai/.test(error.message))
+        await from("atlas_places")
+          .update(patch as never)
+          .eq("id", String(p.id));
+      else fail(error);
+    }
     return true;
   }
   const { data: facts } = await from("atlas_facts")
@@ -563,7 +571,13 @@ async function startJob(district: string, job: Omit<OverviewJob, "done" | "start
   if (row.meta.job && row.meta.job.done < row.meta.job.parts.length && !row.meta.job.error)
     throw new Error("Another job is still running on this district.");
   if (row.overview && job.kind !== "check") await keepVersion(district, row, `Before ${job.kind}`);
-  await setJob(district, row.meta, { ...job, done: 0, started: now() });
+  // Rewriting the page means it needs checking again.
+  const { checked: _checked, ...rest } = row.meta as Row;
+  await setJob(district, job.kind === "check" ? row.meta : rest, {
+    ...job,
+    done: 0,
+    started: now(),
+  });
 }
 
 async function keepVersion(
@@ -843,13 +857,15 @@ async function overviewStep(district: string): Promise<boolean> {
     return true;
   }
   const done = job.done + 1;
+  // A finished fact-check is recorded for the district checklist.
+  const checked = job.kind === "check" && done >= job.parts.length ? { checked: now() } : {};
   fail(
     (
       await from("atlas_districts")
         .update({
           overview: next,
           ...(checks ? { checks } : {}),
-          meta: { ...row.meta, job: { ...job, done } },
+          meta: { ...row.meta, ...checked, job: { ...job, done } },
           updated_at: now(),
         } as never)
         .eq("district", district)
@@ -985,6 +1001,17 @@ export async function savePlace(p: Partial<AtlasPlace> & { id?: string }) {
   delete patch.id;
   if (typeof p.lat === "number" && typeof p.lon === "number" && !p.district)
     patch.district = districtAt(p.lon, p.lat);
+  // Hindi the editor wrote is no longer the AI's.
+  if (p.id && (p.name_hi !== undefined || p.label_hi !== undefined)) {
+    const { error } = await from("atlas_places")
+      .update({ ...patch, hi_ai: false } as never)
+      .eq("id", p.id);
+    if (!error || !/hi_ai/.test(error.message)) {
+      fail(error);
+      invalidate();
+      return;
+    }
+  }
   if (p.id)
     fail(
       (
@@ -1523,4 +1550,13 @@ export async function publishedDistricts(): Promise<{ district: string; at: stri
     district: String(r.district),
     at: (r.published_at as string | null) ?? null,
   }));
+}
+
+// For the review tools: the students' cached atlas dropped, and chapters'
+// knowledge base documents queued to follow edits.
+export const invalidateAtlas = () => invalidate();
+export async function queueKb(chapterKeys: string[]) {
+  const j = await jobs();
+  const kb = [...new Set([...j.kb, ...chapterKeys.filter(Boolean)])];
+  if (kb.length !== j.kb.length) await saveSetting(JOBS_KEY, { ...j, kb });
 }
