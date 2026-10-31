@@ -39,6 +39,7 @@ import { AtlasAcross } from "@/components/atlas-news-panel";
 import { AtlasQuality } from "@/components/atlas-quality-panel";
 import { AtlasSyllabus } from "@/components/atlas-syllabus-panel";
 import { AtlasDrills } from "@/components/atlas-drills-panel";
+import { AtlasUsage } from "@/components/atlas-usage-panel";
 import { DistrictChecklist, GapsReport, HindiReview } from "@/components/atlas-review-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,6 +59,7 @@ const TABS = [
   "syllabus",
   "practice",
   "drills",
+  "usage",
 ] as const;
 type Tab = (typeof TABS)[number];
 const MIGRATION =
@@ -90,6 +92,7 @@ export function AtlasPanel() {
           { id: "syllabus", label: "Syllabus" },
           { id: "practice", label: "Practice" },
           { id: "drills", label: "Drills" },
+          { id: "usage", label: "Usage" },
         ]}
         value={tab}
         onChange={setTab}
@@ -107,6 +110,7 @@ export function AtlasPanel() {
       {tab === "syllabus" && <AtlasSyllabus />}
       {tab === "practice" && <AtlasPractice />}
       {tab === "drills" && <AtlasDrills />}
+      {tab === "usage" && <AtlasUsage />}
     </div>
   );
 }

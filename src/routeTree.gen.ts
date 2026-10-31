@@ -40,6 +40,7 @@ import { Route as ApiCaTickRouteImport } from './routes/api.ca.tick'
 import { Route as ApiSaathiAskRouteImport } from './routes/api.saathi.ask'
 import { Route as ApiSaathiCheckRouteImport } from './routes/api.saathi.check'
 import { Route as AtlasPlaceKeyRouteImport } from './routes/atlas.place.$key'
+import { Route as AtlasSheetDistrictRouteImport } from './routes/atlas.sheet.$district'
 import { Route as AtlasThemeThemeRouteImport } from './routes/atlas.theme.$theme'
 
 const IndexRoute = IndexRouteImport.update({
@@ -196,6 +197,11 @@ const AtlasPlaceKeyRoute = AtlasPlaceKeyRouteImport.update({
   path: '/atlas/place/$key',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AtlasSheetDistrictRoute = AtlasSheetDistrictRouteImport.update({
+  id: '/atlas/sheet/$district',
+  path: '/atlas/sheet/$district',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AtlasThemeThemeRoute = AtlasThemeThemeRouteImport.update({
   id: '/atlas/theme/$theme',
   path: '/atlas/theme/$theme',
@@ -233,6 +239,7 @@ export interface FileRoutesByFullPath {
   '/api/saathi/ask': typeof ApiSaathiAskRoute
   '/api/saathi/check': typeof ApiSaathiCheckRoute
   '/atlas/place/$key': typeof AtlasPlaceKeyRoute
+  '/atlas/sheet/$district': typeof AtlasSheetDistrictRoute
   '/atlas/theme/$theme': typeof AtlasThemeThemeRoute
 }
 export interface FileRoutesByTo {
@@ -266,6 +273,7 @@ export interface FileRoutesByTo {
   '/api/saathi/ask': typeof ApiSaathiAskRoute
   '/api/saathi/check': typeof ApiSaathiCheckRoute
   '/atlas/place/$key': typeof AtlasPlaceKeyRoute
+  '/atlas/sheet/$district': typeof AtlasSheetDistrictRoute
   '/atlas/theme/$theme': typeof AtlasThemeThemeRoute
 }
 export interface FileRoutesById {
@@ -301,6 +309,7 @@ export interface FileRoutesById {
   '/api/saathi/ask': typeof ApiSaathiAskRoute
   '/api/saathi/check': typeof ApiSaathiCheckRoute
   '/atlas/place/$key': typeof AtlasPlaceKeyRoute
+  '/atlas/sheet/$district': typeof AtlasSheetDistrictRoute
   '/atlas/theme/$theme': typeof AtlasThemeThemeRoute
 }
 export interface FileRouteTypes {
@@ -336,6 +345,7 @@ export interface FileRouteTypes {
     | '/api/saathi/ask'
     | '/api/saathi/check'
     | '/atlas/place/$key'
+    | '/atlas/sheet/$district'
     | '/atlas/theme/$theme'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -369,6 +379,7 @@ export interface FileRouteTypes {
     | '/api/saathi/ask'
     | '/api/saathi/check'
     | '/atlas/place/$key'
+    | '/atlas/sheet/$district'
     | '/atlas/theme/$theme'
   id:
     | '__root__'
@@ -403,6 +414,7 @@ export interface FileRouteTypes {
     | '/api/saathi/ask'
     | '/api/saathi/check'
     | '/atlas/place/$key'
+    | '/atlas/sheet/$district'
     | '/atlas/theme/$theme'
   fileRoutesById: FileRoutesById
 }
@@ -437,6 +449,7 @@ export interface RootRouteChildren {
   ApiSaathiAskRoute: typeof ApiSaathiAskRoute
   ApiSaathiCheckRoute: typeof ApiSaathiCheckRoute
   AtlasPlaceKeyRoute: typeof AtlasPlaceKeyRoute
+  AtlasSheetDistrictRoute: typeof AtlasSheetDistrictRoute
   AtlasThemeThemeRoute: typeof AtlasThemeThemeRoute
 }
 
@@ -659,6 +672,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtlasPlaceKeyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/atlas/sheet/$district': {
+      id: '/atlas/sheet/$district'
+      path: '/atlas/sheet/$district'
+      fullPath: '/atlas/sheet/$district'
+      preLoaderRoute: typeof AtlasSheetDistrictRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/atlas/theme/$theme': {
       id: '/atlas/theme/$theme'
       path: '/atlas/theme/$theme'
@@ -711,6 +731,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiSaathiAskRoute: ApiSaathiAskRoute,
   ApiSaathiCheckRoute: ApiSaathiCheckRoute,
   AtlasPlaceKeyRoute: AtlasPlaceKeyRoute,
+  AtlasSheetDistrictRoute: AtlasSheetDistrictRoute,
   AtlasThemeThemeRoute: AtlasThemeThemeRoute,
 }
 export const routeTree = rootRouteImport

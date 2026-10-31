@@ -18,7 +18,9 @@ import {
 } from "@/lib/atlas-drills";
 import {
   districtScore,
+  quizUsage,
   readStreak,
+  sendUsage,
   writeStreak,
   recordQuizAnswers,
   useAtlasSaved,
@@ -197,7 +199,9 @@ function QuizPage() {
   const score = answers.filter((a) => a.right).length;
   useEffect(() => {
     if (!done || !round) return;
-    recordQuizAnswers(answers.map((a) => ({ district: a.q.district, right: a.right })));
+    const list = answers.map((a) => ({ district: a.q.district, right: a.right }));
+    recordQuizAnswers(list);
+    sendUsage([...quizUsage(list), ...(daily ? [{ kind: "daily" as const, ref: today }] : [])]);
     if (daily) {
       const s = afterDaily(readStreak(), today, answers.map((a) => (a.right ? "1" : "0")).join(""));
       writeStreak(s);

@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { ArrowLeft, Map as MapIcon } from "lucide-react";
+import { ArrowLeft, Map as MapIcon, Printer } from "lucide-react";
 import { atlasBaseFn, atlasDistrictFn } from "@/lib/atlas.functions";
 import {
   AGRO_ZONES,
@@ -85,7 +85,15 @@ function DistrictPage() {
           </div>
           <main className="mx-auto max-w-5xl px-4 py-8 sm:px-8">
             <OverviewSections ov={ov} lang={lang} before={map} />
-            <div className="mt-8 flex justify-end border-t border-border pt-3">
+            <div className="mt-8 flex flex-wrap justify-end gap-2 border-t border-border pt-3">
+              <Link
+                to="/atlas/sheet/$district"
+                params={{ district: d.district }}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium hover:bg-muted"
+              >
+                <Printer className="h-3.5 w-3.5" />{" "}
+                {L(lang, "एक पेज का सार (प्रिंट)", "One-page sheet (print)")}
+              </Link>
               <ReportButton
                 lang={lang}
                 kind="district"
