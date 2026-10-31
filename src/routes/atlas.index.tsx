@@ -5,6 +5,7 @@ import {
   Bookmark,
   BookOpen,
   Columns3,
+  GraduationCap,
   Gamepad2,
   Layers,
   MapPin,
@@ -14,7 +15,9 @@ import {
 import { OfflineButton, SaveButton, ShareButton } from "@/components/atlas-actions";
 import { InTheNews, NewsList } from "@/components/atlas-news";
 import { ReportButton } from "@/components/atlas-report";
-import { useAtlasSaved } from "@/lib/atlas-device";
+import { AskedInExams, useAtlasAskedCounts } from "@/components/atlas-exams";
+import { readSchedule, useAtlasSaved } from "@/lib/atlas-device";
+import { dayOf, todaysCards } from "@/lib/atlas-cards";
 import { atlasBaseFn, atlasPlacesFn } from "@/lib/atlas.functions";
 import {
   AGRO_ZONES,
@@ -37,6 +40,7 @@ import {
 import { AtlasMap } from "@/components/atlas-map";
 import {
   useAtlasBase,
+  useAtlasCards,
   useAtlasEntityFacts,
   useAtlasPlace,
   useAtlasPlaces,
@@ -81,6 +85,9 @@ function AtlasPage() {
   // kinds, instead of the kinds chosen).
   const [time, setTime] = useState<{ from: number; to: number } | null>(null);
   const [month, setMonth] = useState<number | null>(null);
+  // Only the places asked about in past papers.
+  const [asked, setAsked] = useState(false);
+  const askedCounts = useAtlasAskedCounts().data;
 
   const all = places.data ?? [];
   const timed = useMemo(() => all.filter((p) => p[8] != null || p[9] != null), [all]);
@@ -89,14 +96,16 @@ function AtlasPage() {
     () =>
       all.filter(
         (p) =>
-          (time
-            ? inEra({ era_from: p[8], era_to: p[9] }, time.from, time.to)
-            : month
-              ? p[10]?.includes(month)
-              : cats.includes(p[3])) ||
+          (asked
+            ? !!askedCounts?.places[p[0]]
+            : time
+              ? inEra({ era_from: p[8], era_to: p[9] }, time.from, time.to)
+              : month
+                ? p[10]?.includes(month)
+                : cats.includes(p[3])) ||
           (sel?.kind === "place" && sel.key === p[0]),
       ),
-    [all, cats, sel, time, month],
+    [all, cats, sel, time, month, asked, askedCounts],
   );
   const counts = useMemo(() => {
     const m = new Map<string, number>();
@@ -231,6 +240,25 @@ function AtlasPage() {
         </section>
       )}
       <InTheNews lang={lang} onPlace={(k) => pick("place", k)} />
+      {!!askedCounts && Object.keys(askedCounts.places).length > 0 && (
+        <button
+          type="button"
+          aria-pressed={asked}
+          onClick={() => {
+            setAsked(!asked);
+            setTime(null);
+            setMonth(null);
+          }}
+          className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm ${asked ? "border-indigo-500 bg-indigo-500/10 font-semibold" : "border-border hover:bg-muted"}`}
+          data-asked-filter
+        >
+          <GraduationCap className="h-4 w-4 text-indigo-600" />
+          {L(lang, "परीक्षाओं में पूछे गए स्थान", "Places asked in exams")}
+          <span className="ml-auto text-xs text-muted-foreground">
+            {Object.keys(askedCounts.places).length}
+          </span>
+        </button>
+      )}
       <ThemeLinks lang={lang} all={all} />
       {timed.length > 0 && (
         <TimeFilter
@@ -244,7 +272,10 @@ function AtlasPage() {
           }
           onChange={(t) => {
             setTime(t);
-            if (t) setMonth(null);
+            if (t) {
+              setMonth(null);
+              setAsked(false);
+            }
           }}
         />
       )}
@@ -266,6 +297,7 @@ function AtlasPage() {
                   onClick={() => {
                     setMonth(on ? null : i + 1);
                     setTime(null);
+                    setAsked(false);
                   }}
                   className={`rounded-md border px-1.5 py-0.5 text-xs disabled:opacity-40 ${on ? "border-primary bg-primary text-primary-foreground" : "border-border"}`}
                 >
@@ -277,7 +309,7 @@ function AtlasPage() {
           </div>
         </section>
       )}
-      <section className={time || month ? "opacity-50" : ""}>
+      <section className={time || month || asked ? "opacity-50" : ""}>
         <div className="mb-2 flex items-center justify-between">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {L(lang, "स्थान", "Places")}
@@ -381,6 +413,7 @@ function AtlasPage() {
         >
           <Gamepad2 className="h-4 w-4" /> {L(lang, "क्विज़", "Quiz")}
         </Link>
+        <CardsLink lang={lang} />
         <SavedLink lang={lang} />
         <LangToggle lang={lang} onChange={setLang} />
         <button
@@ -659,6 +692,7 @@ function PlaceCard({
         <FactsList facts={facts} lang={lang} limit={12} />
       </div>
       <NewsList items={q.data.news ?? []} lang={lang} />
+      <AskedInExams lang={lang} place={place.key} />
       {mentions.length > 0 && (
         <div>
           <p className="mb-1.5 text-sm font-semibold">
@@ -826,6 +860,7 @@ function DistrictCard({
           <p className="text-sm text-muted-foreground">…</p>
         )}
       </div>
+      <AskedInExams lang={lang} district={d.en} />
     </div>
   );
 }
@@ -943,6 +978,30 @@ function SavedLink({ lang }: { lang: AtlasLang }) {
       <Bookmark className="h-4 w-4" /> {L(lang, "सहेजे", "Saved")}
       {n > 0 && (
         <span className="rounded-full bg-amber-100 px-1.5 text-xs text-amber-900">{n}</span>
+      )}
+    </Link>
+  );
+}
+
+// Revision cards, with how many are waiting today (from the schedule on
+// this device).
+function CardsLink({ lang }: { lang: AtlasLang }) {
+  const cards = useAtlasCards();
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (!cards.data) return;
+    const t = todaysCards(cards.data, readSchedule(), dayOf(new Date()));
+    setN(t.due.length + t.fresh.length);
+  }, [cards.data]);
+  return (
+    <Link
+      to="/atlas/cards"
+      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-sm hover:bg-muted"
+      data-cards-link
+    >
+      <Layers className="h-4 w-4" /> {L(lang, "कार्ड", "Cards")}
+      {n > 0 && (
+        <span className="rounded-full bg-indigo-100 px-1.5 text-xs text-indigo-900">{n}</span>
       )}
     </Link>
   );

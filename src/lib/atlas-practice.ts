@@ -341,19 +341,30 @@ export type QuizQ =
 
 // A round of questions (no question twice). `places`: the ones the student
 // chose (by kind); districts: with their neighbours (the wrong options).
+// `focus`: only these districts are asked about (a student's weak ones).
 export function quizRound(
   mode: QuizMode,
   districts: { en: string; meta: DistrictMeta }[],
   places: (QuizPlace & { district: string })[],
   rnd: () => number,
   n = 10,
+  focus?: Set<string>,
 ): QuizQ[] {
   const names = new Set(districts.map((d) => d.en));
-  const usable = places.filter((p) => names.has(p.district) && !NO_DISTRICT_QUESTION.has(p.cat));
+  const asked = (d: string) => !focus || focus.has(d);
+  const usable = places.filter(
+    (p) => names.has(p.district) && asked(p.district) && !NO_DISTRICT_QUESTION.has(p.cat),
+  );
   const seen = new Set<string>();
   const pool = {
-    find: shuffle(districts, rnd),
-    name: shuffle(districts, rnd),
+    find: shuffle(
+      districts.filter((d) => asked(d.en)),
+      rnd,
+    ),
+    name: shuffle(
+      districts.filter((d) => asked(d.en)),
+      rnd,
+    ),
     where: shuffle(usable, rnd).filter((p) => {
       const k = p.en.toLowerCase();
       if (seen.has(k)) return false;
