@@ -59,6 +59,9 @@ export function AtlasMap({
   district,
   onPlace,
   onDistrict,
+  blind = false,
+  marks,
+  named = [],
   className = "",
 }: {
   base: AtlasBase;
@@ -74,6 +77,12 @@ export function AtlasMap({
   district?: string;
   onPlace?: (key: string) => void;
   onDistrict?: (name: string) => void;
+  // A quiz: no names on the map (districts, places), and districts coloured
+  // by `marks` (a colour by district).
+  blind?: boolean;
+  marks?: Record<string, string>;
+  // Districts whose names show on a blind map (an answered question's).
+  named?: string[];
   className?: string;
 }) {
   const own = district ? base.districts.find((d) => d.en === district) : null;
@@ -180,6 +189,7 @@ export function AtlasMap({
   // another name or another dot (the chosen place always).
   const labelled = useMemo(() => {
     const out = new Set<string>();
+    if (blind) return out;
     if (!(zoom > 3.5 || own)) {
       if (selected) out.add(selected);
       return out;
@@ -210,7 +220,7 @@ export function AtlasMap({
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [places, zoom > 3.5, Math.round(k * 50), own, selected, lang]);
+  }, [places, zoom > 3.5, Math.round(k * 50), own, selected, lang, blind]);
   return (
     <div
       className={`relative overflow-hidden rounded-2xl border border-border bg-[#eef2f7] dark:bg-slate-900 ${className}`}
@@ -256,14 +266,15 @@ export function AtlasMap({
             <path
               key={d.en}
               d={d.rings.map(ring).join("")}
-              fill="#fffdf6"
+              fill={marks?.[d.en] ?? "#fffdf6"}
               stroke="#94a3b8"
               strokeWidth={0.8}
               vectorEffect="non-scaling-stroke"
-              className={onDistrict ? "cursor-pointer hover:fill-amber-50" : ""}
+              className={onDistrict && !marks?.[d.en] ? "cursor-pointer hover:fill-amber-50" : ""}
               onClick={() => !moved.current && onDistrict?.(d.en)}
+              data-district={d.en}
             >
-              <title>{lang === "hi" ? d.hi : d.en}</title>
+              {!blind && <title>{lang === "hi" ? d.hi : d.en}</title>}
             </path>
           ))}
         </g>
@@ -312,6 +323,7 @@ export function AtlasMap({
         </g>
         <g style={{ pointerEvents: "none" }}>
           {shown.map((d) => {
+            if (blind && !named.includes(d.en)) return null;
             const [x, y] = project(d.at[0], d.at[1]);
             const size = (own ? 22 : 11) * k;
             return (
@@ -344,7 +356,7 @@ export function AtlasMap({
                 className="cursor-pointer"
                 onClick={() => !moved.current && onPlace?.(p[0])}
                 role="button"
-                aria-label={lang === "hi" ? p[2] || p[1] : p[1]}
+                aria-label={blind ? undefined : lang === "hi" ? p[2] || p[1] : p[1]}
               >
                 <circle cx={x} cy={y} r={r * 2.2} fill="transparent" />
                 <circle
@@ -370,7 +382,9 @@ export function AtlasMap({
                     {lang === "hi" ? p[2] || p[1] : p[1]}
                   </text>
                 )}
-                <title>{`${lang === "hi" ? p[2] || p[1] : p[1]} · ${pickBi(c.name, lang)}`}</title>
+                {!blind && (
+                  <title>{`${lang === "hi" ? p[2] || p[1] : p[1]} · ${pickBi(c.name, lang)}`}</title>
+                )}
               </g>
             );
           })}

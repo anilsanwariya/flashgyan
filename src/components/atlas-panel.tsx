@@ -33,11 +33,12 @@ import {
 import { googleMapsUrl as googleMapsHref } from "@/lib/map-spec";
 import { Badge, PageTabs, errorText, useUrlTab } from "@/components/ca-ui";
 import { AtlasDistrictEditor } from "@/components/atlas-district-editor";
+import { AtlasPractice } from "@/components/atlas-practice-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
-const TABS = ["overview", "districts", "facts", "places", "layers"] as const;
+const TABS = ["overview", "districts", "facts", "places", "layers", "practice"] as const;
 type Tab = (typeof TABS)[number];
 const MIGRATION =
   "The atlas needs its database tables: run the migration 20261212090000_rajasthan_atlas.sql.";
@@ -61,6 +62,7 @@ export function AtlasPanel() {
           { id: "facts", label: "Facts" },
           { id: "places", label: "Places" },
           { id: "layers", label: "Layers" },
+          { id: "practice", label: "Practice" },
         ]}
         value={tab}
         onChange={setTab}
@@ -70,6 +72,7 @@ export function AtlasPanel() {
       {tab === "facts" && <Facts />}
       {tab === "places" && <Places />}
       {tab === "layers" && <Layers />}
+      {tab === "practice" && <AtlasPractice />}
     </div>
   );
 }

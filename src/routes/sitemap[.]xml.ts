@@ -10,6 +10,7 @@ const STATIC_PATHS = [
   { path: "/mcq-tests", priority: "0.8", changefreq: "weekly" },
   { path: "/saathi", priority: "0.5", changefreq: "monthly" },
   { path: "/atlas", priority: "0.8", changefreq: "weekly" },
+  { path: "/atlas/quiz", priority: "0.6", changefreq: "monthly" },
   { path: "/privacy-policy", priority: "0.2", changefreq: "yearly" },
   { path: "/terms", priority: "0.2", changefreq: "yearly" },
 ];
@@ -45,7 +46,8 @@ export const Route = createFileRoute("/sitemap.xml")({
           : await (await import("@/lib/atlas.server")).publishedDistricts().catch(() => []);
         const entries = [
           ...STATIC_PATHS.filter(
-            (p) => !(saathiOff && p.path === "/saathi") && !(atlasOff && p.path === "/atlas"),
+            (p) =>
+              !(saathiOff && p.path === "/saathi") && !(atlasOff && p.path.startsWith("/atlas")),
           ).map((p) => urlEntry(`${SITE_URL}${p.path}`, p.priority, p.changefreq)),
           ...(decks ?? []).map((d) => urlEntry(`${SITE_URL}/decks/${d.id}`, "0.7", "weekly")),
           ...districts.map((d) =>

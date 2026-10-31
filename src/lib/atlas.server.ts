@@ -29,6 +29,7 @@ import {
   type OverviewSection,
 } from "@/lib/atlas";
 import { parseMasterMap, slug, districtAt } from "@/lib/atlas-import.server";
+import { practiceStep } from "@/lib/atlas-practice.server";
 import type { Bi } from "@/lib/current-affairs";
 
 const from = (table: string) => supabaseAdmin.from(table as never);
@@ -911,7 +912,7 @@ export async function atlasStep(): Promise<{ did: string | null }> {
     await saveSetting(JOBS_KEY, { ...(await jobs()), kb: rest });
     return { did: `kb:${ch}` };
   }
-  return { did: null };
+  return practiceStep();
 }
 
 // ---------- Admin reads and edits ----------
