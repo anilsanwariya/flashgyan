@@ -137,6 +137,8 @@ export function useSaveOffline() {
           "/atlas",
           "/atlas/quiz",
           "/atlas/cards",
+          "/atlas/drills",
+          "/atlas/then-now",
           "/atlas/saved",
           "/atlas/compare",
           ...p.districts.map((d) => `/atlas/${encodeURIComponent(d.district)}`),

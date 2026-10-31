@@ -25,8 +25,11 @@ import { Route as AtlasIndexRouteImport } from './routes/atlas.index'
 import { Route as AtlasDistrictRouteImport } from './routes/atlas.$district'
 import { Route as AtlasCardsRouteImport } from './routes/atlas.cards'
 import { Route as AtlasCompareRouteImport } from './routes/atlas.compare'
+import { Route as AtlasDailyRouteImport } from './routes/atlas.daily'
+import { Route as AtlasDrillsRouteImport } from './routes/atlas.drills'
 import { Route as AtlasQuizRouteImport } from './routes/atlas.quiz'
 import { Route as AtlasSavedRouteImport } from './routes/atlas.saved'
+import { Route as AtlasThenNowRouteImport } from './routes/atlas.then-now'
 import { Route as DecksDeckIdRouteImport } from './routes/decks.$deckId'
 import { Route as McqResultTestIdRouteImport } from './routes/mcq-result.$testId'
 import { Route as McqTestIdRouteImport } from './routes/mcq.$testId'
@@ -118,6 +121,16 @@ const AtlasCompareRoute = AtlasCompareRouteImport.update({
   path: '/atlas/compare',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AtlasDailyRoute = AtlasDailyRouteImport.update({
+  id: '/atlas/daily',
+  path: '/atlas/daily',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AtlasDrillsRoute = AtlasDrillsRouteImport.update({
+  id: '/atlas/drills',
+  path: '/atlas/drills',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AtlasQuizRoute = AtlasQuizRouteImport.update({
   id: '/atlas/quiz',
   path: '/atlas/quiz',
@@ -126,6 +139,11 @@ const AtlasQuizRoute = AtlasQuizRouteImport.update({
 const AtlasSavedRoute = AtlasSavedRouteImport.update({
   id: '/atlas/saved',
   path: '/atlas/saved',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AtlasThenNowRoute = AtlasThenNowRouteImport.update({
+  id: '/atlas/then-now',
+  path: '/atlas/then-now',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DecksDeckIdRoute = DecksDeckIdRouteImport.update({
@@ -199,8 +217,11 @@ export interface FileRoutesByFullPath {
   '/atlas/$district': typeof AtlasDistrictRoute
   '/atlas/cards': typeof AtlasCardsRoute
   '/atlas/compare': typeof AtlasCompareRoute
+  '/atlas/daily': typeof AtlasDailyRoute
+  '/atlas/drills': typeof AtlasDrillsRoute
   '/atlas/quiz': typeof AtlasQuizRoute
   '/atlas/saved': typeof AtlasSavedRoute
+  '/atlas/then-now': typeof AtlasThenNowRoute
   '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
@@ -229,8 +250,11 @@ export interface FileRoutesByTo {
   '/atlas/$district': typeof AtlasDistrictRoute
   '/atlas/cards': typeof AtlasCardsRoute
   '/atlas/compare': typeof AtlasCompareRoute
+  '/atlas/daily': typeof AtlasDailyRoute
+  '/atlas/drills': typeof AtlasDrillsRoute
   '/atlas/quiz': typeof AtlasQuizRoute
   '/atlas/saved': typeof AtlasSavedRoute
+  '/atlas/then-now': typeof AtlasThenNowRoute
   '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
@@ -261,8 +285,11 @@ export interface FileRoutesById {
   '/atlas/$district': typeof AtlasDistrictRoute
   '/atlas/cards': typeof AtlasCardsRoute
   '/atlas/compare': typeof AtlasCompareRoute
+  '/atlas/daily': typeof AtlasDailyRoute
+  '/atlas/drills': typeof AtlasDrillsRoute
   '/atlas/quiz': typeof AtlasQuizRoute
   '/atlas/saved': typeof AtlasSavedRoute
+  '/atlas/then-now': typeof AtlasThenNowRoute
   '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
@@ -293,8 +320,11 @@ export interface FileRouteTypes {
     | '/atlas/$district'
     | '/atlas/cards'
     | '/atlas/compare'
+    | '/atlas/daily'
+    | '/atlas/drills'
     | '/atlas/quiz'
     | '/atlas/saved'
+    | '/atlas/then-now'
     | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
@@ -323,8 +353,11 @@ export interface FileRouteTypes {
     | '/atlas/$district'
     | '/atlas/cards'
     | '/atlas/compare'
+    | '/atlas/daily'
+    | '/atlas/drills'
     | '/atlas/quiz'
     | '/atlas/saved'
+    | '/atlas/then-now'
     | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
@@ -354,8 +387,11 @@ export interface FileRouteTypes {
     | '/atlas/$district'
     | '/atlas/cards'
     | '/atlas/compare'
+    | '/atlas/daily'
+    | '/atlas/drills'
     | '/atlas/quiz'
     | '/atlas/saved'
+    | '/atlas/then-now'
     | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
@@ -385,8 +421,11 @@ export interface RootRouteChildren {
   AtlasDistrictRoute: typeof AtlasDistrictRoute
   AtlasCardsRoute: typeof AtlasCardsRoute
   AtlasCompareRoute: typeof AtlasCompareRoute
+  AtlasDailyRoute: typeof AtlasDailyRoute
+  AtlasDrillsRoute: typeof AtlasDrillsRoute
   AtlasQuizRoute: typeof AtlasQuizRoute
   AtlasSavedRoute: typeof AtlasSavedRoute
+  AtlasThenNowRoute: typeof AtlasThenNowRoute
   DecksDeckIdRoute: typeof DecksDeckIdRoute
   McqResultTestIdRoute: typeof McqResultTestIdRoute
   McqTestIdRoute: typeof McqTestIdRoute
@@ -515,6 +554,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtlasCompareRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/atlas/daily': {
+      id: '/atlas/daily'
+      path: '/atlas/daily'
+      fullPath: '/atlas/daily'
+      preLoaderRoute: typeof AtlasDailyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/atlas/drills': {
+      id: '/atlas/drills'
+      path: '/atlas/drills'
+      fullPath: '/atlas/drills'
+      preLoaderRoute: typeof AtlasDrillsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/atlas/quiz': {
       id: '/atlas/quiz'
       path: '/atlas/quiz'
@@ -527,6 +580,13 @@ declare module '@tanstack/react-router' {
       path: '/atlas/saved'
       fullPath: '/atlas/saved'
       preLoaderRoute: typeof AtlasSavedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/atlas/then-now': {
+      id: '/atlas/then-now'
+      path: '/atlas/then-now'
+      fullPath: '/atlas/then-now'
+      preLoaderRoute: typeof AtlasThenNowRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/decks/$deckId': {
@@ -635,8 +695,11 @@ const rootRouteChildren: RootRouteChildren = {
   AtlasDistrictRoute: AtlasDistrictRoute,
   AtlasCardsRoute: AtlasCardsRoute,
   AtlasCompareRoute: AtlasCompareRoute,
+  AtlasDailyRoute: AtlasDailyRoute,
+  AtlasDrillsRoute: AtlasDrillsRoute,
   AtlasQuizRoute: AtlasQuizRoute,
   AtlasSavedRoute: AtlasSavedRoute,
+  AtlasThenNowRoute: AtlasThenNowRoute,
   DecksDeckIdRoute: DecksDeckIdRoute,
   McqResultTestIdRoute: McqResultTestIdRoute,
   McqTestIdRoute: McqTestIdRoute,

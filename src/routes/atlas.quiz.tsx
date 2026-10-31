@@ -8,7 +8,18 @@ import { AtlasMap } from "@/components/atlas-map";
 import { useAtlasBase, useAtlasPlaces } from "@/components/atlas-data";
 import { LangToggle, useAtlasLang } from "@/components/atlas-ui";
 import {
+  afterDaily,
+  currentStreak,
+  dailyRound,
+  EMPTY_STREAK,
+  indiaDay,
+  shareText,
+  type Streak,
+} from "@/lib/atlas-drills";
+import {
   districtScore,
+  readStreak,
+  writeStreak,
   recordQuizAnswers,
   useAtlasSaved,
   useDistrictStats,
@@ -27,9 +38,12 @@ export const Route = createFileRoute("/atlas/quiz")({
       },
     ],
   }),
-  // From the saved list: a "where is it?" quiz on the saved places.
-  validateSearch: (s: Record<string, unknown>): { saved?: 1 } =>
-    s.saved === 1 || s.saved === "1" ? { saved: 1 } : {},
+  // From the saved list: a "where is it?" quiz on the saved places; or
+  // the daily challenge (the same five questions for everyone today).
+  validateSearch: (s: Record<string, unknown>): { saved?: 1; daily?: 1 } => ({
+    ...(s.saved === 1 || s.saved === "1" ? { saved: 1 as const } : {}),
+    ...(s.daily === 1 || s.daily === "1" ? { daily: 1 as const } : {}),
+  }),
   component: QuizPage,
 });
 
@@ -82,7 +96,12 @@ function QuizPage() {
   const [lang, setLang] = useAtlasLang();
   const base = useAtlasBase();
   const places = useAtlasPlaces();
-  const fromSaved = !!Route.useSearch().saved;
+  const search = Route.useSearch();
+  const fromSaved = !!search.saved;
+  const daily = !!search.daily;
+  const today = indiaDay(new Date());
+  const [streak, setStreak] = useState<Streak>(EMPTY_STREAK);
+  useEffect(() => setStreak(readStreak()), []);
   const { saved } = useAtlasSaved();
   const savedKeys = useMemo(() => new Set(saved.places.map((p) => p.key)), [saved.places]);
   const [mode, setMode] = useState<QuizMode>(fromSaved ? "where" : "find");
@@ -119,6 +138,26 @@ function QuizPage() {
   const placeName = (p: { en: string; hi: string }) => (lang === "hi" ? p.hi || p.en : p.en);
 
   const start = (on: string[] | null = focus) => {
+    if (daily) {
+      setRound(
+        dailyRound(
+          today,
+          base.data!.districts,
+          quizPlaces.map((p) => ({
+            key: p[0],
+            en: p[1],
+            hi: p[2],
+            cat: p[3],
+            lat: p[4],
+            lon: p[5],
+            district: p[6],
+          })),
+        ),
+      );
+      setAt(0);
+      setAnswers([]);
+      return;
+    }
     setFocus(on);
     const chosen = quizPlaces
       // Weak districts: every kind of place in them.
@@ -159,6 +198,12 @@ function QuizPage() {
   useEffect(() => {
     if (!done || !round) return;
     recordQuizAnswers(answers.map((a) => ({ district: a.q.district, right: a.right })));
+    if (daily) {
+      const s = afterDaily(readStreak(), today, answers.map((a) => (a.right ? "1" : "0")).join(""));
+      writeStreak(s);
+      setStreak(s);
+      return;
+    }
     if (focus) return; // a weak-districts round is not a best score
     const key = `${mode}:${round.length}`;
     const pct = Math.round((score / round.length) * 100);
@@ -228,8 +273,17 @@ function QuizPage() {
         <p className="p-6 text-destructive">
           {L(lang, "मानचित्र नहीं खुल सका।", "The map couldn't open.")}
         </p>
+      ) : daily && (!round || done) ? (
+        <DailyCard
+          lang={lang}
+          today={today}
+          streak={streak}
+          onStart={() => start()}
+          playing={!!round}
+        />
       ) : !round ? (
         <main className="mx-auto w-full max-w-2xl space-y-6 p-4">
+          {!fromSaved && <DailyLink lang={lang} today={today} streak={streak} />}
           {!fromSaved && Object.keys(results.stats).length > 0 && base.data && (
             <YourDistricts
               lang={lang}
@@ -605,5 +659,155 @@ function YourDistricts({
         </p>
       )}
     </section>
+  );
+}
+
+// Today's challenge: start it, or (played) the result, the streak and a
+// share link.
+function DailyCard({
+  lang,
+  today,
+  streak,
+  onStart,
+  playing,
+}: {
+  lang: AtlasLang;
+  today: string;
+  streak: Streak;
+  onStart: () => void;
+  playing: boolean;
+}) {
+  const marks = streak.days[today];
+  const now = currentStreak(streak, today);
+  const url = typeof window === "undefined" ? "" : `${window.location.origin}/atlas/daily`;
+  const text = marks ? shareText(today, marks, now, url, lang === "hi") : "";
+  const [copied, setCopied] = useState(false);
+  return (
+    <main className="mx-auto w-full max-w-md space-y-4 p-4" data-daily>
+      <div className="rounded-2xl border border-border p-6 text-center">
+        <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          {L(lang, "दैनिक चुनौती", "Daily challenge")} · {today}
+        </p>
+        {marks ? (
+          <>
+            <p className="mt-3 text-3xl tracking-wider" data-daily-marks>
+              {[...marks].map((m) => (m === "1" ? "🟩" : "🟥")).join("")}
+            </p>
+            <p className="mt-1 text-2xl font-bold" data-quiz-score>
+              {[...marks].filter((m) => m === "1").length} / {marks.length}
+            </p>
+          </>
+        ) : (
+          <p className="mt-3 text-sm text-muted-foreground">
+            {L(
+              lang,
+              "आज के 5 प्रश्न — सबके लिए एक जैसे। रोज़ खेलें और लय बनाए रखें!",
+              "Today's 5 questions, the same for everyone. Play every day to keep your streak!",
+            )}
+          </p>
+        )}
+        <p className="mt-3 text-lg" data-daily-streak>
+          🔥 {now} {L(lang, "दिन की लय", now === 1 ? "day streak" : "day streak")}
+          <span className="ml-2 text-sm text-muted-foreground">
+            · {L(lang, "सर्वश्रेष्ठ", "best")} {streak.best}
+          </span>
+        </p>
+      </div>
+      {!marks && !playing ? (
+        <button
+          type="button"
+          onClick={onStart}
+          className="h-12 w-full rounded-xl bg-primary text-base font-semibold text-primary-foreground"
+        >
+          {L(lang, "आज की चुनौती शुरू करें", "Start today's challenge")}
+        </button>
+      ) : marks ? (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <a
+              href={`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text.replace(`\n${url}`, ""))}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-11 items-center justify-center rounded-xl bg-[#229ED9] text-sm font-semibold text-white"
+            >
+              {L(lang, "टेलीग्राम पर भेजें", "Share on Telegram")}
+            </a>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  if (navigator.share) await navigator.share({ text });
+                  else {
+                    await navigator.clipboard.writeText(text);
+                    setCopied(true);
+                  }
+                } catch {
+                  // Cancelled.
+                }
+              }}
+              className="h-11 rounded-xl border border-border text-sm font-semibold"
+            >
+              {copied ? L(lang, "कॉपी हो गया", "Copied") : L(lang, "साझा करें", "Share")}
+            </button>
+          </div>
+          <p className="text-center text-sm text-muted-foreground">
+            {L(lang, "कल नई चुनौती आएगी।", "A new challenge comes tomorrow.")}
+          </p>
+          <div className="flex gap-2">
+            <Link
+              to="/atlas/quiz"
+              className="inline-flex h-11 flex-1 items-center justify-center rounded-xl border border-border text-sm font-semibold"
+            >
+              {L(lang, "और अभ्यास", "Practise more")}
+            </Link>
+            <Link
+              to="/atlas/drills"
+              className="inline-flex h-11 flex-1 items-center justify-center rounded-xl border border-border text-sm font-semibold"
+            >
+              {L(lang, "मानचित्र अभ्यास", "Map drills")}
+            </Link>
+          </div>
+        </>
+      ) : null}
+    </main>
+  );
+}
+
+// On the quiz page: today's challenge and the map drills.
+function DailyLink({ lang, today, streak }: { lang: AtlasLang; today: string; streak: Streak }) {
+  const played = !!streak.days[today];
+  const now = currentStreak(streak, today);
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      <Link
+        to="/atlas/quiz"
+        search={{ daily: 1 }}
+        className="flex items-center gap-2 rounded-2xl border border-amber-300 bg-amber-50 p-3 dark:bg-amber-500/10"
+        data-daily-link
+      >
+        <span className="text-2xl">{played ? "✅" : "📅"}</span>
+        <span>
+          <span className="block font-semibold">{L(lang, "दैनिक चुनौती", "Daily challenge")}</span>
+          <span className="block text-xs text-muted-foreground">
+            {played
+              ? L(lang, "आज पूरी", "Done today")
+              : L(lang, "आज के 5 प्रश्न", "Today's 5 questions")}
+            {now > 0 ? ` · 🔥 ${now}` : ""}
+          </span>
+        </span>
+      </Link>
+      <Link
+        to="/atlas/drills"
+        className="flex items-center gap-2 rounded-2xl border border-border p-3 hover:bg-muted"
+      >
+        <span className="text-2xl">🧭</span>
+        <span>
+          <span className="block font-semibold">{L(lang, "मानचित्र अभ्यास", "Map drills")}</span>
+          <span className="block text-xs text-muted-foreground">
+            {L(lang, "सीमाएँ, नदियाँ, उत्तर-दक्षिण", "Borders, rivers, north to south")}
+          </span>
+        </span>
+      </Link>
+    </div>
   );
 }
