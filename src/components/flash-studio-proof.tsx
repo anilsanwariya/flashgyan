@@ -49,11 +49,17 @@ import {
   isList,
   mainOf,
   versionsOf,
+  anyProofread,
+  chipMark,
+  proofreadDisagree,
+  sheetMark,
+  startTicked,
   wordingGroups,
   type DupGroup,
 } from "@/lib/flash-merge";
 import { needsCheck, type FlashCard, type FlashSource, type FlashTopic } from "@/lib/flash-studio";
 import { runStudioJob, useStudioJob } from "@/lib/flash-jobs";
+import { Mark, useProofread } from "@/components/flash-proofread";
 import { Badge, errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -552,6 +558,7 @@ function MergeDialog({
   const [shown, setShown] = useState(30);
   const [mains, setMains] = useState<Record<string, string>>({});
   const order = topic.books.map((b) => b.code);
+  const proofread = useProofread();
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-3xl">
@@ -567,16 +574,17 @@ function MergeDialog({
         <p className="text-sm text-muted-foreground">
           Merging keeps one card (the chosen book&apos;s version in front) and keeps the other
           books&apos; versions with it: you can take any of their answers or explanations, combine
-          their answers, or split a version out again. The book with the most explanations is picked
-          first (then the books&apos; order in Settings). Where books explain a column differently,
-          the front card&apos;s wording is kept and the others stay in their versions.
+          their answers, or split a version out again. A proofread sheet&apos;s card is picked
+          first, then the book with the most explanations (then the books&apos; order in Settings).
+          Where books explain a column differently, the front card&apos;s wording is kept and the
+          others stay in their versions.
         </p>
         <Button
           disabled={busy || !groups.length}
           onClick={async () => {
             if (
               !confirm(
-                `Merge all ${groups.length} words? Each keeps the book with the most explanations in front; the others' versions stay with it.`,
+                `Merge all ${groups.length} words? Each keeps a proofread sheet's card (or the book with the most explanations) in front; the others' versions stay with it.`,
               )
             )
               return;
@@ -599,8 +607,17 @@ function MergeDialog({
         </Button>
         <ul className="space-y-2">
           {[...groups, ...near].slice(0, shown).map((g, gi) => {
-            const main = mains[g.key] ?? mainOf(g.cards, order).id;
+            const main = mains[g.key] ?? mainOf(g.cards, order, proofread).id;
             const isNear = gi >= groups.length;
+            const gvs = g.cards.map((c) => ({
+              book: c.sources[0]?.book ?? "",
+              front: c.front,
+              back: c.back,
+              ex: c.ex,
+              src: c.sources[0]?.src,
+            }));
+            const marked = anyProofread(gvs, proofread);
+            const differ = proofreadDisagree(gvs, proofread);
             return (
               <li key={g.key} className="space-y-2 rounded-xl border border-border p-3 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
@@ -615,6 +632,14 @@ function MergeDialog({
                     </Badge>
                   )}
                   {g.sameBook && !isNear && <Badge tone="warn">twice in one book</Badge>}
+                  {(differ.answer || differ.front || differ.columns.length > 0) && (
+                    <Badge
+                      tone="warn"
+                      title="Two proofread sheets give different answers, spellings or explanations: you decide"
+                    >
+                      proofread sheets disagree
+                    </Badge>
+                  )}
                   {exConflicts(g.cards, topic.columns).length > 0 && (
                     <Badge
                       tone="warn"
@@ -665,6 +690,7 @@ function MergeDialog({
                           checked={main === c.id}
                           onChange={() => setMains({ ...mains, [g.key]: c.id })}
                         />
+                        {marked && <Mark mark={sheetMark(c.sources[0]?.src, proofread)} />}
                         <BookChip topic={topic} book={c.sources[0]?.book ?? ""} />
                         <span className="min-w-0 flex-1 space-y-0.5">
                           <span className="block whitespace-pre-wrap" lang="hi">
@@ -767,13 +793,20 @@ export function Versions({
       front: o.front,
       back: o.back,
       ex: o.ex,
+      src: o.sources[0]?.src,
     })),
   ];
   const chips = useMemo(() => combineItems(vs), [card, others]); // eslint-disable-line react-hooks/exhaustive-deps
   const [picked, setPicked] = useState<Set<string> | null>(null);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const proofread = useProofread();
   if (!list.length) return null;
-  const ticked = picked ?? new Set(chips.map((c) => c.key));
+  // With a proofread sheet among them: its words start ticked, the others
+  // (only from sheets not proofread) unticked.
+  const marked = anyProofread(vs, proofread);
+  const differ = proofreadDisagree(vs, proofread);
+  const ticked = picked ?? startTicked(chips, vs, proofread);
+  const srcOf = (o: Other) => (o.kind === "card" ? o.card.sources[0]?.src : o.source?.src);
   const books = new Set(vs.map((v) => v.book)).size;
   const fields: {
     key: string;
@@ -838,20 +871,55 @@ export function Versions({
           </>
         )}
       </div>
+      {marked && (
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <span>
+            <Mark mark="yes" /> from a proofread sheet
+          </span>
+          <span>
+            <Mark mark="no" /> only from sheets not proofread
+          </span>
+          {sheetMark(card.sources[0]?.src, proofread) && (
+            <span>
+              This card: <Mark mark={sheetMark(card.sources[0]?.src, proofread)} />
+            </span>
+          )}
+        </p>
+      )}
+      {(differ.answer || differ.front || differ.columns.length > 0) && (
+        <p
+          className="rounded-md border border-amber-300 bg-amber-50/60 p-2 text-xs text-amber-800 dark:bg-amber-950/20 dark:text-amber-300"
+          data-proofread-disagree
+        >
+          Proofread sheets disagree on{" "}
+          {[
+            differ.front && "the spelling",
+            differ.answer && "the answer",
+            ...topic.columns.filter((c) => differ.columns.includes(c.id)).map((c) => c.title),
+          ]
+            .filter(Boolean)
+            .join(", ")}
+          : you decide.
+        </p>
+      )}
       {isList(vs) && (
         <div className="space-y-1.5">
           <div className="text-xs text-muted-foreground">
             Every book&apos;s answers (how many books give each). Tick the ones to keep.
+            {marked && " Words from a proofread sheet start ticked; the others start unticked."}
           </div>
           <div className="flex flex-wrap gap-1.5" lang="hi">
             {chips.map((ch) => {
               const on = ticked.has(ch.key);
+              const mk = marked ? chipMark(ch, proofread) : null;
               return (
                 <button
                   key={ch.key}
                   type="button"
                   aria-pressed={on}
-                  title={`${ch.books.join(", ")}${ch.spellings.length > 1 ? ` · spellings: ${ch.spellings.join(" / ")}` : ""}`}
+                  data-chip={ch.text}
+                  data-proof={mk ?? ""}
+                  title={`${ch.books.join(", ")}${mk ? (mk === "yes" ? " · from a proofread sheet" : " · only from sheets not proofread") : ""}${ch.spellings.length > 1 ? ` · spellings: ${ch.spellings.join(" / ")}` : ""}`}
                   onClick={() => {
                     const next = new Set(ticked);
                     if (on) next.delete(ch.key);
@@ -860,6 +928,11 @@ export function Versions({
                   }}
                   className={`rounded-full border px-2.5 py-0.5 text-sm ${on ? "border-primary bg-primary/10" : "border-border text-muted-foreground line-through"}`}
                 >
+                  {mk && (
+                    <>
+                      <Mark mark={mk} />{" "}
+                    </>
+                  )}
                   {ch.meaning ? `${ch.meaning}. ` : ""}
                   {ch.text} <sup>{ch.books.length}</sup>
                   {ch.spellings.length > 1 && <sup className="text-amber-600">*</sup>}
@@ -897,6 +970,7 @@ export function Versions({
                   }}
                 />
               )}
+              {marked && <Mark mark={sheetMark(srcOf(o), proofread)} />}
               <BookChip topic={topic} book={o.book} />
               <span className="text-xs text-muted-foreground">
                 {o.kind === "card" ? "its own card, not merged" : "merged into this card"}

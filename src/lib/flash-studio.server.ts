@@ -376,7 +376,15 @@ export type ImportResult = {
 // for a topic with no numbers yet.
 export async function importSheet(
   topicId: string,
-  sheet: { cards: SheetCard[]; columns: string[]; prompt: string; book: string; name?: string },
+  sheet: {
+    cards: SheetCard[];
+    columns: string[];
+    prompt: string;
+    book: string;
+    name?: string;
+    // Already proofread by the editor (asked on every upload).
+    proofread?: boolean;
+  },
   keepNumbers: boolean,
   // A sheet added before, replaced by this one (its cards not yet
   // numbered go; numbered ones stay, their numbers being in the app).
@@ -432,7 +440,13 @@ export async function importSheet(
         total: 1,
         done: 1,
         cards: sheet.cards.length,
-        context: { parts: [1], rows: sheet.cards.length, deleted: 0, merged: 0 },
+        context: {
+          parts: [1],
+          rows: sheet.cards.length,
+          deleted: 0,
+          merged: 0,
+          proofread: !!sheet.proofread,
+        },
       } as never)
       .select("id")
       .single();
@@ -654,6 +668,7 @@ const readSource = (r: Row): FlashSourceRow => ({
   rows: Number((r.context as { rows?: number })?.rows) || 0,
   deleted: Number((r.context as { deleted?: number })?.deleted) || 0,
   merged: Number((r.context as { merged?: number })?.merged) || 0,
+  proofread: !!(r.context as { proofread?: boolean })?.proofread,
   created_at: String(r.created_at),
 });
 
@@ -871,6 +886,13 @@ export async function readSourceStep(
 
 // A book taken out again: its cards not yet numbered go with it (numbered
 // ones stay, their numbers being in the app).
+// A sheet marked (or unmarked) as already proofread.
+export async function setSheetProofread(sourceId: string, on: boolean) {
+  await updateSource(sourceId, (r) => ({
+    context: { ...((r.context ?? {}) as Row), proofread: on },
+  }));
+}
+
 export async function deleteSource(sourceId: string): Promise<{ deleted: number; kept: number }> {
   const { data, error } = await from("flash_sources")
     .select("topic_id")
@@ -1025,6 +1047,9 @@ export async function mergeAll(
   topicId: string,
 ): Promise<{ merged: number; cards: number; skipped: number }> {
   const { topic, cards } = await getTopic(topicId);
+  const proofread = new Set(
+    (await listSources(topicId)).filter((s) => s.proofread).map((s) => s.id),
+  );
   let merged = 0;
   let folded = 0;
   let skipped = 0;
@@ -1036,6 +1061,7 @@ export async function mergeAll(
     const main = M.mainOf(
       g.cards,
       topic.books.map((b) => b.code),
+      proofread,
     );
     const others = g.cards.filter((c) => c.id !== main.id);
     await foldInto(main, others);
@@ -1838,7 +1864,13 @@ export type ReplaceResult = {
 export async function replaceSheet(
   topicId: string,
   sourceId: string,
-  sheet: { cards: SheetCard[]; columns: string[]; book: string; name?: string },
+  sheet: {
+    cards: SheetCard[];
+    columns: string[];
+    book: string;
+    name?: string;
+    proofread?: boolean;
+  },
 ): Promise<ReplaceResult> {
   const { topic, cards } = await getTopic(topicId);
   const codes = [...new Set(sheet.cards.map((c) => (c.book || sheet.book).trim()).filter(Boolean))];
@@ -1924,7 +1956,11 @@ export async function replaceSheet(
   await updateSource(sourceId, (r) => ({
     name: (sheet.name ?? String(r.name ?? "")).slice(0, 200),
     cards: sheet.cards.length,
-    context: { ...((r.context ?? {}) as Row), rows: sheet.cards.length },
+    context: {
+      ...((r.context ?? {}) as Row),
+      rows: sheet.cards.length,
+      proofread: !!sheet.proofread,
+    },
   }));
   await touch(topicId);
   return {

@@ -980,6 +980,9 @@ export type FlashSourceRow = {
   rows: number;
   deleted: number;
   merged: number;
+  // A sheet the editor marked already proofread: its words carry a ✓ when
+  // books are compared.
+  proofread: boolean;
   created_at: string;
 };
 

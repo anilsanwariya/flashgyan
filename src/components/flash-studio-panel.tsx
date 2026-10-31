@@ -129,6 +129,7 @@ import { changeSheet, parseWorking, workingRows, type WorkingRow } from "@/lib/f
 import { ProofTools, Versions } from "@/components/flash-studio-proof";
 import {
   booksOf,
+  cardMark,
   dupKey,
   disagreement,
   emptyColumns,
@@ -153,6 +154,7 @@ import {
 import { wnGap, wnKind, type WnGap } from "@/lib/flash-dict";
 import { houseFromList } from "@/lib/flash-spell";
 import { Badge, PageTabs, errorText } from "@/components/ca-ui";
+import { Mark, ProofreadBox, ProofreadContext, useProofread } from "@/components/flash-proofread";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -831,6 +833,16 @@ function ColumnsEditor({
 
 type TopicTab = "cards" | "sheets" | "chunks" | "words" | "settings";
 
+// The topic's proofread sheets, the same Set while they don't change (so
+// lists that depend on it aren't redone on every render).
+let lastProof: { key: string; set: ReadonlySet<string> } = { key: "", set: new Set() };
+function proofSet(sources: FlashSourceRow[]): ReadonlySet<string> {
+  const ids = sources.filter((s) => s.proofread).map((s) => s.id);
+  const key = ids.join(",");
+  if (key !== lastProof.key) lastProof = { key, set: new Set(ids) };
+  return lastProof.set;
+}
+
 function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
   const getFn = useServerFn(getFlashTopic);
   const q = useQuery({
@@ -895,114 +907,119 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
   const { topic, cards, sources } = q.data;
   const live = cards.filter((c) => !c.removed);
   const unnumbered = live.filter((c) => c.card_order === null).length;
+  // The sheets marked proofread: their words get a ✓ wherever books are
+  // compared.
+  const proofread = proofSet(sources);
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          <ArrowLeft className="mr-1 h-4 w-4" /> Topics
-        </Button>
-        <h1 className="min-w-0 flex-1 truncate text-xl font-semibold">{topic.name}</h1>
-        <span
-          className={`basis-full text-sm text-muted-foreground sm:basis-auto ${tab === "cards" ? "hidden" : ""}`}
-        >
-          {live.length} cards · {live.filter((c) => c.verified).length} verified
-          {topic.chunks.length
-            ? ` · ${topic.chunks.length} chunk${topic.chunks.length === 1 ? "" : "s"}`
-            : ""}
-        </span>
+    <ProofreadContext.Provider value={proofread}>
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={onBack}>
+            <ArrowLeft className="mr-1 h-4 w-4" /> Topics
+          </Button>
+          <h1 className="min-w-0 flex-1 truncate text-xl font-semibold">{topic.name}</h1>
+          <span
+            className={`basis-full text-sm text-muted-foreground sm:basis-auto ${tab === "cards" ? "hidden" : ""}`}
+          >
+            {live.length} cards · {live.filter((c) => c.verified).length} verified
+            {topic.chunks.length
+              ? ` · ${topic.chunks.length} chunk${topic.chunks.length === 1 ? "" : "s"}`
+              : ""}
+          </span>
+        </div>
+        <ServerJobsBar topicId={topic.id} onProgress={() => void reload()} />
+        <PageTabs
+          label="Topic"
+          tabs={[
+            { id: "cards", label: "Cards" },
+            { id: "sheets", label: "Sheets" },
+            { id: "chunks", label: "Chunks", dot: topic.chunks.length > 0 && unnumbered > 0 },
+            { id: "words", label: "Words" },
+            { id: "settings", label: "Settings" },
+          ]}
+          value={tab}
+          onChange={setTab}
+        />
+        {tab === "cards" && (
+          <CardsTab
+            topic={topic}
+            cards={cards}
+            sources={sources}
+            onChanged={reload}
+            onCard={putCard}
+            onSheet={(f) => void pickSheet(f)}
+            onTab={setTab}
+            proofIds={proofIds}
+            onProofTaken={() => setProofIds(null)}
+          />
+        )}
+        {tab === "sheets" && (
+          <SheetsTab
+            topic={topic}
+            cards={cards}
+            sources={sources}
+            onAdd={(f, replace) => void pickSheet(f, replace)}
+            onDownloadWorking={async () =>
+              saveBytes(
+                `${topic.name} - working.xlsx`,
+                await xlsxBytes(workingRows(cards, topic.columns)),
+                XLSX_TYPE,
+              )
+            }
+            onChanged={reload}
+          />
+        )}
+        {tab === "chunks" && (
+          <ChunksTab topic={topic} cards={cards} onChanged={reload} onProof={proofThese} />
+        )}
+        {tab === "words" && (
+          <WordsTab topic={topic} cards={cards} onCards={putCard} onProof={proofThese} />
+        )}
+        {tab === "settings" && <SettingsTab topic={topic} onChanged={reload} />}
+        {importing?.replace?.kind === "sheet" && (
+          <ReplaceDialog
+            topic={topic}
+            cards={cards}
+            file={importing.file}
+            sheet={importing.sheet}
+            replace={importing.replace}
+            onClose={() => setImporting(null)}
+            onDone={() => {
+              setImporting(null);
+              void reload();
+            }}
+          />
+        )}
+        {working && (
+          <WorkingDialog
+            topic={topic}
+            cards={cards}
+            file={working.file}
+            rows={working.rows}
+            unknownCols={working.unknown}
+            onClose={() => setWorking(null)}
+            onDone={() => {
+              setWorking(null);
+              void reload();
+            }}
+          />
+        )}
+        {importing && importing.replace?.kind !== "sheet" && (
+          <ImportDialog
+            topic={topic}
+            hasNumbers={cards.some((c) => c.card_order !== null) || topic.chunks.length > 0}
+            file={importing.file}
+            sheet={importing.sheet}
+            replace={importing.replace}
+            onClose={() => setImporting(null)}
+            onDone={() => {
+              setImporting(null);
+              void reload();
+            }}
+          />
+        )}
       </div>
-      <ServerJobsBar topicId={topic.id} onProgress={() => void reload()} />
-      <PageTabs
-        label="Topic"
-        tabs={[
-          { id: "cards", label: "Cards" },
-          { id: "sheets", label: "Sheets" },
-          { id: "chunks", label: "Chunks", dot: topic.chunks.length > 0 && unnumbered > 0 },
-          { id: "words", label: "Words" },
-          { id: "settings", label: "Settings" },
-        ]}
-        value={tab}
-        onChange={setTab}
-      />
-      {tab === "cards" && (
-        <CardsTab
-          topic={topic}
-          cards={cards}
-          sources={sources}
-          onChanged={reload}
-          onCard={putCard}
-          onSheet={(f) => void pickSheet(f)}
-          onTab={setTab}
-          proofIds={proofIds}
-          onProofTaken={() => setProofIds(null)}
-        />
-      )}
-      {tab === "sheets" && (
-        <SheetsTab
-          topic={topic}
-          cards={cards}
-          sources={sources}
-          onAdd={(f, replace) => void pickSheet(f, replace)}
-          onDownloadWorking={async () =>
-            saveBytes(
-              `${topic.name} - working.xlsx`,
-              await xlsxBytes(workingRows(cards, topic.columns)),
-              XLSX_TYPE,
-            )
-          }
-          onChanged={reload}
-        />
-      )}
-      {tab === "chunks" && (
-        <ChunksTab topic={topic} cards={cards} onChanged={reload} onProof={proofThese} />
-      )}
-      {tab === "words" && (
-        <WordsTab topic={topic} cards={cards} onCards={putCard} onProof={proofThese} />
-      )}
-      {tab === "settings" && <SettingsTab topic={topic} onChanged={reload} />}
-      {importing?.replace?.kind === "sheet" && (
-        <ReplaceDialog
-          topic={topic}
-          cards={cards}
-          file={importing.file}
-          sheet={importing.sheet}
-          replace={importing.replace}
-          onClose={() => setImporting(null)}
-          onDone={() => {
-            setImporting(null);
-            void reload();
-          }}
-        />
-      )}
-      {working && (
-        <WorkingDialog
-          topic={topic}
-          cards={cards}
-          file={working.file}
-          rows={working.rows}
-          unknownCols={working.unknown}
-          onClose={() => setWorking(null)}
-          onDone={() => {
-            setWorking(null);
-            void reload();
-          }}
-        />
-      )}
-      {importing && importing.replace?.kind !== "sheet" && (
-        <ImportDialog
-          topic={topic}
-          hasNumbers={cards.some((c) => c.card_order !== null) || topic.chunks.length > 0}
-          file={importing.file}
-          sheet={importing.sheet}
-          replace={importing.replace}
-          onClose={() => setImporting(null)}
-          onDone={() => {
-            setImporting(null);
-            void reload();
-          }}
-        />
-      )}
-    </div>
+    </ProofreadContext.Provider>
   );
 }
 
@@ -1015,6 +1032,7 @@ type Filter =
   | "verified"
   | "several"
   | "single"
+  | "unproofread"
   | "differ"
   | "own"
   | "missing"
@@ -1033,6 +1051,7 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "verified", label: "Verified" },
   { id: "several", label: "In several books" },
   { id: "single", label: "One book only" },
+  { id: "unproofread", label: "From sheets not proofread" },
   { id: "differ", label: "Books differ" },
   { id: "own", label: "Not from your books" },
   { id: "missing", label: "Missing explanations" },
@@ -1054,6 +1073,7 @@ function passes(
   lints?: Map<string, Lint[]>,
   other?: Map<string, unknown>,
   wn?: Map<string, WnGap>,
+  proofread: ReadonlySet<string> = new Set(),
 ): boolean {
   if (f === "wnMissing") return !c.removed && !!wn?.get(c.id)?.missing.length;
   if (f === "wnUnlisted") return !c.removed && !!wn?.get(c.id)?.unlisted.length;
@@ -1067,6 +1087,8 @@ function passes(
   if (f === "unnumbered") return c.card_order === null;
   if (f === "several") return booksOf(c).length > 1;
   if (f === "single") return booksOf(c).length <= 1;
+  // Only from sheets not proofread (none of its versions from a proofread one).
+  if (f === "unproofread") return cardMark(c, proofread) === "no";
   if (f === "differ") {
     const d = disagreement(c);
     return d.answer || d.spelling;
@@ -1101,6 +1123,7 @@ function CardsTab({
   onProofTaken?: () => void;
 }) {
   const addFn = useServerFn(addFlashCard);
+  const proofread = useProofread();
   const [filter, setFilter] = useState<Filter>(
     () => FILTERS.find((f) => f.id === openedOn())?.id ?? "all",
   );
@@ -1229,15 +1252,16 @@ function CardsTab({
       Object.fromEntries(
         FILTERS.map((f) => [
           f.id,
-          inBook.filter((c) => passes(c, f.id, topic.columns, lints, inOther, wnGaps)).length,
+          inBook.filter((c) => passes(c, f.id, topic.columns, lints, inOther, wnGaps, proofread))
+            .length,
         ]),
       ) as Record<Filter, number>,
-    [inBook, topic.columns, lints, inOther, wnGaps],
+    [inBook, topic.columns, lints, inOther, wnGaps, proofread],
   );
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
     const picked = inBook
-      .filter((c) => passes(c, filter, topic.columns, lints, inOther, wnGaps))
+      .filter((c) => passes(c, filter, topic.columns, lints, inOther, wnGaps, proofread))
       .filter(
         (c) =>
           !q ||
@@ -1245,7 +1269,7 @@ function CardsTab({
           String(c.card_order) === q,
       );
     return sortCards(picked, sort, desc);
-  }, [inBook, filter, query, topic.columns, sort, desc, lints, inOther, wnGaps]);
+  }, [inBook, filter, query, topic.columns, sort, desc, lints, inOther, wnGaps, proofread]);
   const startProof = (from: FlashCard[]) => {
     if (!from.length) return;
     const first = from.findIndex((c) => !c.verified);
@@ -1889,8 +1913,18 @@ function CardFlags({ topic, card: c }: { topic: FlashTopic; card: FlashCard }) {
   const books = booksOf(c).length;
   const d = disagreement(c);
   const missing = emptyColumns(c, topic.columns).length;
+  const proofread = useProofread();
+  const mark = proofread.size ? cardMark(c, proofread) : null;
   return (
     <>
+      {mark && (
+        <Badge
+          tone={mark === "yes" ? "good" : "bad"}
+          title={mark === "yes" ? "From a proofread sheet" : "Only from sheets not proofread"}
+        >
+          {mark === "yes" ? "✓ proofread sheet" : "✗ not proofread"}
+        </Badge>
+      )}
       {books > 1 && <Badge tone="primary">{books} books</Badge>}
       {d.answer && !c.verified && <Badge tone="warn">Books differ</Badge>}
       {d.spelling && !c.verified && <Badge tone="warn">Spellings differ</Badge>}
@@ -1936,6 +1970,8 @@ function ImportDialog({
   const needsBook = sheet.cards.some((c) => !c.book);
   const [book, setBook] = useState(replace?.kind === "sheet" ? replace.book : "");
   const [keep, setKeep] = useState(sheet.numbered && !hasNumbers);
+  // Asked every time, a replaced sheet too.
+  const [proofread, setProofread] = useState(false);
   const [busy, setBusy] = useState(false);
   const known = new Set(topic.columns.map((c) => c.title.trim()));
   const newCols = sheet.columns.filter((c) => !known.has(c.trim()));
@@ -2001,6 +2037,11 @@ function ImportDialog({
               </span>
             </label>
           )}
+          <ProofreadBox
+            checked={proofread}
+            onChange={setProofread}
+            before={replace?.kind === "sheet" ? replace.proofread : undefined}
+          />
           <Button
             disabled={busy}
             onClick={async () => {
@@ -2016,6 +2057,7 @@ function ImportDialog({
                     name: file,
                     replace: replace?.id,
                     keep_numbers: keep && !hasNumbers,
+                    proofread,
                   },
                 });
                 toast.success(
@@ -2128,6 +2170,7 @@ function CardTable({
   onEdit?: (c: FlashCard) => void;
 }) {
   const saveFn = useServerFn(saveFlashCard);
+  const proofread = useProofread();
   const save = async (c: FlashCard, field: string, v: string) => {
     if (fieldText(c, field) === v) return;
     const patch =
@@ -2214,6 +2257,7 @@ function CardTable({
                 className="cursor-pointer whitespace-nowrap p-2 text-xs"
                 onClick={() => onOpen(c)}
               >
+                {proofread.size > 0 && <Mark mark={cardMark(c, proofread)} />}{" "}
                 {booksOf(c).join(", ")}
               </td>
               {cell(c, "front", "font-medium")}
