@@ -940,7 +940,9 @@ export async function atlasStep(): Promise<{ did: string | null }> {
   }
   const practice = await practiceStep();
   if (practice.did) return practice;
-  return (await import("@/lib/atlas-themes.server")).themesStep();
+  const themes = await (await import("@/lib/atlas-themes.server")).themesStep();
+  if (themes.did) return themes;
+  return (await import("@/lib/atlas-news.server")).newsStep();
 }
 
 // ---------- Admin reads and edits ----------
@@ -1469,6 +1471,8 @@ export async function atlasPlace(key: string) {
       months: p.months ?? [],
     },
     facts: ((facts ?? []) as unknown as AtlasFact[]).map(publicFact),
+    // Current affairs stories about it (none before their migration).
+    news: await (await import("@/lib/atlas-news.server")).placeNews(key).catch(() => []),
   };
 }
 

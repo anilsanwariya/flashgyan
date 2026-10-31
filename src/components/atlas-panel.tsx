@@ -35,6 +35,7 @@ import { Badge, PageTabs, errorText, useUrlTab } from "@/components/ca-ui";
 import { AtlasDistrictEditor } from "@/components/atlas-district-editor";
 import { AtlasPractice } from "@/components/atlas-practice-panel";
 import { AtlasSuggestions, TimeFields } from "@/components/atlas-themes-panel";
+import { AtlasAcross } from "@/components/atlas-news-panel";
 import { DistrictChecklist, GapsReport, HindiReview } from "@/components/atlas-review-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,6 +50,7 @@ const TABS = [
   "hindi",
   "gaps",
   "suggestions",
+  "across",
   "practice",
 ] as const;
 type Tab = (typeof TABS)[number];
@@ -77,6 +79,7 @@ export function AtlasPanel() {
           { id: "hindi", label: "Hindi review" },
           { id: "gaps", label: "Gaps" },
           { id: "suggestions", label: "Suggestions" },
+          { id: "across", label: "Across the site" },
           { id: "practice", label: "Practice" },
         ]}
         value={tab}
@@ -90,6 +93,7 @@ export function AtlasPanel() {
       {tab === "hindi" && <HindiReview />}
       {tab === "gaps" && <GapsReport />}
       {tab === "suggestions" && <AtlasSuggestions />}
+      {tab === "across" && <AtlasAcross />}
       {tab === "practice" && <AtlasPractice />}
     </div>
   );
