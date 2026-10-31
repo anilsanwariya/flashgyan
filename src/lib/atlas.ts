@@ -987,3 +987,38 @@ export function findMentions<T extends { names: string[] }>(
     .filter((x) => x.n > 0);
   return out.sort((a, b) => b.n - a.n).map((x) => x.e);
 }
+
+// ---------- Sources ----------
+
+// The notes' source codes ("[PW]" in a fact, "… CC PW UPD" after a
+// heading); the editor names them (Quality tab).
+export const SOURCE_CODES = ["PW", "CC", "RGN", "UPD", "SBA", "RajRAS", "DFC"];
+export type SourceNames = Record<string, { name: Bi; url?: string }>;
+const codeRe = (codes: string[]) =>
+  codes
+    .slice()
+    .sort((a, b) => b.length - a.length)
+    .map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+
+// A fact's text without its source tags, and the codes it cites
+// ("[PW]", "[PW cites]", "[SBA list]").
+export function splitSources(text: string, codes: string[] = SOURCE_CODES) {
+  const sources: string[] = [];
+  const re = new RegExp(`\\s*\\[(${codeRe(codes)})(?:\\s[^\\]]{0,20})?\\]`, "g");
+  const clean = text.replace(re, (_, c: string) => {
+    if (!sources.includes(c)) sources.push(c);
+    return "";
+  });
+  return { text: clean.replace(/\s+([.,;:])/g, "$1").trim(), sources };
+}
+
+// A heading without the source codes after it ("… — new facts CC PW UPD").
+export function headingSources(heading: string, codes: string[] = SOURCE_CODES) {
+  const m = new RegExp(`((?:\\s+(?:${codeRe(codes)}))+)\\s*$`).exec(heading);
+  if (!m) return { heading, sources: [] as string[] };
+  return {
+    heading: heading.slice(0, m.index).trim(),
+    sources: [...new Set(m[1].trim().split(/\s+/))],
+  };
+}

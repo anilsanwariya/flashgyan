@@ -15,6 +15,7 @@ import { SITE_URL } from "@/lib/app-promo";
 import { AtlasMap } from "@/components/atlas-map";
 import { useAtlasBase, useAtlasDistrict, useAtlasPlace } from "@/components/atlas-data";
 import { OverviewHero, OverviewSections, SectionChips } from "@/components/atlas-overview";
+import { ReportButton } from "@/components/atlas-report";
 import { FactsList, LangToggle, useAtlasLang } from "@/components/atlas-ui";
 
 export const Route = createFileRoute("/atlas/$district")({
@@ -83,6 +84,14 @@ function DistrictPage() {
           </div>
           <main className="mx-auto max-w-5xl px-4 py-8 sm:px-8">
             <OverviewSections ov={ov} lang={lang} before={map} />
+            <div className="mt-8 flex justify-end border-t border-border pt-3">
+              <ReportButton
+                lang={lang}
+                kind="district"
+                refKey={d.district}
+                label={`${lang === "hi" ? d.name.hi : d.name.en} — ${L(lang, "जिला दर्शन", "district overview")}`}
+              />
+            </div>
           </main>
         </>
       ) : (

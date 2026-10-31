@@ -15,6 +15,7 @@ import { AtlasMap } from "@/components/atlas-map";
 import { useAtlasBase, useAtlasPlace, useAtlasPlaces } from "@/components/atlas-data";
 import { SaveButton, ShareButton } from "@/components/atlas-actions";
 import { NewsList } from "@/components/atlas-news";
+import { ReportButton } from "@/components/atlas-report";
 import { FactsList, LangToggle, useAtlasLang } from "@/components/atlas-ui";
 
 // A place's own page: what a shared link opens, with its link preview
@@ -150,6 +151,12 @@ function PlacePage() {
               lang={lang}
               path={placePath(p.key)}
               title={`${pickBi(p.name, lang)} · ${L(lang, "राजस्थान एटलस", "Rajasthan Atlas")}`}
+            />
+            <ReportButton
+              lang={lang}
+              kind="place"
+              refKey={p.key}
+              label={`${pickBi(p.name, lang)} · ${p.district} · ${p.lat.toFixed(3)}, ${p.lon.toFixed(3)}`}
             />
             <Link
               to="/atlas"
