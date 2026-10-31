@@ -34,11 +34,21 @@ import { googleMapsUrl as googleMapsHref } from "@/lib/map-spec";
 import { Badge, PageTabs, errorText, useUrlTab } from "@/components/ca-ui";
 import { AtlasDistrictEditor } from "@/components/atlas-district-editor";
 import { AtlasPractice } from "@/components/atlas-practice-panel";
+import { DistrictChecklist, GapsReport, HindiReview } from "@/components/atlas-review-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
-const TABS = ["overview", "districts", "facts", "places", "layers", "practice"] as const;
+const TABS = [
+  "overview",
+  "districts",
+  "facts",
+  "places",
+  "layers",
+  "hindi",
+  "gaps",
+  "practice",
+] as const;
 type Tab = (typeof TABS)[number];
 const MIGRATION =
   "The atlas needs its database tables: run the migration 20261212090000_rajasthan_atlas.sql.";
@@ -62,6 +72,8 @@ export function AtlasPanel() {
           { id: "facts", label: "Facts" },
           { id: "places", label: "Places" },
           { id: "layers", label: "Layers" },
+          { id: "hindi", label: "Hindi review" },
+          { id: "gaps", label: "Gaps" },
           { id: "practice", label: "Practice" },
         ]}
         value={tab}
@@ -72,6 +84,8 @@ export function AtlasPanel() {
       {tab === "facts" && <Facts />}
       {tab === "places" && <Places />}
       {tab === "layers" && <Layers />}
+      {tab === "hindi" && <HindiReview />}
+      {tab === "gaps" && <GapsReport />}
       {tab === "practice" && <AtlasPractice />}
     </div>
   );
@@ -260,76 +274,21 @@ function Overview() {
 // ====================== District pages ======================
 
 function Districts() {
-  const fn = useServerFn(listAtlasDistricts);
-  const q = useQuery({
-    queryKey: ["atlasDistricts"],
-    queryFn: () => fn(),
-    refetchOnMount: "always",
-  });
   const qc = useQueryClient();
   const [open, setOpen] = useState<string | null>(null);
-  if (q.isLoading) return <p className="text-muted-foreground">Loading…</p>;
-  if (!q.data?.length)
-    return (
-      <p className="text-muted-foreground">
-        Import the master map first: it adds the 41 districts.
-      </p>
-    );
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
-        Each district's overview page: import your notes (like the Bikaner page), translate,
-        fact-check against the atlas and the books, and publish.
-      </p>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {q.data.map((d) => {
-          const job = d.meta.job;
-          const running = job && !job.error && job.done < job.parts.length;
-          return (
-            <button
-              key={d.district}
-              type="button"
-              onClick={() => setOpen(d.district)}
-              className="space-y-1 rounded-xl border border-border p-3 text-left hover:border-primary"
-              data-district={d.district}
-            >
-              <div className="flex items-center gap-2">
-                <span className="font-semibold">{d.district}</span>
-                <span className="text-sm text-muted-foreground">{d.name_hi}</span>
-                <span className="ml-auto">
-                  {d.status === "published" ? (
-                    <Badge tone="good">Published</Badge>
-                  ) : d.sections ? (
-                    <Badge tone="warn">Draft</Badge>
-                  ) : (
-                    <Badge>No page</Badge>
-                  )}
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {d.sections} sections · {d.places} places · {d.facts} facts
-                {d.openChecks ? ` · ${d.openChecks} fact-check notes` : ""}
-              </p>
-              {running && (
-                <p className="text-xs text-primary">
-                  {job!.kind} {job!.done}/{job!.parts.length}…
-                </p>
-              )}
-              {job?.error && <p className="text-xs text-destructive">{job.error}</p>}
-            </button>
-          );
-        })}
-      </div>
+    <>
+      <DistrictChecklist onOpen={setOpen} />
       {open && (
         <AtlasDistrictEditor
           district={open}
           onClose={() => {
             setOpen(null);
-            void qc.invalidateQueries({ queryKey: ["atlasDistricts"] });
+            void qc.invalidateQueries({ queryKey: ["atlasChecklist"] });
           }}
         />
       )}
-    </div>
+    </>
   );
 }
 

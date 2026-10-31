@@ -15,10 +15,14 @@ import type {
 } from "@/lib/atlas.server";
 
 import type { AtlasMcqRow } from "@/lib/atlas-practice.server";
+import type { GapReport, HindiItem, NotesMatch } from "@/lib/atlas-review.server";
 
 export type {
   AtlasBase,
   AtlasMcqRow,
+  GapReport,
+  HindiItem,
+  NotesMatch,
   DistrictListRow,
   ImportResult,
   OverviewCheck,
@@ -31,6 +35,9 @@ async function server() {
 }
 async function practice() {
   return import("@/lib/atlas-practice.server");
+}
+async function review() {
+  return import("@/lib/atlas-review.server");
 }
 
 async function assertAdmin(userId: string) {
@@ -434,4 +441,77 @@ export const sendAtlasCards = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     await assertAdmin(context.userId);
     return (await practice()).sendCardsToStudio();
+  });
+
+// ---------- Keeping the atlas complete (admin) ----------
+
+export const atlasChecklist = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await review()).districtChecklist();
+  });
+
+export const matchAtlasNotes = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ name: z.string().max(300), text: z.string().min(1).max(2_000_000) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await review()).matchNotes(data.name, data.text);
+  });
+
+export const atlasHindiCounts = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await review()).hindiCounts();
+  });
+
+export const atlasHindiQueue = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        kind: z.enum(["fact", "place"]),
+        skip: z.array(z.string().uuid()).max(500).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await review()).hindiQueue(data.kind, data.skip ?? []);
+  });
+
+export const acceptAtlasHindi = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        items: z
+          .array(
+            z.object({
+              kind: z.enum(["fact", "place"]),
+              id: z.string().uuid(),
+              hi: z.string().max(4000).optional(),
+              label_hi: z.string().max(300).optional(),
+            }),
+          )
+          .min(1)
+          .max(100),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await review()).acceptHindi(data.items);
+    return { ok: true };
+  });
+
+export const atlasGapReport = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await review()).gapReport();
   });
