@@ -50,6 +50,16 @@ const missing = (e: { message: string } | null) =>
 export const KB_SUBJECT = "Rajasthan Atlas";
 const PLACE_COLS =
   "id,key,name_en,name_hi,label_en,label_hi,cat,lat,lon,district,tehsil,refs,note_en,note_hi,status,source,edited,in_file";
+// With the time and month columns once their migration is in (checked
+// again a minute later while it isn't).
+let timeCols: { ok: boolean; at: number } = { ok: false, at: 0 };
+export async function placeCols(): Promise<string> {
+  if (!timeCols.ok && Date.now() - timeCols.at > 60_000) {
+    const { error } = await from("atlas_places").select("era_from,era_to,months").limit(1);
+    timeCols = { ok: !error, at: Date.now() };
+  }
+  return timeCols.ok ? `${PLACE_COLS},era_from,era_to,months` : PLACE_COLS;
+}
 const FACT_COLS =
   "id,key,subject,chapter_key,chapter,heading,text_en,text_hi,table_head,flags,entities,position,status,note,hi_ai,source,edited,in_file";
 const LAYER_COLS = "key,name_en,name_hi,grp,note,approx,items,position,status";
@@ -928,7 +938,9 @@ export async function atlasStep(): Promise<{ did: string | null }> {
     await saveSetting(JOBS_KEY, { ...(await jobs()), kb: rest });
     return { did: `kb:${ch}` };
   }
-  return practiceStep();
+  const practice = await practiceStep();
+  if (practice.did) return practice;
+  return (await import("@/lib/atlas-themes.server")).themesStep();
 }
 
 // ---------- Admin reads and edits ----------
@@ -979,7 +991,7 @@ export async function listPlaces(f: {
   q?: string;
   page?: number;
 }): Promise<{ rows: AtlasPlace[]; total: number }> {
-  let q = from("atlas_places").select(PLACE_COLS, { count: "exact" });
+  let q = from("atlas_places").select(await placeCols(), { count: "exact" });
   if (f.district) q = q.eq("district", f.district);
   if (f.cat) q = q.eq("cat", f.cat);
   if (f.status && f.status !== "all") q = q.eq("status", f.status);
@@ -998,6 +1010,15 @@ export async function listPlaces(f: {
 
 export async function savePlace(p: Partial<AtlasPlace> & { id?: string }) {
   const patch: Row = { ...p, edited: true, updated_at: now() };
+  if (
+    (p.era_from !== undefined || p.era_to !== undefined || p.months !== undefined) &&
+    !(await placeCols()).includes("era_from")
+  ) {
+    // Before the themes migration: the rest is saved, the time left out.
+    delete patch.era_from;
+    delete patch.era_to;
+    delete patch.months;
+  }
   delete patch.id;
   if (typeof p.lat === "number" && typeof p.lon === "number" && !p.district)
     patch.district = districtAt(p.lon, p.lat);
@@ -1327,12 +1348,26 @@ export async function atlasBase(): Promise<AtlasBase> {
 }
 
 // The places students see: [key, en, hi, cat, lat, lon, district, facts].
-export type PublicPlace = [string, string, string, string, number, number, string, number];
+// Then, once known: the years it happened from / to, and a fair's months.
+export type PublicPlace = [
+  string,
+  string,
+  string,
+  string,
+  number,
+  number,
+  string,
+  number,
+  (number | null)?,
+  (number | null)?,
+  number[]?,
+];
 export async function atlasPublicPlaces(): Promise<PublicPlace[]> {
   const c = fresh();
   if (c.places) return c.places as PublicPlace[];
+  const cols = await placeCols();
   const rows = await all<AtlasPlace>(() =>
-    from("atlas_places").select(PLACE_COLS).eq("status", "verified").order("key"),
+    from("atlas_places").select(cols).eq("status", "verified").order("key"),
   );
   const counts = new Map<string, number>();
   const facts = await all<Row>(() =>
@@ -1341,16 +1376,21 @@ export async function atlasPublicPlaces(): Promise<PublicPlace[]> {
   for (const f of facts)
     for (const e of (f.entities as string[]) ?? [])
       if (e.startsWith("P:")) counts.set(e.slice(2), (counts.get(e.slice(2)) ?? 0) + 1);
-  const out: PublicPlace[] = rows.map((p) => [
-    p.key,
-    p.label_en || p.name_en,
-    p.label_hi || p.name_hi,
-    p.cat,
-    p.lat,
-    p.lon,
-    p.district,
-    counts.get(p.key) ?? 0,
-  ]);
+  const out: PublicPlace[] = rows.map((p) => {
+    const row: PublicPlace = [
+      p.key,
+      p.label_en || p.name_en,
+      p.label_hi || p.name_hi,
+      p.cat,
+      p.lat,
+      p.lon,
+      p.district,
+      counts.get(p.key) ?? 0,
+    ];
+    if (p.era_from != null || p.era_to != null || p.months?.length)
+      row.push(p.era_from ?? null, p.era_to ?? null, p.months ?? []);
+    return row;
+  });
   c.places = out;
   return out;
 }
@@ -1377,7 +1417,7 @@ const publicFact = (f: AtlasFact): PublicFact => ({
 // A place's card: the place and its verified facts.
 export async function atlasPlace(key: string) {
   const { data, error } = await from("atlas_places")
-    .select(PLACE_COLS)
+    .select(await placeCols())
     .eq("key", key)
     .eq("status", "verified")
     .maybeSingle();
@@ -1424,6 +1464,9 @@ export async function atlasPlace(key: string) {
       tehsil: p.tehsil,
       note: { en: p.note_en, hi: p.note_hi },
       chapters: [...new Set(p.refs.map((r) => r[0]))],
+      era_from: p.era_from ?? null,
+      era_to: p.era_to ?? null,
+      months: p.months ?? [],
     },
     facts: ((facts ?? []) as unknown as AtlasFact[]).map(publicFact),
   };
@@ -1559,4 +1602,23 @@ export async function queueKb(chapterKeys: string[]) {
   const j = await jobs();
   const kb = [...new Set([...j.kb, ...chapterKeys.filter(Boolean)])];
   if (kb.length !== j.kb.length) await saveSetting(JOBS_KEY, { ...j, kb });
+}
+
+// Everything the students' atlas needs to work offline: every verified fact
+// (with what it is about) and every published district page.
+export type OfflineFact = PublicFact & { entities: string[] };
+export async function atlasOfflinePack() {
+  const facts = await all<AtlasFact>(() =>
+    from("atlas_facts").select(FACT_COLS).eq("status", "verified").order("position"),
+  );
+  const districts = [];
+  for (const d of await publishedDistricts()) {
+    const page = await atlasDistrictPage(d.district);
+    if (page) districts.push(page);
+  }
+  return {
+    at: now(),
+    facts: facts.map((f): OfflineFact => ({ ...publicFact(f), entities: f.entities })),
+    districts,
+  };
 }

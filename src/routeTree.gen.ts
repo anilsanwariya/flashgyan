@@ -23,15 +23,20 @@ import { Route as TermsRouteImport } from './routes/terms'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 import { Route as AtlasIndexRouteImport } from './routes/atlas.index'
 import { Route as AtlasDistrictRouteImport } from './routes/atlas.$district'
+import { Route as AtlasCompareRouteImport } from './routes/atlas.compare'
 import { Route as AtlasQuizRouteImport } from './routes/atlas.quiz'
+import { Route as AtlasSavedRouteImport } from './routes/atlas.saved'
 import { Route as DecksDeckIdRouteImport } from './routes/decks.$deckId'
 import { Route as McqResultTestIdRouteImport } from './routes/mcq-result.$testId'
 import { Route as McqTestIdRouteImport } from './routes/mcq.$testId'
 import { Route as PracticeMcqTestIdRouteImport } from './routes/practice-mcq.$testId'
 import { Route as PracticeDeckIdRouteImport } from './routes/practice.$deckId'
+import { Route as ApiAtlasPreviewRouteImport } from './routes/api.atlas.preview'
 import { Route as ApiCaTickRouteImport } from './routes/api.ca.tick'
 import { Route as ApiSaathiAskRouteImport } from './routes/api.saathi.ask'
 import { Route as ApiSaathiCheckRouteImport } from './routes/api.saathi.check'
+import { Route as AtlasPlaceKeyRouteImport } from './routes/atlas.place.$key'
+import { Route as AtlasThemeThemeRouteImport } from './routes/atlas.theme.$theme'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -102,9 +107,19 @@ const AtlasDistrictRoute = AtlasDistrictRouteImport.update({
   path: '/atlas/$district',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AtlasCompareRoute = AtlasCompareRouteImport.update({
+  id: '/atlas/compare',
+  path: '/atlas/compare',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AtlasQuizRoute = AtlasQuizRouteImport.update({
   id: '/atlas/quiz',
   path: '/atlas/quiz',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AtlasSavedRoute = AtlasSavedRouteImport.update({
+  id: '/atlas/saved',
+  path: '/atlas/saved',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DecksDeckIdRoute = DecksDeckIdRouteImport.update({
@@ -132,6 +147,11 @@ const PracticeDeckIdRoute = PracticeDeckIdRouteImport.update({
   path: '/practice/$deckId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAtlasPreviewRoute = ApiAtlasPreviewRouteImport.update({
+  id: '/api/atlas/preview',
+  path: '/api/atlas/preview',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiCaTickRoute = ApiCaTickRouteImport.update({
   id: '/api/ca/tick',
   path: '/api/ca/tick',
@@ -145,6 +165,16 @@ const ApiSaathiAskRoute = ApiSaathiAskRouteImport.update({
 const ApiSaathiCheckRoute = ApiSaathiCheckRouteImport.update({
   id: '/api/saathi/check',
   path: '/api/saathi/check',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AtlasPlaceKeyRoute = AtlasPlaceKeyRouteImport.update({
+  id: '/atlas/place/$key',
+  path: '/atlas/place/$key',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AtlasThemeThemeRoute = AtlasThemeThemeRouteImport.update({
+  id: '/atlas/theme/$theme',
+  path: '/atlas/theme/$theme',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -161,16 +191,21 @@ export interface FileRoutesByFullPath {
   '/terms': typeof TermsRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/atlas/$district': typeof AtlasDistrictRoute
+  '/atlas/compare': typeof AtlasCompareRoute
   '/atlas/quiz': typeof AtlasQuizRoute
+  '/atlas/saved': typeof AtlasSavedRoute
   '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
   '/atlas/': typeof AtlasIndexRoute
+  '/api/atlas/preview': typeof ApiAtlasPreviewRoute
   '/api/ca/tick': typeof ApiCaTickRoute
   '/api/saathi/ask': typeof ApiSaathiAskRoute
   '/api/saathi/check': typeof ApiSaathiCheckRoute
+  '/atlas/place/$key': typeof AtlasPlaceKeyRoute
+  '/atlas/theme/$theme': typeof AtlasThemeThemeRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -185,16 +220,21 @@ export interface FileRoutesByTo {
   '/terms': typeof TermsRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/atlas/$district': typeof AtlasDistrictRoute
+  '/atlas/compare': typeof AtlasCompareRoute
   '/atlas/quiz': typeof AtlasQuizRoute
+  '/atlas/saved': typeof AtlasSavedRoute
   '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
   '/atlas': typeof AtlasIndexRoute
+  '/api/atlas/preview': typeof ApiAtlasPreviewRoute
   '/api/ca/tick': typeof ApiCaTickRoute
   '/api/saathi/ask': typeof ApiSaathiAskRoute
   '/api/saathi/check': typeof ApiSaathiCheckRoute
+  '/atlas/place/$key': typeof AtlasPlaceKeyRoute
+  '/atlas/theme/$theme': typeof AtlasThemeThemeRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -211,16 +251,21 @@ export interface FileRoutesById {
   '/terms': typeof TermsRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
   '/atlas/$district': typeof AtlasDistrictRoute
+  '/atlas/compare': typeof AtlasCompareRoute
   '/atlas/quiz': typeof AtlasQuizRoute
+  '/atlas/saved': typeof AtlasSavedRoute
   '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
   '/atlas/': typeof AtlasIndexRoute
+  '/api/atlas/preview': typeof ApiAtlasPreviewRoute
   '/api/ca/tick': typeof ApiCaTickRoute
   '/api/saathi/ask': typeof ApiSaathiAskRoute
   '/api/saathi/check': typeof ApiSaathiCheckRoute
+  '/atlas/place/$key': typeof AtlasPlaceKeyRoute
+  '/atlas/theme/$theme': typeof AtlasThemeThemeRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -237,16 +282,21 @@ export interface FileRouteTypes {
     | '/terms'
     | '/admin'
     | '/atlas/$district'
+    | '/atlas/compare'
     | '/atlas/quiz'
+    | '/atlas/saved'
     | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
     | '/practice/$deckId'
     | '/atlas/'
+    | '/api/atlas/preview'
     | '/api/ca/tick'
     | '/api/saathi/ask'
     | '/api/saathi/check'
+    | '/atlas/place/$key'
+    | '/atlas/theme/$theme'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -261,16 +311,21 @@ export interface FileRouteTypes {
     | '/terms'
     | '/admin'
     | '/atlas/$district'
+    | '/atlas/compare'
     | '/atlas/quiz'
+    | '/atlas/saved'
     | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
     | '/practice/$deckId'
     | '/atlas'
+    | '/api/atlas/preview'
     | '/api/ca/tick'
     | '/api/saathi/ask'
     | '/api/saathi/check'
+    | '/atlas/place/$key'
+    | '/atlas/theme/$theme'
   id:
     | '__root__'
     | '/'
@@ -286,16 +341,21 @@ export interface FileRouteTypes {
     | '/terms'
     | '/_authenticated/admin'
     | '/atlas/$district'
+    | '/atlas/compare'
     | '/atlas/quiz'
+    | '/atlas/saved'
     | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
     | '/practice/$deckId'
     | '/atlas/'
+    | '/api/atlas/preview'
     | '/api/ca/tick'
     | '/api/saathi/ask'
     | '/api/saathi/check'
+    | '/atlas/place/$key'
+    | '/atlas/theme/$theme'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -311,16 +371,21 @@ export interface RootRouteChildren {
   SummaryRoute: typeof SummaryRoute
   TermsRoute: typeof TermsRoute
   AtlasDistrictRoute: typeof AtlasDistrictRoute
+  AtlasCompareRoute: typeof AtlasCompareRoute
   AtlasQuizRoute: typeof AtlasQuizRoute
+  AtlasSavedRoute: typeof AtlasSavedRoute
   DecksDeckIdRoute: typeof DecksDeckIdRoute
   McqResultTestIdRoute: typeof McqResultTestIdRoute
   McqTestIdRoute: typeof McqTestIdRoute
   PracticeMcqTestIdRoute: typeof PracticeMcqTestIdRoute
   PracticeDeckIdRoute: typeof PracticeDeckIdRoute
   AtlasIndexRoute: typeof AtlasIndexRoute
+  ApiAtlasPreviewRoute: typeof ApiAtlasPreviewRoute
   ApiCaTickRoute: typeof ApiCaTickRoute
   ApiSaathiAskRoute: typeof ApiSaathiAskRoute
   ApiSaathiCheckRoute: typeof ApiSaathiCheckRoute
+  AtlasPlaceKeyRoute: typeof AtlasPlaceKeyRoute
+  AtlasThemeThemeRoute: typeof AtlasThemeThemeRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -423,11 +488,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtlasDistrictRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/atlas/compare': {
+      id: '/atlas/compare'
+      path: '/atlas/compare'
+      fullPath: '/atlas/compare'
+      preLoaderRoute: typeof AtlasCompareRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/atlas/quiz': {
       id: '/atlas/quiz'
       path: '/atlas/quiz'
       fullPath: '/atlas/quiz'
       preLoaderRoute: typeof AtlasQuizRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/atlas/saved': {
+      id: '/atlas/saved'
+      path: '/atlas/saved'
+      fullPath: '/atlas/saved'
+      preLoaderRoute: typeof AtlasSavedRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/decks/$deckId': {
@@ -465,6 +544,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PracticeDeckIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/atlas/preview': {
+      id: '/api/atlas/preview'
+      path: '/api/atlas/preview'
+      fullPath: '/api/atlas/preview'
+      preLoaderRoute: typeof ApiAtlasPreviewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/ca/tick': {
       id: '/api/ca/tick'
       path: '/api/ca/tick'
@@ -484,6 +570,20 @@ declare module '@tanstack/react-router' {
       path: '/api/saathi/check'
       fullPath: '/api/saathi/check'
       preLoaderRoute: typeof ApiSaathiCheckRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/atlas/place/$key': {
+      id: '/atlas/place/$key'
+      path: '/atlas/place/$key'
+      fullPath: '/atlas/place/$key'
+      preLoaderRoute: typeof AtlasPlaceKeyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/atlas/theme/$theme': {
+      id: '/atlas/theme/$theme'
+      path: '/atlas/theme/$theme'
+      fullPath: '/atlas/theme/$theme'
+      preLoaderRoute: typeof AtlasThemeThemeRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -513,16 +613,21 @@ const rootRouteChildren: RootRouteChildren = {
   SummaryRoute: SummaryRoute,
   TermsRoute: TermsRoute,
   AtlasDistrictRoute: AtlasDistrictRoute,
+  AtlasCompareRoute: AtlasCompareRoute,
   AtlasQuizRoute: AtlasQuizRoute,
+  AtlasSavedRoute: AtlasSavedRoute,
   DecksDeckIdRoute: DecksDeckIdRoute,
   McqResultTestIdRoute: McqResultTestIdRoute,
   McqTestIdRoute: McqTestIdRoute,
   PracticeMcqTestIdRoute: PracticeMcqTestIdRoute,
   PracticeDeckIdRoute: PracticeDeckIdRoute,
   AtlasIndexRoute: AtlasIndexRoute,
+  ApiAtlasPreviewRoute: ApiAtlasPreviewRoute,
   ApiCaTickRoute: ApiCaTickRoute,
   ApiSaathiAskRoute: ApiSaathiAskRoute,
   ApiSaathiCheckRoute: ApiSaathiCheckRoute,
+  AtlasPlaceKeyRoute: AtlasPlaceKeyRoute,
+  AtlasThemeThemeRoute: AtlasThemeThemeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

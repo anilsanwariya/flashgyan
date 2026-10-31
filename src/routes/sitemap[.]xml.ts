@@ -44,6 +44,19 @@ export const Route = createFileRoute("/sitemap.xml")({
         const districts = atlasOff
           ? []
           : await (await import("@/lib/atlas.server")).publishedDistricts().catch(() => []);
+        // Its theme pages that have places, and the places the notes talk about.
+        const { themes, placeKeys } = atlasOff
+          ? { themes: [], placeKeys: [] as string[] }
+          : await (async () => {
+              const { atlasPublicPlaces } = await import("@/lib/atlas.server");
+              const { ATLAS_THEMES, placePath } = await import("@/lib/atlas");
+              const places = await atlasPublicPlaces();
+              const cats = new Set(places.map((p) => p[3]));
+              return {
+                themes: ATLAS_THEMES.filter((t) => t.cats.some((c) => cats.has(c))),
+                placeKeys: places.filter((p) => p[7] > 0).map((p) => placePath(p[0])),
+              };
+            })().catch(() => ({ themes: [], placeKeys: [] as string[] }));
         const entries = [
           ...STATIC_PATHS.filter(
             (p) =>
@@ -53,6 +66,8 @@ export const Route = createFileRoute("/sitemap.xml")({
           ...districts.map((d) =>
             urlEntry(`${SITE_URL}/atlas/${encodeURIComponent(d.district)}`, "0.7", "monthly"),
           ),
+          ...themes.map((t) => urlEntry(`${SITE_URL}/atlas/theme/${t.key}`, "0.6", "monthly")),
+          ...placeKeys.map((k) => urlEntry(`${SITE_URL}${k}`, "0.5", "monthly")),
         ];
         const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries.join("\n")}\n</urlset>\n`;
         return new Response(xml, {

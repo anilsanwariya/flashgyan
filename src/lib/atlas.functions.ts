@@ -16,6 +16,7 @@ import type {
 
 import type { AtlasMcqRow } from "@/lib/atlas-practice.server";
 import type { GapReport, HindiItem, NotesMatch } from "@/lib/atlas-review.server";
+import type { Suggestion } from "@/lib/atlas-themes.server";
 
 export type {
   AtlasBase,
@@ -23,6 +24,7 @@ export type {
   GapReport,
   HindiItem,
   NotesMatch,
+  Suggestion,
   DistrictListRow,
   ImportResult,
   OverviewCheck,
@@ -35,6 +37,9 @@ async function server() {
 }
 async function practice() {
   return import("@/lib/atlas-practice.server");
+}
+async function themes() {
+  return import("@/lib/atlas-themes.server");
 }
 async function review() {
   return import("@/lib/atlas-review.server");
@@ -55,6 +60,8 @@ async function assertAdmin(userId: string) {
 const status = z.enum(["verified", "to_check", "hidden"]);
 const lang = z.enum(["en", "hi"]);
 const district = z.string().trim().min(2).max(60);
+const year = z.number().int().min(-5000).max(2200);
+const months = z.array(z.number().int().min(1).max(12)).max(12);
 
 // ---------- Admin ----------
 
@@ -126,6 +133,9 @@ export const saveAtlasPlace = createServerFn({ method: "POST" })
         note_en: z.string().max(2000).optional(),
         note_hi: z.string().max(2000).optional(),
         status: status.optional(),
+        era_from: year.nullable().optional(),
+        era_to: year.nullable().optional(),
+        months: months.optional(),
       })
       .parse(d),
   )
@@ -325,6 +335,10 @@ export const atlasDistrictFn = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ district }).parse(d))
   .handler(async ({ data }) => (await server()).atlasDistrictPage(data.district));
 
+export const atlasOfflinePackFn = createServerFn({ method: "GET" }).handler(async () =>
+  (await server()).atlasOfflinePack(),
+);
+
 // ---------- The map editor (admin) ----------
 
 export const atlasMapChoices = createServerFn({ method: "GET" })
@@ -514,4 +528,83 @@ export const atlasGapReport = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     await assertAdmin(context.userId);
     return (await review()).gapReport();
+  });
+
+// ---------- Themes: places suggested from the notes (admin) ----------
+
+export const atlasSuggestionsStatus = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await themes()).suggestionsStatus();
+  });
+
+export const startAtlasSuggestions = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ stop: z.boolean().optional(), chapter: z.string().max(40).optional() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    const t = await themes();
+    if (data.stop) {
+      await t.stopSuggestions();
+      return { chapters: 0 };
+    }
+    return t.startSuggestions(data.chapter);
+  });
+
+export const listAtlasSuggestions = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        status: z.enum(["open", "accepted", "rejected"]).optional(),
+        cat: z.string().max(30).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await themes()).listSuggestions(data);
+  });
+
+export const decideAtlasSuggestion = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .discriminatedUnion("decision", [
+        z.object({
+          decision: z.literal("reject"),
+          ids: z.array(z.string().uuid()).min(1).max(200),
+        }),
+        z.object({
+          decision: z.literal("accept"),
+          id: z.string().uuid(),
+          edit: z
+            .object({
+              cat: z.enum(ATLAS_CAT_KEYS as [string, ...string[]]).optional(),
+              name: z
+                .object({ en: z.string().trim().min(1).max(160), hi: z.string().max(160) })
+                .optional(),
+              district: z.string().max(60).optional(),
+              lat: z.number().min(20).max(33).optional(),
+              lon: z.number().min(66).max(80).optional(),
+              era_from: year.nullable().optional(),
+              era_to: year.nullable().optional(),
+              months: months.optional(),
+            })
+            .default({}),
+        }),
+      ])
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    const t = await themes();
+    if (data.decision === "reject") {
+      await t.rejectSuggestions(data.ids);
+      return { key: null };
+    }
+    return t.acceptSuggestion(data.id, data.edit);
   });

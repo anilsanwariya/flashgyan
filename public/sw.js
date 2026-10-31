@@ -3,9 +3,12 @@
 // deploy is picked up on the next visit; only built files (whose names change
 // with every build), icons and fonts are served from the cache. Admin pages,
 // sign-in, server functions and APIs are never cached.
-const VERSION = "v1";
+const VERSION = "v2";
 const STATIC = `fg-static-${VERSION}`;
 const RUNTIME = `fg-runtime-${VERSION}`;
+// The students' atlas pages, kept so the atlas opens offline (its data is
+// kept by the page itself).
+const PAGES = `fg-atlas-pages-${VERSION}`;
 const OFFLINE_URL = "/offline.html";
 const PRECACHE = [OFFLINE_URL, "/icons/icon-192x192.png", "/favicon-96x96.png"];
 const MAX_RUNTIME_ENTRIES = 250;
@@ -24,7 +27,11 @@ self.addEventListener("activate", (event) => {
     caches
       .keys()
       .then((keys) =>
-        Promise.all(keys.filter((k) => k !== STATIC && k !== RUNTIME).map((k) => caches.delete(k))),
+        Promise.all(
+          keys
+            .filter((k) => k !== STATIC && k !== RUNTIME && k !== PAGES)
+            .map((k) => caches.delete(k)),
+        ),
       )
       .then(() => self.clients.claim()),
   );
@@ -65,6 +72,25 @@ async function staleWhileRevalidate(event, request) {
   return update;
 }
 
+// Network first, kept for later; offline: the page kept, or the atlas's
+// home page (the app shell opens any atlas page), or the offline page.
+async function atlasPage(request, url) {
+  const cache = await caches.open(PAGES);
+  try {
+    const res = await fetch(request);
+    if (res.ok && (res.headers.get("content-type") ?? "").includes("text/html"))
+      await cache.put(url.pathname, res.clone());
+    return res;
+  } catch {
+    return (
+      (await cache.match(url.pathname)) ??
+      (await cache.match("/atlas")) ??
+      (await caches.match(OFFLINE_URL)) ??
+      Response.error()
+    );
+  }
+}
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
@@ -73,6 +99,15 @@ self.addEventListener("fetch", (event) => {
   if (url.origin === self.location.origin) {
     // Pages (admin included) come from the network; the offline page is only
     // a fallback and nothing from them is stored.
+    if (request.mode === "navigate" && /^\/atlas(\/|$)/.test(url.pathname)) {
+      event.respondWith(atlasPage(request, url));
+      return;
+    }
+    // The atlas's pages fetched to keep them ("Save for offline").
+    if (/^\/atlas(\/|$)/.test(url.pathname) && request.destination === "") {
+      event.respondWith(atlasPage(request, url));
+      return;
+    }
     if (request.mode === "navigate") {
       event.respondWith(
         fetch(request).catch(async () => (await caches.match(OFFLINE_URL)) ?? Response.error()),
