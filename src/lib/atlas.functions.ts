@@ -56,6 +56,9 @@ async function news() {
 async function quality() {
   return import("@/lib/atlas-quality.server");
 }
+async function usage() {
+  return import("@/lib/atlas-usage.server");
+}
 async function recheck() {
   return import("@/lib/atlas-recheck.server");
 }
@@ -341,17 +344,27 @@ export const atlasPlacesFn = createServerFn({ method: "GET" }).handler(async () 
 
 export const atlasPlaceFn = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ key: z.string().min(2).max(200) }).parse(d))
-  .handler(async ({ data }) => (await server()).atlasPlace(data.key));
+  .handler(async ({ data }) => {
+    void (await usage()).bumpUsage([{ kind: "place", ref: data.key }]);
+    return (await server()).atlasPlace(data.key);
+  });
 
 export const atlasEntityFactsFn = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) =>
     z.object({ entity: z.string().regex(/^[DSVTU]:[\p{L}\p{N} .|()'-]{1,120}$/u) }).parse(d),
   )
-  .handler(async ({ data }) => (await server()).atlasEntityFacts(data.entity));
+  .handler(async ({ data }) => {
+    if (data.entity.startsWith("D:"))
+      void (await usage()).bumpUsage([{ kind: "district", ref: data.entity.slice(2) }]);
+    return (await server()).atlasEntityFacts(data.entity);
+  });
 
 export const atlasDistrictFn = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ district }).parse(d))
-  .handler(async ({ data }) => (await server()).atlasDistrictPage(data.district));
+  .handler(async ({ data }) => {
+    void (await usage()).bumpUsage([{ kind: "district", ref: data.district }]);
+    return (await server()).atlasDistrictPage(data.district);
+  });
 
 // The atlas places and districts a SAATHI answer names.
 export const atlasMentionsFn = createServerFn({ method: "POST" })
@@ -957,4 +970,38 @@ export const readAtlasTehsils = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return (await drills()).readTehsils(data.text);
+  });
+
+// ---------- Usage ----------
+
+// A student's quiz answers, daily challenge or a search that found
+// nothing (counted by day, no student identified).
+export const atlasUsageFn = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        rows: z
+          .array(
+            z.object({
+              kind: z.enum(["quiz_right", "quiz_wrong", "daily", "search_miss"]),
+              ref: z.string().min(1).max(80),
+              n: z.number().int().min(1).max(30).optional(),
+            }),
+          )
+          .max(40),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const { clientIp } = await import("@/lib/saathi-ask.server");
+    return (await usage()).studentUsage(data.rows, clientIp(getRequest()));
+  });
+
+export const atlasUsageView = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ days: z.number().int().min(1).max(90) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await usage()).usageView(data.days);
   });

@@ -9,6 +9,7 @@ import {
   Gamepad2,
   Layers,
   MapPin,
+  Printer,
   Search,
   X,
 } from "lucide-react";
@@ -16,8 +17,9 @@ import { OfflineButton, SaveButton, ShareButton } from "@/components/atlas-actio
 import { InTheNews, NewsList } from "@/components/atlas-news";
 import { ReportButton } from "@/components/atlas-report";
 import { AskedInExams, useAtlasAskedCounts } from "@/components/atlas-exams";
-import { readSchedule, useAtlasSaved } from "@/lib/atlas-device";
+import { readSchedule, sendUsage, useAtlasSaved } from "@/lib/atlas-device";
 import { dayOf, todaysCards } from "@/lib/atlas-cards";
+import { searchRank } from "@/lib/atlas-search";
 import { atlasBaseFn, atlasPlacesFn } from "@/lib/atlas.functions";
 import {
   AGRO_ZONES,
@@ -113,18 +115,15 @@ function AtlasPage() {
     return m;
   }, [all]);
   const results = useMemo(() => {
-    const t = q.trim().toLowerCase();
-    if (t.length < 2) return [];
-    const d = (base.data?.districts ?? [])
-      .filter((x) => x.en.toLowerCase().includes(t) || x.hi.includes(q.trim()))
-      .map((x) => ({
-        kind: "district" as const,
-        key: x.en,
-        name: lang === "hi" ? x.hi : x.en,
-        sub: L(lang, "जिला", "District"),
-      }));
-    const p = all
-      .filter((x) => x[1].toLowerCase().includes(t) || x[2].includes(q.trim()))
+    if (q.trim().length < 2) return [];
+    // Spelling forgiven ("Jhunjhunun", "Chitorgarh", "झुंझनू").
+    const d = searchRank(q, base.data?.districts ?? [], (x) => [x.en, x.hi]).map((x) => ({
+      kind: "district" as const,
+      key: x.en,
+      name: lang === "hi" ? x.hi : x.en,
+      sub: L(lang, "जिला", "District"),
+    }));
+    const p = searchRank(q, all, (x) => [x[1], x[2]])
       .slice(0, 12)
       .map((x) => ({
         kind: "place" as const,
@@ -134,6 +133,14 @@ function AtlasPage() {
       }));
     return [...d, ...p].slice(0, 14);
   }, [q, all, base.data, lang]);
+
+  // A search that finds nothing tells the editor what students look for.
+  useEffect(() => {
+    const t = q.trim();
+    if (t.length < 3 || results.length) return;
+    const id = setTimeout(() => sendUsage([{ kind: "search_miss", ref: t }]), 1500);
+    return () => clearTimeout(id);
+  }, [q, results.length]);
 
   const pick = (kind: "place" | "district", key: string) => {
     setSel({ kind, key });
@@ -791,6 +798,13 @@ function DistrictCard({
               className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium hover:bg-muted"
             >
               <Columns3 className="h-3.5 w-3.5" /> {L(lang, "तुलना करें", "Compare")}
+            </Link>
+            <Link
+              to="/atlas/sheet/$district"
+              params={{ district: d.en }}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium hover:bg-muted"
+            >
+              <Printer className="h-3.5 w-3.5" /> {L(lang, "एक पेज का सार", "One-page sheet")}
             </Link>
           </div>
         </div>

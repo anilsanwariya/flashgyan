@@ -9,6 +9,7 @@
 import type { Bi } from "@/lib/current-affairs";
 import { quizRound, type QuizQ } from "@/lib/atlas-practice";
 import type { DistrictMeta } from "@/lib/atlas";
+import { searchRank } from "@/lib/atlas-search";
 
 // ---------- Borders (from the notes' "Inter-state borders" and the
 // international border) ----------
@@ -288,14 +289,7 @@ export function parseTehsils(
   return { rows, problems };
 }
 
-// Rows found for a search (English or Hindi, any part of the name).
+// Rows found for a search (English or Hindi; spelling forgiven).
 export function findTehsil(rows: TehsilRow[], q: string): TehsilRow[] {
-  const n = norm(q);
-  if (n.length < 2) return [];
-  return rows
-    .filter((r) => norm(r.tehsil.en).includes(n) || (r.tehsil.hi && norm(r.tehsil.hi).includes(n)))
-    .sort(
-      (a, b) => Number(!norm(a.tehsil.en).startsWith(n)) - Number(!norm(b.tehsil.en).startsWith(n)),
-    )
-    .slice(0, 12);
+  return searchRank(q, rows, (r) => [r.tehsil.en, r.tehsil.hi]).slice(0, 12);
 }

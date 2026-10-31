@@ -183,6 +183,33 @@ export function writeStreak(s: Streak) {
   }
 }
 
+// ---------- Usage (counted by day, no student identified) ----------
+
+// Sent and forgotten: a failure (offline) is not counted.
+export function sendUsage(
+  rows: { kind: "quiz_right" | "quiz_wrong" | "daily" | "search_miss"; ref: string; n?: number }[],
+) {
+  if (!rows.length) return;
+  void import("@/lib/atlas.functions")
+    .then(({ atlasUsageFn }) => atlasUsageFn({ data: { rows: rows.slice(0, 40) } }))
+    .catch(() => undefined);
+}
+
+// Quiz answers as counts by district.
+export function quizUsage(list: { district: string; right: boolean }[]) {
+  const m = new Map<string, { right: number; wrong: number }>();
+  for (const a of list) {
+    const x = m.get(a.district) ?? { right: 0, wrong: 0 };
+    if (a.right) x.right++;
+    else x.wrong++;
+    m.set(a.district, x);
+  }
+  return [...m].flatMap(([d, x]) => [
+    ...(x.right ? [{ kind: "quiz_right" as const, ref: d, n: x.right }] : []),
+    ...(x.wrong ? [{ kind: "quiz_wrong" as const, ref: d, n: x.wrong }] : []),
+  ]);
+}
+
 // ---------- Offline ----------
 
 const DB = "fg-atlas";

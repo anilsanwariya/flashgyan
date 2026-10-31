@@ -524,7 +524,7 @@ export function AtlasMap({
           </ul>
         </div>
       )}
-      <div className="absolute right-2 top-2 flex flex-col gap-1">
+      <div className="absolute right-2 top-2 flex flex-col gap-1 print:hidden">
         {[
           { icon: Plus, label: lang === "hi" ? "बड़ा करें" : "Zoom in", on: () => zoomAt(1.5) },
           {

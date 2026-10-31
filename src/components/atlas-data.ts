@@ -142,6 +142,7 @@ export function useSaveOffline() {
           "/atlas/saved",
           "/atlas/compare",
           ...p.districts.map((d) => `/atlas/${encodeURIComponent(d.district)}`),
+          ...p.districts.map((d) => `/atlas/sheet/${encodeURIComponent(d.district)}`),
           ...ATLAS_THEMES.map((t) => `/atlas/theme/${t.key}`),
         ].map((u) => fetch(u, { credentials: "same-origin" }).catch(() => null)),
       );
