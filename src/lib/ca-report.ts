@@ -89,6 +89,8 @@ export type WeeklyStats = {
   pickSuggestions?: number;
   // Each house style rule's week in the style check.
   style?: StyleScore[];
+  // The atlas: dated facts due for a recheck, students' open reports.
+  atlas?: { recheck: number; reports: number };
 };
 
 // One house style rule's week: notes the style check found, fixed with
@@ -250,6 +252,17 @@ export function weeklyReportText(s: WeeklyStats, adminUrl?: string): string {
     `❓ Questions it couldn't answer: ${s.knowledgeGaps}`,
   );
 
+  if (s.atlas && (s.atlas.recheck || s.atlas.reports)) {
+    lines.push("", `<b>Atlas</b>`);
+    if (s.atlas.recheck)
+      lines.push(
+        `🔄 ${s.atlas.recheck} dated fact${s.atlas.recheck === 1 ? "" : "s"} due for a recheck: Atlas → Quality → Recheck`,
+      );
+    if (s.atlas.reports)
+      lines.push(
+        `🚩 ${s.atlas.reports} mistake report${s.atlas.reports === 1 ? "" : "s"} from students waiting`,
+      );
+  }
   if (s.quiz)
     lines.push(
       "",

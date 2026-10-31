@@ -281,6 +281,12 @@ export async function sendWeeklyReport(
       console.error("picking rules:", e instanceof Error ? e.message : e);
     }
   }
+  try {
+    stats.atlas = await (await import("@/lib/atlas-recheck.server")).atlasWeekly();
+  } catch (e) {
+    // No atlas yet: the report goes out without it.
+    console.error("atlas:", e instanceof Error ? e.message : e);
+  }
   const text = weeklyReportText(stats, origin ? `${origin}/admin?section=ca.daily` : undefined);
   if (!token || !settings.test_chat_id) return { sent: false, text };
   const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {

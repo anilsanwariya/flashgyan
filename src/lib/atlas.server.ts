@@ -946,6 +946,8 @@ export async function atlasStep(): Promise<{ did: string | null }> {
   if (practice.did) return practice;
   const themes = await (await import("@/lib/atlas-themes.server")).themesStep();
   if (themes.did) return themes;
+  const syllabus = await (await import("@/lib/atlas-syllabus.server")).syllabusStep();
+  if (syllabus.did) return syllabus;
   return (await import("@/lib/atlas-news.server")).newsStep();
 }
 
