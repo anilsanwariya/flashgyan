@@ -14,6 +14,10 @@ import { RAJ_RIVERS } from "@/lib/geo-data";
 import {
   ATLAS_SUBJECTS,
   EMPTY_OVERVIEW,
+  SOURCE_CODES,
+  headingSources,
+  splitSources,
+  type SourceNames,
   OVERVIEW_SECTIONS,
   cleanFactText,
   normalizeOverview,
@@ -1310,6 +1314,8 @@ export type AtlasBase = {
   }[];
   rivers: { en: string; hi: string; tier: number; lines: LonLat[][] }[];
   layers: AtlasLayer[];
+  // The notes' sources by code (named by the editor).
+  sources: SourceNames;
 };
 
 export async function atlasBase(): Promise<AtlasBase> {
@@ -1336,6 +1342,7 @@ export async function atlasBase(): Promise<AtlasBase> {
       tier: r.tier ?? 1,
       lines: r.lines.map((x) => simplify(x, 0.006)),
     })),
+    sources: {},
     layers: ((l ?? []) as unknown as AtlasLayer[]).map((x) => ({
       ...x,
       items: x.items.map((f) => ({
@@ -1345,6 +1352,7 @@ export async function atlasBase(): Promise<AtlasBase> {
       })),
     })),
   };
+  base.sources = (await sourceCodes()).names;
   c.base = base;
   return base;
 }
@@ -1405,19 +1413,45 @@ export type PublicFact = {
   head: string;
   flags: number;
   hiAi: boolean;
+  // The notes' source codes it cites (its heading's too), out of its text.
+  sources: string[];
 };
-const publicFact = (f: AtlasFact): PublicFact => ({
-  id: f.id,
-  chapter: f.chapter,
-  heading: f.heading,
-  text: { en: cleanFactText(f.text_en), hi: cleanFactText(f.text_hi) },
-  head: f.table_head,
-  flags: f.flags,
-  hiAi: f.hi_ai,
-});
+// The source codes known (the notes' and the editor's own), kept a while.
+let codes: { at: number; list: string[]; names: SourceNames } = {
+  at: 0,
+  list: SOURCE_CODES,
+  names: {},
+};
+export async function sourceCodes() {
+  if (Date.now() - codes.at > 5 * 60_000) {
+    const names = await setting<SourceNames>(SOURCES_KEY, {});
+    codes = { at: Date.now(), list: [...new Set([...SOURCE_CODES, ...Object.keys(names)])], names };
+  }
+  return codes;
+}
+export const SOURCES_KEY = "atlas_sources";
+export const resetSourceCodes = () => {
+  codes = { ...codes, at: 0 };
+};
+const publicFact = (f: AtlasFact): PublicFact => {
+  const en = splitSources(cleanFactText(f.text_en), codes.list);
+  const hi = splitSources(cleanFactText(f.text_hi), codes.list);
+  const h = headingSources(f.heading, codes.list);
+  return {
+    id: f.id,
+    chapter: f.chapter,
+    heading: h.heading,
+    text: { en: en.text, hi: hi.text },
+    head: f.table_head,
+    flags: f.flags,
+    hiAi: f.hi_ai,
+    sources: [...new Set([...en.sources, ...hi.sources, ...h.sources])],
+  };
+};
 
 // A place's card: the place and its verified facts.
 export async function atlasPlace(key: string) {
+  await sourceCodes();
   const { data, error } = await from("atlas_places")
     .select(await placeCols())
     .eq("key", key)
@@ -1479,6 +1513,7 @@ export async function atlasPlace(key: string) {
 // The facts on a district (for the map's district card), or on a
 // physiographic division (S:/V:).
 export async function atlasEntityFacts(entity: string): Promise<PublicFact[]> {
+  await sourceCodes();
   const { data, error } = await from("atlas_facts")
     .select(FACT_COLS)
     .contains("entities", [entity])
@@ -1612,6 +1647,7 @@ export async function queueKb(chapterKeys: string[]) {
 // (with what it is about) and every published district page.
 export type OfflineFact = PublicFact & { entities: string[] };
 export async function atlasOfflinePack() {
+  await sourceCodes();
   const facts = await all<AtlasFact>(() =>
     from("atlas_facts").select(FACT_COLS).eq("status", "verified").order("position"),
   );

@@ -18,6 +18,7 @@ import type { AtlasMcqRow } from "@/lib/atlas-practice.server";
 import type { GapReport, HindiItem, NotesMatch } from "@/lib/atlas-review.server";
 import type { Suggestion } from "@/lib/atlas-themes.server";
 import type { NewsItem } from "@/lib/atlas-news.server";
+import type { AtlasReport, PositionCheck } from "@/lib/atlas-quality.server";
 
 export type {
   AtlasBase,
@@ -27,6 +28,8 @@ export type {
   NotesMatch,
   Suggestion,
   NewsItem,
+  AtlasReport,
+  PositionCheck,
   DistrictListRow,
   ImportResult,
   OverviewCheck,
@@ -45,6 +48,9 @@ async function themes() {
 }
 async function news() {
   return import("@/lib/atlas-news.server");
+}
+async function quality() {
+  return import("@/lib/atlas-quality.server");
 }
 async function review() {
   return import("@/lib/atlas-review.server");
@@ -348,6 +354,26 @@ export const atlasMentionsFn = createServerFn({ method: "POST" })
 export const atlasInNewsFn = createServerFn({ method: "GET" }).handler(async () =>
   (await news()).atlasInNews(),
 );
+
+// A student's "Report a mistake" (no sign-in needed; rate limited).
+export const reportAtlasMistake = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        kind: z.enum(["fact", "place", "district"]),
+        ref: z.string().trim().min(1).max(200),
+        label: z.string().max(600),
+        message: z.string().trim().min(8).max(1500),
+        correction: z.string().trim().max(1500),
+        page: z.string().max(300),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const { clientIp } = await import("@/lib/saathi-ask.server");
+    return (await quality()).reportMistake(data, { ip: clientIp(getRequest()), userId: null });
+  });
 
 export const atlasOfflinePackFn = createServerFn({ method: "GET" }).handler(async () =>
   (await server()).atlasOfflinePack(),
@@ -662,4 +688,90 @@ export const setUpAtlasDistrictSeries = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     await assertAdmin(context.userId);
     return (await news()).setUpDistrictSeries();
+  });
+
+// ---------- Quality: sources, reports, positions (admin) ----------
+
+export const atlasSourcesOverview = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await quality()).sourcesOverview();
+  });
+
+export const saveAtlasSources = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .record(
+        z.string().max(10),
+        z.object({
+          name: z.object({ en: z.string().max(120), hi: z.string().max(120) }),
+          url: z.string().max(300).optional(),
+        }),
+      )
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await quality()).saveSourceNames(data);
+    return { ok: true };
+  });
+
+export const atlasReports = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ status: z.enum(["open", "fixed", "dismissed"]) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await quality()).listReports(data.status);
+  });
+
+export const setAtlasReport = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        ids: z.array(z.string().uuid()).min(1).max(200),
+        status: z.enum(["open", "fixed", "dismissed"]),
+        note: z.string().max(500).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await quality()).setReportStatus(data.ids, data.status, data.note);
+    return { ok: true };
+  });
+
+export const atlasPositionChecks = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await quality()).positionChecks();
+  });
+
+export const decideAtlasPosition = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        key: z.string().min(2).max(200),
+        decision: z.discriminatedUnion("use", [
+          z.object({
+            use: z.literal("list"),
+            lat: z.number().min(20).max(33),
+            lon: z.number().min(66).max(80),
+          }),
+          z.object({ use: z.literal("district") }),
+          z.object({ use: z.literal("keep") }),
+        ]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await quality()).decidePosition(data.key, data.decision);
+    return { ok: true };
   });

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { OfflineButton, SaveButton, ShareButton } from "@/components/atlas-actions";
 import { InTheNews, NewsList } from "@/components/atlas-news";
+import { ReportButton } from "@/components/atlas-report";
 import { useAtlasSaved } from "@/lib/atlas-device";
 import { atlasBaseFn, atlasPlacesFn } from "@/lib/atlas.functions";
 import {
@@ -591,6 +592,12 @@ function PlaceCard({
               path={placePath(place.key)}
               title={`${pickBi(place.name, lang)} · ${L(lang, "राजस्थान एटलस", "Rajasthan Atlas")}`}
             />
+            <ReportButton
+              lang={lang}
+              kind="place"
+              refKey={place.key}
+              label={`${pickBi(place.name, lang)} · ${place.district} · ${place.lat.toFixed(3)}, ${place.lon.toFixed(3)}`}
+            />
           </div>
           {(place.era_from != null || place.era_to != null || place.months?.length > 0) && (
             <p className="text-xs font-medium text-amber-800 dark:text-amber-300" data-place-time>
@@ -718,6 +725,12 @@ function DistrictCard({
               lang={lang}
               path={`/atlas/${encodeURIComponent(d.en)}`}
               title={`${lang === "hi" ? d.hi : d.en} · ${L(lang, "राजस्थान एटलस", "Rajasthan Atlas")}`}
+            />
+            <ReportButton
+              lang={lang}
+              kind="district"
+              refKey={d.en}
+              label={lang === "hi" ? d.hi : d.en}
             />
             <Link
               to="/atlas/compare"

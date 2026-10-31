@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { factKinds, pickBi, type AtlasLang } from "@/lib/atlas";
 import type { PublicFact } from "@/lib/atlas.functions";
+import { useAtlasBase } from "@/components/atlas-data";
+import { ReportButton } from "@/components/atlas-report";
 
 const LANG_KEY = "atlas-lang";
 
@@ -68,6 +70,7 @@ export function FactsList({
   limit?: number;
 }) {
   const [all, setAll] = useState(false);
+  const names = useAtlasBase().data?.sources;
   const shown = limit && !all ? facts.slice(0, limit) : facts;
   const groups: { head: string; chapter: string; facts: PublicFact[] }[] = [];
   for (const f of shown) {
@@ -110,6 +113,32 @@ export function FactsList({
                     · AI अनुवाद
                   </span>
                 )}
+                {(f.sources ?? []).length > 0 && (
+                  <span
+                    className="ml-1.5 inline-flex flex-wrap gap-1 align-middle"
+                    data-fact-sources
+                  >
+                    {f.sources.map((c) => {
+                      const n = names?.[c];
+                      return (
+                        <span
+                          key={c}
+                          title={n ? pickBi(n.name, lang) || c : c}
+                          className="rounded border border-border px-1 text-[10px] text-muted-foreground"
+                        >
+                          {n && pickBi(n.name, lang) ? pickBi(n.name, lang) : c}
+                        </span>
+                      );
+                    })}
+                  </span>
+                )}
+                <ReportButton
+                  lang={lang}
+                  kind="fact"
+                  refKey={f.id}
+                  label={pickBi(f.text, lang)}
+                  compact
+                />
               </li>
             ))}
           </ul>

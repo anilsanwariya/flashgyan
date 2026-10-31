@@ -36,6 +36,7 @@ import { AtlasDistrictEditor } from "@/components/atlas-district-editor";
 import { AtlasPractice } from "@/components/atlas-practice-panel";
 import { AtlasSuggestions, TimeFields } from "@/components/atlas-themes-panel";
 import { AtlasAcross } from "@/components/atlas-news-panel";
+import { AtlasQuality } from "@/components/atlas-quality-panel";
 import { DistrictChecklist, GapsReport, HindiReview } from "@/components/atlas-review-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,6 +52,7 @@ const TABS = [
   "gaps",
   "suggestions",
   "across",
+  "quality",
   "practice",
 ] as const;
 type Tab = (typeof TABS)[number];
@@ -80,6 +82,7 @@ export function AtlasPanel() {
           { id: "gaps", label: "Gaps" },
           { id: "suggestions", label: "Suggestions" },
           { id: "across", label: "Across the site" },
+          { id: "quality", label: "Quality" },
           { id: "practice", label: "Practice" },
         ]}
         value={tab}
@@ -94,6 +97,7 @@ export function AtlasPanel() {
       {tab === "gaps" && <GapsReport />}
       {tab === "suggestions" && <AtlasSuggestions />}
       {tab === "across" && <AtlasAcross />}
+      {tab === "quality" && <AtlasQuality />}
       {tab === "practice" && <AtlasPractice />}
     </div>
   );
