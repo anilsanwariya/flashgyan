@@ -1603,3 +1603,22 @@ export async function queueKb(chapterKeys: string[]) {
   const kb = [...new Set([...j.kb, ...chapterKeys.filter(Boolean)])];
   if (kb.length !== j.kb.length) await saveSetting(JOBS_KEY, { ...j, kb });
 }
+
+// Everything the students' atlas needs to work offline: every verified fact
+// (with what it is about) and every published district page.
+export type OfflineFact = PublicFact & { entities: string[] };
+export async function atlasOfflinePack() {
+  const facts = await all<AtlasFact>(() =>
+    from("atlas_facts").select(FACT_COLS).eq("status", "verified").order("position"),
+  );
+  const districts = [];
+  for (const d of await publishedDistricts()) {
+    const page = await atlasDistrictPage(d.district);
+    if (page) districts.push(page);
+  }
+  return {
+    at: now(),
+    facts: facts.map((f): OfflineFact => ({ ...publicFact(f), entities: f.entities })),
+    districts,
+  };
+}

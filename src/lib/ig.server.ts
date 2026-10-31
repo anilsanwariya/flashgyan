@@ -633,7 +633,10 @@ async function chooseDesign(day: string, settings: IgSettings) {
 
 // ---------- Making the images ----------
 
-export async function screenshot(html: string): Promise<Uint8Array> {
+export async function screenshot(
+  html: string,
+  viewport: { width: number; height: number } = { width: 1080, height: 1920 },
+): Promise<Uint8Array> {
   const account = process.env.CLOUDFLARE_ACCOUNT_ID;
   const token = process.env.CLOUDFLARE_API_TOKEN;
   if (!account || !token)
@@ -646,7 +649,7 @@ export async function screenshot(html: string): Promise<Uint8Array> {
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         html,
-        viewport: { width: 1080, height: 1920, deviceScaleFactor: 1 },
+        viewport: { ...viewport, deviceScaleFactor: 1 },
         screenshotOptions: { type: "png" },
         gotoOptions: { waitUntil: "networkidle0", timeout: 45_000 },
         waitForSelector: { selector: "body[data-fit]", timeout: 20_000 },

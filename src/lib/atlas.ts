@@ -892,3 +892,47 @@ export const ATLAS_THEMES: AtlasTheme[] = [
   },
 ];
 export const atlasTheme = (key: string) => ATLAS_THEMES.find((t) => t.key === key) ?? null;
+
+// ---------- Crowded dots ----------
+
+// Dots closer than `dist` (map units) drawn as one group: the heaviest dot
+// (most facts) starts a group, the others near it join (greedy, stable).
+export function clusterDots<T extends { key: string; x: number; y: number; w: number }>(
+  dots: T[],
+  dist: number,
+): { x: number; y: number; members: T[] }[] {
+  const order = [...dots].sort((a, b) => b.w - a.w || a.key.localeCompare(b.key));
+  const groups: { x: number; y: number; members: T[] }[] = [];
+  for (const d of order) {
+    const g = groups.find((c) => Math.hypot(c.x - d.x, c.y - d.y) < dist);
+    if (g) g.members.push(d);
+    else groups.push({ x: d.x, y: d.y, members: [d] });
+  }
+  return groups;
+}
+
+// A shared atlas page's link preview (the picture made by
+// /api/atlas/preview).
+export function atlasShareMeta(o: {
+  title: string;
+  description: string;
+  image: string;
+  url: string;
+}) {
+  return [
+    { property: "og:title", content: o.title },
+    { property: "og:description", content: o.description },
+    { property: "og:image", content: o.image },
+    { property: "og:image:width", content: "1200" },
+    { property: "og:image:height", content: "630" },
+    { property: "og:url", content: o.url },
+    { name: "twitter:card", content: "summary_large_image" },
+    { name: "twitter:title", content: o.title },
+    { name: "twitter:description", content: o.description },
+    { name: "twitter:image", content: o.image },
+  ];
+}
+
+// A place page's path (its key's ":" kept readable).
+export const placePath = (key: string) =>
+  `/atlas/place/${encodeURIComponent(key).replace(/%3A/gi, ":")}`;

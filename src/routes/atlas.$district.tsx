@@ -1,25 +1,39 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
 import { ArrowLeft, Map as MapIcon } from "lucide-react";
-import { atlasBaseFn, atlasDistrictFn, atlasPlaceFn } from "@/lib/atlas.functions";
-import { AGRO_ZONES, ATLAS_GROUPS, DIVISIONS, atlasCat, pickBi, type AtlasLang } from "@/lib/atlas";
+import { atlasBaseFn, atlasDistrictFn } from "@/lib/atlas.functions";
+import {
+  AGRO_ZONES,
+  ATLAS_GROUPS,
+  DIVISIONS,
+  atlasCat,
+  atlasShareMeta,
+  pickBi,
+  type AtlasLang,
+} from "@/lib/atlas";
+import { SITE_URL } from "@/lib/app-promo";
 import { AtlasMap } from "@/components/atlas-map";
+import { useAtlasBase, useAtlasDistrict, useAtlasPlace } from "@/components/atlas-data";
 import { OverviewHero, OverviewSections, SectionChips } from "@/components/atlas-overview";
 import { FactsList, LangToggle, useAtlasLang } from "@/components/atlas-ui";
 
 export const Route = createFileRoute("/atlas/$district")({
   ssr: false,
-  head: ({ params }) => ({
-    meta: [
-      { title: `${params.district} district — Rajasthan Atlas · FlashGyan` },
-      {
-        name: "description",
-        content: `${params.district} district of Rajasthan for RPSC and RSSB exams: geography, agriculture, forts, temples, folk saints, history and every place on the map.`,
-      },
-    ],
-  }),
+  head: ({ params }) => {
+    const description = `${params.district} district of Rajasthan for RPSC and RSSB exams: geography, agriculture, forts, temples, folk saints, history and every place on the map.`;
+    return {
+      meta: [
+        { title: `${params.district} district — Rajasthan Atlas · FlashGyan` },
+        { name: "description", content: description },
+        ...atlasShareMeta({
+          title: `${params.district} district — Rajasthan Atlas`,
+          description,
+          url: `${SITE_URL}/atlas/${encodeURIComponent(params.district)}`,
+          image: `${SITE_URL}/api/atlas/preview?district=${encodeURIComponent(params.district)}`,
+        }),
+      ],
+    };
+  },
   component: DistrictPage,
 });
 
@@ -28,13 +42,8 @@ const L = (lang: AtlasLang, hi: string, en: string) => (lang === "hi" ? hi : en)
 function DistrictPage() {
   const { district } = Route.useParams();
   const [lang, setLang] = useAtlasLang();
-  const fn = useServerFn(atlasDistrictFn);
-  const baseFn = useServerFn(atlasBaseFn);
-  const q = useQuery({
-    queryKey: ["atlasDistrict", district],
-    queryFn: () => fn({ data: { district } }),
-  });
-  const base = useQuery({ queryKey: ["atlasBase"], queryFn: () => baseFn(), staleTime: Infinity });
+  const q = useAtlasDistrict(district);
+  const base = useAtlasBase();
   const d = q.data;
   if (q.isLoading) return <p className="p-6 text-muted-foreground">…</p>;
   if (!d)
@@ -124,12 +133,7 @@ function DistrictMap({
   }, [page.places]);
   const [on, setOn] = useState<string[]>([]);
   const [sel, setSel] = useState<string | null>(null);
-  const placeFn = useServerFn(atlasPlaceFn);
-  const card = useQuery({
-    queryKey: ["atlasPlace", sel],
-    queryFn: () => placeFn({ data: { key: sel! } }),
-    enabled: !!sel,
-  });
+  const card = useAtlasPlace(sel);
   const shown = page.places.filter((p) => !on.length || on.includes(atlasCat(p[3]).group));
   return (
     <section

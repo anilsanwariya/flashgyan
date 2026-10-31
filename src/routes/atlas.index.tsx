@@ -1,14 +1,19 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, BookOpen, Gamepad2, Layers, MapPin, Search, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  atlasBaseFn,
-  atlasEntityFactsFn,
-  atlasPlaceFn,
-  atlasPlacesFn,
-} from "@/lib/atlas.functions";
+  ArrowLeft,
+  Bookmark,
+  BookOpen,
+  Columns3,
+  Gamepad2,
+  Layers,
+  MapPin,
+  Search,
+  X,
+} from "lucide-react";
+import { OfflineButton, SaveButton, ShareButton } from "@/components/atlas-actions";
+import { useAtlasSaved } from "@/lib/atlas-device";
+import { atlasBaseFn, atlasPlacesFn } from "@/lib/atlas.functions";
 import {
   AGRO_ZONES,
   ATLAS_CATS,
@@ -18,6 +23,7 @@ import {
   atlasCat,
   layerLegend,
   pickBi,
+  placePath,
   ATLAS_THEMES,
   ERAS,
   MONTHS,
@@ -27,6 +33,12 @@ import {
   type AtlasLang,
 } from "@/lib/atlas";
 import { AtlasMap } from "@/components/atlas-map";
+import {
+  useAtlasBase,
+  useAtlasEntityFacts,
+  useAtlasPlace,
+  useAtlasPlaces,
+} from "@/components/atlas-data";
 import { FactsList, LangToggle, useAtlasLang } from "@/components/atlas-ui";
 
 export const Route = createFileRoute("/atlas/")({
@@ -41,6 +53,11 @@ export const Route = createFileRoute("/atlas/")({
       },
     ],
   }),
+  // A shared link opens a place's or a district's card.
+  validateSearch: (s: Record<string, unknown>): { place?: string; district?: string } => ({
+    ...(typeof s.place === "string" && s.place.length <= 200 ? { place: s.place } : {}),
+    ...(typeof s.district === "string" && s.district.length <= 60 ? { district: s.district } : {}),
+  }),
   component: AtlasPage,
 });
 
@@ -49,14 +66,8 @@ const L = (lang: AtlasLang, hi: string, en: string) => (lang === "hi" ? hi : en)
 
 function AtlasPage() {
   const [lang, setLang] = useAtlasLang();
-  const baseFn = useServerFn(atlasBaseFn);
-  const placesFn = useServerFn(atlasPlacesFn);
-  const base = useQuery({ queryKey: ["atlasBase"], queryFn: () => baseFn(), staleTime: Infinity });
-  const places = useQuery({
-    queryKey: ["atlasPlaces"],
-    queryFn: () => placesFn(),
-    staleTime: Infinity,
-  });
+  const base = useAtlasBase();
+  const places = useAtlasPlaces();
   const [colour, setColour] = useState<string | null>("divisions");
   const [overlays, setOverlays] = useState<string[]>([]);
   const [cats, setCats] = useState<string[]>(DEFAULT_CATS);
@@ -128,6 +139,18 @@ function AtlasPage() {
     }
   };
 
+  // A shared link: its card, once the map is there.
+  const search = Route.useSearch();
+  const opened = useRef(false);
+  useEffect(() => {
+    if (opened.current || !base.data || !places.data) return;
+    opened.current = true;
+    if (search.place && places.data.some((p) => p[0] === search.place)) pick("place", search.place);
+    else if (search.district && base.data.districts.some((d) => d.en === search.district))
+      pick("district", search.district);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [base.data, places.data]);
+
   const layers = base.data?.layers ?? [];
   const colourLayers = layers.filter((l) =>
     l.items.some((f) => f.kind === "area" || f.kind === "district"),
@@ -137,6 +160,15 @@ function AtlasPage() {
 
   const Panel = (
     <div className="space-y-5">
+      <section className="flex flex-wrap items-start gap-2">
+        <OfflineButton lang={lang} />
+        <Link
+          to="/atlas/compare"
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium hover:bg-muted"
+        >
+          <Columns3 className="h-3.5 w-3.5" /> {L(lang, "जिलों की तुलना", "Compare districts")}
+        </Link>
+      </section>
       <section>
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           {L(lang, "मानचित्र का रंग", "Colour the map by")}
@@ -346,6 +378,7 @@ function AtlasPage() {
         >
           <Gamepad2 className="h-4 w-4" /> {L(lang, "क्विज़", "Quiz")}
         </Link>
+        <SavedLink lang={lang} />
         <LangToggle lang={lang} onChange={setLang} />
         <button
           type="button"
@@ -379,6 +412,7 @@ function AtlasPage() {
               focus={focus}
               onPlace={(k) => setSel({ kind: "place", key: k })}
               onDistrict={(d) => setSel({ kind: "district", key: d })}
+              cluster
               className="h-[62dvh] lg:h-[calc(100dvh-120px)]"
             />
             {active && (
@@ -510,8 +544,7 @@ function PlaceCard({
   onDistrict: (d: string) => void;
   onPlace: (k: string) => void;
 }) {
-  const fn = useServerFn(atlasPlaceFn);
-  const q = useQuery({ queryKey: ["atlasPlace", k], queryFn: () => fn({ data: { key: k } }) });
+  const q = useAtlasPlace(k);
   if (q.isLoading) return <p className="text-sm text-muted-foreground">…</p>;
   if (!q.data) return null;
   const { place, facts, mentions } = q.data;
@@ -540,6 +573,23 @@ function PlaceCard({
         <div className="min-w-0 flex-1">
           <h2 className="text-lg font-bold leading-tight">{pickBi(place.name, lang)}</h2>
           <p className="text-xs text-muted-foreground">{pickBi(c.name, lang)}</p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            <SaveButton
+              lang={lang}
+              place={{
+                key: place.key,
+                name: place.name.en,
+                name_hi: place.name.hi,
+                cat: place.cat,
+                district: place.district,
+              }}
+            />
+            <ShareButton
+              lang={lang}
+              path={placePath(place.key)}
+              title={`${pickBi(place.name, lang)} · ${L(lang, "राजस्थान एटलस", "Rajasthan Atlas")}`}
+            />
+          </div>
           {(place.era_from != null || place.era_to != null || place.months?.length > 0) && (
             <p className="text-xs font-medium text-amber-800 dark:text-amber-300" data-place-time>
               {[eraLabel(place.era_from, place.era_to, lang), monthsLabel(place.months, lang)]
@@ -645,11 +695,7 @@ function DistrictCard({
   onClose: () => void;
   onPlace: (k: string) => void;
 }) {
-  const fn = useServerFn(atlasEntityFactsFn);
-  const q = useQuery({
-    queryKey: ["atlasEntity", `D:${name}`],
-    queryFn: () => fn({ data: { entity: `D:${name}` } }),
-  });
+  const q = useAtlasEntityFacts(`D:${name}`);
   const d = base.districts.find((x) => x.en === name);
   if (!d) return null;
   const mine = places.filter((p) => p[6] === name);
@@ -663,6 +709,21 @@ function DistrictCard({
             {lang === "hi" ? d.hi : d.en}
           </h2>
           <p className="text-xs text-muted-foreground">{L(lang, "जिला", "District")}</p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            <SaveButton lang={lang} district={d.en} />
+            <ShareButton
+              lang={lang}
+              path={`/atlas/${encodeURIComponent(d.en)}`}
+              title={`${lang === "hi" ? d.hi : d.en} · ${L(lang, "राजस्थान एटलस", "Rajasthan Atlas")}`}
+            />
+            <Link
+              to="/atlas/compare"
+              search={{ d: d.en }}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium hover:bg-muted"
+            >
+              <Columns3 className="h-3.5 w-3.5" /> {L(lang, "तुलना करें", "Compare")}
+            </Link>
+          </div>
         </div>
         <button
           type="button"
@@ -852,5 +913,21 @@ function TimeFilter({
         </p>
       </div>
     </section>
+  );
+}
+
+function SavedLink({ lang }: { lang: AtlasLang }) {
+  const { saved } = useAtlasSaved();
+  const n = saved.places.length + saved.districts.length;
+  return (
+    <Link
+      to="/atlas/saved"
+      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-sm hover:bg-muted"
+    >
+      <Bookmark className="h-4 w-4" /> {L(lang, "सहेजे", "Saved")}
+      {n > 0 && (
+        <span className="rounded-full bg-amber-100 px-1.5 text-xs text-amber-900">{n}</span>
+      )}
+    </Link>
   );
 }

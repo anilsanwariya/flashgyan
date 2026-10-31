@@ -1,13 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
 import { ArrowLeft, Check, RotateCcw, Trophy, X } from "lucide-react";
-import { atlasBaseFn, atlasPlacesFn, type PublicPlace } from "@/lib/atlas.functions";
+import { type PublicPlace } from "@/lib/atlas.functions";
 import { ATLAS_GROUPS, atlasCat, pickBi, type AtlasLang } from "@/lib/atlas";
 import { NO_DISTRICT_QUESTION, quizRound, type QuizMode, type QuizQ } from "@/lib/atlas-practice";
 import { AtlasMap } from "@/components/atlas-map";
+import { useAtlasBase, useAtlasPlaces } from "@/components/atlas-data";
 import { LangToggle, useAtlasLang } from "@/components/atlas-ui";
+import { useAtlasSaved } from "@/lib/atlas-device";
 
 export const Route = createFileRoute("/atlas/quiz")({
   ssr: false,
@@ -21,6 +21,9 @@ export const Route = createFileRoute("/atlas/quiz")({
       },
     ],
   }),
+  // From the saved list: a "where is it?" quiz on the saved places.
+  validateSearch: (s: Record<string, unknown>): { saved?: 1 } =>
+    s.saved === 1 || s.saved === "1" ? { saved: 1 } : {},
   component: QuizPage,
 });
 
@@ -71,15 +74,12 @@ function readBest(): Record<string, number> {
 
 function QuizPage() {
   const [lang, setLang] = useAtlasLang();
-  const baseFn = useServerFn(atlasBaseFn);
-  const placesFn = useServerFn(atlasPlacesFn);
-  const base = useQuery({ queryKey: ["atlasBase"], queryFn: () => baseFn(), staleTime: Infinity });
-  const places = useQuery({
-    queryKey: ["atlasPlaces"],
-    queryFn: () => placesFn(),
-    staleTime: Infinity,
-  });
-  const [mode, setMode] = useState<QuizMode>("find");
+  const base = useAtlasBase();
+  const places = useAtlasPlaces();
+  const fromSaved = !!Route.useSearch().saved;
+  const { saved } = useAtlasSaved();
+  const savedKeys = useMemo(() => new Set(saved.places.map((p) => p.key)), [saved.places]);
+  const [mode, setMode] = useState<QuizMode>(fromSaved ? "where" : "find");
   const [groups, setGroups] = useState<string[]>(["culture", "water", "wildlife", "minerals"]);
   const [size, setSize] = useState(10);
   const [round, setRound] = useState<QuizQ[] | null>(null);
@@ -92,6 +92,8 @@ function QuizPage() {
     () => (places.data ?? []).filter((p) => !NO_DISTRICT_QUESTION.has(p[3])),
     [places.data],
   );
+  // The saved places a "which district?" question can be asked about.
+  const savedUsable = quizPlaces.filter((p) => savedKeys.has(p[0]) && p[6]).length;
   const groupCount = useMemo(() => {
     const m = new Map<string, number>();
     for (const p of quizPlaces) {
@@ -108,7 +110,7 @@ function QuizPage() {
 
   const start = () => {
     const chosen = quizPlaces
-      .filter((p) => groups.includes(atlasCat(p[3]).group))
+      .filter((p) => (fromSaved ? savedKeys.has(p[0]) : groups.includes(atlasCat(p[3]).group)))
       .map((p) => ({
         key: p[0],
         en: p[1],
@@ -228,7 +230,16 @@ function QuizPage() {
               ))}
             </div>
           </section>
-          {(mode === "where" || mode === "mix") && (
+          {fromSaved && (
+            <p className="rounded-lg bg-amber-500/10 p-3 text-sm" data-quiz-saved>
+              {L(
+                lang,
+                `आपके सहेजे ${savedUsable} स्थानों पर क्विज़`,
+                `A quiz on your ${savedUsable} saved places`,
+              )}
+            </p>
+          )}
+          {!fromSaved && (mode === "where" || mode === "mix") && (
             <section className="space-y-2">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                 {L(lang, "किन स्थानों से", "Which places")}
@@ -271,7 +282,7 @@ function QuizPage() {
           <button
             type="button"
             onClick={start}
-            disabled={(mode === "where" && !groups.length) || !base.data}
+            disabled={(mode === "where" && !groups.length && !fromSaved) || !base.data}
             className="h-11 w-full rounded-xl bg-primary text-base font-semibold text-primary-foreground disabled:opacity-50"
           >
             {L(lang, "शुरू करें", "Start")}

@@ -335,6 +335,10 @@ export const atlasDistrictFn = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ district }).parse(d))
   .handler(async ({ data }) => (await server()).atlasDistrictPage(data.district));
 
+export const atlasOfflinePackFn = createServerFn({ method: "GET" }).handler(async () =>
+  (await server()).atlasOfflinePack(),
+);
+
 // ---------- The map editor (admin) ----------
 
 export const atlasMapChoices = createServerFn({ method: "GET" })

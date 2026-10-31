@@ -1,9 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
 import { ArrowLeft, ChevronDown } from "lucide-react";
-import { atlasBaseFn, atlasPlaceFn, atlasPlacesFn, type PublicPlace } from "@/lib/atlas.functions";
+import { type PublicPlace } from "@/lib/atlas.functions";
 import {
   ATLAS_THEMES,
   MONTHS,
@@ -15,6 +13,7 @@ import {
   type AtlasLang,
 } from "@/lib/atlas";
 import { AtlasMap } from "@/components/atlas-map";
+import { useAtlasBase, useAtlasPlace, useAtlasPlaces } from "@/components/atlas-data";
 import { FactsList, LangToggle, useAtlasLang } from "@/components/atlas-ui";
 
 export const Route = createFileRoute("/atlas/theme/$theme")({
@@ -48,14 +47,8 @@ function ThemePage() {
 function ThemeView({ theme }: { theme: string }) {
   const t = atlasTheme(theme);
   const [lang, setLang] = useAtlasLang();
-  const baseFn = useServerFn(atlasBaseFn);
-  const placesFn = useServerFn(atlasPlacesFn);
-  const base = useQuery({ queryKey: ["atlasBase"], queryFn: () => baseFn(), staleTime: Infinity });
-  const places = useQuery({
-    queryKey: ["atlasPlaces"],
-    queryFn: () => placesFn(),
-    staleTime: Infinity,
-  });
+  const base = useAtlasBase();
+  const places = useAtlasPlaces();
   const [open, setOpen] = useState<string | null>(null);
   const [focus, setFocus] = useState<{ lon: number; lat: number; zoom?: number } | null>(null);
   const mine = useMemo(
@@ -162,6 +155,7 @@ function ThemeView({ theme }: { theme: string }) {
                 const p = mine.find((x) => x[0] === k);
                 if (p) pick(p);
               }}
+              cluster
               className="h-[48vh] lg:sticky lg:top-16 lg:h-[calc(100dvh-140px)]"
             />
           </div>
@@ -236,12 +230,7 @@ function ThemeItem({
   open: boolean;
   onClick: () => void;
 }) {
-  const fn = useServerFn(atlasPlaceFn);
-  const q = useQuery({
-    queryKey: ["atlasPlace", p[0]],
-    queryFn: () => fn({ data: { key: p[0] } }),
-    enabled: open,
-  });
+  const q = useAtlasPlace(p[0], open);
   const c = atlasCat(p[3]);
   const when = [eraLabel(p[8], p[9], lang), monthsLabel(p[10], lang)].filter(Boolean).join(" · ");
   return (

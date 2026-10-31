@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import {
   atlasCat,
+  clusterDots,
   layerSvg,
   pickBi,
   type AtlasLang,
@@ -62,6 +63,7 @@ export function AtlasMap({
   blind = false,
   marks,
   named = [],
+  cluster = false,
   className = "",
 }: {
   base: AtlasBase;
@@ -83,6 +85,8 @@ export function AtlasMap({
   marks?: Record<string, string>;
   // Districts whose names show on a blind map (an answered question's).
   named?: string[];
+  // Crowded dots drawn as one, with a list of the places there.
+  cluster?: boolean;
   className?: string;
 }) {
   const own = district ? base.districts.find((d) => d.en === district) : null;
@@ -185,6 +189,46 @@ export function AtlasMap({
     [base.districts],
   );
   const r = 5.5 * k;
+  // Crowded dots: groups of two or more (the chosen place always alone).
+  const groups = useMemo(() => {
+    if (!cluster || zoom > 8) return null;
+    const dots = places
+      .filter((p) => p[0] !== selected)
+      .map((p) => {
+        const [x, y] = project(p[5], p[4]);
+        return { key: p[0], x, y, w: p[7], p };
+      });
+    return clusterDots(dots, r * 2.6);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [places, cluster, Math.round(k * 40), selected]);
+  const crowds = groups?.filter((g) => g.members.length > 1) ?? [];
+  const alone = useMemo(() => {
+    if (!groups) return places;
+    const single = new Set(
+      groups.filter((g) => g.members.length === 1).map((g) => g.members[0].key),
+    );
+    return places.filter((p) => single.has(p[0]) || p[0] === selected);
+  }, [groups, places, selected]);
+  const [here, setHere] = useState<{
+    x: number;
+    y: number;
+    members: { x: number; y: number; p: PublicPlace }[];
+  } | null>(null);
+  useEffect(() => setHere(null), [places]);
+  const zoomTo = (pts: { x: number; y: number }[]) => {
+    const xs = pts.map((q) => q.x);
+    const ys = pts.map((q) => q.y);
+    const pad = r * 6;
+    const w = Math.max(
+      home.w / 40,
+      Math.max(...xs) - Math.min(...xs) + pad * 2,
+      ((Math.max(...ys) - Math.min(...ys) + pad * 2) * home.w) / home.h,
+    );
+    const h = w * (home.h / home.w);
+    const cx = (Math.max(...xs) + Math.min(...xs)) / 2;
+    const cy = (Math.max(...ys) + Math.min(...ys)) / 2;
+    setView({ x: cx - w / 2, y: cy - h / 2, w, h });
+  };
   // Names that fit: the places with the most facts first, none over
   // another name or another dot (the chosen place always).
   const labelled = useMemo(() => {
@@ -195,13 +239,13 @@ export function AtlasMap({
       return out;
     }
     const size = (own ? 12 : 10) * k;
-    const boxes: [number, number, number, number][] = places.map((p) => {
+    const boxes: [number, number, number, number][] = alone.map((p) => {
       const [x, y] = project(p[5], p[4]);
       return [x - r, y - r, x + r, y + r];
     });
     const hit = (b: [number, number, number, number]) =>
       boxes.some((o) => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
-    const order = [...places].sort(
+    const order = [...alone].sort(
       (a, b) => Number(b[0] === selected) - Number(a[0] === selected) || b[7] - a[7],
     );
     for (const p of order) {
@@ -220,7 +264,7 @@ export function AtlasMap({
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [places, zoom > 3.5, Math.round(k * 50), own, selected, lang, blind]);
+  }, [alone, zoom > 3.5, Math.round(k * 50), own, selected, lang, blind]);
   return (
     <div
       className={`relative overflow-hidden rounded-2xl border border-border bg-[#eef2f7] dark:bg-slate-900 ${className}`}
@@ -346,7 +390,43 @@ export function AtlasMap({
           })}
         </g>
         <g>
-          {places.map((p) => {
+          {crowds.map((g) => {
+            const top = atlasCat(g.members[0].p[3]);
+            const n = g.members.length;
+            return (
+              <g
+                key={`c:${g.members[0].key}`}
+                className="cursor-pointer"
+                role="button"
+                aria-label={lang === "hi" ? `यहाँ ${n} स्थान` : `${n} places here`}
+                data-crowd={n}
+                onClick={() => !moved.current && setHere(g)}
+              >
+                <circle cx={g.x} cy={g.y} r={r * 3} fill="transparent" />
+                <circle
+                  cx={g.x}
+                  cy={g.y}
+                  r={r * (1.5 + Math.min(n, 20) / 20)}
+                  fill={top.color}
+                  fillOpacity={0.9}
+                  stroke="#fff"
+                  strokeWidth={r * 0.35}
+                />
+                <text
+                  x={g.x}
+                  y={g.y + r * 0.55}
+                  textAnchor="middle"
+                  fontSize={r * 1.5}
+                  fontWeight={700}
+                  fill="#fff"
+                  style={{ pointerEvents: "none" }}
+                >
+                  {n}
+                </text>
+              </g>
+            );
+          })}
+          {alone.map((p) => {
             const [x, y] = project(p[5], p[4]);
             const c = atlasCat(p[3]);
             const on = selected === p[0];
@@ -390,6 +470,60 @@ export function AtlasMap({
           })}
         </g>
       </svg>
+      {here && (
+        <div
+          className="absolute inset-x-2 bottom-2 max-h-[45%] overflow-y-auto rounded-xl border border-border bg-background/95 p-2 shadow-lg sm:right-auto sm:w-80"
+          data-places-here
+        >
+          <div className="mb-1 flex items-center gap-2">
+            <p className="flex-1 text-sm font-semibold">
+              {lang === "hi"
+                ? `यहाँ ${here.members.length} स्थान`
+                : `${here.members.length} places here`}
+            </p>
+            <button
+              type="button"
+              className="rounded-md border border-border px-2 py-0.5 text-xs hover:bg-muted"
+              onClick={() => {
+                zoomTo(here.members);
+                setHere(null);
+              }}
+            >
+              {lang === "hi" ? "बड़ा करके देखें" : "Zoom in"}
+            </button>
+            <button
+              type="button"
+              aria-label={lang === "hi" ? "बंद करें" : "Close"}
+              className="grid h-6 w-6 place-items-center rounded hover:bg-muted"
+              onClick={() => setHere(null)}
+            >
+              ×
+            </button>
+          </div>
+          <ul className="space-y-0.5">
+            {here.members.map(({ p }) => (
+              <li key={p[0]}>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-sm hover:bg-muted"
+                  onClick={() => {
+                    setHere(null);
+                    onPlace?.(p[0]);
+                  }}
+                >
+                  <span>{atlasCat(p[3]).icon}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {lang === "hi" ? p[2] || p[1] : p[1]}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">
+                    {pickBi(atlasCat(p[3]).name, lang)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="absolute right-2 top-2 flex flex-col gap-1">
         {[
           { icon: Plus, label: lang === "hi" ? "बड़ा करें" : "Zoom in", on: () => zoomAt(1.5) },
