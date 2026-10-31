@@ -16,6 +16,7 @@ import { AtlasMap } from "@/components/atlas-map";
 import { useAtlasBase, useAtlasDistrict, useAtlasPlace } from "@/components/atlas-data";
 import { OverviewHero, OverviewSections, SectionChips } from "@/components/atlas-overview";
 import { ReportButton } from "@/components/atlas-report";
+import { AskedInExams } from "@/components/atlas-exams";
 import { FactsList, LangToggle, useAtlasLang } from "@/components/atlas-ui";
 
 export const Route = createFileRoute("/atlas/$district")({
@@ -215,11 +216,13 @@ function DistrictMap({
             </p>
             <h3 className="text-lg font-bold">{pickBi(card.data.place.name, lang)}</h3>
             <FactsList facts={card.data.facts} lang={lang} limit={8} />
+            <AskedInExams lang={lang} place={sel} />
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">…</p>
         )}
       </div>
+      <AskedInExams lang={lang} district={page.district} />
       <p className="text-xs text-muted-foreground">
         {L(
           lang,

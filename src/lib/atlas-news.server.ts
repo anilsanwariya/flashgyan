@@ -40,7 +40,7 @@ async function saveSetting(key: string, value: unknown) {
 type PlaceEntry = { p: PublicPlace; names: string[] };
 let index: { at: number; places: PlaceEntry[] } = { at: 0, places: [] };
 // The atlas's verified places, by their names.
-async function placeIndex(): Promise<PlaceEntry[]> {
+export async function placeIndex(): Promise<PlaceEntry[]> {
   if (Date.now() - index.at < 5 * 60_000 && index.places.length) return index.places;
   // A place called just like a district ("Rajsamand" for its crops) is
   // the district, not a place.
@@ -60,7 +60,7 @@ async function placeIndex(): Promise<PlaceEntry[]> {
   };
   return index.places;
 }
-const DISTRICTS = RAJ_DISTRICTS.map((d) => ({ en: d.en, hi: d.hi, names: [d.en, d.hi] }));
+export const DISTRICTS = RAJ_DISTRICTS.map((d) => ({ en: d.en, hi: d.hi, names: [d.en, d.hi] }));
 
 // What a SAATHI answer names: Rajasthan's districts and the atlas's places
 // (only when it is about Rajasthan: it names the state or a district).

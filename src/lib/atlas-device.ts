@@ -3,6 +3,7 @@
 // use (in its database). Both are only this device's: nothing is sent
 // anywhere, and the atlas works the same when storage is blocked.
 import { useCallback, useEffect, useState } from "react";
+import type { Schedule } from "@/lib/atlas-cards";
 
 // ---------- Saved to revise later ----------
 
@@ -70,6 +71,96 @@ export function useAtlasSaved() {
       }),
     clear: () => write(EMPTY),
   };
+}
+
+// ---------- Quiz results by district ----------
+
+// Each district's last answers in the map quiz ("1" right, "0" wrong,
+// newest last), for the student's weak districts.
+const STATS_KEY = "atlas-district-stats";
+const STATS_CHANGED = "atlas-stats-changed";
+export const STATS_KEEP = 10;
+export type DistrictStats = Record<string, string>;
+
+function readStats(): DistrictStats {
+  try {
+    const v = JSON.parse(localStorage.getItem(STATS_KEY) ?? "{}") as DistrictStats;
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+export function recordQuizAnswers(list: { district: string; right: boolean }[]) {
+  const s = readStats();
+  for (const a of list)
+    s[a.district] = ((s[a.district] ?? "") + (a.right ? "1" : "0")).slice(-STATS_KEEP);
+  try {
+    localStorage.setItem(STATS_KEY, JSON.stringify(s));
+    window.dispatchEvent(new Event(STATS_CHANGED));
+  } catch {
+    // Storage blocked: not kept.
+  }
+}
+
+// A district's share of right answers (of its last ones).
+export const districtScore = (s: string) => ({
+  tries: s.length,
+  pct: s.length ? Math.round(((s.match(/1/g) ?? []).length / s.length) * 100) : 0,
+});
+export const WEAK_PCT = 70;
+
+// The student's results, and their weak districts (tried twice or more,
+// under 70% right), weakest first.
+export function useDistrictStats() {
+  const [stats, setStats] = useState<DistrictStats>({});
+  useEffect(() => {
+    const load = () => setStats(readStats());
+    load();
+    window.addEventListener("storage", load);
+    window.addEventListener(STATS_CHANGED, load);
+    return () => {
+      window.removeEventListener("storage", load);
+      window.removeEventListener(STATS_CHANGED, load);
+    };
+  }, []);
+  const weak = Object.entries(stats)
+    .map(([d, s]) => ({ district: d, ...districtScore(s) }))
+    .filter((x) => x.tries >= 2 && x.pct < WEAK_PCT)
+    .sort((a, b) => a.pct - b.pct || b.tries - a.tries)
+    .map((x) => x.district);
+  return {
+    stats,
+    weak,
+    clear: () => {
+      try {
+        localStorage.removeItem(STATS_KEY);
+        window.dispatchEvent(new Event(STATS_CHANGED));
+      } catch {
+        // nothing kept
+      }
+    },
+  };
+}
+
+// ---------- Flashcard schedule ----------
+
+const CARDS_KEY = "atlas-cards";
+const EMPTY_SCHEDULE: Schedule = { cards: {}, day: "", fresh: 0 };
+export function readSchedule(): Schedule {
+  try {
+    const v = JSON.parse(localStorage.getItem(CARDS_KEY) ?? "null") as Schedule | null;
+    return v && typeof v.cards === "object" ? v : EMPTY_SCHEDULE;
+  } catch {
+    return EMPTY_SCHEDULE;
+  }
+}
+export function writeSchedule(s: Schedule) {
+  try {
+    localStorage.setItem(CARDS_KEY, JSON.stringify(s));
+  } catch {
+    // Storage blocked: kept for this visit only.
+  }
 }
 
 // ---------- Offline ----------

@@ -120,10 +120,21 @@ export async function syllabusCoverage() {
     Object.entries(s.links).map(([g, t]) => [g, t.filter((x) => ids.has(x))]),
   );
   const counts = topicCounts(topics, links, facts);
+  // Past exam questions filed under each topic (and its subtopics).
+  const perTopic = await (await import("@/lib/atlas-exams.server")).askedPerTopic();
+  const asked = new Map<string, number>();
+  const sum = (id: string): number => {
+    const n =
+      (perTopic.get(id) ?? 0) +
+      topics.filter((t) => t.parent_id === id).reduce((s, t) => s + sum(t.id), 0);
+    asked.set(id, n);
+    return n;
+  };
+  for (const t of topics.filter((x) => !x.parent_id)) sum(t.id);
   return {
     ready: true as const,
     sections: ATLAS_SECTIONS.filter((x) => topics.some((t) => t.section === x)),
-    topics: topics.map((t) => ({ ...t, ...counts.get(t.id)! })),
+    topics: topics.map((t) => ({ ...t, ...counts.get(t.id)!, asked: asked.get(t.id) ?? 0 })),
     groups: groups.map((g) => ({
       ...g,
       topics: links[g.key] ?? null, // null: not filed yet

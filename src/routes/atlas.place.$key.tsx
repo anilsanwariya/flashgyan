@@ -15,6 +15,7 @@ import { AtlasMap } from "@/components/atlas-map";
 import { useAtlasBase, useAtlasPlace, useAtlasPlaces } from "@/components/atlas-data";
 import { SaveButton, ShareButton } from "@/components/atlas-actions";
 import { NewsList } from "@/components/atlas-news";
+import { AskedInExams } from "@/components/atlas-exams";
 import { ReportButton } from "@/components/atlas-report";
 import { FactsList, LangToggle, useAtlasLang } from "@/components/atlas-ui";
 
@@ -168,6 +169,7 @@ function PlacePage() {
           </div>
           {pickBi(p.note, lang) && <p className="text-sm">{pickBi(p.note, lang)}</p>}
           <NewsList items={data.news ?? []} lang={lang} />
+          <AskedInExams lang={lang} place={p.key} />
           <div>
             <p className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">
               <BookOpen className="h-4 w-4" /> {L(lang, "नोट्स से तथ्य", "From the notes")}

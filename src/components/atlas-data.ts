@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
   atlasBaseFn,
+  atlasCardsFn,
   atlasDistrictFn,
   atlasEntityFactsFn,
   atlasOfflinePackFn,
@@ -26,6 +27,16 @@ export function useAtlasBase() {
     queryKey: ["atlasBase"],
     queryFn: () => withOffline("base", () => fn()),
     staleTime: Infinity,
+  });
+}
+
+// The atlas's revision cards (their schedule is on the device).
+export function useAtlasCards() {
+  const fn = useServerFn(atlasCardsFn);
+  return useQuery({
+    queryKey: ["atlasCards"],
+    queryFn: () => withOffline("cards", () => fn()),
+    staleTime: 10 * 60_000,
   });
 }
 
@@ -125,6 +136,7 @@ export function useSaveOffline() {
         [
           "/atlas",
           "/atlas/quiz",
+          "/atlas/cards",
           "/atlas/saved",
           "/atlas/compare",
           ...p.districts.map((d) => `/atlas/${encodeURIComponent(d.district)}`),

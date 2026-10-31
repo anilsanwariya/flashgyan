@@ -20,6 +20,7 @@ import {
   revisionCards,
   seeded,
   shuffle,
+  type AtlasCard,
   type AtlasMcq,
   type PracticeFact,
 } from "@/lib/atlas-practice";
@@ -454,6 +455,49 @@ export async function publishMcqs(): Promise<{ sets: number; questions: number }
 
 // ---------- Flashcards to the Card studio ----------
 
+// The atlas's flashcards: the notes' revision lines, and the notes'
+// questions once approved as MCQs (their answers checked).
+async function atlasCards() {
+  const approved = (
+    await all<Row>(() =>
+      from("atlas_mcqs")
+        .select(MCQ_COLS)
+        .eq("kind", "notes")
+        .eq("status", "approved")
+        .eq("pending", false)
+        .order("key"),
+    ).catch(() => [] as Row[])
+  ).map(readMcq);
+  return [
+    ...revisionCards(await verifiedFacts()),
+    ...approved.map((m) => ({
+      key: `qa:${m.key}`,
+      front: m.question,
+      back: m.explanation,
+      chapter: m.set_name.replace(/^Atlas · /, "").split(" / ")[0],
+      heading: "",
+    })),
+  ];
+}
+
+// The same cards for students to revise in the atlas (on a schedule kept
+// on their device). A memory line without a question of its own ("Sunel
+// in, Sironj out…") gets its chapter on the front.
+let cardsCache: { at: number; cards: AtlasCard[] } | null = null;
+export async function publicAtlasCards(): Promise<AtlasCard[]> {
+  if (cardsCache && Date.now() - cardsCache.at < 10 * 60_000) return cardsCache.cards;
+  const cards = (await atlasCards()).map((c) =>
+    / revise$/.test(c.front.en)
+      ? {
+          ...c,
+          front: { en: `${c.chapter} — memory line`, hi: `${c.chapter} — याद रखने की पंक्ति` },
+        }
+      : c,
+  );
+  cardsCache = { at: Date.now(), cards };
+  return cards;
+}
+
 export const STUDIO_TOPIC = "Rajasthan Atlas · revision cards";
 
 // New revision cards (and the notes' questions) added to the atlas's Card
@@ -478,26 +522,7 @@ export async function sendCardsToStudio(): Promise<{
     topic = String((data as unknown as Row).id);
     studio.cards = {};
   }
-  const approved = (
-    await all<Row>(() =>
-      from("atlas_mcqs")
-        .select(MCQ_COLS)
-        .eq("kind", "notes")
-        .eq("status", "approved")
-        .eq("pending", false)
-        .order("key"),
-    )
-  ).map(readMcq);
-  const cards = [
-    ...revisionCards(await verifiedFacts()),
-    ...approved.map((m) => ({
-      key: `qa:${m.key}`,
-      front: m.question,
-      back: m.explanation,
-      chapter: m.set_name.replace(/^Atlas · /, "").split(" / ")[0],
-      heading: "",
-    })),
-  ];
+  const cards = await atlasCards();
   const { data: last } = await from("flash_cards")
     .select("pos")
     .eq("topic_id", topic)

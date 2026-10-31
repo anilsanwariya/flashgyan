@@ -7,7 +7,13 @@ import { NO_DISTRICT_QUESTION, quizRound, type QuizMode, type QuizQ } from "@/li
 import { AtlasMap } from "@/components/atlas-map";
 import { useAtlasBase, useAtlasPlaces } from "@/components/atlas-data";
 import { LangToggle, useAtlasLang } from "@/components/atlas-ui";
-import { useAtlasSaved } from "@/lib/atlas-device";
+import {
+  districtScore,
+  recordQuizAnswers,
+  useAtlasSaved,
+  useDistrictStats,
+  WEAK_PCT,
+} from "@/lib/atlas-device";
 
 export const Route = createFileRoute("/atlas/quiz")({
   ssr: false,
@@ -87,6 +93,10 @@ function QuizPage() {
   const [answers, setAnswers] = useState<Answer[]>([]);
   const [best, setBest] = useState<Record<string, number>>({});
   useEffect(() => setBest(readBest()), []);
+  // The student's own results by district (this device), and a round on
+  // their weak districts only.
+  const results = useDistrictStats();
+  const [focus, setFocus] = useState<string[] | null>(null);
 
   const quizPlaces = useMemo(
     () => (places.data ?? []).filter((p) => !NO_DISTRICT_QUESTION.has(p[3])),
@@ -108,9 +118,13 @@ function QuizPage() {
   };
   const placeName = (p: { en: string; hi: string }) => (lang === "hi" ? p.hi || p.en : p.en);
 
-  const start = () => {
+  const start = (on: string[] | null = focus) => {
+    setFocus(on);
     const chosen = quizPlaces
-      .filter((p) => (fromSaved ? savedKeys.has(p[0]) : groups.includes(atlasCat(p[3]).group)))
+      // Weak districts: every kind of place in them.
+      .filter((p) =>
+        on ? true : fromSaved ? savedKeys.has(p[0]) : groups.includes(atlasCat(p[3]).group),
+      )
       .map((p) => ({
         key: p[0],
         en: p[1],
@@ -120,7 +134,16 @@ function QuizPage() {
         lon: p[5],
         district: p[6],
       }));
-    setRound(quizRound(mode, base.data!.districts, chosen, Math.random, size));
+    setRound(
+      quizRound(
+        on ? "mix" : mode,
+        base.data!.districts,
+        chosen,
+        Math.random,
+        size,
+        on ? new Set(on) : undefined,
+      ),
+    );
     setAt(0);
     setAnswers([]);
   };
@@ -135,6 +158,8 @@ function QuizPage() {
   const score = answers.filter((a) => a.right).length;
   useEffect(() => {
     if (!done || !round) return;
+    recordQuizAnswers(answers.map((a) => ({ district: a.q.district, right: a.right })));
+    if (focus) return; // a weak-districts round is not a best score
     const key = `${mode}:${round.length}`;
     const pct = Math.round((score / round.length) * 100);
     const b = readBest();
@@ -205,6 +230,17 @@ function QuizPage() {
         </p>
       ) : !round ? (
         <main className="mx-auto w-full max-w-2xl space-y-6 p-4">
+          {!fromSaved && Object.keys(results.stats).length > 0 && base.data && (
+            <YourDistricts
+              lang={lang}
+              base={base.data}
+              stats={results.stats}
+              weak={results.weak}
+              districtName={districtName}
+              onPractise={() => start(results.weak.slice(0, 6))}
+              onClear={results.clear}
+            />
+          )}
           <section className="space-y-2">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               {L(lang, "क्विज़ चुनें", "Choose a quiz")}
@@ -281,7 +317,7 @@ function QuizPage() {
           </section>
           <button
             type="button"
-            onClick={start}
+            onClick={() => start(null)}
             disabled={(mode === "where" && !groups.length && !fromSaved) || !base.data}
             className="h-11 w-full rounded-xl bg-primary text-base font-semibold text-primary-foreground disabled:opacity-50"
           >
@@ -292,6 +328,11 @@ function QuizPage() {
         <main className="mx-auto w-full max-w-2xl space-y-5 p-4">
           <div className="rounded-2xl border border-border p-6 text-center">
             <Trophy className="mx-auto h-10 w-10 text-amber-500" />
+            {focus && (
+              <p className="mt-1 text-sm text-muted-foreground" data-quiz-focus>
+                {L(lang, "कमज़ोर जिले", "Weak districts")}: {focus.map(districtName).join(", ")}
+              </p>
+            )}
             <p className="mt-2 text-3xl font-bold" data-quiz-score>
               {score} / {round.length}
             </p>
@@ -343,7 +384,7 @@ function QuizPage() {
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={start}
+              onClick={() => start()}
               className="inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary font-semibold text-primary-foreground"
             >
               <RotateCcw className="h-4 w-4" />
@@ -351,7 +392,10 @@ function QuizPage() {
             </button>
             <button
               type="button"
-              onClick={() => setRound(null)}
+              onClick={() => {
+                setRound(null);
+                setFocus(null);
+              }}
               className="h-11 flex-1 rounded-xl border border-border font-semibold"
             >
               {L(lang, "क्विज़ बदलें", "Change quiz")}
@@ -474,5 +518,92 @@ function prompt(
     lang,
     `${placeName(q.place)} (${cat}) किस जिले में है? मानचित्र पर टैप करें`,
     `${placeName(q.place)} (${cat.toLowerCase()}) — tap its district`,
+  );
+}
+
+// The student's results by district on this device: a map coloured by how
+// often they got each district right, and a round on the weak ones.
+function YourDistricts({
+  lang,
+  base,
+  stats,
+  weak,
+  districtName,
+  onPractise,
+  onClear,
+}: {
+  lang: AtlasLang;
+  base: NonNullable<ReturnType<typeof useAtlasBase>["data"]>;
+  stats: Record<string, string>;
+  weak: string[];
+  districtName: (en: string) => string;
+  onPractise: () => void;
+  onClear: () => void;
+}) {
+  const marks = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const [d, s] of Object.entries(stats)) {
+      const { pct } = districtScore(s);
+      m[d] = pct >= 85 ? "#86efac" : pct >= WEAK_PCT ? "#fde68a" : "#fca5a5";
+    }
+    return m;
+  }, [stats]);
+  const tried = Object.keys(stats).length;
+  return (
+    <section className="space-y-2 rounded-2xl border border-border p-3" data-your-districts>
+      <div className="flex items-center gap-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          {L(lang, "आपके जिले", "Your districts")}
+        </h2>
+        <button type="button" onClick={onClear} className="ml-auto text-xs underline">
+          {L(lang, "परिणाम मिटाएँ", "Clear my results")}
+        </button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {L(
+          lang,
+          `${tried} जिलों पर आपके पिछले उत्तर (इसी डिवाइस पर): हरा = ठीक, पीला = लगभग, लाल = कमज़ोर।`,
+          `Your last answers on ${tried} districts (on this device): green = sure, yellow = nearly, red = weak.`,
+        )}
+      </p>
+      <AtlasMap
+        base={base}
+        places={[]}
+        lang={lang}
+        colour={null}
+        overlays={[]}
+        marks={marks}
+        className="h-56"
+      />
+      {weak.length ? (
+        <>
+          <div className="flex flex-wrap gap-1">
+            {weak.slice(0, 6).map((d) => (
+              <span
+                key={d}
+                className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-800 dark:bg-red-500/20 dark:text-red-200"
+              >
+                {districtName(d)} · {districtScore(stats[d]).pct}%
+              </span>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={onPractise}
+            className="h-10 w-full rounded-xl bg-red-600 text-sm font-semibold text-white"
+          >
+            {L(
+              lang,
+              `मेरे कमज़ोर जिलों का अभ्यास (${Math.min(weak.length, 6)})`,
+              `Practise my weak districts (${Math.min(weak.length, 6)})`,
+            )}
+          </button>
+        </>
+      ) : (
+        <p className="text-sm text-emerald-700 dark:text-emerald-400">
+          {L(lang, "अभी कोई कमज़ोर जिला नहीं। शाबाश!", "No weak districts just now. Well done!")}
+        </p>
+      )}
+    </section>
   );
 }

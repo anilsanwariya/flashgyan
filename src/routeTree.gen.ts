@@ -23,6 +23,7 @@ import { Route as TermsRouteImport } from './routes/terms'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 import { Route as AtlasIndexRouteImport } from './routes/atlas.index'
 import { Route as AtlasDistrictRouteImport } from './routes/atlas.$district'
+import { Route as AtlasCardsRouteImport } from './routes/atlas.cards'
 import { Route as AtlasCompareRouteImport } from './routes/atlas.compare'
 import { Route as AtlasQuizRouteImport } from './routes/atlas.quiz'
 import { Route as AtlasSavedRouteImport } from './routes/atlas.saved'
@@ -105,6 +106,11 @@ const AtlasIndexRoute = AtlasIndexRouteImport.update({
 const AtlasDistrictRoute = AtlasDistrictRouteImport.update({
   id: '/atlas/$district',
   path: '/atlas/$district',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AtlasCardsRoute = AtlasCardsRouteImport.update({
+  id: '/atlas/cards',
+  path: '/atlas/cards',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AtlasCompareRoute = AtlasCompareRouteImport.update({
@@ -191,6 +197,7 @@ export interface FileRoutesByFullPath {
   '/terms': typeof TermsRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/atlas/$district': typeof AtlasDistrictRoute
+  '/atlas/cards': typeof AtlasCardsRoute
   '/atlas/compare': typeof AtlasCompareRoute
   '/atlas/quiz': typeof AtlasQuizRoute
   '/atlas/saved': typeof AtlasSavedRoute
@@ -220,6 +227,7 @@ export interface FileRoutesByTo {
   '/terms': typeof TermsRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/atlas/$district': typeof AtlasDistrictRoute
+  '/atlas/cards': typeof AtlasCardsRoute
   '/atlas/compare': typeof AtlasCompareRoute
   '/atlas/quiz': typeof AtlasQuizRoute
   '/atlas/saved': typeof AtlasSavedRoute
@@ -251,6 +259,7 @@ export interface FileRoutesById {
   '/terms': typeof TermsRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
   '/atlas/$district': typeof AtlasDistrictRoute
+  '/atlas/cards': typeof AtlasCardsRoute
   '/atlas/compare': typeof AtlasCompareRoute
   '/atlas/quiz': typeof AtlasQuizRoute
   '/atlas/saved': typeof AtlasSavedRoute
@@ -282,6 +291,7 @@ export interface FileRouteTypes {
     | '/terms'
     | '/admin'
     | '/atlas/$district'
+    | '/atlas/cards'
     | '/atlas/compare'
     | '/atlas/quiz'
     | '/atlas/saved'
@@ -311,6 +321,7 @@ export interface FileRouteTypes {
     | '/terms'
     | '/admin'
     | '/atlas/$district'
+    | '/atlas/cards'
     | '/atlas/compare'
     | '/atlas/quiz'
     | '/atlas/saved'
@@ -341,6 +352,7 @@ export interface FileRouteTypes {
     | '/terms'
     | '/_authenticated/admin'
     | '/atlas/$district'
+    | '/atlas/cards'
     | '/atlas/compare'
     | '/atlas/quiz'
     | '/atlas/saved'
@@ -371,6 +383,7 @@ export interface RootRouteChildren {
   SummaryRoute: typeof SummaryRoute
   TermsRoute: typeof TermsRoute
   AtlasDistrictRoute: typeof AtlasDistrictRoute
+  AtlasCardsRoute: typeof AtlasCardsRoute
   AtlasCompareRoute: typeof AtlasCompareRoute
   AtlasQuizRoute: typeof AtlasQuizRoute
   AtlasSavedRoute: typeof AtlasSavedRoute
@@ -486,6 +499,13 @@ declare module '@tanstack/react-router' {
       path: '/atlas/$district'
       fullPath: '/atlas/$district'
       preLoaderRoute: typeof AtlasDistrictRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/atlas/cards': {
+      id: '/atlas/cards'
+      path: '/atlas/cards'
+      fullPath: '/atlas/cards'
+      preLoaderRoute: typeof AtlasCardsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/atlas/compare': {
@@ -613,6 +633,7 @@ const rootRouteChildren: RootRouteChildren = {
   SummaryRoute: SummaryRoute,
   TermsRoute: TermsRoute,
   AtlasDistrictRoute: AtlasDistrictRoute,
+  AtlasCardsRoute: AtlasCardsRoute,
   AtlasCompareRoute: AtlasCompareRoute,
   AtlasQuizRoute: AtlasQuizRoute,
   AtlasSavedRoute: AtlasSavedRoute,

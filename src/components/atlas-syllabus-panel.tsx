@@ -73,8 +73,9 @@ export function AtlasSyllabus() {
         <h3 className="font-semibold">The atlas on the syllabus</h3>
         <p className="text-sm text-muted-foreground">
           SAATHI files each chapter heading of the atlas under the topics of the master outlines, so
-          you can see which syllabus topics have few or no facts. Change a heading's topics where it
-          got them wrong: your filing is kept when SAATHI files again.
+          you can see which syllabus topics have few or no facts, and how often each was asked in
+          past papers (“asked 4×”, from Exam papers). Change a heading's topics where it got them
+          wrong: your filing is kept when SAATHI files again.
         </p>
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span>
@@ -170,6 +171,14 @@ function TopicRow({ t, d, onDone }: { t: Topic; d: Coverage; onDone: () => Promi
         className="flex w-full items-center gap-2 text-left"
       >
         <span className={t.level === "chapter" ? "font-semibold" : ""}>{t.name_en}</span>
+        {t.asked > 0 && (
+          <span
+            className="text-xs text-amber-700 dark:text-amber-400"
+            title="Past exam questions filed under this topic"
+          >
+            · asked {t.asked}×
+          </span>
+        )}
         {t.total === 0 ? (
           <span className="ml-auto">
             <Badge tone="warn">no facts</Badge>

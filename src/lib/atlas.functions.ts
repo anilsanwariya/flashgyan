@@ -20,6 +20,7 @@ import type { Suggestion } from "@/lib/atlas-themes.server";
 import type { NewsItem } from "@/lib/atlas-news.server";
 import type { AtlasReport, PositionCheck } from "@/lib/atlas-quality.server";
 import type { RecheckFact } from "@/lib/atlas-recheck.server";
+import type { AskedQ } from "@/lib/atlas-exams.server";
 
 export type {
   AtlasBase,
@@ -32,6 +33,7 @@ export type {
   AtlasReport,
   PositionCheck,
   RecheckFact,
+  AskedQ,
   DistrictListRow,
   ImportResult,
   OverviewCheck,
@@ -863,3 +865,27 @@ export const setAtlasGroupTopics = createServerFn({ method: "POST" })
     await (await syllabus()).setGroupTopics(data.key, data.topics);
     return { ok: true };
   });
+
+// ---------- Asked in exams (public: published papers only) ----------
+
+async function exams() {
+  return import("@/lib/atlas-exams.server");
+}
+
+export const atlasAskedCountsFn = createServerFn({ method: "GET" }).handler(async () =>
+  (await exams()).askedCounts(),
+);
+
+export const atlasAskedFn = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) =>
+    z
+      .object({ place: z.string().max(200).optional(), district: z.string().max(60).optional() })
+      .parse(d),
+  )
+  .handler(async ({ data }) => (await exams()).askedAbout(data));
+
+// The atlas's flashcards, for students to revise (their schedule stays on
+// their device).
+export const atlasCardsFn = createServerFn({ method: "GET" }).handler(async () =>
+  (await import("@/lib/atlas-practice.server")).publicAtlasCards(),
+);
