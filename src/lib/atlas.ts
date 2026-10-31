@@ -328,11 +328,18 @@ export type AtlasFact = {
   in_file: boolean;
 };
 
-// The notes' markers, kept out of the students' view: "[verify]", "⟪…⟫".
+// The notes' markers, kept out of the students' view: "[verify]", "⟪…⟫",
+// and the update markers "⟦🔄 … (as of Sep 2026 — check) ⟧", which keep
+// their "(as of …)" but lose the reminder to check ("— check", "(check)").
+const CHECK = "(?:check|जाँचें|जांचें)";
 export const cleanFactText = (t: string) =>
   t
     .replace(/\[verify[^\]]*\]/gi, "")
-    .replace(/[⟪⟫]/g, "")
+    .replace(/[⟪⟫⟦⟧]|🔄\uFE0F?/gu, "")
+    .replace(new RegExp(`(?:\\s*[—–]\\s*${CHECK})+(?=\\s*(?:\\)|$))`, "gi"), "")
+    .replace(new RegExp(`\\s*\\(${CHECK}\\)`, "gi"), "")
+    .replace(/\(\s+/g, "(")
+    .replace(/\s+([).,;])/g, "$1")
     .replace(/\s{2,}/g, " ")
     .trim();
 

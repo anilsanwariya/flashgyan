@@ -10,6 +10,8 @@ import {
   ATLAS_SUBJECTS,
   DIVISIONS,
   atlasCat,
+  cleanFactText,
+  splitSources,
   type DistrictMeta,
 } from "@/lib/atlas";
 import type { Bi } from "@/lib/current-affairs";
@@ -195,12 +197,8 @@ export type PracticeFact = {
 };
 const MCQ = 64;
 const REVISION = 128;
-const clean = (t: string) =>
-  t
-    .replace(/\[verify[^\]]*\]/gi, "")
-    .replace(/[⟪⟫]/g, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
+// What students see: no notes' markers and no source tags.
+const clean = (t: string) => splitSources(cleanFactText(t)).text;
 
 // The notes' self-test questions: an MCQ-marked question and the answer
 // fact right after it, or one fact holding both ("Question? Answer").
