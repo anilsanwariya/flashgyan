@@ -34,6 +34,7 @@ import { googleMapsUrl as googleMapsHref } from "@/lib/map-spec";
 import { Badge, PageTabs, errorText, useUrlTab } from "@/components/ca-ui";
 import { AtlasDistrictEditor } from "@/components/atlas-district-editor";
 import { AtlasPractice } from "@/components/atlas-practice-panel";
+import { AtlasSuggestions, TimeFields } from "@/components/atlas-themes-panel";
 import { DistrictChecklist, GapsReport, HindiReview } from "@/components/atlas-review-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,6 +48,7 @@ const TABS = [
   "layers",
   "hindi",
   "gaps",
+  "suggestions",
   "practice",
 ] as const;
 type Tab = (typeof TABS)[number];
@@ -74,6 +76,7 @@ export function AtlasPanel() {
           { id: "layers", label: "Layers" },
           { id: "hindi", label: "Hindi review" },
           { id: "gaps", label: "Gaps" },
+          { id: "suggestions", label: "Suggestions" },
           { id: "practice", label: "Practice" },
         ]}
         value={tab}
@@ -86,6 +89,7 @@ export function AtlasPanel() {
       {tab === "layers" && <Layers />}
       {tab === "hindi" && <HindiReview />}
       {tab === "gaps" && <GapsReport />}
+      {tab === "suggestions" && <AtlasSuggestions />}
       {tab === "practice" && <AtlasPractice />}
     </div>
   );
@@ -838,6 +842,12 @@ function PlaceForm({
         value={p.note_hi ?? ""}
         onChange={(e) => set({ note_hi: e.target.value })}
       />
+      <div className="sm:col-span-2">
+        <TimeFields
+          value={{ era_from: p.era_from ?? null, era_to: p.era_to ?? null, months: p.months ?? [] }}
+          onChange={(t) => set(t)}
+        />
+      </div>
       <div className="flex gap-2 sm:col-span-2">
         <Button
           size="sm"
@@ -852,6 +862,9 @@ function PlaceForm({
               lon: p.lon,
               note_en: p.note_en,
               note_hi: p.note_hi,
+              era_from: p.era_from ?? null,
+              era_to: p.era_to ?? null,
+              months: p.months ?? [],
               ...(place && (place.lat !== p.lat || place.lon !== p.lon) ? { district: "" } : {}),
             })
           }

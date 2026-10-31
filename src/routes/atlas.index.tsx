@@ -18,6 +18,12 @@ import {
   atlasCat,
   layerLegend,
   pickBi,
+  ATLAS_THEMES,
+  ERAS,
+  MONTHS,
+  eraLabel,
+  inEra,
+  monthsLabel,
   type AtlasLang,
 } from "@/lib/atlas";
 import { AtlasMap } from "@/components/atlas-map";
@@ -58,11 +64,26 @@ function AtlasPage() {
   const [sel, setSel] = useState<{ kind: "place" | "district"; key: string } | null>(null);
   const [focus, setFocus] = useState<{ lon: number; lat: number; zoom?: number } | null>(null);
   const [q, setQ] = useState("");
+  // In time: the places of a span of years, or a month's fairs (across all
+  // kinds, instead of the kinds chosen).
+  const [time, setTime] = useState<{ from: number; to: number } | null>(null);
+  const [month, setMonth] = useState<number | null>(null);
 
   const all = places.data ?? [];
+  const timed = useMemo(() => all.filter((p) => p[8] != null || p[9] != null), [all]);
+  const monthly = useMemo(() => all.filter((p) => p[10]?.length), [all]);
   const shown = useMemo(
-    () => all.filter((p) => cats.includes(p[3]) || (sel?.kind === "place" && sel.key === p[0])),
-    [all, cats, sel],
+    () =>
+      all.filter(
+        (p) =>
+          (time
+            ? inEra({ era_from: p[8], era_to: p[9] }, time.from, time.to)
+            : month
+              ? p[10]?.includes(month)
+              : cats.includes(p[3])) ||
+          (sel?.kind === "place" && sel.key === p[0]),
+      ),
+    [all, cats, sel, time, month],
   );
   const counts = useMemo(() => {
     const m = new Map<string, number>();
@@ -175,7 +196,53 @@ function AtlasPage() {
           ))}
         </section>
       )}
-      <section>
+      <ThemeLinks lang={lang} all={all} />
+      {timed.length > 0 && (
+        <TimeFilter
+          lang={lang}
+          value={time}
+          count={
+            time
+              ? timed.filter((p) => inEra({ era_from: p[8], era_to: p[9] }, time.from, time.to))
+                  .length
+              : timed.length
+          }
+          onChange={(t) => {
+            setTime(t);
+            if (t) setMonth(null);
+          }}
+        />
+      )}
+      {monthly.length > 0 && (
+        <section>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {L(lang, "माह के मेले-उत्सव", "Fairs by month")}
+          </p>
+          <div className="flex flex-wrap gap-1" role="group" aria-label={L(lang, "माह", "Month")}>
+            {MONTHS.map((m, i) => {
+              const n = monthly.filter((p) => p[10]!.includes(i + 1)).length;
+              const on = month === i + 1;
+              return (
+                <button
+                  key={m.en}
+                  type="button"
+                  aria-pressed={on}
+                  disabled={!n}
+                  onClick={() => {
+                    setMonth(on ? null : i + 1);
+                    setTime(null);
+                  }}
+                  className={`rounded-md border px-1.5 py-0.5 text-xs disabled:opacity-40 ${on ? "border-primary bg-primary text-primary-foreground" : "border-border"}`}
+                >
+                  {pickBi(m, lang)}
+                  {n ? <span className="opacity-70"> {n}</span> : null}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+      <section className={time || month ? "opacity-50" : ""}>
         <div className="mb-2 flex items-center justify-between">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {L(lang, "स्थान", "Places")}
@@ -473,6 +540,13 @@ function PlaceCard({
         <div className="min-w-0 flex-1">
           <h2 className="text-lg font-bold leading-tight">{pickBi(place.name, lang)}</h2>
           <p className="text-xs text-muted-foreground">{pickBi(c.name, lang)}</p>
+          {(place.era_from != null || place.era_to != null || place.months?.length > 0) && (
+            <p className="text-xs font-medium text-amber-800 dark:text-amber-300" data-place-time>
+              {[eraLabel(place.era_from, place.era_to, lang), monthsLabel(place.months, lang)]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
         </div>
         <button
           type="button"
@@ -676,5 +750,107 @@ function DistrictCard({
         )}
       </div>
     </div>
+  );
+}
+
+// The theme pages with places in them.
+function ThemeLinks({ lang, all }: { lang: AtlasLang; all: { 3: string }[] }) {
+  const themes = ATLAS_THEMES.map((t) => ({
+    t,
+    n: all.filter((p) => t.cats.includes(p[3])).length,
+  })).filter((x) => x.n > 0);
+  if (!themes.length) return null;
+  return (
+    <section>
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {L(lang, "विषय अनुसार", "By theme")}
+      </p>
+      <div className="flex flex-wrap gap-1">
+        {themes.map(({ t, n }) => (
+          <Link
+            key={t.key}
+            to="/atlas/theme/$theme"
+            params={{ theme: t.key }}
+            className="rounded-full border border-border px-2 py-0.5 text-xs hover:bg-muted"
+          >
+            {pickBi(t.name, lang)} <span className="opacity-60">{n}</span>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// A span of years: an era, or any years with the slider.
+const MIN_YEAR = -3000;
+const MAX_YEAR = 2030;
+function TimeFilter({
+  lang,
+  value,
+  count,
+  onChange,
+}: {
+  lang: AtlasLang;
+  value: { from: number; to: number } | null;
+  count: number;
+  onChange: (v: { from: number; to: number } | null) => void;
+}) {
+  const v = value ?? { from: 1200, to: 1707 };
+  return (
+    <section>
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {L(lang, "समय के अनुसार", "In time")}
+        </p>
+        {value && (
+          <button type="button" className="text-xs underline" onClick={() => onChange(null)}>
+            {L(lang, "हटाएँ", "Clear")}
+          </button>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {ERAS.map((e) => {
+          const on = value?.from === e.from && value?.to === e.to;
+          return (
+            <button
+              key={e.key}
+              type="button"
+              aria-pressed={on}
+              onClick={() => onChange(on ? null : { from: e.from, to: e.to })}
+              className={`rounded-full border px-2 py-0.5 text-xs ${on ? "border-primary bg-primary text-primary-foreground" : "border-border"}`}
+            >
+              {pickBi(e.name, lang)}
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-2 space-y-1">
+        <input
+          type="range"
+          aria-label={L(lang, "से वर्ष", "From year")}
+          min={MIN_YEAR}
+          max={MAX_YEAR}
+          step={10}
+          value={v.from}
+          onChange={(e) => onChange({ from: Math.min(Number(e.target.value), v.to), to: v.to })}
+          className="w-full accent-primary"
+        />
+        <input
+          type="range"
+          aria-label={L(lang, "तक वर्ष", "To year")}
+          min={MIN_YEAR}
+          max={MAX_YEAR}
+          step={10}
+          value={v.to}
+          onChange={(e) => onChange({ from: v.from, to: Math.max(Number(e.target.value), v.from) })}
+          className="w-full accent-primary"
+        />
+        <p className="text-xs text-muted-foreground" data-time-range>
+          {value
+            ? `${eraLabel(v.from, v.to, lang)} · ${count} ${L(lang, "स्थान", "places")}`
+            : L(lang, `${count} स्थानों का समय ज्ञात है`, `${count} places have a time`)}
+        </p>
+      </div>
+    </section>
   );
 }
