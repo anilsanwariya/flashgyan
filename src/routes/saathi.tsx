@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import ReactMarkdown, { type Components } from "react-markdown";
+import { AtlasMentions } from "@/components/atlas-news";
 import remarkGfm from "remark-gfm";
 import {
   listSaathiTopics,
@@ -910,6 +911,8 @@ function MessageBubble({
             </div>
           </div>
         )}
+
+        {answered && <AtlasMentions text={msg.content} />}
 
         {answered && ((msg.sources?.length ?? 0) > 0 || msg.general) && (
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">

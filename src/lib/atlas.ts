@@ -936,3 +936,54 @@ export function atlasShareMeta(o: {
 // A place page's path (its key's ":" kept readable).
 export const placePath = (key: string) =>
   `/atlas/place/${encodeURIComponent(key).replace(/%3A/gi, ":")}`;
+
+// ---------- Names in a text (SAATHI answers, news stories) ----------
+
+// A name as matched: its words, without brackets ("Kumbhalgarh fort
+// (UNESCO)" → "kumbhalgarh fort").
+export const mentionKey = (name: string) =>
+  name
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
+// The entries a text names (each counted once, most-named first). English
+// names match whole words of 5 letters or more (so "Pali" in "Palighat"
+// or short words don't); Hindi names whole words of 3 letters or more.
+export function findMentions<T extends { names: string[] }>(
+  text: string,
+  entries: T[],
+  minLetters = 5,
+): T[] {
+  const hay = ` ${mentionKey(text)} `;
+  const count = (k: string) => hay.split(` ${k} `).length - 1;
+  const found: { e: T; keys: string[]; n: number }[] = [];
+  for (const e of entries) {
+    const keys = e.names
+      .map(mentionKey)
+      .filter((k) =>
+        k
+          ? /[\u0900-\u097F]/.test(k)
+            ? k.length >= 3
+            : k.replace(/\s/g, "").length >= minLetters
+          : false,
+      );
+    const n = keys.reduce((s, k) => s + count(k), 0);
+    if (n) found.push({ e, keys, n });
+  }
+  // A name found only inside a longer one found ("Pushkar" in "Pushkar
+  // fair") is that one, not itself.
+  const all = found.flatMap((f) => f.keys.filter((k) => count(k)).map((k) => ({ k, f })));
+  const out = found
+    .map((f) => {
+      let n = f.n;
+      for (const k of f.keys)
+        for (const o of all)
+          if (o.f !== f && o.k !== k && ` ${o.k} `.includes(` ${k} `)) n -= count(o.k);
+      return { e: f.e, n };
+    })
+    .filter((x) => x.n > 0);
+  return out.sort((a, b) => b.n - a.n).map((x) => x.e);
+}

@@ -14,6 +14,7 @@ import { SITE_URL } from "@/lib/app-promo";
 import { AtlasMap } from "@/components/atlas-map";
 import { useAtlasBase, useAtlasPlace, useAtlasPlaces } from "@/components/atlas-data";
 import { SaveButton, ShareButton } from "@/components/atlas-actions";
+import { NewsList } from "@/components/atlas-news";
 import { FactsList, LangToggle, useAtlasLang } from "@/components/atlas-ui";
 
 // A place's own page: what a shared link opens, with its link preview
@@ -159,6 +160,7 @@ function PlacePage() {
             </Link>
           </div>
           {pickBi(p.note, lang) && <p className="text-sm">{pickBi(p.note, lang)}</p>}
+          <NewsList items={data.news ?? []} lang={lang} />
           <div>
             <p className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">
               <BookOpen className="h-4 w-4" /> {L(lang, "नोट्स से तथ्य", "From the notes")}

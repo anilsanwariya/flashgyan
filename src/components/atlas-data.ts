@@ -61,6 +61,7 @@ async function placeFromPack(key: string): Promise<PlaceCard | undefined> {
     },
     facts: p.facts.filter((f) => f.entities.includes(`P:${key}`)),
     mentions: [],
+    news: [],
   };
 }
 

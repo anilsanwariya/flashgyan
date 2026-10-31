@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { OfflineButton, SaveButton, ShareButton } from "@/components/atlas-actions";
+import { InTheNews, NewsList } from "@/components/atlas-news";
 import { useAtlasSaved } from "@/lib/atlas-device";
 import { atlasBaseFn, atlasPlacesFn } from "@/lib/atlas.functions";
 import {
@@ -228,6 +229,7 @@ function AtlasPage() {
           ))}
         </section>
       )}
+      <InTheNews lang={lang} onPlace={(k) => pick("place", k)} />
       <ThemeLinks lang={lang} all={all} />
       {timed.length > 0 && (
         <TimeFilter
@@ -649,6 +651,7 @@ function PlaceCard({
         </p>
         <FactsList facts={facts} lang={lang} limit={12} />
       </div>
+      <NewsList items={q.data.news ?? []} lang={lang} />
       {mentions.length > 0 && (
         <div>
           <p className="mb-1.5 text-sm font-semibold">

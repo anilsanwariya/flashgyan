@@ -17,6 +17,7 @@ import type {
 import type { AtlasMcqRow } from "@/lib/atlas-practice.server";
 import type { GapReport, HindiItem, NotesMatch } from "@/lib/atlas-review.server";
 import type { Suggestion } from "@/lib/atlas-themes.server";
+import type { NewsItem } from "@/lib/atlas-news.server";
 
 export type {
   AtlasBase,
@@ -25,6 +26,7 @@ export type {
   HindiItem,
   NotesMatch,
   Suggestion,
+  NewsItem,
   DistrictListRow,
   ImportResult,
   OverviewCheck,
@@ -40,6 +42,9 @@ async function practice() {
 }
 async function themes() {
   return import("@/lib/atlas-themes.server");
+}
+async function news() {
+  return import("@/lib/atlas-news.server");
 }
 async function review() {
   return import("@/lib/atlas-review.server");
@@ -335,6 +340,15 @@ export const atlasDistrictFn = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ district }).parse(d))
   .handler(async ({ data }) => (await server()).atlasDistrictPage(data.district));
 
+// The atlas places and districts a SAATHI answer names.
+export const atlasMentionsFn = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => z.object({ text: z.string().max(20_000) }).parse(d))
+  .handler(async ({ data }) => (await news()).atlasMentions(data.text));
+
+export const atlasInNewsFn = createServerFn({ method: "GET" }).handler(async () =>
+  (await news()).atlasInNews(),
+);
+
 export const atlasOfflinePackFn = createServerFn({ method: "GET" }).handler(async () =>
   (await server()).atlasOfflinePack(),
 );
@@ -607,4 +621,45 @@ export const decideAtlasSuggestion = createServerFn({ method: "POST" })
       return { key: null };
     }
     return t.acceptSuggestion(data.id, data.edit);
+  });
+
+// ---------- The atlas across the site (admin) ----------
+
+export const atlasNewsLinks = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await news()).newsLinks();
+  });
+
+export const editAtlasNews = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .discriminatedUnion("op", [
+        z.object({ op: z.literal("hide"), id: z.string().uuid(), hidden: z.boolean() }),
+        z.object({ op: z.literal("rescan"), from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }),
+      ])
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    const n = await news();
+    if (data.op === "hide") await n.hideNewsLink(data.id, data.hidden);
+    else await n.rescanNews(data.from);
+    return { ok: true };
+  });
+
+export const atlasDistrictSeries = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await news()).districtSeries();
+  });
+
+export const setUpAtlasDistrictSeries = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await news()).setUpDistrictSeries();
   });
