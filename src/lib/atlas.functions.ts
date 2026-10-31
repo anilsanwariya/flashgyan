@@ -19,6 +19,7 @@ import type { GapReport, HindiItem, NotesMatch } from "@/lib/atlas-review.server
 import type { Suggestion } from "@/lib/atlas-themes.server";
 import type { NewsItem } from "@/lib/atlas-news.server";
 import type { AtlasReport, PositionCheck } from "@/lib/atlas-quality.server";
+import type { RecheckFact } from "@/lib/atlas-recheck.server";
 
 export type {
   AtlasBase,
@@ -30,6 +31,7 @@ export type {
   NewsItem,
   AtlasReport,
   PositionCheck,
+  RecheckFact,
   DistrictListRow,
   ImportResult,
   OverviewCheck,
@@ -51,6 +53,9 @@ async function news() {
 }
 async function quality() {
   return import("@/lib/atlas-quality.server");
+}
+async function recheck() {
+  return import("@/lib/atlas-recheck.server");
 }
 async function review() {
   return import("@/lib/atlas-review.server");
@@ -773,5 +778,88 @@ export const decideAtlasPosition = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     await (await quality()).decidePosition(data.key, data.decision);
+    return { ok: true };
+  });
+
+// ---------- Rechecking dated facts (admin) ----------
+
+const every = z.union([z.literal(3), z.literal(6), z.literal(12)]);
+
+export const atlasRecheckList = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await recheck()).recheckList();
+  });
+
+export const confirmAtlasRecheck = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), bump: z.boolean(), every: every.optional() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await recheck()).confirmRecheck(data.id, data);
+  });
+
+export const editAtlasRecheck = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        text_en: z.string().min(1).max(4000),
+        text_hi: z.string().max(4000),
+        chapter_key: z.string().max(40).optional(),
+        every: every.optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await recheck()).editRecheck(data.id, data);
+    return { ok: true };
+  });
+
+export const setAtlasRecheckMonths = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ months: every }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await recheck()).setRecheckMonths(data.months);
+    return { ok: true };
+  });
+
+// ---------- The atlas on the syllabus (admin) ----------
+
+async function syllabus() {
+  return import("@/lib/atlas-syllabus.server");
+}
+
+export const atlasSyllabusCoverage = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await syllabus()).syllabusCoverage();
+  });
+
+export const startAtlasSyllabusLinks = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ again: z.boolean() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await syllabus()).startSyllabusLinks(data.again);
+  });
+
+export const setAtlasGroupTopics = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({ key: z.string().min(1).max(400), topics: z.array(z.string().uuid()).max(10) })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await syllabus()).setGroupTopics(data.key, data.topics);
     return { ok: true };
   });

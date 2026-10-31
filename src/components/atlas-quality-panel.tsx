@@ -1,4 +1,5 @@
-// Keeping the atlas right (admin): students' reports of mistakes (fixed
+// Keeping the atlas right (admin): dated facts due for a recheck, students'
+// reports of mistakes (fixed
 // here or dismissed), the notes' source codes and their names (shown under
 // every fact), and places whose position disagrees with the surveyed place
 // list or their district.
@@ -9,6 +10,11 @@ import { toast } from "sonner";
 import { Check, ExternalLink, X } from "lucide-react";
 import {
   atlasPositionChecks,
+  atlasRecheckList,
+  confirmAtlasRecheck,
+  editAtlasRecheck,
+  setAtlasRecheckMonths,
+  type RecheckFact,
   atlasReports,
   atlasSourcesOverview,
   decideAtlasPosition,
@@ -30,10 +36,230 @@ const MIGRATION = "Reports need the migration 20261217090000_atlas_reports.sql."
 export function AtlasQuality() {
   return (
     <div className="space-y-6">
+      <Recheck />
       <Reports />
       <Sources />
       <Positions />
     </div>
+  );
+}
+
+// ====================== Recheck ======================
+
+const EVERY = [3, 6, 12] as const;
+type Every = (typeof EVERY)[number];
+const monthName = (ym: string) =>
+  new Date(`${ym}-01T00:00:00Z`).toLocaleDateString("en-IN", {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
+function Recheck() {
+  const fn = useServerFn(atlasRecheckList);
+  const monthsFn = useServerFn(setAtlasRecheckMonths);
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["atlasRecheck"], queryFn: () => fn(), refetchOnMount: "always" });
+  const [all, setAll] = useState(false);
+  const [shown, setShown] = useState(30);
+  const refresh = () => qc.invalidateQueries({ queryKey: ["atlasRecheck"] });
+  const d = q.data;
+  const list = d ? d.facts.filter((f) => all || f.isDue) : [];
+  return (
+    <section className="space-y-3 rounded-xl border border-border p-4" data-recheck>
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="font-semibold">
+          Dated facts to recheck{d ? ` (${d.due} due of ${d.facts.length})` : ""}
+        </h3>
+        <div className="ml-auto flex gap-1">
+          {([false, true] as const).map((v) => (
+            <button
+              key={String(v)}
+              type="button"
+              aria-pressed={all === v}
+              onClick={() => setAll(v)}
+              className={`rounded-full border px-3 py-1 text-xs ${all === v ? "border-primary bg-primary/10 font-medium" : "border-border"}`}
+            >
+              {v ? "All dated facts" : "Due now"}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Facts your notes mark as changing (🔄, “as of …”). Students see only “(as of Sep 2026)”, so
+        they come back here a few months after that date or your last recheck. “Still true” moves a
+        month date (“Sep 2026”) to this month; a year alone (“as of 2024”) is usually the data's
+        year and stays. The weekly report on Telegram says how many are due.
+      </p>
+      {d && (
+        <label className="flex items-center gap-2 text-sm">
+          Recheck every
+          <select
+            aria-label="Recheck every"
+            value={d.months}
+            onChange={async (e) => {
+              await monthsFn({ data: { months: Number(e.target.value) as Every } });
+              await refresh();
+            }}
+            className="h-8 rounded-md border border-input bg-background px-2"
+          >
+            {EVERY.map((m) => (
+              <option key={m} value={m}>
+                {m} months
+              </option>
+            ))}
+          </select>
+          <span className="text-muted-foreground">(unless set for a fact)</span>
+        </label>
+      )}
+      {q.isLoading ? (
+        <p className="text-muted-foreground">Loading…</p>
+      ) : q.error ? (
+        <p className="text-destructive">{errorText(q.error, "Couldn't load")}</p>
+      ) : !list.length ? (
+        <p className="text-sm text-muted-foreground">
+          {all ? "No dated facts." : "Nothing due: every dated fact has been checked recently."}
+        </p>
+      ) : (
+        <>
+          <ul className="space-y-2">
+            {list.slice(0, shown).map((f) => (
+              <RecheckRow key={f.id} f={f} usual={d!.months} onDone={refresh} />
+            ))}
+          </ul>
+          {list.length > shown && (
+            <Button size="sm" variant="outline" onClick={() => setShown(shown + 30)}>
+              Show more ({list.length - shown})
+            </Button>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function RecheckRow({
+  f,
+  usual,
+  onDone,
+}: {
+  f: RecheckFact;
+  usual: number;
+  onDone: () => Promise<unknown>;
+}) {
+  const okFn = useServerFn(confirmAtlasRecheck);
+  const editFn = useServerFn(editAtlasRecheck);
+  const [edit, setEdit] = useState(false);
+  const [en, setEn] = useState(f.text_en);
+  const [hi, setHi] = useState(f.text_hi);
+  const [every, setEvery] = useState<Every>(f.every as Every);
+  const [busy, setBusy] = useState(false);
+  const run = async (go: () => Promise<unknown>) => {
+    setBusy(true);
+    try {
+      await go();
+      await onDone();
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't save"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <li
+      className="space-y-1.5 rounded-xl border border-border p-3 text-sm"
+      data-recheck-fact={f.id}
+    >
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span>
+          {f.chapter}
+          {f.heading ? ` › ${f.heading}` : ""}
+        </span>
+        {f.district && <Badge>{f.district}</Badge>}
+        <Badge tone={f.isDue ? "warn" : "muted"}>
+          {f.isDue ? "due" : `next ${monthName(f.due)}`}
+        </Badge>
+        <span>
+          {f.label ? `as of ${f.label}` : "no date"}
+          {f.checkedOn
+            ? ` · checked ${new Date(f.checkedOn).toLocaleDateString("en-IN")}`
+            : " · never rechecked"}
+        </span>
+      </div>
+      <p>{f.shown}</p>
+      {edit && (
+        <div className="space-y-2">
+          <Textarea
+            aria-label="Fact (English)"
+            rows={3}
+            value={en}
+            onChange={(e) => setEn(e.target.value)}
+          />
+          <Textarea
+            aria-label="Fact (Hindi)"
+            lang="hi"
+            rows={3}
+            value={hi}
+            onChange={(e) => setHi(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Keep a marker like “(as of Oct 2026 — check)” so the fact stays on this list.
+          </p>
+          <Button
+            size="sm"
+            disabled={busy || !en.trim()}
+            onClick={() =>
+              run(async () => {
+                await editFn({
+                  data: { id: f.id, text_en: en, text_hi: hi, chapter_key: f.chapter_key, every },
+                });
+                toast.success("Fact saved and marked rechecked");
+                setEdit(false);
+              })
+            }
+          >
+            Save and mark rechecked
+          </Button>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() =>
+            run(async () => {
+              const r = await okFn({ data: { id: f.id, bump: true, every } });
+              toast.success(
+                r.moved ? "Still true: its date is now this month" : "Still true: marked rechecked",
+              );
+            })
+          }
+        >
+          <Check className="mr-1 h-4 w-4" /> Still true
+        </Button>
+        {!edit && (
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEdit(true)}>
+            Edit
+          </Button>
+        )}
+        <label className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
+          Recheck every
+          <select
+            aria-label="Recheck this fact every"
+            value={every}
+            onChange={(e) => setEvery(Number(e.target.value) as Every)}
+            className="h-7 rounded-md border border-input bg-background px-1"
+          >
+            {EVERY.map((m) => (
+              <option key={m} value={m}>
+                {m} months{m === usual ? " (usual)" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+    </li>
   );
 }
 

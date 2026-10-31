@@ -37,6 +37,7 @@ import { AtlasPractice } from "@/components/atlas-practice-panel";
 import { AtlasSuggestions, TimeFields } from "@/components/atlas-themes-panel";
 import { AtlasAcross } from "@/components/atlas-news-panel";
 import { AtlasQuality } from "@/components/atlas-quality-panel";
+import { AtlasSyllabus } from "@/components/atlas-syllabus-panel";
 import { DistrictChecklist, GapsReport, HindiReview } from "@/components/atlas-review-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,6 +54,7 @@ const TABS = [
   "suggestions",
   "across",
   "quality",
+  "syllabus",
   "practice",
 ] as const;
 type Tab = (typeof TABS)[number];
@@ -83,6 +85,7 @@ export function AtlasPanel() {
           { id: "suggestions", label: "Suggestions" },
           { id: "across", label: "Across the site" },
           { id: "quality", label: "Quality" },
+          { id: "syllabus", label: "Syllabus" },
           { id: "practice", label: "Practice" },
         ]}
         value={tab}
@@ -98,6 +101,7 @@ export function AtlasPanel() {
       {tab === "suggestions" && <AtlasSuggestions />}
       {tab === "across" && <AtlasAcross />}
       {tab === "quality" && <AtlasQuality />}
+      {tab === "syllabus" && <AtlasSyllabus />}
       {tab === "practice" && <AtlasPractice />}
     </div>
   );
