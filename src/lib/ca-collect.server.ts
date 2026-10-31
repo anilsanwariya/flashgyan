@@ -247,6 +247,12 @@ export async function tick(origin?: string): Promise<TickResult> {
   } catch (e) {
     console.error("atlas:", e);
   }
+  // The atlas's daily question, as a quiz poll on the channel (when on).
+  try {
+    await (await import("@/lib/atlas-drills.server")).dailyPollStep(origin);
+  } catch (e) {
+    console.error("atlas daily poll:", e);
+  }
 
   const { data: claimed, error } = await supabaseAdmin.rpc(
     "ca_claim_run" as never,

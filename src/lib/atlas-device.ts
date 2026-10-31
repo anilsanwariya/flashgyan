@@ -4,6 +4,7 @@
 // anywhere, and the atlas works the same when storage is blocked.
 import { useCallback, useEffect, useState } from "react";
 import type { Schedule } from "@/lib/atlas-cards";
+import { EMPTY_STREAK, type Streak } from "@/lib/atlas-drills";
 
 // ---------- Saved to revise later ----------
 
@@ -160,6 +161,25 @@ export function writeSchedule(s: Schedule) {
     localStorage.setItem(CARDS_KEY, JSON.stringify(s));
   } catch {
     // Storage blocked: kept for this visit only.
+  }
+}
+
+// ---------- The daily challenge's streak ----------
+
+const DAILY_KEY = "atlas-daily";
+export function readStreak(): Streak {
+  try {
+    const v = JSON.parse(localStorage.getItem(DAILY_KEY) ?? "null") as Streak | null;
+    return v && typeof v.days === "object" ? v : EMPTY_STREAK;
+  } catch {
+    return EMPTY_STREAK;
+  }
+}
+export function writeStreak(s: Streak) {
+  try {
+    localStorage.setItem(DAILY_KEY, JSON.stringify(s));
+  } catch {
+    // Storage blocked: not kept.
   }
 }
 

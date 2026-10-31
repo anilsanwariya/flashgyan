@@ -179,6 +179,25 @@ function AtlasPage() {
         >
           <Columns3 className="h-3.5 w-3.5" /> {L(lang, "जिलों की तुलना", "Compare districts")}
         </Link>
+        <Link
+          to="/atlas/quiz"
+          search={{ daily: 1 }}
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 text-xs font-medium hover:bg-amber-100 dark:bg-amber-500/10"
+        >
+          📅 {L(lang, "दैनिक चुनौती", "Daily challenge")}
+        </Link>
+        <Link
+          to="/atlas/drills"
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium hover:bg-muted"
+        >
+          🧭 {L(lang, "मानचित्र अभ्यास", "Map drills")}
+        </Link>
+        <Link
+          to="/atlas/then-now"
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium hover:bg-muted"
+        >
+          🗂️ {L(lang, "जिले: तब और अब", "Districts then and now")}
+        </Link>
       </section>
       <section>
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">

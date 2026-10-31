@@ -889,3 +889,72 @@ export const atlasAskedFn = createServerFn({ method: "POST" })
 export const atlasCardsFn = createServerFn({ method: "GET" }).handler(async () =>
   (await import("@/lib/atlas-practice.server")).publicAtlasCards(),
 );
+
+// ---------- Map drills, the daily challenge, districts then and now ----------
+
+async function drills() {
+  return import("@/lib/atlas-drills.server");
+}
+
+export const atlasDrillsFn = createServerFn({ method: "GET" }).handler(async () =>
+  (await drills()).publicDrills(),
+);
+export const atlasTehsilsFn = createServerFn({ method: "GET" }).handler(async () =>
+  (await drills()).publicTehsils(),
+);
+
+export const atlasDrillsAdmin = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await drills()).drillsAdmin();
+  });
+
+const dname = z.string().min(2).max(60);
+export const editAtlasDrills = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .discriminatedUnion("op", [
+        z.object({
+          op: z.literal("river"),
+          river: z.object({
+            key: z.string().min(1).max(60),
+            name: z.object({ en: z.string().max(80), hi: z.string().max(80) }),
+            districts: z.array(dname).max(20),
+            checked: z.boolean(),
+          }),
+        }),
+        z.object({ op: z.literal("borders"), borders: z.record(z.array(dname).max(20)) }),
+        z.object({
+          op: z.literal("tehsils"),
+          text: z.string().max(200_000),
+          replace: z.boolean(),
+        }),
+        z.object({ op: z.literal("deleteTehsil"), en: z.string().min(1).max(120) }),
+        z.object({
+          op: z.literal("poll"),
+          on: z.boolean(),
+          hour: z.number().int().min(0).max(23),
+        }),
+      ])
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    const s = await drills();
+    if (data.op === "river") await s.saveRiver(data.river);
+    else if (data.op === "borders") await s.saveBorders(data.borders);
+    else if (data.op === "tehsils") return s.saveTehsils(data.text, data.replace);
+    else if (data.op === "deleteTehsil") await s.deleteTehsil(data.en);
+    else await s.savePoll({ on: data.on, hour: data.hour });
+    return { saved: 0, problems: [] as string[] };
+  });
+
+export const readAtlasTehsils = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ text: z.string().min(20).max(30_000) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await drills()).readTehsils(data.text);
+  });
