@@ -71,11 +71,20 @@ import {
   rowsToPapers,
   type ExamPaper,
   type KeySheet,
+  type Difficulty,
   type ExamQuestion,
+  type ProofLevel,
+  LEVELS,
+  LEVEL_NO,
+  accepted,
+  levelApplies,
+  levelDone,
+  levelOpen,
 } from "@/lib/exam-papers";
 import { formatDate } from "@/lib/current-affairs";
 import { Badge, errorText } from "@/components/ca-ui";
 import { ExamWeights } from "@/components/exam-weights";
+import { AlsoAccepted, DifficultySelect, ProofChecks } from "@/components/exam-proof";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -327,8 +336,14 @@ function PaperBadges({ p }: { p: PaperSummary }) {
       {written && <Badge tone="primary">Written (Mains)</Badge>}
       {p.questions > 0 && p.status !== "published" && (
         <Badge tone={p.verified === p.questions ? "good" : "muted"}>
-          {p.verified} of {p.questions} verified{written ? "" : ` · ${p.explained} explained`}
+          {p.verified} of {p.questions} finished
+          {written
+            ? ""
+            : ` · ① ${p.proof_question ?? 0} · ② ${p.proof_answer ?? 0} · ③ ${p.proof_explanation ?? 0} of ${p.explained} explained`}
         </Badge>
+      )}
+      {!written && (p.need_explanation ?? 0) > 0 && (
+        <Badge tone="warn">{p.need_explanation} need an explanation</Badge>
       )}
       {reading && (
         <Badge tone="warn">
@@ -447,8 +462,8 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
           per language (S. No. “E-1” English, “H-1” Hindi) with the columns{" "}
           {SHEET_COLUMNS.slice(0, 11).join(", ")}; or one sheet per language in the columns{" "}
           {EXCEL_COLUMNS.join(", ")}. Each paper starts as a draft: fill its explanations, proofread
-          and verify every question, then publish it. Export gives the same sheet with the
-          explanations.
+          every question (question, answer, explanation), then publish it. Export gives the same
+          sheet with the explanations.
         </p>
         <Button onClick={() => setOpenForm(true)}>
           <Plus className="mr-1 h-4 w-4" /> Add a paper
@@ -644,12 +659,26 @@ type Filter =
   | "ca"
   | "unverified"
   | "verified"
+  | "p_question"
+  | "p_answer"
+  | "p_explanation"
+  | "needexpl"
   | "noexpl"
   | "key"
   | "flagged"
   | "nomodel"
   | "notopic";
 type Topics = Record<string, { name_en: string; name_hi: string; section: string }>;
+// Typing in a box (a ticked checkbox doesn't count): no shortcut keys.
+const typing = (t: HTMLElement | null) =>
+  !!t &&
+  /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) &&
+  !(t instanceof HTMLInputElement && (t.type === "checkbox" || t.type === "radio"));
+const PASS_OF = {
+  p_question: "question",
+  p_answer: "answer",
+  p_explanation: "explanation",
+} as const;
 type Lang = "both" | "hi" | "en";
 
 function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
@@ -780,17 +809,21 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
                 ? !x.verified
                 : filter === "verified"
                   ? x.verified
-                  : filter === "noexpl"
-                    ? !x.explanation_en && !x.explanation_hi
-                    : filter === "key"
-                      ? !!x.key_note
-                      : filter === "flagged"
-                        ? flagged(x)
-                        : filter === "nomodel"
-                          ? !x.model_answer
-                          : filter === "notopic"
-                            ? !x.master_topic_id && !x.deleted
-                            : true,
+                  : filter === "p_question" || filter === "p_answer" || filter === "p_explanation"
+                    ? levelOpen(x, PASS_OF[filter])
+                    : filter === "needexpl"
+                      ? x.verified && !x.explanation_en && !x.explanation_hi
+                      : filter === "noexpl"
+                        ? !x.explanation_en && !x.explanation_hi
+                        : filter === "key"
+                          ? !!x.key_note
+                          : filter === "flagged"
+                            ? flagged(x)
+                            : filter === "nomodel"
+                              ? !x.model_answer
+                              : filter === "notopic"
+                                ? !x.master_topic_id && !x.deleted
+                                : true,
     )
     .filter((x) => !subject || (x.subject_section || "—") === subject);
   // The subject sections in this paper, with their counts.
@@ -1026,8 +1059,8 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
               ? [
                   ["all", `All (${questions.length})`],
                   ["check", `To check (${toCheck.length})`],
-                  ["unverified", `Not verified (${questions.filter((x) => !x.verified).length})`],
-                  ["verified", `Verified (${questions.filter((x) => x.verified).length})`],
+                  ["unverified", `Not finished (${questions.filter((x) => !x.verified).length})`],
+                  ["verified", `Finished (${questions.filter((x) => x.verified).length})`],
                   [
                     "nomodel",
                     `No model answer (${questions.filter((x) => !x.model_answer).length})`,
@@ -1051,8 +1084,23 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
                   ...(questions.some((x) => x.ca)
                     ? [["ca", `Current affairs (${questions.filter((x) => x.ca).length})`]]
                     : []),
-                  ["unverified", `Not verified (${questions.filter((x) => !x.verified).length})`],
-                  ["verified", `Verified (${questions.filter((x) => x.verified).length})`],
+                  ["unverified", `Not finished (${questions.filter((x) => !x.verified).length})`],
+                  ["verified", `Finished (${questions.filter((x) => x.verified).length})`],
+                  ...LEVELS.map(
+                    (l) =>
+                      [
+                        `p_${l}`,
+                        `${LEVEL_NO[l]} ${l === "question" ? "Question" : l === "answer" ? "Answer" : "Explanation"} to proofread (${questions.filter((x) => levelOpen(x, l)).length})`,
+                      ] as [Filter, string],
+                  ),
+                  ...(questions.some((x) => x.verified && !x.explanation_en && !x.explanation_hi)
+                    ? [
+                        [
+                          "needexpl",
+                          `Needs an explanation (${questions.filter((x) => x.verified && !x.explanation_en && !x.explanation_hi).length})`,
+                        ],
+                      ]
+                    : []),
                   [
                     "noexpl",
                     `No explanation (${questions.filter((x) => !x.explanation_en && !x.explanation_hi).length})`,
@@ -1280,7 +1328,7 @@ function QuestionCard({
   const setVerified = (verified: boolean) =>
     void updateFn({ data: { id: q.id, patch: { verified } } })
       .then(async () => {
-        toast.success(verified ? `Question ${q.q_no} verified` : `Question ${q.q_no} not verified`);
+        toast.success(verified ? `Question ${q.q_no} finished` : `Question ${q.q_no} not finished`);
         await onChanged();
       })
       .catch((e) => toast.error(errorText(e, "Couldn't save")));
@@ -1317,10 +1365,15 @@ function QuestionCard({
         {gaps.length > 0 && <Badge tone="warn">Check: {gaps.join(", ")}</Badge>}
         {q.ca !== null && <Badge>{q.ca ? "Current affairs" : "Static"}</Badge>}
         {q.match && <Badge tone={MATCH_TONE[q.match]}>{MATCH_TEXT[q.match]}</Badge>}
-        {q.verified && (
+        {written && q.verified && (
           <Badge tone="good">
-            <BadgeCheck className="h-3 w-3" /> Verified
+            <BadgeCheck className="h-3 w-3" /> Finished
           </Badge>
+        )}
+        {!written && q.difficulty && (
+          <span className="text-xs capitalize text-muted-foreground" data-difficulty>
+            {q.difficulty}
+          </span>
         )}
         {q.key_note && <Badge tone="warn">Check the key</Badge>}
         {flagged(q) && (
@@ -1348,14 +1401,16 @@ function QuestionCard({
         )}
         {!locked && (
           <span className="ml-auto flex items-center gap-1">
-            <Button
-              size="sm"
-              variant={q.verified ? "ghost" : "outline"}
-              className="h-7"
-              onClick={() => setVerified(!q.verified)}
-            >
-              {q.verified ? "Unverify" : "Verify"}
-            </Button>
+            {written && (
+              <Button
+                size="sm"
+                variant={q.verified ? "ghost" : "outline"}
+                className="h-7"
+                onClick={() => setVerified(!q.verified)}
+              >
+                {q.verified ? "Unverify" : "Verify"}
+              </Button>
+            )}
             <Button
               size="sm"
               variant="ghost"
@@ -1377,6 +1432,7 @@ function QuestionCard({
           </span>
         )}
       </div>
+      {!written && <ProofChecks q={q} locked={flagsLocked} onChanged={onChanged} />}
       {editing ? (
         <QuestionEditor
           q={q}
@@ -1402,11 +1458,17 @@ function QuestionCard({
                     {q.options.map((o, i) => (
                       <li
                         key={i}
-                        className={`break-words ${q.correct === i + 1 ? "font-semibold text-green-700 dark:text-green-400" : ""}`}
+                        className={`break-words ${accepted(q, i + 1) ? "font-semibold text-green-700 dark:text-green-400" : ""}`}
                       >
                         ({i + 1}) {o[l] || "—"}{" "}
                         {q.correct === i + 1 && (
                           <Check className="inline h-3.5 w-3.5" aria-label="correct" />
+                        )}
+                        {q.correct !== i + 1 && accepted(q, i + 1) && (
+                          <span className="text-xs font-normal" data-also>
+                            <Check className="inline h-3.5 w-3.5" aria-label="also accepted" /> also
+                            accepted
+                          </span>
                         )}
                       </li>
                     ))}
@@ -1484,6 +1546,8 @@ function QuestionEditor({
     word_limit: q.word_limit == null ? "" : String(q.word_limit),
     model_answer: q.model_answer ?? "",
     model_source: q.model_source ?? "",
+    also: q.also_correct ?? [],
+    difficulty: (q.difficulty ?? "") as Difficulty | "",
   });
   const [busy, setBusy] = useState(false);
   const num = (v: string) => (/^\d+$/.test(v.trim()) ? Number(v.trim()) : null);
@@ -1524,6 +1588,14 @@ function QuestionEditor({
                     correct: /^[1-4]$/.test(f.answer) ? Number(f.answer) : null,
                     explanation_en: f.explanation_en,
                     explanation_hi: f.explanation_hi,
+                    // Sent only when changed (they need the proof levels
+                    // migration).
+                    ...(f.also.join() !== (q.also_correct ?? []).join()
+                      ? { also_correct: /^[1-4]$/.test(f.answer) ? f.also : [] }
+                      : {}),
+                    ...(f.difficulty !== (q.difficulty ?? "")
+                      ? { difficulty: f.difficulty || null }
+                      : {}),
                   }),
               ...(subjectChanged
                 ? { subject_section: f.subject_section, topic_en: f.topic_en, topic_hi: f.topic_hi }
@@ -1668,6 +1740,19 @@ function QuestionEditor({
           ))}
           <option value="deleted">Deleted</option>
         </select>
+        {!written && (
+          <>
+            <AlsoAccepted
+              answer={f.answer}
+              also={f.also.filter((n) => String(n) !== f.answer)}
+              onChange={(also) => setF({ ...f, also })}
+            />
+            <DifficultySelect
+              value={f.difficulty}
+              onChange={(difficulty) => setF({ ...f, difficulty })}
+            />
+          </>
+        )}
         <select
           aria-label="Subject section"
           value={f.subject_section}
@@ -1979,10 +2064,10 @@ function Proofread({
         <h3 className="font-semibold">Proofread and publish</h3>
         {published ? <Badge tone="good">Published</Badge> : <Badge tone="muted">Draft</Badge>}
         <span className="text-sm text-muted-foreground" data-testid="proof-counts">
-          {verified} of {questions.length} verified ·{" "}
+          {verified} of {questions.length} finished ·{" "}
           {written
             ? `${questions.filter((q) => q.model_answer).length} with model answers`
-            : `${explained} explained`}
+            : `① ${questions.filter((q) => q.proof_question).length} · ② ${questions.filter((q) => q.proof_answer).length} · ③ ${questions.filter((q) => q.proof_explanation).length} of ${explained} explained`}
           {general ? ` · ${general} from general knowledge` : ""}
           {reviewed ? ` · ${flaggedCount} flagged by the AI check` : ""}
         </span>
@@ -1991,7 +2076,7 @@ function Proofread({
         <p className="text-sm text-muted-foreground">
           Run the AI check: it sorts the questions into subject sections and topics and flags
           language mistakes. Add model answers on each question (private, for learning only). Then
-          link the questions to the master outlines, verify every question and publish it.
+          link the questions to the master outlines, finish every question and publish it.
         </p>
       ) : published ? (
         <p className="text-sm text-muted-foreground">
@@ -2004,8 +2089,10 @@ function Proofread({
         <p className="text-sm text-muted-foreground">
           Fill the explanations, then run the AI check: it sorts the questions into subject sections
           and topics and flags likely mistakes (a wrong key, an explanation that disagrees, Hindi
-          and English that differ) to proofread first. Then check every question: edit, delete or
-          verify. When all are verified, publish it.
+          and English that differ) to proofread first. Then proofread every question in three
+          checks: ① the question and options, ② the answer, ③ the explanation (once one is written;
+          tick ② first). A question with no explanation yet is finished with ① and ② and marked
+          “Needs explanation”. When all are finished, publish it.
         </p>
       )}
       {busy && (
@@ -2074,7 +2161,7 @@ function Proofread({
           <Button
             size="sm"
             disabled={!!busy || !questions.length || verified < questions.length}
-            title={verified < questions.length ? "Verify every question first" : undefined}
+            title={verified < questions.length ? "Finish every question first" : undefined}
             onClick={() => void publish()}
           >
             <Upload className="mr-1 h-4 w-4" /> Publish
@@ -2122,7 +2209,7 @@ function QuestionJump({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
-      if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+      if (typing(t)) return;
       if (e.key !== "g" && e.key !== "G") return;
       // The cards cover the list: only theirs.
       const cards = document.querySelector('[role="dialog"][aria-label="Proofread questions"]');
@@ -2186,10 +2273,10 @@ function QuestionJump({
                     : flagged(x) && !x.verified
                       ? "Flagged by the AI check"
                       : x.verified
-                        ? "Verified"
+                        ? "Finished"
                         : !x.explanation_en && !x.explanation_hi
-                          ? "Not verified · no explanation"
-                          : "Not verified"
+                          ? "Not finished · no explanation"
+                          : "Not finished"
                 }
                 className={`h-7 rounded text-xs tabular-nums ${
                   x.deleted
@@ -2210,11 +2297,11 @@ function QuestionJump({
           <p className="flex flex-wrap gap-x-3 text-[11px] text-muted-foreground">
             <span>
               <span className="mr-1 inline-block h-2 w-2 rounded-sm bg-emerald-500/60" />
-              Verified
+              Finished
             </span>
             <span>
               <span className="mr-1 inline-block h-2 w-2 rounded-sm bg-muted-foreground/30" />
-              Not verified
+              Not finished
             </span>
             <span>
               <span className="mr-1 inline-block h-2 w-2 rounded-sm bg-amber-500/60" />
@@ -2255,22 +2342,40 @@ function ProofCards({
   const updateFn = useServerFn(updateExamQuestion);
   const removeFn = useServerFn(deleteExamQuestion);
   const [onlyOpen, setOnlyOpen] = useState(!locked);
+  // One level at a time (① question, ② answer, ③ explanation), or all.
+  const [pass, setPass] = useState<"all" | ProofLevel>("all");
   const [onlyFlagged, setOnlyFlagged] = useState(false);
   const [lang, setLang] = useState<Lang>(lang0);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const list = questions.filter((q) => (!onlyOpen || !q.verified) && (!onlyFlagged || flagged(q)));
+  const open = (x: ExamQuestion) => (written || pass === "all" ? !x.verified : levelOpen(x, pass));
+  const list = questions.filter((q) => (!onlyOpen || open(q)) && (!onlyFlagged || flagged(q)));
   const [at, setAt] = useState(0);
   const i = Math.min(at, Math.max(0, list.length - 1));
   const q = list[i];
   const verifiedCount = questions.filter((x) => x.verified).length;
+  const passDone =
+    pass === "all" || written ? q?.verified : !!q && (levelDone(q, pass) || !levelApplies(q, pass));
 
   async function verify() {
     if (!q || locked) return;
+    if (!written && pass === "explanation" && !q.proof_answer) {
+      toast.error("Tick the answer first, then the explanation.");
+      return;
+    }
     setSaving(true);
     try {
-      await updateFn({ data: { id: q.id, patch: { verified: true } } });
-      toast.success(`Question ${q.q_no} verified`);
+      await updateFn({
+        data: {
+          id: q.id,
+          patch: written || pass === "all" ? { verified: true } : { proof: { [pass]: true } },
+        },
+      });
+      toast.success(
+        written || pass === "all"
+          ? `Question ${q.q_no} finished`
+          : `Question ${q.q_no}: ${LEVEL_NO[pass]} ticked`,
+      );
       await onChanged();
       // The verified question leaves the "not verified" list: the next
       // takes its place; in the full list, go on.
@@ -2299,12 +2404,20 @@ function ProofCards({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
-      if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+      if (typing(t)) return;
       if (e.key === "Escape") onClose();
       else if (e.key === "ArrowRight") setAt((x) => Math.min(x + 1, list.length - 1));
       else if (e.key === "ArrowLeft") setAt((x) => Math.max(0, x - 1));
       else if ((e.key === "v" || e.key === "V") && !editing) void verify();
       else if ((e.key === "e" || e.key === "E") && !locked) setEditing(true);
+      else if (/^[123]$/.test(e.key) && q && !locked && !written && !editing) {
+        // 1, 2, 3: tick or clear that check.
+        const l = LEVELS[Number(e.key) - 1];
+        if (!levelApplies(q, l)) return;
+        void updateFn({ data: { id: q.id, patch: { proof: { [l]: !levelDone(q, l) } } } })
+          .then(onChanged)
+          .catch((err) => toast.error(errorText(err, "Couldn't save")));
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -2322,7 +2435,7 @@ function ProofCards({
         </Button>
         <span className="text-sm font-medium" data-testid="card-progress">
           {list.length ? `${i + 1} of ${list.length}` : "Nothing here"} · {verifiedCount} of{" "}
-          {questions.length} verified
+          {questions.length} finished
         </span>
         <QuestionJump
           questions={questions}
@@ -2353,8 +2466,24 @@ function ProofCards({
               setAt(0);
             }}
           />
-          Only not verified
+          {written || pass === "all" ? "Only not finished" : "Only not ticked"}
         </label>
+        {!written && (
+          <select
+            aria-label="Proofreading pass"
+            value={pass}
+            onChange={(e) => {
+              setPass(e.target.value as "all" | ProofLevel);
+              setAt(0);
+            }}
+            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+          >
+            <option value="all">All checks</option>
+            <option value="question">① Question pass</option>
+            <option value="answer">② Answer pass</option>
+            <option value="explanation">③ Explanation pass</option>
+          </select>
+        )}
         {questions.some(flagged) && (
           <label className="flex items-center gap-1.5 text-xs">
             <input
@@ -2411,13 +2540,15 @@ function ProofCards({
               {onlyFlagged
                 ? "No flagged question here."
                 : onlyOpen
-                  ? "Every question is verified."
+                  ? written || pass === "all"
+                    ? "Every question is finished."
+                    : `Nothing left in this pass.`
                   : "No questions."}
             </p>
           )}
           {q?.key_note && (
             <p className="mt-2 rounded-xl border border-amber-400/60 bg-amber-500/10 p-2.5 text-sm">
-              {q.key_note} Set the right option in Edit, or verify if the key is right.
+              {q.key_note} Set the right option in Edit, or tick ② if the key is right.
             </p>
           )}
           {q && !written && !q.explanation_en && !q.explanation_hi && (
@@ -2470,10 +2601,18 @@ function ProofCards({
             </Button>
             <Button
               size="sm"
-              disabled={saving || editing || q.verified}
+              disabled={saving || editing || !!passDone}
               onClick={() => void verify()}
+              data-pass-button={pass}
             >
-              <BadgeCheck className="mr-1 h-4 w-4" /> {q.verified ? "Verified" : "Verify & next"}
+              <BadgeCheck className="mr-1 h-4 w-4" />{" "}
+              {written || pass === "all"
+                ? q.verified
+                  ? "Finished"
+                  : "Finish & next"
+                : passDone
+                  ? `${LEVEL_NO[pass]} ticked`
+                  : `Tick ${LEVEL_NO[pass]} & next`}
             </Button>
           </>
         )}

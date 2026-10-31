@@ -56,7 +56,8 @@ export type ExamQuestion = {
   explanation_hi: string;
   explanation_source: string;
   explanation_general: boolean;
-  // Proofread and verified by the editor.
+  // Finished: proofread at every level that applies (kept by the server
+  // from the three checks below; the other features use it).
   verified: boolean;
   // The sheet's "Correct Answer" text didn't match the option numbered.
   key_note: string;
@@ -67,7 +68,121 @@ export type ExamQuestion = {
   topic_en?: string;
   topic_hi?: string;
   ai_check?: AiCheck | null;
-} & Written;
+} & Written &
+  Proof;
+
+// After the exam_proof_levels migration: the three proofreading checks (the
+// question and options read right, the answer, the explanation), the other
+// options the key also accepts, and the question's difficulty.
+export type Proof = {
+  proof_question?: boolean;
+  proof_answer?: boolean;
+  proof_explanation?: boolean;
+  also_correct?: number[];
+  difficulty?: Difficulty | null;
+};
+export const DIFFICULTIES = ["easy", "medium", "hard"] as const;
+export type Difficulty = (typeof DIFFICULTIES)[number];
+export const difficultyOf = (v: unknown): Difficulty | null =>
+  typeof v === "string" && (DIFFICULTIES as readonly string[]).includes(v.trim().toLowerCase())
+    ? (v.trim().toLowerCase() as Difficulty)
+    : null;
+
+export type ProofLevel = "question" | "answer" | "explanation";
+export const PROOF_LABEL: Record<ProofLevel, string> = {
+  question: "Question",
+  answer: "Answer",
+  explanation: "Explanation",
+};
+
+type ProofQ = Pick<ExamQuestion, "explanation_en" | "explanation_hi" | "verified"> & Proof;
+export const hasExplanation = (q: Pick<ExamQuestion, "explanation_en" | "explanation_hi">) =>
+  !!((q.explanation_en ?? "").trim() || (q.explanation_hi ?? "").trim());
+// Finished: the question and answer proofread, and the explanation too
+// when one is written.
+export const finished = (q: ProofQ) =>
+  !!q.proof_question && !!q.proof_answer && (!hasExplanation(q) || !!q.proof_explanation);
+// Finished but with no explanation yet: usable, to be filled in later.
+export const needsExplanation = (q: ProofQ) => finished(q) && !hasExplanation(q);
+// Every option the key accepts (the main one first).
+export const answersOf = (q: { correct: number | null; also_correct?: number[] }) =>
+  q.correct ? [q.correct, ...(q.also_correct ?? []).filter((n) => n !== q.correct)] : [];
+// Other accepted options, cleaned (1–4, not the main one, no repeats).
+export const cleanAlso = (list: unknown, main: number | null): number[] =>
+  main
+    ? [
+        ...new Set(
+          (Array.isArray(list) ? list : [])
+            .map(Number)
+            .filter((n) => Number.isInteger(n) && n >= 1 && n <= 4 && n !== main),
+        ),
+      ].sort()
+    : [];
+
+// The checks in order, numbered as on screen.
+export const LEVELS: ProofLevel[] = ["question", "answer", "explanation"];
+export const LEVEL_NO: Record<ProofLevel, string> = {
+  question: "①",
+  answer: "②",
+  explanation: "③",
+};
+
+export const levelDone = (q: ProofQ, l: ProofLevel) =>
+  l === "question" ? !!q.proof_question : l === "answer" ? !!q.proof_answer : !!q.proof_explanation;
+// A level that applies to the question: the explanation only once written.
+export const levelApplies = (q: ProofQ, l: ProofLevel) => l !== "explanation" || hasExplanation(q);
+// Still to do at this level (the explanation after the answer).
+export const levelOpen = (q: ProofQ, l: ProofLevel) =>
+  levelApplies(q, l) && !levelDone(q, l) && (l !== "explanation" || !!q.proof_answer);
+
+// Is option n (1–4) accepted by the key?
+export const accepted = (q: ProofQ & { correct: number | null }, n: number) =>
+  answersOf(q).includes(n);
+
+// The three checks after a change: editing the question unticks the
+// question; a new answer unticks the answer and the explanation; a new
+// explanation unticks the explanation. Then the ticks asked for: the
+// explanation only after the answer, and only when one is written.
+// "verified" (old callers) ticks or clears every check that applies.
+export function proofAfter(
+  old: ProofQ,
+  next: { explanation_en: string; explanation_hi: string },
+  changed: { question?: boolean; answer?: boolean; explanation?: boolean },
+  set: Partial<Record<ProofLevel, boolean>> & { verified?: boolean } = {},
+): {
+  proof_question: boolean;
+  proof_answer: boolean;
+  proof_explanation: boolean;
+  verified: boolean;
+} {
+  const had = {
+    q: old.proof_question ?? old.verified,
+    a: old.proof_answer ?? old.verified,
+    e: old.proof_explanation ?? (old.verified && hasExplanation(old)),
+  };
+  let q = !!had.q && !changed.question;
+  let a = !!had.a && !changed.answer;
+  let e = !!had.e && !changed.answer && !changed.explanation;
+  const explained = hasExplanation(next);
+  if (set.verified !== undefined) q = a = e = set.verified;
+  if (set.question !== undefined) q = set.question;
+  if (set.answer !== undefined) {
+    a = set.answer;
+    if (!a) e = false;
+  }
+  if (set.explanation !== undefined) {
+    if (set.explanation && !a) throw new Error("Tick the answer first, then the explanation.");
+    if (set.explanation && !explained) throw new Error("There's no explanation to proofread.");
+    e = set.explanation;
+  }
+  if (!explained) e = false;
+  return {
+    proof_question: q,
+    proof_answer: a,
+    proof_explanation: e,
+    verified: q && a && (!explained || e),
+  };
+}
 
 export type PaperKind = "objective" | "subjective";
 // A written (Mains) question: where it sits, its marks and word limit, and a
@@ -202,6 +317,7 @@ export function reviewMessages(
     options_en: string[];
     options_hi: string[];
     correct: number | null;
+    also?: number[];
     deleted: boolean;
     explanation_en: string;
     explanation_hi: string;
@@ -231,7 +347,7 @@ Reply with JSON only: [{"n": question number, "subject": "...", "topic": {"en": 
         .map((q) =>
           q.written
             ? `Question ${q.n} (written answer${q.written.marks ? `, ${q.written.marks} marks` : ""}${q.written.words ? `, ${q.written.words} words` : ""})\nEnglish: ${q.question_en || "(none)"}\nHindi: ${q.question_hi || "(none)"}`
-            : `Question ${q.n}\nEnglish: ${q.question_en || "(none)"}\n${q.options_en.map((o, i) => `  (${i + 1}) ${o}`).join("\n")}\nHindi: ${q.question_hi || "(none)"}\n${q.options_hi.map((o, i) => `  (${i + 1}) ${o}`).join("\n")}\n${q.deleted ? "Deleted by the answer key." : `Correct option given: ${q.correct ?? "none"}`}\nExplanation (English): ${q.explanation_en || "(none yet)"}\nExplanation (Hindi): ${q.explanation_hi || "(none yet)"}`,
+            : `Question ${q.n}\nEnglish: ${q.question_en || "(none)"}\n${q.options_en.map((o, i) => `  (${i + 1}) ${o}`).join("\n")}\nHindi: ${q.question_hi || "(none)"}\n${q.options_hi.map((o, i) => `  (${i + 1}) ${o}`).join("\n")}\n${q.deleted ? "Deleted by the answer key." : `Correct option given: ${q.correct ?? "none"}${q.also?.length ? ` (the key also accepts ${q.also.join(", ")})` : ""}`}\nExplanation (English): ${q.explanation_en || "(none yet)"}\nExplanation (Hindi): ${q.explanation_hi || "(none yet)"}`,
         )
         .join("\n\n---\n\n")}`,
     },
@@ -294,6 +410,8 @@ export type QuestionDraft = {
   subject_section?: string;
   topic_en?: string;
   topic_hi?: string;
+  also_correct?: number[];
+  difficulty?: Difficulty | null;
 } & Written;
 
 export const OPTION_COUNT = 4;
@@ -521,6 +639,7 @@ export function explainMessages(
     extra: string;
     options: string[];
     correct: number | null;
+    also?: number[];
     deleted: boolean;
     passages: { k: number; title: string; content: string }[];
   }[],
@@ -549,7 +668,7 @@ Reply with JSON only: [{"n": question number, "en": "...", "hi": "...", "from": 
               .map((o, i) => `(${i + 1}) ${o}`)
               .join(
                 "\n",
-              )}\n${q.deleted ? "Deleted by the answer key." : `Correct option: ${q.correct ?? "not given"}`}${
+              )}\n${q.deleted ? "Deleted by the answer key." : `Correct option: ${q.correct ?? "not given"}${q.also?.length ? ` (the key also accepts ${q.also.join(", ")}: say why each is right)` : ""}`}${
               q.passages.length
                 ? `\nBook passages:\n${q.passages.map((p) => `[K${p.k}] ${p.title}\n${p.content}`).join("\n")}`
                 : "\nBook passages: none"
@@ -697,6 +816,11 @@ export function rowsToPapers(
       const ans = (row["Correct Option No."] ?? "").trim();
       if (/^(deleted|delete|\*|विलोपित)$/i.test(ans)) q.deleted = true;
       else if (/^[1-4](\.0+)?$/.test(ans)) q.correct = Number(ans);
+      else if (/^[1-4](?:\s*[,/+&]\s*[1-4])+$/.test(ans)) {
+        const [first, ...rest] = ans.split(/\s*[,/+&]\s*/).map(Number);
+        q.correct = first;
+        q.also_correct = cleanAlso(rest, first);
+      }
       if (extra.explanation)
         q[lang === "hi" ? "explanation_hi" : "explanation_en"] = extra.explanation;
       if (row["Subject section"]) q.subject_section = subjectSection(row["Subject section"]);
@@ -920,7 +1044,13 @@ export function questionGaps(q: QuestionDraft, subjective = false): string[] {
 
 // ---------- The answer key ----------
 
-export type KeyEntry = { q_no: number; correct: number | null; deleted: boolean };
+export type KeyEntry = {
+  q_no: number;
+  correct: number | null;
+  deleted: boolean;
+  // Other options the key also accepts ("1,3", "A/C").
+  also?: number[];
+};
 
 // A key can cover several booklet series (A, B, C, D: the same questions in
 // another order). Its answers, by each series' question numbers; a plain key
@@ -964,12 +1094,16 @@ function headerGroup(cols: Col[]): Col[] {
   return cols;
 }
 
-const answerOf = (a: string): Omit<KeyEntry, "q_no"> | null =>
-  a === "*"
-    ? { correct: null, deleted: true }
-    : /^[1-4]$/.test(a)
-      ? { correct: Number(a), deleted: false }
-      : null;
+const answerOf = (a: string): Omit<KeyEntry, "q_no"> | null => {
+  if (a === "*") return { correct: null, deleted: true };
+  if (/^[1-4]$/.test(a)) return { correct: Number(a), deleted: false };
+  // More than one option accepted: "1,3", "1/3", "1+3", "1&3".
+  if (/^[1-4](?:[,/+&][1-4])+$/.test(a)) {
+    const [first, ...rest] = a.split(/[,/+&]/).map(Number);
+    return { correct: first, deleted: false, also: cleanAlso(rest, first) };
+  }
+  return null;
+};
 const questionNo = (v: string) => {
   const n = Number(v);
   return Number.isInteger(n) && n >= 1 && n <= 1000 ? n : null;
@@ -1002,7 +1136,7 @@ export function parseKeySheet(text: string): KeySheet & { problems: string[] } {
     }
     if (/[a-z]{3,}|\p{Script=Devanagari}{2,}/iu.test(line.replace(/deleted|delete/gi, "")))
       continue;
-    const tokens = line.match(/\d+|\*/g) ?? [];
+    const tokens = line.match(/\b[1-4](?:[,/+&][1-4])+\b|\d+|\*/g) ?? [];
     const size = group.length;
     if (tokens.length < size || tokens.length % size || tokens.length > perLine) continue;
     const rows: [string, KeyEntry][] = [];
@@ -1096,7 +1230,8 @@ A key can cover several booklet series (sets A, B, C, D: the same questions in a
           ? `give the answers by series ${s}'s question numbers: in a table where each row gives one question's number in every series and then its answer, use the number in the ${s} column; in a table with an answer column for each series, use the ${s} column.`
           : `give no answers ("answers": []): the paper's series is needed first.`
       }
-Reply with JSON only: {"series": [] or ["A", "B", ...], "answers": [{"n": question number, "answer": 1-4 or null, "deleted": false}]}`,
+When the key accepts more than one option for a question ("1,3", "A/C", "both 1 and 3"), give the first in "answer" and the others in "also".
+Reply with JSON only: {"series": [] or ["A", "B", ...], "answers": [{"n": question number, "answer": 1-4 or null, "also": [] or [other accepted options], "deleted": false}]}`,
     },
     { role: "user", content: "Read the answer key." },
   ];
@@ -1108,10 +1243,14 @@ const entriesFrom = (list: unknown): KeyEntry[] => {
     const o = (x ?? {}) as Record<string, unknown>;
     const n = Number(o.n);
     if (!Number.isInteger(n) || n < 1 || n > 1000) continue;
-    const a = Number(o.answer ?? o.correct);
+    const raw = o.answer ?? o.correct;
+    const list = (Array.isArray(raw) ? raw : [raw]).map(Number);
+    const a = list[0];
     if (o.deleted === true) out.set(n, { q_no: n, correct: null, deleted: true });
-    else if (a >= 1 && a <= 4 && Number.isInteger(a))
-      out.set(n, { q_no: n, correct: a, deleted: false });
+    else if (a >= 1 && a <= 4 && Number.isInteger(a)) {
+      const also = cleanAlso([...list.slice(1), ...(Array.isArray(o.also) ? o.also : [])], a);
+      out.set(n, { q_no: n, correct: a, deleted: false, ...(also.length ? { also } : {}) });
+    }
   }
   return [...out.values()].sort((a, b) => a.q_no - b.q_no);
 };
@@ -1140,7 +1279,9 @@ export function keyFromRows(rows: Record<string, unknown>[]): KeySheet & { probl
   );
   const known = cols.every((c) => c && !c.includes(" "));
   const cell = (v: unknown) => {
-    const a = String(v ?? "").trim();
+    const a = String(v ?? "")
+      .trim()
+      .replace(/^([1-4])(?:\s*[,/+&]\s*[1-4])+$/, (m) => m.replace(/\s+/g, ""));
     return /^(deleted|delete|विलोपित)$/i.test(a) ? "*" : a;
   };
   const lines = known

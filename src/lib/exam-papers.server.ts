@@ -17,6 +17,13 @@ import {
   CHECK_BATCH,
   checkSig,
   checkedNow,
+  cleanAlso,
+  difficultyOf,
+  hasExplanation,
+  needsExplanation,
+  proofAfter,
+  type Difficulty,
+  type ProofLevel,
   parseReview,
   reviewMessages,
   subjectSection,
@@ -78,6 +85,12 @@ export type PaperSummary = ExamPaper & {
   ca: number;
   verified: number;
   explained: number;
+  // The three checks (after the exam_proof_levels migration), and finished
+  // questions still without an explanation.
+  proof_question: number;
+  proof_answer: number;
+  proof_explanation: number;
+  need_explanation: number;
 };
 
 const QUESTION_COLS =
@@ -90,21 +103,72 @@ const missingCheck = (e: { message: string } | null) =>
 export const CHECK_NOT_READY =
   "Subjects and the AI check need a database update: run the latest migration (paper_check_subjects) in Lovable or the SQL editor.";
 
-// A paper's questions (those numbered, or all), with the migration's columns
-// when it has run.
+// After the exam_proof_levels migration: the three checks, other accepted
+// options and difficulty.
+const PROOF_COLS = ",proof_question,proof_answer,proof_explanation,also_correct,difficulty";
+const missingProof = (e: { message: string } | null) =>
+  !!e && /proof_question|proof_answer|proof_explanation|also_correct|difficulty/.test(e.message);
+export const PROOF_NOT_READY =
+  "The three proofreading checks need a database update: run the latest migration (exam_proof_levels) in Lovable or the SQL editor.";
+
+// The optional column groups, each dropped when its migration hasn't run.
+const OPTIONAL = [
+  {
+    key: "check",
+    cols: () => CHECK_COLS,
+    miss: (e: { message: string } | null) => missingCheck(e),
+  },
+  {
+    key: "mains",
+    cols: () => MAINS_COLS,
+    miss: (e: { message: string } | null) => missingMains(e),
+  },
+  { key: "proof", cols: () => PROOF_COLS, miss: missingProof },
+] as const;
+type Ready = Record<(typeof OPTIONAL)[number]["key"], boolean>;
+
+// Rows with every optional column group whose migration has run.
+async function withOptional(
+  run: (cols: string) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
+  base = QUESTION_COLS,
+  groups: (keyof Ready)[] = ["check", "mains", "proof"],
+): Promise<{ rows: unknown[]; has: Ready }> {
+  const has: Ready = {
+    check: groups.includes("check"),
+    mains: groups.includes("mains"),
+    proof: groups.includes("proof"),
+  };
+  for (;;) {
+    const r = await run(
+      base +
+        OPTIONAL.filter((g) => has[g.key])
+          .map((g) => g.cols())
+          .join(""),
+    );
+    // The proof group first: its names never match the others' patterns.
+    const gone = [...OPTIONAL].reverse().find((g) => has[g.key] && g.miss(r.error));
+    if (!gone) {
+      fail(r.error);
+      return { rows: (r.data ?? []) as unknown[], has };
+    }
+    has[gone.key] = false;
+  }
+}
+
+// A paper's questions (those numbered, or all), with the migrations'
+// columns when they have run.
 async function selectQuestions(paperId: string, qNos?: number[]) {
-  const q = (cols: string) => {
+  const { rows, has } = await withOptional((cols) => {
     let x = from("exam_questions").select(cols).eq("paper_id", paperId);
     if (qNos) x = x.in("q_no", qNos);
     return x.order("q_no");
+  });
+  return {
+    ready: has.check,
+    mains: has.mains,
+    proof: has.proof,
+    questions: rows.map(readQuestion),
   };
-  let r = await q(QUESTION_COLS + CHECK_COLS + MAINS_COLS);
-  const mains = !missingMains(r.error);
-  if (!mains) r = await q(QUESTION_COLS + CHECK_COLS);
-  const ready = !missingCheck(r.error);
-  if (!ready) r = await q(QUESTION_COLS);
-  fail(r.error);
-  return { ready, mains, questions: ((r.data ?? []) as unknown[]).map(readQuestion) };
 }
 
 // After the mains_papers migration: written questions and master topics.
@@ -119,8 +183,15 @@ const isWritten = (p: { kind?: string }) => p.kind === "subjective";
 function readQuestion(r: unknown): ExamQuestion {
   const q = r as ExamQuestion;
   const options = Array.isArray(q.options) ? q.options : [];
+  const explained = hasExplanation(q);
   return {
     ...q,
+    // Before the exam_proof_levels migration: "verified" ticks every check.
+    proof_question: q.proof_question ?? q.verified,
+    proof_answer: q.proof_answer ?? q.verified,
+    proof_explanation: q.proof_explanation ?? (q.verified && explained),
+    also_correct: cleanAlso(q.also_correct, q.correct),
+    difficulty: difficultyOf(q.difficulty),
     options: Array.from({ length: OPTION_COUNT }, (_, i) => ({
       en: options[i]?.en ?? "",
       hi: options[i]?.hi ?? "",
@@ -156,15 +227,23 @@ export async function listPapers(): Promise<{ ready: boolean; papers: PaperSumma
       ca: 0,
       verified: 0,
       explained: 0,
+      proof_question: 0,
+      proof_answer: 0,
+      proof_explanation: 0,
+      need_explanation: 0,
     });
   // A page at a time: one request returns at most 1,000 rows.
   for (let at = 0; papers.length; at += 1000) {
-    const { data: rows, error: qErr } = await from("exam_questions")
-      .select(QUESTION_COLS)
-      .order("id")
-      .range(at, at + 999);
-    fail(qErr);
-    for (const raw of rows ?? []) {
+    const { rows } = await withOptional(
+      (cols) =>
+        from("exam_questions")
+          .select(cols)
+          .order("id")
+          .range(at, at + 999),
+      QUESTION_COLS,
+      ["proof"],
+    );
+    for (const raw of rows) {
       const q = readQuestion(raw);
       const s = stats.get(q.paper_id);
       if (!s) continue;
@@ -178,9 +257,12 @@ export async function listPapers(): Promise<{ ready: boolean; papers: PaperSumma
       if (q.match === "missed") s.missed++;
       if (q.verified) s.verified++;
       if (q.explanation_en || q.explanation_hi) s.explained++;
+      if (q.proof_question) s.proof_question++;
+      if (q.proof_answer) s.proof_answer++;
+      if (q.proof_explanation) s.proof_explanation++;
+      if (needsExplanation(q)) s.need_explanation++;
     }
-    if (missing(qErr)) return { ready: false, papers: [] };
-    if ((rows ?? []).length < 1000) break;
+    if (rows.length < 1000) break;
   }
   return {
     ready: true,
@@ -267,6 +349,7 @@ export async function saveQuestions(paperId: string, drafts: QuestionDraft[], re
   const {
     ready,
     mains,
+    proof,
     questions: old0,
   } = await selectQuestions(
     paperId,
@@ -301,6 +384,15 @@ export async function saveQuestions(paperId: string, drafts: QuestionDraft[], re
       explanation_source: d.explanation_source ?? old?.explanation_source ?? "",
       explanation_general: d.explanation_general ?? old?.explanation_general ?? false,
       key_note: d.key_note ?? old?.key_note ?? "",
+      ...(proof
+        ? {
+            also_correct: cleanAlso(
+              d.also_correct ?? old?.also_correct,
+              d.correct !== undefined ? d.correct : (old?.correct ?? null),
+            ),
+            difficulty: difficultyOf(d.difficulty ?? old?.difficulty),
+          }
+        : {}),
       ...(subjects
         ? {
             subject_section: d.subject_section ?? old?.subject_section ?? "",
@@ -397,13 +489,35 @@ export async function applyKey(
   if (!entries.length) throw new Error("No answers found in this key.");
   // The series the answers were picked for, kept on the paper.
   if (series !== undefined) await updatePaper(paperId, { series });
-  const rows = entries.map((e) => ({
-    paper_id: paperId,
-    q_no: e.q_no,
-    correct: e.deleted ? null : e.correct,
-    deleted: e.deleted,
-    updated_at: now(),
-  }));
+  // A question whose answer the key changes: its answer and explanation
+  // are proofread again.
+  const { proof, questions: had } = await selectQuestions(
+    paperId,
+    entries.map((e) => e.q_no),
+  );
+  const old = new Map(had.map((q) => [q.q_no, q]));
+  const rows = entries.map((e) => {
+    const correct = e.deleted ? null : e.correct;
+    const row = {
+      paper_id: paperId,
+      q_no: e.q_no,
+      correct,
+      deleted: e.deleted,
+      updated_at: now(),
+    };
+    if (!proof) return row;
+    const also = cleanAlso(e.also, correct);
+    const q = old.get(e.q_no);
+    const answer =
+      !!q &&
+      (q.correct !== correct ||
+        q.deleted !== e.deleted ||
+        (q.also_correct ?? []).join() !== also.join());
+    const checks = q
+      ? proofAfter(q, q, { answer })
+      : { proof_question: false, proof_answer: false, proof_explanation: false, verified: false };
+    return { ...row, also_correct: also, ...checks };
+  });
   for (let i = 0; i < rows.length; i += 200)
     fail(
       (
@@ -490,42 +604,57 @@ export async function importPapers(
 
 // ---------- Editing ----------
 
-export async function updateQuestion(
-  id: string,
-  patch: Partial<
-    Pick<
-      ExamQuestion,
-      | "question_en"
-      | "question_hi"
-      | "extra_en"
-      | "extra_hi"
-      | "options"
-      | "correct"
-      | "deleted"
-      | "explanation_en"
-      | "explanation_hi"
-      | "verified"
-      | "subject_section"
-      | "topic_en"
-      | "topic_hi"
-      | "unit"
-      | "part"
-      | "marks"
-      | "word_limit"
-      | "model_answer"
-      | "model_source"
-      | "master_topic_id"
-    >
-  >,
-) {
+export type QuestionPatch = Partial<
+  Pick<
+    ExamQuestion,
+    | "question_en"
+    | "question_hi"
+    | "extra_en"
+    | "extra_hi"
+    | "options"
+    | "correct"
+    | "deleted"
+    | "explanation_en"
+    | "explanation_hi"
+    | "verified"
+    | "subject_section"
+    | "topic_en"
+    | "topic_hi"
+    | "unit"
+    | "part"
+    | "marks"
+    | "word_limit"
+    | "model_answer"
+    | "model_source"
+    | "master_topic_id"
+    | "also_correct"
+  >
+> & {
+  // Ticks or clears one or more of the three checks.
+  proof?: Partial<Record<ProofLevel, boolean>>;
+  difficulty?: Difficulty | null;
+};
+
+async function questionById(id: string) {
+  const { rows, has } = await withOptional((cols) =>
+    from("exam_questions").select(cols).eq("id", id).limit(1),
+  );
+  if (!rows.length) throw new Error("That question is gone: reload the paper.");
+  return { q: readQuestion(rows[0]), has };
+}
+
+const sameText = (a: string | undefined, b: string | undefined) =>
+  (a ?? "").trim() === (b ?? "").trim();
+
+export async function updateQuestion(id: string, patch: QuestionPatch) {
   // A model answer or outline topic changes nothing students see: allowed on
   // a published paper too.
   const privateOnly = Object.keys(patch).every((k) =>
     ["model_answer", "model_source", "master_topic_id"].includes(k),
   );
   if (!privateOnly) await assertDraft({ question: id });
-  // The subject, topic, model answer and outline topic: no need to verify
-  // again.
+  // The subject, topic, difficulty, model answer and outline topic: no
+  // need to proofread again.
   const sorted: Record<string, unknown> = {};
   if (patch.subject_section !== undefined)
     sorted.subject_section = subjectSection(patch.subject_section);
@@ -536,10 +665,12 @@ export async function updateQuestion(
   if (patch.model_source !== undefined)
     sorted.model_source = String(patch.model_source).trim().slice(0, 200);
   if (patch.master_topic_id !== undefined) sorted.master_topic_id = patch.master_topic_id;
+  if (patch.difficulty !== undefined) sorted.difficulty = difficultyOf(patch.difficulty);
   if (Object.keys(sorted).length) {
     const { error } = await from("exam_questions")
       .update({ ...sorted, updated_at: now() } as never)
       .eq("id", id);
+    if (missingProof(error)) throw new Error(PROOF_NOT_READY);
     if (missingMains(error) && /model_|master_topic/.test(error!.message))
       throw new Error(MAINS_NOT_READY);
     if (missingCheck(error)) throw new Error(CHECK_NOT_READY);
@@ -547,6 +678,8 @@ export async function updateQuestion(
     const rest = Object.keys(patch).filter((k) => !(k in sorted));
     if (!rest.length) return;
   }
+  const { q: old, has } = await questionById(id);
+  if ((patch.proof || patch.also_correct) && !has.proof) throw new Error(PROOF_NOT_READY);
   const row: Record<string, unknown> = { updated_at: now() };
   for (const k of [
     "question_en",
@@ -560,16 +693,6 @@ export async function updateQuestion(
   for (const k of ["unit", "part"] as const)
     if (patch[k] !== undefined) row[k] = String(patch[k]).trim().slice(0, 60);
   for (const k of ["marks", "word_limit"] as const) if (patch[k] !== undefined) row[k] = patch[k];
-  // A change to the question or its explanation needs verifying again; the
-  // key's note is settled once the key is set by hand.
-  const changed =
-    Object.keys(row).length > 1 ||
-    !!patch.options ||
-    patch.correct !== undefined ||
-    patch.deleted !== undefined;
-  if (patch.correct !== undefined || patch.deleted !== undefined) row.key_note = "";
-  row.verified = patch.verified !== undefined ? patch.verified : changed ? false : undefined;
-  if (row.verified === undefined) delete row.verified;
   if (patch.options)
     row.options = Array.from({ length: OPTION_COUNT }, (_, i) => ({
       en: String(patch.options![i]?.en ?? "")
@@ -579,8 +702,51 @@ export async function updateQuestion(
         .trim()
         .slice(0, 1000),
     }));
+  const deleted = patch.deleted ?? old.deleted;
   if (patch.deleted !== undefined) row.deleted = patch.deleted;
-  if (patch.correct !== undefined) row.correct = patch.deleted ? null : patch.correct;
+  if (patch.correct !== undefined || patch.deleted !== undefined)
+    row.correct = deleted ? null : patch.correct !== undefined ? patch.correct : old.correct;
+  const correct = (row.correct as number | null | undefined) ?? (deleted ? null : old.correct);
+  if (has.proof && (patch.also_correct !== undefined || "correct" in row))
+    row.also_correct = cleanAlso(patch.also_correct ?? old.also_correct, correct);
+  // What really changed (the editor sends every field when saving).
+  const textChanged = (k: keyof ExamQuestion) =>
+    k in row && !sameText(row[k] as string, old[k] as string);
+  const optionsChanged =
+    !!row.options &&
+    (row.options as { en: string; hi: string }[]).some(
+      (o, i) => !sameText(o.en, old.options[i]?.en) || !sameText(o.hi, old.options[i]?.hi),
+    );
+  const changed = {
+    question:
+      optionsChanged ||
+      (["question_en", "question_hi", "extra_en", "extra_hi"] as const).some(textChanged) ||
+      (["unit", "part", "marks", "word_limit"] as const).some((k) => k in row && row[k] !== old[k]),
+    answer:
+      deleted !== old.deleted ||
+      correct !== old.correct ||
+      (has.proof &&
+        "also_correct" in row &&
+        (row.also_correct as number[]).join() !== (old.also_correct ?? []).join()),
+    explanation: (["explanation_en", "explanation_hi"] as const).some(textChanged),
+  };
+  // The key's note is settled once the key is set by hand.
+  if (patch.correct !== undefined || patch.deleted !== undefined) row.key_note = "";
+  if (has.proof) {
+    Object.assign(
+      row,
+      proofAfter(
+        old,
+        {
+          explanation_en: (row.explanation_en as string) ?? old.explanation_en,
+          explanation_hi: (row.explanation_hi as string) ?? old.explanation_hi,
+        },
+        changed,
+        { ...patch.proof, ...(patch.verified !== undefined ? { verified: patch.verified } : {}) },
+      ),
+    );
+  } else if (patch.verified !== undefined) row.verified = patch.verified;
+  else if (changed.question || changed.answer || changed.explanation) row.verified = false;
   fail(
     (
       await from("exam_questions")
@@ -636,7 +802,8 @@ export async function explainStep(
   redo: string[] = [],
 ): Promise<{ done: number; left: number; total: number }> {
   await assertDraft({ paper: paperId });
-  const { paper, questions } = await getPaper(paperId);
+  const { paper } = await getPaper(paperId);
+  const { proof: proofCols, questions } = await selectQuestions(paperId);
   if (isWritten(paper)) throw new Error("A written paper has model answers, not explanations.");
   const wanted = (q: ExamQuestion) =>
     redo.length ? redo.includes(q.id) : !q.explanation_en && !q.explanation_hi;
@@ -704,6 +871,7 @@ export async function explainStep(
           extra: [q.extra_en, q.extra_hi].filter(Boolean).join("\n"),
           options: q.options.map((o) => [o.en, o.hi].filter(Boolean).join(" / ")),
           correct: q.correct,
+          also: q.also_correct,
           deleted: q.deleted,
           passages,
         })),
@@ -725,7 +893,10 @@ export async function explainStep(
             explanation_hi: e.hi,
             explanation_source: [...new Set(used.map((p) => p.title))].join("; ").slice(0, 500),
             explanation_general: !used.length,
+            // A new explanation is proofread again (and needed for
+            // finishing now that there is one).
             verified: false,
+            ...(proofCols ? { proof_explanation: false } : {}),
             updated_at: now(),
           } as never)
           .eq("id", q.id)
@@ -767,6 +938,7 @@ export async function reviewStep(
           options_en: q.options.map((o) => o.en),
           options_hi: q.options.map((o) => o.hi),
           correct: q.correct,
+          also: q.also_correct,
           deleted: q.deleted,
           explanation_en: q.explanation_en,
           explanation_hi: q.explanation_hi,
@@ -815,7 +987,10 @@ export async function publishPaper(paperId: string, minutes?: number) {
   if (paper.status === "published") return paper;
   if (!questions.length) throw new Error("This paper has no questions.");
   const left = questions.filter((q) => !q.verified).length;
-  if (left) throw new Error(`${left} question${left === 1 ? " isn't" : "s aren't"} verified yet.`);
+  if (left)
+    throw new Error(
+      `${left} question${left === 1 ? " isn't" : "s aren't"} proofread yet (question and answer, and the explanation where one is written).`,
+    );
   // A written paper: for the notes and the other features, no students' test.
   if (isWritten(paper)) {
     fail(
@@ -848,6 +1023,12 @@ export async function publishPaper(paperId: string, minutes?: number) {
   try {
     const rows = usable.map((q, i) => {
       const sections = [
+        q.also_correct?.length
+          ? {
+              title: "Also accepted / ये भी सही",
+              body: `Option ${q.also_correct.join(", ")} (answer key) / विकल्प ${q.also_correct.join(", ")} (उत्तर कुंजी)`,
+            }
+          : null,
         q.explanation_hi ? { title: "व्याख्या", body: q.explanation_hi } : null,
         q.explanation_en && q.explanation_en !== q.explanation_hi
           ? { title: "Explanation", body: q.explanation_en }
