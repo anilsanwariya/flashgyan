@@ -75,10 +75,12 @@ export async function questionBank(): Promise<{
   ready: boolean;
   papers: BankPaper[];
   rows: BankRow[];
+  // Section keys' names ("gkgs" → "GK & GS").
+  sectionNames: Record<string, string>;
 }> {
   const { data, error } = await from("exam_papers").select("*");
   if (error && /exam_papers|schema cache/.test(error.message))
-    return { ready: false, papers: [], rows: [] };
+    return { ready: false, papers: [], rows: [], sectionNames: {} };
   fail(error);
   // Objective papers only (written ones have model answers, not keys).
   const raw = ((data ?? []) as unknown as ExamPaper[]).filter((p) => p.kind !== "subjective");
@@ -147,5 +149,10 @@ export async function questionBank(): Promise<{
     };
   });
   rows.sort((a, b) => a.paper.localeCompare(b.paper) || a.n - b.n);
-  return { ready: true, papers, rows };
+  return {
+    ready: true,
+    papers,
+    rows,
+    sectionNames: Object.fromEntries(sections.map((s) => [s.key, s.name_en])),
+  };
 }

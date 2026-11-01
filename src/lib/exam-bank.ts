@@ -195,3 +195,70 @@ export function facets(
 // A paper's year: from its date, else from its name.
 export const yearOf = (date: string | null, name: string) =>
   date?.slice(0, 4) || /\b(19|20)\d{2}\b/.exec(name)?.[0] || "";
+
+// ---------- The overview: two dimensions at once ----------
+
+export type Matrix = {
+  rows: string[];
+  cols: string[];
+  // "row\u0000col" → its report; row totals under "row\u0000", column totals
+  // under "\u0000col".
+  cells: Map<string, Report>;
+};
+export const cellKey = (row: string, col: string) => `${row}\u0000${col}`;
+
+// Rows by one dimension, columns by another (each largest first; years
+// newest first), with every cell's report and the totals.
+export function matrix(
+  rows: BankRow[],
+  papers: BankPaper[],
+  rowDim: Dimension,
+  colDim: Dimension,
+  maxCols = 12,
+): Matrix {
+  const byId = new Map(papers.map((p) => [p.id, p]));
+  const groups = new Map<string, BankRow[]>();
+  const add = (k: string, r: BankRow) => groups.set(k, [...(groups.get(k) ?? []), r]);
+  for (const r of rows) {
+    const a = valueOf(r, byId, rowDim);
+    const b = valueOf(r, byId, colDim);
+    add(cellKey(a, b), r);
+    add(cellKey(a, ""), r);
+    add(cellKey("", b), r);
+  }
+  const cells = new Map([...groups].map(([k, rs]) => [k, report(rs)]));
+  const order = (d: Dimension, values: string[]) =>
+    values
+      .filter(
+        (v) => (cells.get(d === rowDim ? cellKey(v, "") : cellKey("", v))?.questions ?? 0) > 0,
+      )
+      .sort((x, y) => {
+        if (d === "year") return y.localeCompare(x);
+        const n = (v: string) =>
+          cells.get(d === rowDim ? cellKey(v, "") : cellKey("", v))?.questions ?? 0;
+        return n(y) - n(x) || x.localeCompare(y);
+      });
+  const rowValues = new Set<string>();
+  const colValues = new Set<string>();
+  for (const r of rows) {
+    rowValues.add(valueOf(r, byId, rowDim));
+    colValues.add(valueOf(r, byId, colDim));
+  }
+  return {
+    rows: order(rowDim, [...rowValues]),
+    cols: order(colDim, [...colValues]).slice(0, maxCols),
+    cells,
+  };
+}
+
+// A cell's colour band by how much is finished.
+export const band = (r: Report | undefined) =>
+  !r || !r.questions
+    ? "none"
+    : r.done === r.questions
+      ? "done"
+      : r.done / r.questions >= 0.5
+        ? "half"
+        : r.done
+          ? "some"
+          : "zero";
