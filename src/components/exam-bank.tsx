@@ -35,6 +35,7 @@ import { errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ProofCards } from "@/components/exam-papers-panel";
+import { SaveAsSet } from "@/components/exam-export-sets";
 
 const LIST_SIZE = 60;
 
@@ -49,11 +50,14 @@ export function QuestionBank({
   onOpen,
   filter: f,
   onFilter: setF,
+  onSaved = () => {},
 }: {
   onOpen: (paperId: string) => void;
   // Kept by the page, so the overview can open the bank filtered.
   filter: BankFilter;
   onFilter: (f: BankFilter) => void;
+  // After a filter is saved as an export set.
+  onSaved?: () => void;
 }) {
   const qc = useQueryClient();
   const q = useBank();
@@ -153,6 +157,7 @@ export function QuestionBank({
           >
             <BadgeCheck className="mr-1 h-4 w-4" /> Proofread these ({todo.length})
           </Button>
+          <SaveAsSet filter={f} label={label} onSaved={onSaved} />
           {todo.length > CARDS_MAX && (
             <span className="text-xs text-muted-foreground">The first {CARDS_MAX} at a time.</span>
           )}

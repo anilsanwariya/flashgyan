@@ -419,3 +419,107 @@ export const examBankQuestions = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await server()).questionsByIds(data.ids);
   });
+
+// ---------- Export sets ----------
+
+const exportServer = () => import("@/lib/exam-export.server");
+const lang = z.enum(["hi", "en"]);
+const bankFilter = z
+  .object({
+    exam: z.string().max(300).optional(),
+    year: z.string().max(10).optional(),
+    paper: z.string().max(60).optional(),
+    subject: z.string().max(300).optional(),
+    topic: z.string().max(400).optional(),
+    subtopic: z.string().max(400).optional(),
+    section: z.string().max(60).optional(),
+    difficulty: z.string().max(10).optional(),
+    search: z.string().max(200).optional(),
+  })
+  .passthrough();
+
+export const listExportSets = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await exportServer()).listSets();
+  });
+
+export const createExportSet = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ name: z.string().max(120), filter: bankFilter }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await exportServer()).createSet(data.name, data.filter);
+  });
+
+export const updateExportSet = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id,
+        name: z.string().max(120).optional(),
+        titles: z
+          .object({ hi: z.string().max(40), en: z.string().max(40) })
+          .partial()
+          .optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await exportServer()).updateSet(data.id, data);
+    return { ok: true };
+  });
+
+export const deleteExportSet = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await exportServer()).deleteSet(data.id);
+    return { ok: true };
+  });
+
+export const downloadExportSet = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id, lang }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await exportServer()).downloadSet(data.id, data.lang);
+  });
+
+export const importExportIds = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id,
+        lang,
+        rows: z
+          .array(
+            z.object({
+              id: z.string().max(120),
+              order: z.number().int().nullable(),
+              text: z.string().max(8000),
+            }),
+          )
+          .max(5000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await exportServer()).importIds(data.id, data.lang, data.rows);
+  });
+
+export const clearExportRemoved = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id, lang }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await exportServer()).clearRemoved(data.id, data.lang);
+  });
