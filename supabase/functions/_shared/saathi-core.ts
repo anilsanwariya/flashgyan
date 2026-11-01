@@ -313,8 +313,10 @@ async function recordUsage(label: string, u: SaathiUsage) {
 
 // A photo sent with a message (e.g. a page of a handwritten answer): base64 data,
 // ideally under about 1,600 pixels on the long side (5 MB at most).
+// An image, or a PDF (a page of a document, read as Claude reads PDFs: the
+// page's picture and its text).
 export type SaathiImage = {
-  media_type: "image/jpeg" | "image/png" | "image/webp" | "image/gif";
+  media_type: "image/jpeg" | "image/png" | "image/webp" | "image/gif" | "application/pdf";
   data: string;
 };
 
@@ -327,7 +329,7 @@ function anthropicRequest(messages: ChatMessage[], signal?: AbortSignal, images?
     const last = turns[turns.length - 1];
     last.content = [
       ...images.map((img) => ({
-        type: "image",
+        type: img.media_type === "application/pdf" ? "document" : "image",
         source: { type: "base64", media_type: img.media_type, data: img.data },
       })),
       { type: "text", text: last.content as string },

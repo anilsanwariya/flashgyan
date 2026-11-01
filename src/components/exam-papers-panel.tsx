@@ -111,6 +111,7 @@ import { langOf, sectionOf } from "@/lib/exam-sections";
 import { QuestionBank } from "@/components/exam-bank";
 import { ExamOverview } from "@/components/exam-overview";
 import { ExportSets } from "@/components/exam-export-sets";
+import { PaperQueue } from "@/components/exam-queue";
 import type { BankFilter } from "@/lib/exam-bank";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -334,6 +335,7 @@ function PaperList({ onOpen }: { onOpen: (id: string) => void }) {
   return (
     <div className="space-y-4">
       <AddPaper onAdded={onOpen} />
+      <PaperQueue onOpen={onOpen} />
       <ExamWeights />
       <PyqSets />
       <SectionsSettings />
@@ -802,6 +804,13 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
     queryKey: ["examPaper", id],
     queryFn: () => getFn({ data: { id } }),
     refetchOnMount: true,
+    // Being read in the background: the questions come in as it goes.
+    refetchInterval: (query) => {
+      const d = query.state.data as { queued?: { status: string } | null } | undefined;
+      return d?.queued && ["waiting", "reading", "uploading"].includes(d.queued.status)
+        ? 10_000
+        : false;
+    },
   });
   const [reading, setReading] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
@@ -907,6 +916,8 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
   const topics: Topics = data!.topics ?? {};
   // The exam's syllabus to tag on and the paper's sections.
   const tagging = (data as { tagging?: Tagging | null }).tagging ?? null;
+  // Read in the background (the upload queue).
+  const queued = (data as { queued?: { status: string } | null }).queued ?? null;
   const langFor = (x: ExamQuestion) =>
     tagging ? langOf(tagging.sections, sectionOf(tagging.ranges, x)) : null;
   const toCheck = questions.filter((x) => questionGaps(x, written, langFor(x)).length);
@@ -1090,7 +1101,17 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
               )}
             </p>
           ) : (
-            unread && (
+            unread &&
+            (queued && queued.status !== "failed" ? (
+              <p
+                className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm"
+                data-queued
+              >
+                <RefreshCw className="h-4 w-4 animate-spin text-primary" />
+                Being read in the background: {paper.pages_done} of {paper.pages} pages so far. You
+                can close this page.
+              </p>
+            ) : (
               <div className="rounded-xl border border-amber-400/60 bg-amber-500/10 p-3 text-sm">
                 <p>
                   {paper.pages_done} of {paper.pages} pages read. Choose the question paper's PDF to
@@ -1107,7 +1128,7 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
                   }}
                 />
               </div>
-            )
+            ))
           )}
           <label className={`flex flex-wrap items-center gap-2 text-sm ${written ? "hidden" : ""}`}>
             <KeyRound className="h-4 w-4 text-primary" />
