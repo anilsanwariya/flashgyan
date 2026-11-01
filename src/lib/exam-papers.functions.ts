@@ -56,11 +56,14 @@ const draft = z.object({
   word_limit: z.number().int().min(0).max(5000).nullable().optional(),
   model_answer: z.string().max(20000).optional(),
   model_source: z.string().max(200).optional(),
+  also_correct: z.array(z.number().int().min(1).max(4)).max(3).optional(),
+  difficulty: z.enum(["easy", "medium", "hard"]).nullable().optional(),
 });
 const keyEntry = z.object({
   q_no: z.number().int().min(1).max(1000),
   correct: z.number().int().min(1).max(4).nullable(),
   deleted: z.boolean(),
+  also: z.array(z.number().int().min(1).max(4)).max(3).optional(),
 });
 const image = z.object({
   media_type: z.enum(["image/jpeg", "image/png", "image/webp"]),
@@ -223,6 +226,15 @@ export const updateExamQuestion = createServerFn({ method: "POST" })
           model_answer: z.string().max(20000).optional(),
           model_source: z.string().max(200).optional(),
           master_topic_id: id.nullable().optional(),
+          also_correct: z.array(z.number().int().min(1).max(4)).max(3).optional(),
+          difficulty: z.enum(["easy", "medium", "hard"]).nullable().optional(),
+          proof: z
+            .object({
+              question: z.boolean().optional(),
+              answer: z.boolean().optional(),
+              explanation: z.boolean().optional(),
+            })
+            .optional(),
         }),
       })
       .parse(d),
