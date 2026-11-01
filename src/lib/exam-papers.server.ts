@@ -53,6 +53,21 @@ import {
   type KeyEntry,
   type QuestionDraft,
 } from "@/lib/exam-papers";
+import {
+  cleanRanges,
+  cleanSections,
+  guessSyllabus,
+  langOf,
+  needsSorting,
+  readTag,
+  sectionOf,
+  syllabusTags,
+  tagContext,
+  tagLines,
+  type PaperSection,
+  type SectionRange,
+} from "@/lib/exam-sections";
+import { examTitle, type SyllabusNode } from "@/lib/syllabus";
 import type { CaContent, CaFact } from "@/lib/current-affairs";
 import * as CA from "@/lib/current-affairs.server";
 import * as WN from "@/lib/flash-wordnet";
@@ -111,6 +126,51 @@ const missingProof = (e: { message: string } | null) =>
 export const PROOF_NOT_READY =
   "The three proofreading checks need a database update: run the latest migration (exam_proof_levels) in Lovable or the SQL editor.";
 
+// After the paper_sections migration: a question's section and syllabus
+// line; a paper's type, sections and syllabus.
+const SECTION_COLS = ",paper_section,syllabus_node_id";
+const missingSections = (e: { message: string } | null) =>
+  !!e &&
+  /paper_section|syllabus_node_id|paper_type|exam_syllabus_id|'sections'|"sections"|\.sections\b/.test(
+    e.message,
+  );
+export const SECTIONS_NOT_READY =
+  "Paper types, sections and syllabus tags need a database update: run the latest migration (paper_sections) in Lovable or the SQL editor.";
+
+// ---------- Sections (a setting) ----------
+
+const SECTIONS_KEY = "exam_sections";
+export async function getSections(): Promise<PaperSection[]> {
+  const { data } = await from("bot_settings").select("value").eq("key", SECTIONS_KEY).maybeSingle();
+  return cleanSections((data as { value?: unknown } | null)?.value);
+}
+export async function saveSections(list: PaperSection[]) {
+  const clean = cleanSections(list);
+  fail(
+    (
+      await from("bot_settings").upsert({
+        key: SECTIONS_KEY,
+        value: clean,
+        updated_at: now(),
+      } as never)
+    ).error,
+  );
+  return clean;
+}
+
+// A paper's sections (cleaned against the setting) and each question's
+// language: a language section's questions are in that language only.
+export async function paperSectionsOf(paper: Pick<ExamPaper, "sections">) {
+  const sections = await getSections();
+  const ranges = cleanRanges(paper.sections, sections);
+  return {
+    sections,
+    ranges,
+    lang: (q: { q_no: number; paper_section?: string | null }) =>
+      langOf(sections, sectionOf(ranges, q)),
+  };
+}
+
 // The optional column groups, each dropped when its migration hasn't run.
 const OPTIONAL = [
   {
@@ -124,6 +184,11 @@ const OPTIONAL = [
     miss: (e: { message: string } | null) => missingMains(e),
   },
   { key: "proof", cols: () => PROOF_COLS, miss: missingProof },
+  {
+    key: "sections",
+    cols: () => SECTION_COLS,
+    miss: (e: { message: string } | null) => missingSections(e),
+  },
 ] as const;
 type Ready = Record<(typeof OPTIONAL)[number]["key"], boolean>;
 
@@ -131,12 +196,13 @@ type Ready = Record<(typeof OPTIONAL)[number]["key"], boolean>;
 async function withOptional(
   run: (cols: string) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
   base = QUESTION_COLS,
-  groups: (keyof Ready)[] = ["check", "mains", "proof"],
+  groups: (keyof Ready)[] = ["check", "mains", "proof", "sections"],
 ): Promise<{ rows: unknown[]; has: Ready }> {
   const has: Ready = {
     check: groups.includes("check"),
     mains: groups.includes("mains"),
     proof: groups.includes("proof"),
+    sections: groups.includes("sections"),
   };
   for (;;) {
     const r = await run(
@@ -145,7 +211,7 @@ async function withOptional(
           .map((g) => g.cols())
           .join(""),
     );
-    // The proof group first: its names never match the others' patterns.
+    // The newest groups first: their names never match the older patterns.
     const gone = [...OPTIONAL].reverse().find((g) => has[g.key] && g.miss(r.error));
     if (!gone) {
       fail(r.error);
@@ -167,6 +233,7 @@ async function selectQuestions(paperId: string, qNos?: number[]) {
     ready: has.check,
     mains: has.mains,
     proof: has.proof,
+    sections: has.sections,
     questions: rows.map(readQuestion),
   };
 }
@@ -191,6 +258,8 @@ function readQuestion(r: unknown): ExamQuestion {
     proof_answer: q.proof_answer ?? q.verified,
     proof_explanation: q.proof_explanation ?? (q.verified && explained),
     also_correct: cleanAlso(q.also_correct, q.correct),
+    paper_section: q.paper_section ?? "",
+    syllabus_node_id: q.syllabus_node_id ?? null,
     difficulty: difficultyOf(q.difficulty),
     options: Array.from({ length: OPTION_COUNT }, (_, i) => ({
       en: options[i]?.en ?? "",
@@ -200,8 +269,71 @@ function readQuestion(r: unknown): ExamQuestion {
 }
 
 // A written (Mains) question has no options.
-const incomplete = (q: ExamQuestion, written = false) =>
-  !q.question_en || !q.question_hi || (!written && q.options.some((o) => !o.en || !o.hi));
+// A language section's question (lang) needs only that language.
+const incomplete = (q: ExamQuestion, written = false, lang: "en" | "hi" | null = null) =>
+  (!q.question_en && lang !== "hi") ||
+  (!q.question_hi && lang !== "en") ||
+  (!written && q.options.some((o) => (!o.en && lang !== "hi") || (!o.hi && lang !== "en")));
+
+// ---------- Tagging on the exam's syllabus ----------
+
+type SylRow = { id: string; name: string; stage: string; notified_on: string | null };
+// The syllabi in the Syllabus feature (old ones kept for old papers left
+// out).
+async function currentSyllabi(): Promise<SylRow[]> {
+  let { data, error } = await from("syllabus_exams")
+    .select("id,name,stage,notified_on")
+    .eq("archived", false);
+  if (error && /archived/.test(error.message))
+    ({ data, error } = await from("syllabus_exams").select("id,name,stage,notified_on"));
+  if (error) return [];
+  return (data ?? []) as unknown as SylRow[];
+}
+
+async function syllabusNodes(examId: string) {
+  const { data } = await from("syllabus_nodes")
+    .select("id,kind,text_en,text_hi,section")
+    .eq("exam_id", examId)
+    .order("position");
+  return (data ?? []) as unknown as Pick<
+    SyllabusNode,
+    "id" | "kind" | "text_en" | "text_hi" | "section"
+  >[];
+}
+
+// What tagging a paper needs: the exam's current syllabus (set on the paper,
+// else guessed from its name), its numbered lines and their tags, the old
+// syllabus the paper followed (its headings), and the paper's sections.
+export async function paperTagging(paper: ExamPaper) {
+  const list = await currentSyllabi();
+  const set = paper.exam_syllabus_id ? list.find((x) => x.id === paper.exam_syllabus_id) : null;
+  const syl = set ?? guessSyllabus(paper.exam, list);
+  const nodes = syl ? await syllabusNodes(syl.id) : [];
+  const tags = syllabusTags(nodes);
+  let old: { name: string; heads: string[] } | null = null;
+  if (paper.syllabus_id) {
+    const { data } = await from("syllabus_exams")
+      .select("name,stage")
+      .eq("id", paper.syllabus_id)
+      .maybeSingle();
+    if (data) {
+      const heads = (await syllabusNodes(paper.syllabus_id))
+        .filter((n) => n.kind === "heading" || n.kind === "subheading")
+        .map((n) => n.text_en || n.text_hi);
+      old = { name: examTitle(data as never), heads };
+    }
+  }
+  const { sections, ranges } = await paperSectionsOf(paper);
+  return {
+    syllabus: syl ? { id: syl.id, title: examTitle(syl as never), guessed: !set } : null,
+    syllabi: list.map((x) => ({ id: x.id, title: examTitle(x as never) })),
+    lines: tagLines(nodes),
+    tags: Object.fromEntries(tags),
+    old,
+    sections,
+    ranges,
+  };
+}
 
 // ---------- Papers ----------
 
@@ -215,6 +347,9 @@ export async function listPapers(): Promise<{ ready: boolean; papers: PaperSumma
   const papers = (data ?? []) as unknown as ExamPaper[];
   const stats = new Map<string, Omit<PaperSummary, keyof ExamPaper>>();
   const writtenIds = new Set(papers.filter(isWritten).map((p) => p.id));
+  // Each paper's sections, for its language questions.
+  const allSections = await getSections();
+  const rangesOf = new Map(papers.map((p) => [p.id, cleanRanges(p.sections, allSections)]));
   for (const p of papers)
     stats.set(p.id, {
       questions: 0,
@@ -241,7 +376,7 @@ export async function listPapers(): Promise<{ ready: boolean; papers: PaperSumma
           .order("id")
           .range(at, at + 999),
       QUESTION_COLS,
-      ["proof"],
+      ["proof", "sections"],
     );
     for (const raw of rows) {
       const q = readQuestion(raw);
@@ -250,7 +385,8 @@ export async function listPapers(): Promise<{ ready: boolean; papers: PaperSumma
       s.questions++;
       if (q.correct) s.answered++;
       if (q.deleted) s.deleted++;
-      if (incomplete(q, writtenIds.has(q.paper_id))) s.incomplete++;
+      const lang = langOf(allSections, sectionOf(rangesOf.get(q.paper_id) ?? [], q));
+      if (incomplete(q, writtenIds.has(q.paper_id), lang)) s.incomplete++;
       if (q.ca) s.ca++;
       if (q.match === "covered") s.covered++;
       if (q.match === "low") s.low++;
@@ -281,6 +417,10 @@ export type PaperMeta = {
   exam_date: string | null;
   paper_code?: string;
   series?: string;
+  // After the paper_sections migration.
+  paper_type?: string;
+  sections?: SectionRange[];
+  exam_syllabus_id?: string | null;
 };
 
 const cleanMeta = (m: Partial<PaperMeta>) => ({
@@ -292,6 +432,9 @@ const cleanMeta = (m: Partial<PaperMeta>) => ({
   ...(m.exam_date !== undefined ? { exam_date: m.exam_date || null } : {}),
   ...(m.paper_code !== undefined ? { paper_code: m.paper_code.trim().slice(0, 60) } : {}),
   ...(m.series !== undefined ? { series: normSeries(m.series) } : {}),
+  ...(m.paper_type !== undefined ? { paper_type: m.paper_type.trim().slice(0, 40) } : {}),
+  ...(m.sections !== undefined ? { sections: m.sections.slice(0, 12) } : {}),
+  ...(m.exam_syllabus_id !== undefined ? { exam_syllabus_id: m.exam_syllabus_id } : {}),
 });
 
 export async function createPaper(
@@ -302,11 +445,21 @@ export async function createPaper(
 ): Promise<ExamPaper> {
   const row = cleanMeta(meta);
   if (!row.exam) throw new Error("Give the exam's name.");
-  const { data, error } = await from("exam_papers")
-    .insert({ ...row, source, pages, ...(kind === "subjective" ? { kind } : {}) } as never)
-    .select("*")
-    .single();
+  if (row.sections) row.sections = cleanRanges(row.sections, await getSections());
+  const insert = (r: Record<string, unknown>) =>
+    from("exam_papers")
+      .insert({ ...r, source, pages, ...(kind === "subjective" ? { kind } : {}) } as never)
+      .select("*")
+      .single();
+  let { data, error } = await insert(row);
+  // Before the paper_sections migration: added without its type and
+  // sections (the paper's page asks for the migration).
+  if (missingSections(error)) {
+    const { paper_type: _t, sections: _s, exam_syllabus_id: _e, ...plain } = row;
+    ({ data, error } = await insert(plain));
+  }
   if (kind === "subjective" && missingMains(error)) throw new Error(MAINS_NOT_READY);
+  if (missingSections(error)) throw new Error(SECTIONS_NOT_READY);
   if (missing(error)) throw new Error(PAPERS_NOT_READY);
   fail(error);
   return data as unknown as ExamPaper;
@@ -315,13 +468,12 @@ export async function createPaper(
 export async function updatePaper(id: string, meta: Partial<PaperMeta>) {
   const row = cleanMeta(meta);
   if (row.exam === "") throw new Error("Give the exam's name.");
-  fail(
-    (
-      await from("exam_papers")
-        .update({ ...row, updated_at: now() } as never)
-        .eq("id", id)
-    ).error,
-  );
+  if (row.sections) row.sections = cleanRanges(row.sections, await getSections());
+  const { error } = await from("exam_papers")
+    .update({ ...row, updated_at: now() } as never)
+    .eq("id", id);
+  if (missingSections(error)) throw new Error(SECTIONS_NOT_READY);
+  fail(error);
 }
 
 // The old syllabus a paper followed (an old one kept for old papers only),
@@ -619,7 +771,13 @@ export class SeriesNeeded extends Error {
 
 export async function importPapers(
   papers: ImportedPaper[],
-  meta: { conducted_by: string; exam_date: string | null },
+  meta: {
+    conducted_by: string;
+    exam_date: string | null;
+    paper_type?: string;
+    sections?: SectionRange[];
+    exam_syllabus_id?: string | null;
+  },
 ): Promise<{ papers: string[]; questions: number }> {
   if (!papers.length || !papers.some((p) => p.questions.length))
     throw new Error(
@@ -634,6 +792,9 @@ export async function importPapers(
         subject: p.subject,
         conducted_by: meta.conducted_by,
         exam_date: meta.exam_date,
+        ...(meta.paper_type ? { paper_type: meta.paper_type } : {}),
+        ...(meta.sections ? { sections: meta.sections } : {}),
+        ...(meta.exam_syllabus_id ? { exam_syllabus_id: meta.exam_syllabus_id } : {}),
       },
       "excel",
       0,
@@ -686,6 +847,8 @@ export type QuestionPatch = Partial<
   // Ticks or clears one or more of the three checks.
   proof?: Partial<Record<ProofLevel, boolean>>;
   difficulty?: Difficulty | null;
+  paper_section?: string;
+  syllabus_node_id?: string | null;
 };
 
 async function questionById(id: string) {
@@ -719,10 +882,32 @@ export async function updateQuestion(id: string, patch: QuestionPatch) {
     sorted.model_source = String(patch.model_source).trim().slice(0, 200);
   if (patch.master_topic_id !== undefined) sorted.master_topic_id = patch.master_topic_id;
   if (patch.difficulty !== undefined) sorted.difficulty = difficultyOf(patch.difficulty);
+  if (patch.paper_section !== undefined)
+    sorted.paper_section = String(patch.paper_section).slice(0, 30);
+  // A syllabus line: the subject and topic follow it.
+  if (patch.syllabus_node_id !== undefined) {
+    sorted.syllabus_node_id = patch.syllabus_node_id;
+    if (patch.syllabus_node_id) {
+      const { data: n } = await from("syllabus_nodes")
+        .select("exam_id")
+        .eq("id", patch.syllabus_node_id)
+        .maybeSingle();
+      if (!n) throw new Error("That syllabus line is gone: reload the paper.");
+      const tag = syllabusTags(await syllabusNodes((n as { exam_id: string }).exam_id)).get(
+        patch.syllabus_node_id,
+      );
+      if (tag) {
+        sorted.subject_section = tag.subject;
+        sorted.topic_en = tag.topic_en;
+        sorted.topic_hi = tag.topic_hi;
+      }
+    }
+  }
   if (Object.keys(sorted).length) {
     const { error } = await from("exam_questions")
       .update({ ...sorted, updated_at: now() } as never)
       .eq("id", id);
+    if (missingSections(error)) throw new Error(SECTIONS_NOT_READY);
     if (missingProof(error)) throw new Error(PROOF_NOT_READY);
     if (missingMains(error) && /model_|master_topic/.test(error!.message))
       throw new Error(MAINS_NOT_READY);
@@ -858,6 +1043,8 @@ export async function explainStep(
   const { paper } = await getPaper(paperId);
   const { proof: proofCols, questions } = await selectQuestions(paperId);
   if (isWritten(paper)) throw new Error("A written paper has model answers, not explanations.");
+  // A language section's questions: explained in that language only.
+  const { lang: langFor } = await paperSectionsOf(paper);
   const wanted = (q: ExamQuestion) =>
     redo.length ? redo.includes(q.id) : !q.explanation_en && !q.explanation_hi;
   const todo = questions.filter(wanted);
@@ -927,6 +1114,7 @@ export async function explainStep(
           also: q.also_correct,
           deleted: q.deleted,
           passages,
+          lang: langFor(q),
         })),
         hindiGuide(glossary),
       ),
@@ -942,8 +1130,9 @@ export async function explainStep(
       (
         await from("exam_questions")
           .update({
-            explanation_en: e.en,
-            explanation_hi: e.hi,
+            // A language question: never a translation.
+            explanation_en: langFor(q) === "hi" ? "" : e.en,
+            explanation_hi: langFor(q) === "en" ? "" : e.hi,
             explanation_source: [...new Set(used.map((p) => p.title))].join("; ").slice(0, 500),
             explanation_general: !used.length,
             // A new explanation is proofread again (and needed for
@@ -974,8 +1163,26 @@ export async function reviewStep(
   const { data: p, error } = await from("exam_papers").select("*").eq("id", paperId).single();
   fail(error);
   const written = isWritten(p as unknown as { kind?: string });
-  const { ready, questions } = await selectQuestions(paperId);
+  const { ready, questions, proof, sections: sectionCols } = await selectQuestions(paperId);
   if (!ready) throw new Error(CHECK_NOT_READY);
+  // Tagging on the exam's syllabus, and the paper's sections (after the
+  // paper_sections migration).
+  const tagging = sectionCols ? await paperTagging(p as unknown as ExamPaper) : null;
+  const langFor = (q: ExamQuestion) =>
+    tagging ? langOf(tagging.sections, sectionOf(tagging.ranges, q)) : null;
+  const paperSections =
+    tagging && needsSorting(tagging.ranges)
+      ? tagging.sections.filter((x) => tagging.ranges.some((r) => r.key === x.key))
+      : null;
+  const context =
+    tagging && (tagging.lines.length || paperSections)
+      ? tagContext({
+          syllabus: tagging.syllabus?.title ?? "",
+          lines: tagging.lines,
+          oldSyllabus: tagging.old,
+          sections: paperSections,
+        })
+      : undefined;
   const wanted = (q: ExamQuestion) => (redo.length ? redo.includes(q.id) : !checkedNow(q));
   const todo = questions.filter(wanted);
   const batch = todo.slice(0, CHECK_BATCH);
@@ -996,8 +1203,10 @@ export async function reviewStep(
           explanation_en: q.explanation_en,
           explanation_hi: q.explanation_hi,
           written: written ? { marks: q.marks ?? null, words: q.word_limit ?? null } : null,
+          lang: langFor(q),
         })),
         (p as unknown as { exam: string }).exam,
+        context,
       ),
     ),
     batch.map((q) => q.q_no),
@@ -1008,13 +1217,49 @@ export async function reviewStep(
     const r = out.get(q.q_no);
     if (!r) continue;
     // A question deleted by the key: no key to doubt.
-    const issues = q.deleted ? r.issues.filter((i) => i.kind !== "key") : r.issues;
+    // Its syllabus line (when not tagged yet), its section (when no range
+    // covers it) and difficulty (when not set): subject and topic follow the
+    // line.
+    const t = tagging
+      ? readTag(
+          r.raw,
+          tagging.lines,
+          tagging.ranges.map((x) => x.key),
+        )
+      : null;
+    const sorted =
+      t?.section &&
+      paperSections &&
+      !tagging!.ranges.some((x) => x.from && x.to && q.q_no >= x.from && q.q_no <= x.to)
+        ? t.section
+        : null;
+    // A language question has no translation to compare (its section as
+    // just sorted counts).
+    const qLang = langFor({ ...q, paper_section: sorted ?? q.paper_section });
+    const issues = (q.deleted ? r.issues.filter((i) => i.kind !== "key") : r.issues).filter(
+      (i) => i.kind !== "language" || !qLang,
+    );
+    const node = t?.node && !q.syllabus_node_id ? t.node : null;
+    const tag = node ? tagging!.tags[node] : null;
     fail(
       (
         await from("exam_questions")
           .update({
-            ...(q.subject_section ? {} : { subject_section: r.subject }),
-            ...(q.topic_en || q.topic_hi ? {} : { topic_en: r.topic.en, topic_hi: r.topic.hi }),
+            ...(tag
+              ? {
+                  syllabus_node_id: node,
+                  subject_section: tag.subject || r.subject,
+                  topic_en: tag.topic_en,
+                  topic_hi: tag.topic_hi,
+                }
+              : {
+                  ...(q.subject_section ? {} : { subject_section: r.subject }),
+                  ...(q.topic_en || q.topic_hi
+                    ? {}
+                    : { topic_en: r.topic.en, topic_hi: r.topic.hi }),
+                }),
+            ...(sorted ? { paper_section: sorted } : {}),
+            ...(proof && t?.difficulty && !q.difficulty ? { difficulty: t.difficulty } : {}),
             ai_check: {
               issues,
               suggest: q.deleted ? null : r.suggest,
