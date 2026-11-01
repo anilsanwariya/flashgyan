@@ -12,8 +12,30 @@ export const STAGES = [
   { id: "prelims", label: "Prelims" },
   { id: "mains", label: "Mains" },
   { id: "single", label: "Single stage" },
+  // Exams with two (or three) stages that aren't Prelims and Mains, often
+  // both objective.
+  { id: "stage1", label: "Stage 1" },
+  { id: "stage2", label: "Stage 2" },
+  { id: "stage3", label: "Stage 3" },
 ] as const;
 export type Stage = (typeof STAGES)[number]["id"];
+export const stageLabel = (s: Stage) => STAGES.find((x) => x.id === s)?.label ?? s;
+
+// Objective (MCQ) or written papers.
+export const MODES = [
+  { id: "objective", label: "Objective (MCQ)" },
+  { id: "written", label: "Written" },
+] as const;
+export type Mode = (typeof MODES)[number]["id"];
+export const defaultMode = (s: Stage): Mode => (s === "mains" ? "written" : "objective");
+
+// A stage with several papers: held on the same day or on different days.
+export const PAPER_DAYS = [
+  { id: "", label: "One paper" },
+  { id: "same", label: "Several papers, same day" },
+  { id: "different", label: "Several papers, different days" },
+] as const;
+export type PaperDays = "same" | "different" | null;
 
 export const NODE_KINDS = ["paper", "unit", "part", "heading", "subheading", "line"] as const;
 export type NodeKind = (typeof NODE_KINDS)[number];
@@ -61,6 +83,12 @@ export type SyllabusExam = {
   pages_done: number;
   status: "draft" | "final";
   error: string | null;
+  // After the syllabus_stages migration: objective or written, the papers'
+  // days, and "for old papers only" (kept for the papers that followed it,
+  // out of the Syllabus feature, outlines, notes and quizzes).
+  mode?: Mode;
+  paper_days?: PaperDays;
+  archived?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -78,7 +106,35 @@ export type SyllabusNode = {
 };
 
 export const examTitle = (e: Pick<SyllabusExam, "name" | "stage">) =>
-  `${e.name}${e.stage === "single" ? "" : ` ${e.stage === "prelims" ? "Prelims" : "Mains"}`}`;
+  `${e.name}${e.stage === "single" ? "" : ` ${stageLabel(e.stage)}`}`;
+
+// The papers of a stage: its "paper" headings, else the scheme's papers.
+export function stagePapers(
+  nodes: Pick<SyllabusNode, "kind" | "text_en" | "text_hi">[],
+  scheme: Scheme | null,
+): string[] {
+  const heads = nodes.filter((n) => n.kind === "paper").map((n) => n.text_en || n.text_hi);
+  return heads.length ? heads : (scheme?.papers ?? []).map((p) => p.name);
+}
+
+// How a stage is held, in a few words: "Objective · 2 papers, same day".
+export function stageNote(
+  e: Pick<SyllabusExam, "mode" | "paper_days" | "stage">,
+  papers: number,
+): string {
+  const mode = e.mode ?? defaultMode(e.stage);
+  const days =
+    papers > 1 || e.paper_days
+      ? `${papers > 1 ? `${papers} papers` : "several papers"}${
+          e.paper_days === "same"
+            ? ", same day"
+            : e.paper_days === "different"
+              ? ", different days"
+              : ""
+        }`
+      : "";
+  return [mode === "written" ? "Written" : "Objective", days].filter(Boolean).join(" · ");
+}
 
 const str = (v: unknown, max = 2000) =>
   typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "";

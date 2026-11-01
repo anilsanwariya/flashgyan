@@ -65,11 +65,25 @@ const shortHead = (s: string) => {
 async function officialLines(
   section?: string,
 ): Promise<(OutlineLine & { section: string; stage: SyllabusExam["stage"] })[]> {
-  const exams = await all<SyllabusExam>("syllabus_exams", "id,name,stage");
+  // Old syllabi kept for old papers only are left out.
+  const exams = (
+    await all<SyllabusExam>("syllabus_exams", "id,name,stage,archived").catch((e) => {
+      if (/archived/.test(String(e?.message)))
+        return all<SyllabusExam>("syllabus_exams", "id,name,stage");
+      throw e;
+    })
+  ).filter((e) => !e.archived);
   const names = new Map(exams.map((e) => [e.id, examTitle(e)]));
   const stages = new Map(exams.map((e) => [e.id, e.stage]));
   // In a steady order: exam by exam (Prelims before Mains), as printed.
-  const STAGE_ORDER = { prelims: 0, mains: 1, single: 2 } as const;
+  const STAGE_ORDER = {
+    prelims: 0,
+    mains: 1,
+    single: 2,
+    stage1: 3,
+    stage2: 4,
+    stage3: 5,
+  } as const;
   const rank = new Map(
     [...exams]
       .sort(
@@ -82,9 +96,11 @@ async function officialLines(
   );
   const nodes = (
     await all<SyllabusNode>("syllabus_nodes", "id,exam_id,position,kind,text_en,text_hi,section")
-  ).sort(
-    (a, b) => (rank.get(a.exam_id) ?? 0) - (rank.get(b.exam_id) ?? 0) || a.position - b.position,
-  );
+  )
+    .filter((n) => rank.has(n.exam_id))
+    .sort(
+      (a, b) => (rank.get(a.exam_id) ?? 0) - (rank.get(b.exam_id) ?? 0) || a.position - b.position,
+    );
   const links = await all<{ node_id: string; topic_id: string }>(
     "syllabus_links",
     "node_id,topic_id",

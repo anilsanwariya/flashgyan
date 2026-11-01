@@ -324,6 +324,59 @@ export async function updatePaper(id: string, meta: Partial<PaperMeta>) {
   );
 }
 
+// The old syllabus a paper followed (an old one kept for old papers only),
+// or none.
+export async function setPaperSyllabus(paperId: string, syllabusId: string | null) {
+  if (syllabusId) {
+    const { data, error } = await from("syllabus_exams")
+      .select("id,archived")
+      .eq("id", syllabusId)
+      .single();
+    if (error && /archived/.test(error.message))
+      throw new Error(
+        "Old syllabi need a database update: run the latest migration (syllabus_stages) in Lovable or the SQL editor.",
+      );
+    fail(error);
+    if (!(data as unknown as { archived?: boolean }).archived)
+      throw new Error(
+        "That's an exam's current syllabus: a paper links only to an old syllabus kept for old papers.",
+      );
+  }
+  const { error } = await from("exam_papers")
+    .update({ syllabus_id: syllabusId, updated_at: now() } as never)
+    .eq("id", paperId);
+  if (error && /syllabus_id/.test(error.message))
+    throw new Error(
+      "Old syllabi need a database update: run the latest migration (syllabus_stages) in Lovable or the SQL editor.",
+    );
+  fail(error);
+}
+
+// A paper's old syllabus in short, for its page.
+export async function paperSyllabus(syllabusId: string | null | undefined) {
+  if (!syllabusId) return null;
+  const { data } = await from("syllabus_exams")
+    .select("id,name,stage,body,notified_on,pages,pages_done,status")
+    .eq("id", syllabusId)
+    .maybeSingle();
+  if (!data) return null;
+  const { count } = await from("syllabus_nodes")
+    .select("id", { count: "exact", head: true })
+    .eq("exam_id", syllabusId)
+    .eq("kind", "line");
+  const e = data as {
+    id: string;
+    name: string;
+    stage: string;
+    body: string;
+    notified_on: string | null;
+    pages: number;
+    pages_done: number;
+    status: string;
+  };
+  return { ...e, lines: count ?? 0 };
+}
+
 export async function deletePaper(id: string) {
   fail((await from("exam_papers").delete().eq("id", id)).error);
 }

@@ -23,7 +23,9 @@ async function assertAdmin(userId: string) {
 }
 
 const id = z.string().uuid();
-const stage = z.enum(["prelims", "mains", "single"]);
+const stage = z.enum(["prelims", "mains", "single", "stage1", "stage2", "stage3"]);
+const mode = z.enum(["objective", "written"]);
+const paperDays = z.enum(["same", "different"]).nullable();
 const date = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -47,6 +49,14 @@ export const listSyllabi = createServerFn({ method: "GET" })
     return (await server()).listSyllabi();
   });
 
+// The old syllabi kept for old papers (never in the Syllabus feature).
+export const listOldSyllabi = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).listSyllabi(true);
+  });
+
 export const createSyllabus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
@@ -57,6 +67,9 @@ export const createSyllabus = createServerFn({ method: "POST" })
         stage,
         notified_on: date,
         pages: z.number().int().min(1).max(200),
+        mode: mode.optional(),
+        paper_days: paperDays.optional(),
+        archived: z.boolean().optional(),
       })
       .parse(d),
   )
@@ -117,6 +130,9 @@ export const updateSyllabusExam = createServerFn({ method: "POST" })
           stage: stage.optional(),
           notified_on: date.optional(),
           status: z.enum(["draft", "final"]).optional(),
+          mode: mode.optional(),
+          paper_days: paperDays.optional(),
+          archived: z.boolean().optional(),
         }),
       })
       .parse(d),

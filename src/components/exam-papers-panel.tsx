@@ -49,6 +49,7 @@ import {
   setExamLesson,
   syncExamPyqSets,
   updateExamPaper,
+  setExamPaperSyllabus,
   updateExamQuestion,
   type PaperSummary,
 } from "@/lib/exam-papers.functions";
@@ -85,6 +86,14 @@ import { formatDate } from "@/lib/current-affairs";
 import { Badge, errorText } from "@/components/ca-ui";
 import { ExamWeights } from "@/components/exam-weights";
 import { AlsoAccepted, DifficultySelect, ProofChecks } from "@/components/exam-proof";
+import {
+  linkOldSyllabus,
+  NO_OLD_SYLLABUS,
+  OldSyllabusPicker,
+  PaperSyllabus,
+  type OldSyllabusChoice,
+} from "@/components/exam-paper-syllabus";
+import { createSyllabus } from "@/lib/syllabus.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -372,6 +381,9 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
   const createFn = useServerFn(createExamPaper);
   const importFn = useServerFn(importExamPapers);
   const keyFn = useServerFn(applyExamKey);
+  const syllabusFn = useServerFn(createSyllabus);
+  const linkFn = useServerFn(setExamPaperSyllabus);
+  const [oldSyllabus, setOldSyllabus] = useState<OldSyllabusChoice>(NO_OLD_SYLLABUS);
   const [openForm, setOpenForm] = useState(false);
   const [exam, setExam] = useState("");
   const [subject, setSubject] = useState("");
@@ -414,6 +426,9 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
         series,
       };
       let id: string;
+      let ids: string[] = [];
+      if (oldSyllabus.pick === "new" && !oldSyllabus.en && !oldSyllabus.hi)
+        throw new Error("Choose the old syllabus PDF (English or Hindi).");
       if (isExcel(paperFile)) {
         setBusy("Reading the sheet…");
         const { workbookSheets } = await import("@/lib/exam-pdf");
@@ -422,6 +437,7 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
           data: { papers, conducted_by: body, exam_date: date || null },
         });
         id = r.papers[0];
+        ids = r.papers;
         toast.success(
           `${r.questions} questions imported${r.papers.length > 1 ? ` into ${r.papers.length} papers` : ""}`,
         );
@@ -431,9 +447,24 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
         const pages = await pdfPageCount(paperFile);
         const paper = await createFn({ data: { meta, pages, kind } });
         id = paper.id;
+        ids = [id];
         pending.set(id, paperFile);
         toast.success(`Paper added: reading its ${pages} pages`);
       } else throw new Error("Use the question paper's PDF or an Excel sheet.");
+      // The old syllabus it followed (made once, linked to every paper).
+      if (oldSyllabus.pick) {
+        setBusy("Adding the old syllabus…");
+        try {
+          const sid = await linkOldSyllabus(
+            { id, exam: meta.exam || exam, conducted_by: body, written: kind === "subjective" },
+            oldSyllabus,
+            { create: syllabusFn, link: linkFn },
+          );
+          for (const other of ids.slice(1)) await linkFn({ data: { id: other, syllabus_id: sid } });
+        } catch (err) {
+          toast.error(errorText(err, "Couldn't add the old syllabus"));
+        }
+      }
       if (keyRead) {
         setBusy("Adding the answer key…");
         try {
@@ -595,6 +626,7 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
           </span>
         </label>
       </div>
+      <OldSyllabusPicker value={oldSyllabus} onChange={setOldSyllabus} />
       <div className="flex flex-wrap gap-2">
         <Button type="submit" disabled={!!busy || !paperFile}>
           <FileUp className="mr-1 h-4 w-4" /> {busy || "Add paper"}
@@ -947,6 +979,14 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
           )}
           {toCheck.length > 0 && <Badge tone="warn">{toCheck.length} to check</Badge>}
         </div>
+        <PaperSyllabus
+          paper={paper}
+          syllabus={
+            (data as { syllabus?: Parameters<typeof PaperSyllabus>[0]["syllabus"] }).syllabus ??
+            null
+          }
+          onChanged={refresh}
+        />
         {reading ? (
           <p className="flex items-center gap-2 text-sm text-primary" role="status">
             <RefreshCw className="h-4 w-4 animate-spin" /> {reading}

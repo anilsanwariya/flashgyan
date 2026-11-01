@@ -38,8 +38,15 @@ import {
   KIND_LABEL,
   NODE_KINDS,
   readableText,
+  defaultMode,
+  MODES,
+  PAPER_DAYS,
   STAGES,
+  stageNote,
+  stagePapers,
+  type Mode,
   type NodeKind,
+  type PaperDays,
   type Scheme,
   type Stage,
   type SyllabusExam,
@@ -57,6 +64,10 @@ import { NotesBooks } from "@/components/notes-books";
 // goes on after the exam is made.
 type Files = { en: File | null; hi: File | null; scheme: File | null };
 const chosen = new Map<string, Files>();
+// PDFs chosen elsewhere (a paper's old syllabus), read when the syllabus
+// opens.
+export const queueSyllabusFiles = (id: string, files: Files) => chosen.set(id, files);
+export const syllabusQueued = (id: string) => chosen.has(id);
 
 export function SyllabusPanel() {
   const [open, setOpen] = useState<string | null>(null);
@@ -155,6 +166,9 @@ function SyllabusCard({ e, onOpen }: { e: SyllabusSummary; onOpen: () => void })
           </Badge>
         )}
       </div>
+      <p className="text-xs text-muted-foreground" data-stage-note>
+        {stageNote(e, e.papers)}
+      </p>
       <p className="text-xs text-muted-foreground">
         {e.lines} points under {e.headings} headings
         {e.unsorted ? ` · ${e.unsorted} without a subject section` : ""}
@@ -172,10 +186,29 @@ function SyllabusCard({ e, onOpen }: { e: SyllabusSummary; onOpen: () => void })
   );
 }
 
-function AddSyllabus({ onAdded }: { onAdded: (id: string) => void }) {
+// A new syllabus: the exam's current one, or (archived) an old one kept
+// for the old papers that followed it.
+export function AddSyllabus({
+  onAdded,
+  archived = false,
+  name = "",
+  body = "",
+}: {
+  onAdded: (id: string) => void;
+  archived?: boolean;
+  name?: string;
+  body?: string;
+}) {
   const qc = useQueryClient();
   const createFn = useServerFn(createSyllabus);
-  const [f, setF] = useState({ name: "", body: "", stage: "prelims" as Stage, notified_on: "" });
+  const [f, setF] = useState({
+    name,
+    body,
+    stage: "prelims" as Stage,
+    notified_on: "",
+    mode: "objective" as Mode,
+    paper_days: "" as "" | "same" | "different",
+  });
   const [files, setFiles] = useState<Files>({ en: null, hi: null, scheme: null });
   const [busy, setBusy] = useState(false);
   const ok = f.name.trim().length >= 2 && (files.en || files.hi);
@@ -193,10 +226,13 @@ function AddSyllabus({ onAdded }: { onAdded: (id: string) => void }) {
           stage: f.stage,
           notified_on: f.notified_on || null,
           pages: Math.max(...counts),
+          mode: f.mode,
+          paper_days: (f.paper_days || null) as PaperDays,
+          ...(archived ? { archived: true } : {}),
         },
       });
       chosen.set(e.id, files);
-      await qc.invalidateQueries({ queryKey: ["syllabi"] });
+      await qc.invalidateQueries({ queryKey: [archived ? "oldSyllabi" : "syllabi"] });
       onAdded(e.id);
     } catch (e) {
       toast.error(errorText(e, "Couldn't add it"));
@@ -222,11 +258,18 @@ function AddSyllabus({ onAdded }: { onAdded: (id: string) => void }) {
       className="space-y-3 rounded-2xl border border-border bg-card p-4"
     >
       <div>
-        <h3 className="font-semibold">Add an exam's syllabus</h3>
+        <h3 className="font-semibold">
+          {archived ? "Add the old syllabus this paper followed" : "Add an exam's syllabus"}
+        </h3>
         <p className="text-sm text-muted-foreground">
-          One stage at a time (RAS Prelims, then RAS Mains). Choose the official syllabus PDFs in
-          English and Hindi, and for Mains the scheme of examination. SAATHI reads them a page at a
-          time (one AI request a page), pairs the Hindi and English lines and puts each point in a
+          {archived
+            ? "Kept for old papers only: it helps read and sort papers set before the syllabus changed, and never shows in the Syllabus section, the outlines, notes or quizzes (they follow the exam's latest syllabus). "
+            : ""}
+          One stage at a time (RAS Prelims, then RAS Mains; or Stage 1, then Stage 2). Say whether
+          its papers are objective or written, and when a stage has several papers whether they're
+          held on the same day or different days. Choose the official syllabus PDFs in English and
+          Hindi, and the scheme of examination if you have it. SAATHI reads them a page at a time
+          (one AI request a page), pairs the Hindi and English lines and puts each point in a
           subject section; then you check it.
         </p>
       </div>
@@ -250,12 +293,39 @@ function AddSyllabus({ onAdded }: { onAdded: (id: string) => void }) {
         <select
           aria-label="Stage"
           value={f.stage}
-          onChange={(e) => setF({ ...f, stage: e.target.value as Stage })}
+          onChange={(e) => {
+            const stage = e.target.value as Stage;
+            setF({ ...f, stage, mode: defaultMode(stage) });
+          }}
           className="h-9 rounded-md border border-input bg-background px-2 text-sm"
         >
           {STAGES.map((s) => (
             <option key={s.id} value={s.id}>
               {s.label}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Papers"
+          value={f.mode}
+          onChange={(e) => setF({ ...f, mode: e.target.value as Mode })}
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+        >
+          {MODES.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Papers held"
+          value={f.paper_days}
+          onChange={(e) => setF({ ...f, paper_days: e.target.value as "" | "same" | "different" })}
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+        >
+          {PAPER_DAYS.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.label}
             </option>
           ))}
         </select>
@@ -273,7 +343,7 @@ function AddSyllabus({ onAdded }: { onAdded: (id: string) => void }) {
       <div className="flex flex-wrap items-end gap-2">
         {file("en", "English syllabus PDF")}
         {file("hi", "Hindi syllabus PDF")}
-        {f.stage !== "prelims" && file("scheme", "Scheme of examination PDF (optional)")}
+        {file("scheme", "Scheme of examination PDF (optional)")}
         <Button onClick={() => void add()} disabled={!ok || busy}>
           <FileUp className="mr-1 h-4 w-4" /> {busy ? "Adding…" : "Add and read"}
         </Button>
@@ -287,7 +357,15 @@ function AddSyllabus({ onAdded }: { onAdded: (id: string) => void }) {
 type Lang = "both" | "hi" | "en";
 const sectionNames = SUBJECT_SECTIONS.map((s) => s.en as string);
 
-function SyllabusView({ id, onBack }: { id: string; onBack: () => void }) {
+export function SyllabusView({
+  id,
+  onBack,
+  backLabel = "All syllabi",
+}: {
+  id: string;
+  onBack: () => void;
+  backLabel?: string;
+}) {
   const qc = useQueryClient();
   const getFn = useServerFn(getSyllabus);
   const pageFn = useServerFn(readSyllabusPage);
@@ -372,6 +450,7 @@ function SyllabusView({ id, onBack }: { id: string; onBack: () => void }) {
       setReading(null);
       await refresh();
       await qc.invalidateQueries({ queryKey: ["syllabi"] });
+      await qc.invalidateQueries({ queryKey: ["oldSyllabi"] });
     }
   }
 
@@ -391,7 +470,7 @@ function SyllabusView({ id, onBack }: { id: string; onBack: () => void }) {
     return (
       <div className="space-y-2">
         <Button variant="ghost" size="sm" onClick={onBack}>
-          <ArrowLeft className="mr-1 h-4 w-4" /> All syllabi
+          <ArrowLeft className="mr-1 h-4 w-4" /> {backLabel}
         </Button>
         <p className="text-sm text-destructive">{errorText(q.error, "Couldn't load it")}</p>
       </div>
@@ -427,7 +506,7 @@ function SyllabusView({ id, onBack }: { id: string; onBack: () => void }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="ghost" size="sm" onClick={onBack}>
-          <ArrowLeft className="mr-1 h-4 w-4" /> All syllabi
+          <ArrowLeft className="mr-1 h-4 w-4" /> {backLabel}
         </Button>
         <h2 className="text-lg font-semibold">{examTitle(exam)}</h2>
         {exam.body && <span className="text-sm text-muted-foreground">{exam.body}</span>}
@@ -437,6 +516,11 @@ function SyllabusView({ id, onBack }: { id: string; onBack: () => void }) {
         <Badge tone={exam.status === "final" ? "good" : "muted"}>
           {exam.status === "final" ? "Final" : "Draft"}
         </Badge>
+        {exam.archived && (
+          <Badge tone="warn" data-archived>
+            For old papers only
+          </Badge>
+        )}
         <div className="ml-auto flex flex-wrap gap-2">
           {exam.status === "draft" ? (
             <Button
@@ -496,6 +580,7 @@ function SyllabusView({ id, onBack }: { id: string; onBack: () => void }) {
         )
       )}
 
+      <StageSettings exam={exam} papers={stagePapers(nodes, exam.scheme)} onChanged={refresh} />
       {exam.scheme && <SchemeTable scheme={exam.scheme} />}
 
       <div className="sticky top-0 z-10 -mx-1 flex flex-wrap items-center gap-2 bg-background/95 px-1 py-1.5 backdrop-blur">
@@ -587,6 +672,59 @@ function SyllabusView({ id, onBack }: { id: string; onBack: () => void }) {
             Read it all again
           </button>
         </p>
+      )}
+    </div>
+  );
+}
+
+// How the stage is held: objective or written, and its papers' days.
+function StageSettings({
+  exam,
+  papers,
+  onChanged,
+}: {
+  exam: SyllabusExam;
+  papers: string[];
+  onChanged: () => Promise<unknown>;
+}) {
+  const fn = useServerFn(updateSyllabusExam);
+  const save = (patch: { mode?: Mode; paper_days?: PaperDays }) =>
+    void fn({ data: { id: exam.id, patch } })
+      .then(async () => {
+        toast.success("Saved");
+        await onChanged();
+      })
+      .catch((e) => toast.error(errorText(e, "Couldn't save")));
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm" data-stage-settings>
+      <select
+        aria-label="Papers"
+        value={exam.mode ?? defaultMode(exam.stage)}
+        onChange={(e) => save({ mode: e.target.value as Mode })}
+        className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+      >
+        {MODES.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.label}
+          </option>
+        ))}
+      </select>
+      <select
+        aria-label="Papers held"
+        value={exam.paper_days ?? ""}
+        onChange={(e) => save({ paper_days: (e.target.value || null) as PaperDays })}
+        className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+      >
+        {PAPER_DAYS.map((d) => (
+          <option key={d.id} value={d.id}>
+            {d.label}
+          </option>
+        ))}
+      </select>
+      {papers.length > 1 && (
+        <span className="text-xs text-muted-foreground" data-stage-papers>
+          {papers.length} papers: {papers.join(" · ")}
+        </span>
       )}
     </div>
   );

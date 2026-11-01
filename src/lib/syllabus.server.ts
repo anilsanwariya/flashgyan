@@ -8,12 +8,15 @@ import {
   examTitle,
   joinCut,
   NODE_KINDS,
+  defaultMode,
   normalizeScheme,
   pageMessages,
   parsePage,
   parseScheme,
   schemeMessages,
+  type Mode,
   type NodeKind,
+  type PaperDays,
   type Stage,
   type SyllabusExam,
   type SyllabusNode,
@@ -33,6 +36,12 @@ const now = () => new Date().toISOString();
 
 const missing = (e: { message: string } | null) =>
   !!e && /syllabus_exams|syllabus_nodes|schema cache/.test(e.message);
+// After the syllabus_stages migration: Stage 1/2/3, objective or written,
+// the papers' days, old syllabi for old papers.
+const missingStages = (e: { message: string } | null) =>
+  !!e && /mode|paper_days|archived|syllabus_exams_stage_check|syllabus_id/.test(e.message);
+export const STAGES_NOT_READY =
+  "Stages, papers' days and old syllabi need a database update: run the latest migration (syllabus_stages) in Lovable or the SQL editor.";
 export const SYLLABUS_NOT_READY =
   "The syllabus library needs a database update: run the latest migration (syllabus) in Lovable or the SQL editor.";
 
@@ -61,21 +70,31 @@ export type SyllabusSummary = SyllabusExam & {
   lines: number;
   headings: number;
   unsorted: number;
+  // The stage's papers (its "paper" headings).
+  papers: number;
   sections: Record<string, number>;
 };
 
-export async function listSyllabi(): Promise<{ ready: boolean; exams: SyllabusSummary[] }> {
-  const { data, error } = await from("syllabus_exams")
-    .select("*")
-    .order("name")
-    .order("stage", { ascending: false });
+// The Syllabus feature's syllabi, or (archived) the old ones kept for old
+// papers.
+export async function listSyllabi(
+  archived = false,
+): Promise<{ ready: boolean; exams: SyllabusSummary[] }> {
+  const q = () =>
+    from("syllabus_exams").select("*").order("name").order("stage", { ascending: false });
+  let { data, error } = await q().eq("archived", archived);
+  // Before the syllabus_stages migration: none is old.
+  if (missingStages(error)) {
+    if (archived) return { ready: true, exams: [] };
+    ({ data, error } = await q());
+  }
   if (missing(error)) return { ready: false, exams: [] };
   fail(error);
   const exams = ((data ?? []) as unknown[]).map(readExam);
   const stats = new Map(
     exams.map((e) => [
       e.id,
-      { lines: 0, headings: 0, unsorted: 0, sections: {} as Record<string, number> },
+      { lines: 0, headings: 0, unsorted: 0, papers: 0, sections: {} as Record<string, number> },
     ]),
   );
   for (let at = 0; exams.length; at += 1000) {
@@ -91,7 +110,10 @@ export async function listSyllabi(): Promise<{ ready: boolean; exams: SyllabusSu
         s.lines++;
         if (!r.section) s.unsorted++;
         else s.sections[r.section] = (s.sections[r.section] ?? 0) + 1;
-      } else s.headings++;
+      } else {
+        s.headings++;
+        if (r.kind === "paper") s.papers++;
+      }
     }
     if ((rows ?? []).length < 1000) break;
   }
@@ -104,17 +126,39 @@ export async function createSyllabus(input: {
   stage: Stage;
   notified_on: string | null;
   pages: number;
+  mode?: Mode;
+  paper_days?: PaperDays;
+  archived?: boolean;
 }): Promise<SyllabusExam> {
-  const { data, error } = await from("syllabus_exams")
-    .insert({
-      name: input.name.trim().slice(0, 120),
-      body: input.body.trim().slice(0, 60),
-      stage: input.stage,
-      notified_on: input.notified_on,
-      pages: input.pages,
-    } as never)
-    .select("*")
-    .single();
+  const base = {
+    name: input.name.trim().slice(0, 120),
+    body: input.body.trim().slice(0, 60),
+    stage: input.stage,
+    notified_on: input.notified_on,
+    pages: input.pages,
+  };
+  const mode = input.mode ?? defaultMode(input.stage);
+  const insert = (row: Record<string, unknown>) =>
+    from("syllabus_exams")
+      .insert(row as never)
+      .select("*")
+      .single();
+  let { data, error } = await insert({
+    ...base,
+    mode,
+    ...(input.paper_days ? { paper_days: input.paper_days } : {}),
+    ...(input.archived ? { archived: true } : {}),
+  });
+  // Before the syllabus_stages migration: fine when nothing new was asked.
+  if (missingStages(error)) {
+    const plain =
+      mode === defaultMode(input.stage) &&
+      !input.paper_days &&
+      !input.archived &&
+      ["prelims", "mains", "single"].includes(input.stage);
+    if (!plain) throw new Error(STAGES_NOT_READY);
+    ({ data, error } = await insert(base));
+  }
   if (missing(error)) throw new Error(SYLLABUS_NOT_READY);
   fail(error);
   return readExam(data);
@@ -223,7 +267,12 @@ export async function readSyllabusScheme(id: string, text: string) {
 
 export async function updateSyllabusExam(
   id: string,
-  patch: Partial<Pick<SyllabusExam, "name" | "body" | "stage" | "notified_on" | "status">>,
+  patch: Partial<
+    Pick<
+      SyllabusExam,
+      "name" | "body" | "stage" | "notified_on" | "status" | "mode" | "paper_days" | "archived"
+    >
+  >,
 ) {
   const row: Record<string, unknown> = { updated_at: now() };
   if (patch.name !== undefined) row.name = patch.name.trim().slice(0, 120);
@@ -231,13 +280,14 @@ export async function updateSyllabusExam(
   if (patch.stage !== undefined) row.stage = patch.stage;
   if (patch.notified_on !== undefined) row.notified_on = patch.notified_on;
   if (patch.status !== undefined) row.status = patch.status;
-  fail(
-    (
-      await from("syllabus_exams")
-        .update(row as never)
-        .eq("id", id)
-    ).error,
-  );
+  if (patch.mode !== undefined) row.mode = patch.mode;
+  if (patch.paper_days !== undefined) row.paper_days = patch.paper_days || null;
+  if (patch.archived !== undefined) row.archived = patch.archived;
+  const { error } = await from("syllabus_exams")
+    .update(row as never)
+    .eq("id", id);
+  if (missingStages(error)) throw new Error(STAGES_NOT_READY);
+  fail(error);
   return loadExam(id);
 }
 
