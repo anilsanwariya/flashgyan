@@ -114,6 +114,8 @@ export const getExamPaper = createServerFn({ method: "POST" })
       syllabus: await s.paperSyllabus(got.paper.syllabus_id).catch(() => null),
       // The exam's syllabus to tag on, its lines and tags, and the sections.
       tagging: await s.paperTagging(got.paper).catch(() => null),
+      // Read in the background, when queued.
+      queued: await s.queuedFor(got.paper.id).catch(() => null),
     };
   });
 
@@ -522,4 +524,68 @@ export const clearExportRemoved = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return (await exportServer()).clearRemoved(data.id, data.lang);
+  });
+
+// ---------- Papers read in the background ----------
+
+const queueServer = () => import("@/lib/exam-queue.server");
+
+export const startQueuedPaper = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        meta,
+        kind: z.enum(["objective", "subjective"]),
+        file_name: z.string().max(200),
+        pages: z.number().int().min(1).max(500),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await queueServer()).startQueued(data);
+  });
+
+export const markQueuedUploaded = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await queueServer()).markUploaded(data.id);
+    return { ok: true };
+  });
+
+export const listPaperQueue = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await queueServer()).listQueue();
+  });
+
+// One step of reading (the open page speeds the queue up).
+export const stepPaperQueue = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: id.optional() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return { did: await (await queueServer()).queueStep(data.id) };
+  });
+
+export const retryQueuedPaper = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await queueServer()).retryQueued(data.id);
+    return { ok: true };
+  });
+
+export const removeQueuedPaper = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await queueServer()).removeQueued(data.id);
+    return { ok: true };
   });

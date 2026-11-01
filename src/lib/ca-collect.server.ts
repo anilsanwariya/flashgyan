@@ -227,6 +227,16 @@ export async function tick(origin?: string): Promise<TickResult> {
   } catch (e) {
     console.error("newspaper clipping:", e);
   }
+  // Exam papers queued for reading in the background, a few pages a step.
+  try {
+    const queue = await import("@/lib/exam-queue.server");
+    const t0 = Date.now();
+    while (Date.now() - t0 < 45_000 && (await queue.queueStep())) {
+      // one step at a time, within the tick's time
+    }
+  } catch (e) {
+    console.error("exam paper queue:", e);
+  }
   // Words in the News: suggestions after the evening collection, cards
   // written and proofread, images made, the album posted when due.
   try {

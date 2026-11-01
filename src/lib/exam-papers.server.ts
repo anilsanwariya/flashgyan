@@ -545,6 +545,17 @@ export async function paperSyllabus(syllabusId: string | null | undefined) {
   return { ...e, lines: count ?? 0 };
 }
 
+// The paper's place in the upload queue (none before the queue's migration).
+export async function queuedFor(paperId: string): Promise<{ status: string } | null> {
+  const { data, error } = await from("exam_paper_queue")
+    .select("status")
+    .eq("paper_id", paperId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) return null;
+  return ((data ?? []) as { status: string }[])[0] ?? null;
+}
+
 export async function deletePaper(id: string) {
   fail((await from("exam_papers").delete().eq("id", id)).error);
 }
