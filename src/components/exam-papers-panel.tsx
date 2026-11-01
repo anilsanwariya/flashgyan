@@ -108,6 +108,7 @@ import {
   type TypeChoice,
 } from "@/components/exam-paper-sections";
 import { langOf, sectionOf } from "@/lib/exam-sections";
+import { QuestionBank } from "@/components/exam-bank";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -145,10 +146,35 @@ const pending = new Map<string, File>();
 
 export function ExamPapers() {
   const [open, setOpen] = useOpenPaper();
-  return open ? (
-    <PaperView id={open} onBack={() => setOpen(null)} />
-  ) : (
-    <PaperList onOpen={setOpen} />
+  const [tab, setTab] = useState<"papers" | "bank">("papers");
+  if (open) return <PaperView id={open} onBack={() => setOpen(null)} />;
+  return (
+    <div className="space-y-4">
+      <div
+        role="tablist"
+        aria-label="Exam papers"
+        className="inline-flex rounded-lg border border-border p-0.5 text-sm"
+      >
+        {(
+          [
+            ["papers", "Papers"],
+            ["bank", "Question bank"],
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            role="tab"
+            aria-selected={tab === k}
+            onClick={() => setTab(k)}
+            className={`rounded-md px-3 py-1.5 ${tab === k ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === "bank" ? <QuestionBank onOpen={setOpen} /> : <PaperList onOpen={setOpen} />}
+    </div>
   );
 }
 
@@ -2417,7 +2443,7 @@ function QuestionJump({
   );
 }
 
-function ProofCards({
+export function ProofCards({
   questions,
   lang: lang0,
   locked,
