@@ -94,6 +94,20 @@ import {
   type OldSyllabusChoice,
 } from "@/components/exam-paper-syllabus";
 import { createSyllabus } from "@/lib/syllabus.functions";
+import {
+  NEW_TYPE,
+  PaperSections,
+  PaperTypePicker,
+  QuestionTag,
+  SectionsSettings,
+  TagFields,
+  TaggingProvider,
+  typeToMeta,
+  useTagging,
+  type Tagging,
+  type TypeChoice,
+} from "@/components/exam-paper-sections";
+import { langOf, sectionOf } from "@/lib/exam-sections";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -271,6 +285,7 @@ function PaperList({ onOpen }: { onOpen: (id: string) => void }) {
       <AddPaper onAdded={onOpen} />
       <ExamWeights />
       <PyqSets />
+      <SectionsSettings />
       {data.lessons.length > 0 && (
         <section className="space-y-1 rounded-2xl border border-border bg-card p-4 text-sm">
           <h3 className="font-semibold">Lessons in use for picking stories</h3>
@@ -384,9 +399,11 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
   const syllabusFn = useServerFn(createSyllabus);
   const linkFn = useServerFn(setExamPaperSyllabus);
   const [oldSyllabus, setOldSyllabus] = useState<OldSyllabusChoice>(NO_OLD_SYLLABUS);
+  // The paper's type (its sections) and the syllabus to tag on.
+  const [type, setType] = useState<TypeChoice>(NEW_TYPE);
+  const [guessed, setGuessed] = useState<string | null>(null);
   const [openForm, setOpenForm] = useState(false);
   const [exam, setExam] = useState("");
-  const [subject, setSubject] = useState("");
   const [body, setBody] = useState("RPSC");
   const [date, setDate] = useState("");
   const [paperFile, setPaperFile] = useState<File | null>(null);
@@ -418,12 +435,20 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
           );
         }
       }
+      const t = typeToMeta(type, guessed);
+      if (type.paper_type === "subject" && !type.subject)
+        throw new Error("Choose the paper's GK subject.");
+      if (type.paper_type === "custom" && !type.custom.length)
+        throw new Error("Choose the paper's sections.");
       const meta = {
         exam: exam.trim(),
-        subject: subject.trim(),
+        subject: t.subject,
         conducted_by: body,
         exam_date: date || null,
         series,
+        paper_type: t.paper_type,
+        sections: t.sections,
+        exam_syllabus_id: t.exam_syllabus_id,
       };
       let id: string;
       let ids: string[] = [];
@@ -434,7 +459,14 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
         const { workbookSheets } = await import("@/lib/exam-pdf");
         const papers = rowsToPapers(await workbookSheets(paperFile), meta);
         const r = await importFn({
-          data: { papers, conducted_by: body, exam_date: date || null },
+          data: {
+            papers,
+            conducted_by: body,
+            exam_date: date || null,
+            paper_type: t.paper_type,
+            sections: t.sections,
+            exam_syllabus_id: t.exam_syllabus_id,
+          },
         });
         id = r.papers[0];
         ids = r.papers;
@@ -510,7 +542,7 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
       <h3 className="font-semibold">Add a paper</h3>
       <div
         role="radiogroup"
-        aria-label="Paper type"
+        aria-label="Objective or written"
         className="inline-flex rounded-lg border border-border p-0.5 text-sm"
       >
         {(
@@ -546,13 +578,9 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
           maxLength={200}
           onChange={(e) => setExam(e.target.value)}
         />
-        <Input
-          aria-label="Subject"
-          placeholder="Subject, e.g. G.K. & G.S."
-          value={subject}
-          maxLength={200}
-          onChange={(e) => setSubject(e.target.value)}
-        />
+        <div className="sm:col-span-2">
+          <PaperTypePicker exam={exam} value={type} onChange={setType} onGuess={setGuessed} />
+        </div>
         <select
           aria-label="Conducted by"
           value={body}
@@ -826,7 +854,11 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
   // A Mains paper: written answers, no options or key.
   const written = paper.kind === "subjective";
   const topics: Topics = data!.topics ?? {};
-  const toCheck = questions.filter((x) => questionGaps(x, written).length);
+  // The exam's syllabus to tag on and the paper's sections.
+  const tagging = (data as { tagging?: Tagging | null }).tagging ?? null;
+  const langFor = (x: ExamQuestion) =>
+    tagging ? langOf(tagging.sections, sectionOf(tagging.ranges, x)) : null;
+  const toCheck = questions.filter((x) => questionGaps(x, written, langFor(x)).length);
   const shown = questions
     .filter((x) =>
       filter === "answer"
@@ -834,7 +866,7 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
         : filter === "deleted"
           ? x.deleted
           : filter === "check"
-            ? questionGaps(x, written).length > 0
+            ? questionGaps(x, written, langFor(x)).length > 0
             : filter === "ca"
               ? x.ca
               : filter === "unverified"
@@ -873,7 +905,9 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
     try {
       const { saveWorkbook } = await import("@/lib/exam-pdf");
       const name = `${paper!.exam}${paper!.subject ? ` - ${paper!.subject}` : ""}`
+        .replace(/\+/g, " and ")
         .replace(/[^\p{L}\p{N} .&-]+/gu, "")
+        .replace(/\s+/g, " ")
         .slice(0, 80);
       await saveWorkbook(`${name}.xlsx`, [
         { name: "Bilingual", rows: paperSheetRows(paper!, questions) },
@@ -906,328 +940,337 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
   }
 
   return (
-    <div className="space-y-4">
-      <Button variant="ghost" size="sm" onClick={onBack}>
-        <ArrowLeft className="mr-1 h-4 w-4" /> All papers
-      </Button>
+    <TaggingProvider value={tagging}>
+      <div className="space-y-4">
+        <Button variant="ghost" size="sm" onClick={onBack}>
+          <ArrowLeft className="mr-1 h-4 w-4" /> All papers
+        </Button>
 
-      <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
-        {editing ? (
-          <PaperDetails paper={paper} onDone={() => setEditing(false)} onSaved={refresh} />
-        ) : (
-          <div className="flex flex-wrap items-start gap-2">
-            <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
-              <h2 className="break-words text-lg font-semibold">{paper.exam}</h2>
-              <p className="text-sm text-muted-foreground">
-                {[
-                  paper.subject,
-                  paper.conducted_by,
-                  paper.exam_date && formatDate(paper.exam_date, "en"),
-                  paper.paper_code && `Paper code ${paper.paper_code}`,
-                  paper.series && `Series ${paper.series}`,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </p>
-            </div>
-            <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-              <Pencil className="mr-1 h-4 w-4" /> Details
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void exportExcel()}
-              disabled={!questions.length}
-            >
-              <Download className="mr-1 h-4 w-4" /> Export to Excel
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              aria-label="Delete paper"
-              onClick={() => {
-                if (confirm(`Delete “${paper.exam}” and its ${questions.length} questions?`))
-                  void deleteFn({ data: { id } })
-                    .then(async () => {
-                      toast.success("Paper deleted");
-                      await qc.invalidateQueries({ queryKey: ["examPapers"] });
-                      onBack();
-                    })
-                    .catch((e) => toast.error(errorText(e, "Couldn't delete it")));
-              }}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-        )}
-        <div className="flex flex-wrap gap-1.5 text-xs">
-          <Badge tone="primary">
-            {questions.length}
-            {paper.questions_total ? ` of ${paper.questions_total}` : ""} questions
-          </Badge>
-          {written ? (
-            <Badge tone="muted">
-              Written ·{" "}
-              {questions.filter((x) => !x.deleted).reduce((n, x) => n + (x.marks ?? 0), 0)} marks
-            </Badge>
-          ) : paper.key_added ? (
-            <Badge tone="good">
-              {answered} answers{deleted ? `, ${deleted} deleted` : ""}
-            </Badge>
+        <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+          {editing ? (
+            <PaperDetails paper={paper} onDone={() => setEditing(false)} onSaved={refresh} />
           ) : (
-            <Badge tone="muted">No answer key</Badge>
-          )}
-          {toCheck.length > 0 && <Badge tone="warn">{toCheck.length} to check</Badge>}
-        </div>
-        <PaperSyllabus
-          paper={paper}
-          syllabus={
-            (data as { syllabus?: Parameters<typeof PaperSyllabus>[0]["syllabus"] }).syllabus ??
-            null
-          }
-          onChanged={refresh}
-        />
-        {reading ? (
-          <p className="flex items-center gap-2 text-sm text-primary" role="status">
-            <RefreshCw className="h-4 w-4 animate-spin" /> {reading}
-            {reading.startsWith("Reading page") && (
-              <Button size="sm" variant="ghost" onClick={() => (stop.current = true)}>
-                Stop
+            <div className="flex flex-wrap items-start gap-2">
+              <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
+                <h2 className="break-words text-lg font-semibold">{paper.exam}</h2>
+                <p className="text-sm text-muted-foreground">
+                  {[
+                    paper.subject,
+                    paper.conducted_by,
+                    paper.exam_date && formatDate(paper.exam_date, "en"),
+                    paper.paper_code && `Paper code ${paper.paper_code}`,
+                    paper.series && `Series ${paper.series}`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+                <Pencil className="mr-1 h-4 w-4" /> Details
               </Button>
-            )}
-          </p>
-        ) : (
-          unread && (
-            <div className="rounded-xl border border-amber-400/60 bg-amber-500/10 p-3 text-sm">
-              <p>
-                {paper.pages_done} of {paper.pages} pages read. Choose the question paper's PDF to
-                go on from page {paper.pages_done + 1}.
-              </p>
-              <Input
-                type="file"
-                accept=".pdf"
-                aria-label="Question paper PDF to go on"
-                className="mt-2"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void read(f, paper.pages_done + 1);
-                }}
-              />
-            </div>
-          )
-        )}
-        <label className={`flex flex-wrap items-center gap-2 text-sm ${written ? "hidden" : ""}`}>
-          <KeyRound className="h-4 w-4 text-primary" />
-          <span className="font-medium">
-            {paper.key_added ? "Answer key added" : "Add the answer key"}
-          </span>
-          <Input
-            type="file"
-            aria-label="Answer key"
-            accept=".pdf,.xlsx,.xls,.csv,image/*"
-            disabled={!!reading}
-            className="h-9 max-w-xs"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void addKey(f);
-              e.target.value = "";
-            }}
-          />
-          {paper.key_added && (
-            <span className="text-xs text-muted-foreground">A new key replaces its answers.</span>
-          )}
-        </label>
-        {askSeries && (
-          <div
-            role="group"
-            aria-label="Which series"
-            className="space-y-2 rounded-xl border border-amber-400/60 bg-amber-500/10 p-3 text-sm"
-          >
-            <p>{askSeries.message}</p>
-            <p className="text-xs text-muted-foreground">
-              The series (set) is printed on the question paper's cover. The answers for it are
-              picked from the key.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {askSeries.series.map((x) => (
-                <Button key={x} size="sm" onClick={() => void addKey(askSeries.read, x)}>
-                  Series {x}
-                </Button>
-              ))}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void exportExcel()}
+                disabled={!questions.length}
+              >
+                <Download className="mr-1 h-4 w-4" /> Export to Excel
+              </Button>
               <Button
                 size="sm"
                 variant="ghost"
+                aria-label="Delete paper"
                 onClick={() => {
-                  setAskSeries(null);
-                  keyWaiting.delete(id);
+                  if (confirm(`Delete “${paper.exam}” and its ${questions.length} questions?`))
+                    void deleteFn({ data: { id } })
+                      .then(async () => {
+                        toast.success("Paper deleted");
+                        await qc.invalidateQueries({ queryKey: ["examPapers"] });
+                        onBack();
+                      })
+                      .catch((e) => toast.error(errorText(e, "Couldn't delete it")));
                 }}
               >
-                Cancel
+                <Trash2 className="h-4 w-4" />
               </Button>
             </div>
+          )}
+          <div className="flex flex-wrap gap-1.5 text-xs">
+            <Badge tone="primary">
+              {questions.length}
+              {paper.questions_total ? ` of ${paper.questions_total}` : ""} questions
+            </Badge>
+            {written ? (
+              <Badge tone="muted">
+                Written ·{" "}
+                {questions.filter((x) => !x.deleted).reduce((n, x) => n + (x.marks ?? 0), 0)} marks
+              </Badge>
+            ) : paper.key_added ? (
+              <Badge tone="good">
+                {answered} answers{deleted ? `, ${deleted} deleted` : ""}
+              </Badge>
+            ) : (
+              <Badge tone="muted">No answer key</Badge>
+            )}
+            {toCheck.length > 0 && <Badge tone="warn">{toCheck.length} to check</Badge>}
           </div>
-        )}
-      </section>
-
-      <Proofread paper={paper} questions={questions} lang={lang} onChanged={refresh} />
-
-      <MagazineCheck
-        paper={paper}
-        questions={questions}
-        stories={data!.stories}
-        lessonsInUse={data!.lessons}
-        onChanged={refresh}
-      />
-
-      <div className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-2 bg-background/95 px-1 py-1.5 backdrop-blur">
-        <QuestionJump
-          questions={questions}
-          onJump={(x) => {
-            // Any question: one the filter hides shows the full list.
-            if (!shown.some((y) => y.id === x.id)) {
-              setFilter("all");
-              setSubject("");
+          <PaperSyllabus
+            paper={paper}
+            syllabus={
+              (data as { syllabus?: Parameters<typeof PaperSyllabus>[0]["syllabus"] }).syllabus ??
+              null
             }
-            jumpTo.current = x.q_no;
-            // A new value each time, so the same question can be jumped to again.
-            setJumped(Date.now());
-          }}
-        />
-        <div role="radiogroup" aria-label="Show questions" className="flex flex-wrap gap-1">
-          {(
-            (written
-              ? [
-                  ["all", `All (${questions.length})`],
-                  ["check", `To check (${toCheck.length})`],
-                  ["unverified", `Not finished (${questions.filter((x) => !x.verified).length})`],
-                  ["verified", `Finished (${questions.filter((x) => x.verified).length})`],
-                  [
-                    "nomodel",
-                    `No model answer (${questions.filter((x) => !x.model_answer).length})`,
-                  ],
-                  [
-                    "notopic",
-                    `Not in an outline (${questions.filter((x) => !x.master_topic_id && !x.deleted).length})`,
-                  ],
-                  ...(questions.some(flagged)
-                    ? [["flagged", `AI flagged (${questions.filter(flagged).length})`]]
-                    : []),
-                ]
-              : [
-                  ["all", `All (${questions.length})`],
-                  [
-                    "answer",
-                    `No answer (${questions.filter((x) => !x.correct && !x.deleted).length})`,
-                  ],
-                  ["deleted", `Deleted (${deleted})`],
-                  ["check", `To check (${toCheck.length})`],
-                  ...(questions.some((x) => x.ca)
-                    ? [["ca", `Current affairs (${questions.filter((x) => x.ca).length})`]]
-                    : []),
-                  ["unverified", `Not finished (${questions.filter((x) => !x.verified).length})`],
-                  ["verified", `Finished (${questions.filter((x) => x.verified).length})`],
-                  ...LEVELS.map(
-                    (l) =>
-                      [
-                        `p_${l}`,
-                        `${LEVEL_NO[l]} ${l === "question" ? "Question" : l === "answer" ? "Answer" : "Explanation"} to proofread (${questions.filter((x) => levelOpen(x, l)).length})`,
-                      ] as [Filter, string],
-                  ),
-                  ...(questions.some((x) => x.verified && !x.explanation_en && !x.explanation_hi)
-                    ? [
-                        [
-                          "needexpl",
-                          `Needs an explanation (${questions.filter((x) => x.verified && !x.explanation_en && !x.explanation_hi).length})`,
-                        ],
-                      ]
-                    : []),
-                  [
-                    "noexpl",
-                    `No explanation (${questions.filter((x) => !x.explanation_en && !x.explanation_hi).length})`,
-                  ],
-                  ...(questions.some((x) => x.key_note)
-                    ? [["key", `Check the key (${questions.filter((x) => x.key_note).length})`]]
-                    : []),
-                  ...(questions.some(flagged)
-                    ? [["flagged", `AI flagged (${questions.filter(flagged).length})`]]
-                    : []),
-                  ...(questions.some((x) => x.master_topic_id)
-                    ? [
-                        [
-                          "notopic",
-                          `Not in an outline (${questions.filter((x) => !x.master_topic_id && !x.deleted).length})`,
-                        ],
-                      ]
-                    : []),
-                ]) as [Filter, string][]
-          ).map(([k, label]) => (
-            <button
-              key={k}
-              type="button"
-              role="radio"
-              aria-checked={filter === k}
-              onClick={() => setFilter(k)}
-              className={`rounded-full border px-3 py-1 text-xs ${filter === k ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:bg-muted"}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        {subjects.length > 1 || (subjects[0] && subjects[0][0] !== "—") ? (
-          <select
-            aria-label="Subject section"
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-            className="h-7 rounded-md border border-input bg-background px-2 text-xs"
-          >
-            <option value="">All subjects</option>
-            {subjects.map(([name, n]) => (
-              <option key={name} value={name}>
-                {name === "—" ? "No subject yet" : name} ({n})
-              </option>
-            ))}
-          </select>
-        ) : null}
-        <div className="ml-auto inline-flex rounded-lg border border-border p-0.5 text-xs">
-          {(["both", "hi", "en"] as const).map((l) => (
-            <button
-              key={l}
-              type="button"
-              aria-pressed={lang === l}
-              onClick={() => setLang(l)}
-              className={`rounded-md px-2.5 py-1 ${lang === l ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
-            >
-              {l === "both" ? "Both" : l === "hi" ? "हिंदी" : "English"}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {shown.length ? (
-        <ol className="space-y-2" data-testid="questions">
-          {shown.map((x) => (
-            <QuestionCard
-              key={x.id}
-              q={x}
-              lang={lang}
-              locked={published}
-              written={written}
-              topic={x.master_topic_id ? topics[x.master_topic_id] : undefined}
-              story={x.matched_item ? data!.stories[x.matched_item] : undefined}
-              onChanged={refresh}
+            onChanged={refresh}
+          />
+          <PaperSections
+            paper={paper}
+            questions={questions}
+            tagging={tagging}
+            locked={paper.status === "published"}
+            onChanged={refresh}
+          />
+          {reading ? (
+            <p className="flex items-center gap-2 text-sm text-primary" role="status">
+              <RefreshCw className="h-4 w-4 animate-spin" /> {reading}
+              {reading.startsWith("Reading page") && (
+                <Button size="sm" variant="ghost" onClick={() => (stop.current = true)}>
+                  Stop
+                </Button>
+              )}
+            </p>
+          ) : (
+            unread && (
+              <div className="rounded-xl border border-amber-400/60 bg-amber-500/10 p-3 text-sm">
+                <p>
+                  {paper.pages_done} of {paper.pages} pages read. Choose the question paper's PDF to
+                  go on from page {paper.pages_done + 1}.
+                </p>
+                <Input
+                  type="file"
+                  accept=".pdf"
+                  aria-label="Question paper PDF to go on"
+                  className="mt-2"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void read(f, paper.pages_done + 1);
+                  }}
+                />
+              </div>
+            )
+          )}
+          <label className={`flex flex-wrap items-center gap-2 text-sm ${written ? "hidden" : ""}`}>
+            <KeyRound className="h-4 w-4 text-primary" />
+            <span className="font-medium">
+              {paper.key_added ? "Answer key added" : "Add the answer key"}
+            </span>
+            <Input
+              type="file"
+              aria-label="Answer key"
+              accept=".pdf,.xlsx,.xls,.csv,image/*"
+              disabled={!!reading}
+              className="h-9 max-w-xs"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void addKey(f);
+                e.target.value = "";
+              }}
             />
-          ))}
-        </ol>
-      ) : (
-        <p className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-          {questions.length
-            ? "No question here."
-            : unread || reading
-              ? "Reading the paper…"
-              : "No questions yet."}
-        </p>
-      )}
-    </div>
+            {paper.key_added && (
+              <span className="text-xs text-muted-foreground">A new key replaces its answers.</span>
+            )}
+          </label>
+          {askSeries && (
+            <div
+              role="group"
+              aria-label="Which series"
+              className="space-y-2 rounded-xl border border-amber-400/60 bg-amber-500/10 p-3 text-sm"
+            >
+              <p>{askSeries.message}</p>
+              <p className="text-xs text-muted-foreground">
+                The series (set) is printed on the question paper's cover. The answers for it are
+                picked from the key.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {askSeries.series.map((x) => (
+                  <Button key={x} size="sm" onClick={() => void addKey(askSeries.read, x)}>
+                    Series {x}
+                  </Button>
+                ))}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setAskSeries(null);
+                    keyWaiting.delete(id);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <Proofread paper={paper} questions={questions} lang={lang} onChanged={refresh} />
+
+        <MagazineCheck
+          paper={paper}
+          questions={questions}
+          stories={data!.stories}
+          lessonsInUse={data!.lessons}
+          onChanged={refresh}
+        />
+
+        <div className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-2 bg-background/95 px-1 py-1.5 backdrop-blur">
+          <QuestionJump
+            questions={questions}
+            onJump={(x) => {
+              // Any question: one the filter hides shows the full list.
+              if (!shown.some((y) => y.id === x.id)) {
+                setFilter("all");
+                setSubject("");
+              }
+              jumpTo.current = x.q_no;
+              // A new value each time, so the same question can be jumped to again.
+              setJumped(Date.now());
+            }}
+          />
+          <div role="radiogroup" aria-label="Show questions" className="flex flex-wrap gap-1">
+            {(
+              (written
+                ? [
+                    ["all", `All (${questions.length})`],
+                    ["check", `To check (${toCheck.length})`],
+                    ["unverified", `Not finished (${questions.filter((x) => !x.verified).length})`],
+                    ["verified", `Finished (${questions.filter((x) => x.verified).length})`],
+                    [
+                      "nomodel",
+                      `No model answer (${questions.filter((x) => !x.model_answer).length})`,
+                    ],
+                    [
+                      "notopic",
+                      `Not in an outline (${questions.filter((x) => !x.master_topic_id && !x.deleted).length})`,
+                    ],
+                    ...(questions.some(flagged)
+                      ? [["flagged", `AI flagged (${questions.filter(flagged).length})`]]
+                      : []),
+                  ]
+                : [
+                    ["all", `All (${questions.length})`],
+                    [
+                      "answer",
+                      `No answer (${questions.filter((x) => !x.correct && !x.deleted).length})`,
+                    ],
+                    ["deleted", `Deleted (${deleted})`],
+                    ["check", `To check (${toCheck.length})`],
+                    ...(questions.some((x) => x.ca)
+                      ? [["ca", `Current affairs (${questions.filter((x) => x.ca).length})`]]
+                      : []),
+                    ["unverified", `Not finished (${questions.filter((x) => !x.verified).length})`],
+                    ["verified", `Finished (${questions.filter((x) => x.verified).length})`],
+                    ...LEVELS.map(
+                      (l) =>
+                        [
+                          `p_${l}`,
+                          `${LEVEL_NO[l]} ${l === "question" ? "Question" : l === "answer" ? "Answer" : "Explanation"} to proofread (${questions.filter((x) => levelOpen(x, l)).length})`,
+                        ] as [Filter, string],
+                    ),
+                    ...(questions.some((x) => x.verified && !x.explanation_en && !x.explanation_hi)
+                      ? [
+                          [
+                            "needexpl",
+                            `Needs an explanation (${questions.filter((x) => x.verified && !x.explanation_en && !x.explanation_hi).length})`,
+                          ],
+                        ]
+                      : []),
+                    [
+                      "noexpl",
+                      `No explanation (${questions.filter((x) => !x.explanation_en && !x.explanation_hi).length})`,
+                    ],
+                    ...(questions.some((x) => x.key_note)
+                      ? [["key", `Check the key (${questions.filter((x) => x.key_note).length})`]]
+                      : []),
+                    ...(questions.some(flagged)
+                      ? [["flagged", `AI flagged (${questions.filter(flagged).length})`]]
+                      : []),
+                    ...(questions.some((x) => x.master_topic_id)
+                      ? [
+                          [
+                            "notopic",
+                            `Not in an outline (${questions.filter((x) => !x.master_topic_id && !x.deleted).length})`,
+                          ],
+                        ]
+                      : []),
+                  ]) as [Filter, string][]
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                role="radio"
+                aria-checked={filter === k}
+                onClick={() => setFilter(k)}
+                className={`rounded-full border px-3 py-1 text-xs ${filter === k ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:bg-muted"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {subjects.length > 1 || (subjects[0] && subjects[0][0] !== "—") ? (
+            <select
+              aria-label="Subject section"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              className="h-7 rounded-md border border-input bg-background px-2 text-xs"
+            >
+              <option value="">All subjects</option>
+              {subjects.map(([name, n]) => (
+                <option key={name} value={name}>
+                  {name === "—" ? "No subject yet" : name} ({n})
+                </option>
+              ))}
+            </select>
+          ) : null}
+          <div className="ml-auto inline-flex rounded-lg border border-border p-0.5 text-xs">
+            {(["both", "hi", "en"] as const).map((l) => (
+              <button
+                key={l}
+                type="button"
+                aria-pressed={lang === l}
+                onClick={() => setLang(l)}
+                className={`rounded-md px-2.5 py-1 ${lang === l ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+              >
+                {l === "both" ? "Both" : l === "hi" ? "हिंदी" : "English"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {shown.length ? (
+          <ol className="space-y-2" data-testid="questions">
+            {shown.map((x) => (
+              <QuestionCard
+                key={x.id}
+                q={x}
+                lang={lang}
+                locked={published}
+                written={written}
+                topic={x.master_topic_id ? topics[x.master_topic_id] : undefined}
+                story={x.matched_item ? data!.stories[x.matched_item] : undefined}
+                onChanged={refresh}
+              />
+            ))}
+          </ol>
+        ) : (
+          <p className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+            {questions.length
+              ? "No question here."
+              : unread || reading
+                ? "Reading the paper…"
+                : "No questions yet."}
+          </p>
+        )}
+      </div>
+    </TaggingProvider>
   );
 }
 
@@ -1363,7 +1406,12 @@ function QuestionCard({
   const [editing, setEditing] = useState(false);
   const updateFn = useServerFn(updateExamQuestion);
   const removeFn = useServerFn(deleteExamQuestion);
-  const gaps = questionGaps(q, written);
+  const tagCtx = useTagging();
+  const gaps = questionGaps(
+    q,
+    written,
+    tagCtx ? langOf(tagCtx.sections, sectionOf(tagCtx.ranges, q)) : null,
+  );
   const show = (l: "en" | "hi") => lang === "both" || lang === l;
   const setVerified = (verified: boolean) =>
     void updateFn({ data: { id: q.id, patch: { verified } } })
@@ -1421,7 +1469,8 @@ function QuestionCard({
             <ShieldAlert className="h-3 w-3" /> AI flagged
           </Badge>
         )}
-        {q.subject_section && (
+        <QuestionTag q={q} lang={lang} />
+        {q.subject_section && !q.syllabus_node_id && (
           <span className="text-xs text-muted-foreground" data-subject>
             {q.subject_section}
             {q.topic_en || q.topic_hi
@@ -1588,6 +1637,7 @@ function QuestionEditor({
     model_source: q.model_source ?? "",
     also: q.also_correct ?? [],
     difficulty: (q.difficulty ?? "") as Difficulty | "",
+    tag: { paper_section: q.paper_section ?? "", syllabus_node_id: q.syllabus_node_id ?? "" },
   });
   const [busy, setBusy] = useState(false);
   const num = (v: string) => (/^\d+$/.test(v.trim()) ? Number(v.trim()) : null);
@@ -1639,6 +1689,14 @@ function QuestionEditor({
                   }),
               ...(subjectChanged
                 ? { subject_section: f.subject_section, topic_en: f.topic_en, topic_hi: f.topic_hi }
+                : {}),
+              // Sent only when changed (they need the paper_sections
+              // migration); a syllabus line sets the subject and topic.
+              ...(f.tag.paper_section !== (q.paper_section ?? "")
+                ? { paper_section: f.tag.paper_section }
+                : {}),
+              ...(f.tag.syllabus_node_id !== (q.syllabus_node_id ?? "")
+                ? { syllabus_node_id: f.tag.syllabus_node_id || null }
                 : {}),
             },
           },
@@ -1793,6 +1851,7 @@ function QuestionEditor({
             />
           </>
         )}
+        <TagFields q={q} value={f.tag} onChange={(tag) => setF({ ...f, tag })} />
         <select
           aria-label="Subject section"
           value={f.subject_section}

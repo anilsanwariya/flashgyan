@@ -34,6 +34,12 @@ export type ExamPaper = {
   // After the syllabus_stages migration: the old syllabus the paper
   // followed, when it isn't the exam's current one.
   syllabus_id?: string | null;
+  // After the paper_sections migration: the paper's type, its sections
+  // (with the questions each covers) and the exam's current syllabus its
+  // questions are tagged on.
+  paper_type?: string;
+  sections?: { key: string; from: number | null; to: number | null }[];
+  exam_syllabus_id?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -71,6 +77,11 @@ export type ExamQuestion = {
   topic_en?: string;
   topic_hi?: string;
   ai_check?: AiCheck | null;
+  // After the paper_sections migration: its section (set by the AI or the
+  // editor; the paper's ranges come first) and the syllabus line it asks
+  // about.
+  paper_section?: string;
+  syllabus_node_id?: string | null;
 } & Written &
   Proof;
 
@@ -326,8 +337,13 @@ export function reviewMessages(
     explanation_hi: string;
     // A written (Mains) question: its marks and word limit.
     written?: { marks: number | null; words: number | null } | null;
+    // A language section's question: in this language only.
+    lang?: "en" | "hi" | null;
   }[],
   examName: string,
+  // The syllabus to tag on and the paper's sections (tagContext): a second
+  // system message, so the first stays the same on every call.
+  context?: string,
 ): ChatMessage[] {
   return [
     {
@@ -339,18 +355,19 @@ For each question:
 3. "issues": only real problems a proofreader must fix, each {"kind", "note"} with a short note saying what is wrong:
    - "key": the correct option given looks wrong (give the option you think is right in "suggest");
    - "explanation": the explanation argues for another option, or states a wrong fact, or doesn't explain the question;
-   - "language": the Hindi and English versions of the question or options don't say the same thing (a different number, name, negation or option order);
+   - "language": the Hindi and English versions of the question or options don't say the same thing (a different number, name, negation or option order); never for a question marked as one language only (it tests that language and has no translation);
    - "question": the text or an option is garbled, cut off, misspelt so as to change the meaning, or two options are the same.
 Be strict but fair: no issues for style, wording or small spelling slips. A question deleted by the key needs no key check. A written (Mains) question has no options, key or explanation: check only "language" and "question". Use well-established knowledge; when unsure, don't raise an issue.
 Reply with JSON only: [{"n": question number, "subject": "...", "topic": {"en": "...", "hi": "..."}, "issues": [{"kind": "...", "note": "..."}], "suggest": option number or null}]`,
     },
+    ...(context ? [{ role: "system" as const, content: context }] : []),
     {
       role: "user",
       content: `Exam: ${examName}\n\n${qs
         .map((q) =>
           q.written
             ? `Question ${q.n} (written answer${q.written.marks ? `, ${q.written.marks} marks` : ""}${q.written.words ? `, ${q.written.words} words` : ""})\nEnglish: ${q.question_en || "(none)"}\nHindi: ${q.question_hi || "(none)"}`
-            : `Question ${q.n}\nEnglish: ${q.question_en || "(none)"}\n${q.options_en.map((o, i) => `  (${i + 1}) ${o}`).join("\n")}\nHindi: ${q.question_hi || "(none)"}\n${q.options_hi.map((o, i) => `  (${i + 1}) ${o}`).join("\n")}\n${q.deleted ? "Deleted by the answer key." : `Correct option given: ${q.correct ?? "none"}${q.also?.length ? ` (the key also accepts ${q.also.join(", ")})` : ""}`}\nExplanation (English): ${q.explanation_en || "(none yet)"}\nExplanation (Hindi): ${q.explanation_hi || "(none yet)"}`,
+            : `Question ${q.n}${q.lang ? ` (${q.lang === "hi" ? "Hindi" : "English"} only: a language question, no translation)` : ""}\nEnglish: ${q.question_en || "(none)"}\n${q.options_en.map((o, i) => `  (${i + 1}) ${o}`).join("\n")}\nHindi: ${q.question_hi || "(none)"}\n${q.options_hi.map((o, i) => `  (${i + 1}) ${o}`).join("\n")}\n${q.deleted ? "Deleted by the answer key." : `Correct option given: ${q.correct ?? "none"}${q.also?.length ? ` (the key also accepts ${q.also.join(", ")})` : ""}`}\nExplanation (English): ${q.explanation_en || "(none yet)"}\nExplanation (Hindi): ${q.explanation_hi || "(none yet)"}`,
         )
         .join("\n\n---\n\n")}`,
     },
@@ -358,6 +375,9 @@ Reply with JSON only: [{"n": question number, "subject": "...", "topic": {"en": 
 }
 
 export type Review = {
+  // The question's whole reply (for the tag keys: line, section,
+  // difficulty).
+  raw: Record<string, unknown>;
   subject: string;
   topic: Bi;
   issues: { kind: CheckKind; note: string }[];
@@ -383,6 +403,7 @@ export function parseReview(raw: string, nums: number[]): Map<number, Review> {
       .slice(0, 4);
     const sg = Number(o.suggest);
     out.set(n, {
+      raw: o,
       subject: subjectSection(o.subject),
       topic: { en: topic.en || topic.hi, hi: topic.hi || topic.en },
       issues,
@@ -645,6 +666,8 @@ export function explainMessages(
     also?: number[];
     deleted: boolean;
     passages: { k: number; title: string; content: string }[];
+    // A language section's question: explained in that language only.
+    lang?: "en" | "hi" | null;
   }[],
   glossary?: string,
 ): ChatMessage[] {
@@ -659,7 +682,7 @@ For each question, a detailed explanation:
 - Assertion and reason, chronology and odd one out: each part in turn.
 - Direct questions: why each other option is wrong, in a line each where useful.
 - End with one related fact worth revising ("Also remember: …" / "यह भी याद रखें: …").
-Base it on the book passages given for the question [K…] and list the ones you used in "from". When no passage explains it, write from well-established knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. A question the key deleted: explain briefly why it was likely deleted (two answers right, none right, or an error), if you can tell. Never change the correct option given. Plain text, no markdown headings; at most about 180 words in each language.${glossary ?? ""}
+Base it on the book passages given for the question [K…] and list the ones you used in "from". When no passage explains it, write from well-established knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. A question the key deleted: explain briefly why it was likely deleted (two answers right, none right, or an error), if you can tell. Never change the correct option given. A question marked as one language only tests that language (Hindi or English grammar, vocabulary, usage): explain it in that language only and leave the other "" — never translate it. Plain text, no markdown headings; at most about 180 words in each language.${glossary ?? ""}
 Reply with JSON only: [{"n": question number, "en": "...", "hi": "...", "from": [passage numbers]}]`,
     },
     {
@@ -667,7 +690,7 @@ Reply with JSON only: [{"n": question number, "en": "...", "hi": "...", "from": 
       content: qs
         .map(
           (q) =>
-            `Question ${q.n}: ${q.question}${q.extra ? `\n${q.extra}` : ""}\n${q.options
+            `Question ${q.n}${q.lang ? ` (${q.lang === "hi" ? "Hindi" : "English"} only: explain in ${q.lang === "hi" ? "Hindi" : "English"} only)` : ""}: ${q.question}${q.extra ? `\n${q.extra}` : ""}\n${q.options
               .map((o, i) => `(${i + 1}) ${o}`)
               .join(
                 "\n",
@@ -868,7 +891,7 @@ export function pageMessages(page: number, pages: number): ChatMessage[] {
   return [
     {
       role: "system",
-      content: `You read pages of Indian competitive exam question papers (RPSC, RSSB and similar) into data. A paper is usually bilingual: each question appears in Hindi and in English (often Hindi in the left column and English in the right, each with its own question number). For every question on this page, give its number, its question text in English and in Hindi, its other part in each language (statements, List I and List II of a match-the-following, assertion and reason, codes — keep each on its own line), and its four options in each language, in order. Leave out option 5 when it only says "Question not attempted" / "अनुत्तरित प्रश्न". Copy the text exactly as printed (fix only broken line breaks); keep every number, name and symbol. A question cut off at the top or bottom of the page: give the part on this page with "partial": true. Leave out instructions, headers and page numbers.
+      content: `You read pages of Indian competitive exam question papers (RPSC, RSSB and similar) into data. A paper is usually bilingual: each question appears in Hindi and in English (often Hindi in the left column and English in the right, each with its own question number). For every question on this page, give its number, its question text in English and in Hindi, its other part in each language (statements, List I and List II of a match-the-following, assertion and reason, codes — keep each on its own line), and its four options in each language, in order. Leave out option 5 when it only says "Question not attempted" / "अनुत्तरित प्रश्न". A question printed in one language only (in a Hindi or English language section, testing that language): give it in that language only and leave the other language's fields empty — never translate it. Copy the text exactly as printed (fix only broken line breaks); keep every number, name and symbol. A question cut off at the top or bottom of the page: give the part on this page with "partial": true. Leave out instructions, headers and page numbers.
 On the cover page (instructions, no questions), give the paper's details instead: the exam, subject, paper code, booklet series (the set letter, e.g. "Series A" / "प्रश्न-पुस्तिका सीरीज A", or "" if none) and number of questions as printed.
 Reply with JSON only: {"paper": {"exam": "...", "subject": "...", "paper_code": "...", "series": "A", "questions": number} or null, "questions": [{"n": number, "en": {"question": "...", "extra": "...", "options": ["...", "...", "...", "..."]}, "hi": {"question": "...", "extra": "...", "options": ["...", "...", "...", "..."]}, "partial": false}]}`,
     },
@@ -1034,13 +1057,21 @@ export function mergeQuestion<T extends QuestionDraft>(had: T, fresh: QuestionDr
 }
 
 // What is still missing in a question (for the editor to check).
-export function questionGaps(q: QuestionDraft, subjective = false): string[] {
+// What a question still lacks. A language section's question (lang) is in
+// that language only.
+export function questionGaps(
+  q: QuestionDraft,
+  subjective = false,
+  lang: "en" | "hi" | null = null,
+): string[] {
   const gaps: string[] = [];
-  if (!q.question_en) gaps.push("English question");
-  if (!q.question_hi) gaps.push("Hindi question");
+  if (!q.question_en && lang !== "hi") gaps.push("English question");
+  if (!q.question_hi && lang !== "en") gaps.push("Hindi question");
   // A written question has no options; its marks are what to check.
   if (subjective) return q.marks ? gaps : [...gaps, "marks"];
-  const missing = q.options.filter((o) => !o.en || !o.hi).length;
+  const missing = q.options.filter(
+    (o) => (lang !== "hi" && !o.en) || (lang !== "en" && !o.hi),
+  ).length;
   if (q.options.length < OPTION_COUNT || missing) gaps.push("options");
   return gaps;
 }

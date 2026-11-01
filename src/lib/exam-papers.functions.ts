@@ -31,6 +31,18 @@ const meta = z.object({
   exam_date: dateSchema.nullable(),
   paper_code: z.string().trim().max(60).optional(),
   series: z.string().trim().max(20).optional(),
+  paper_type: z.string().trim().max(40).optional(),
+  sections: z
+    .array(
+      z.object({
+        key: z.string().max(30),
+        from: z.number().int().min(1).max(1000).nullable(),
+        to: z.number().int().min(1).max(1000).nullable(),
+      }),
+    )
+    .max(12)
+    .optional(),
+  exam_syllabus_id: z.string().uuid().nullable().optional(),
 });
 const bi = z.object({ en: z.string().max(4000), hi: z.string().max(4000) });
 const draft = z.object({
@@ -100,7 +112,40 @@ export const getExamPaper = createServerFn({ method: "POST" })
       topics,
       lessons: await s.lessonsInUse(),
       syllabus: await s.paperSyllabus(got.paper.syllabus_id).catch(() => null),
+      // The exam's syllabus to tag on, its lines and tags, and the sections.
+      tagging: await s.paperTagging(got.paper).catch(() => null),
     };
+  });
+
+// The paper sections (a setting): GK & GS, Hindi, English…
+export const getExamSections = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).getSections();
+  });
+
+export const saveExamSections = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        sections: z
+          .array(
+            z.object({
+              key: z.string().max(30),
+              name_en: z.string().max(60),
+              name_hi: z.string().max(60),
+              lang: z.enum(["en", "hi"]).nullable(),
+            }),
+          )
+          .max(40),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).saveSections(data.sections);
   });
 
 // The old syllabus a paper followed (or none).
@@ -204,6 +249,10 @@ export const importExamPapers = createServerFn({ method: "POST" })
           .max(50),
         conducted_by: z.string().trim().max(100),
         exam_date: dateSchema.nullable(),
+        // The type, sections and syllabus chosen in the form, for every paper.
+        paper_type: meta.shape.paper_type,
+        sections: meta.shape.sections,
+        exam_syllabus_id: meta.shape.exam_syllabus_id,
       })
       .parse(d),
   )
@@ -212,6 +261,9 @@ export const importExamPapers = createServerFn({ method: "POST" })
     return (await server()).importPapers(data.papers, {
       conducted_by: data.conducted_by,
       exam_date: data.exam_date,
+      paper_type: data.paper_type,
+      sections: data.sections,
+      exam_syllabus_id: data.exam_syllabus_id,
     });
   });
 
@@ -244,6 +296,8 @@ export const updateExamQuestion = createServerFn({ method: "POST" })
           master_topic_id: id.nullable().optional(),
           also_correct: z.array(z.number().int().min(1).max(4)).max(3).optional(),
           difficulty: z.enum(["easy", "medium", "hard"]).nullable().optional(),
+          paper_section: z.string().max(30).optional(),
+          syllabus_node_id: id.nullable().optional(),
           proof: z
             .object({
               question: z.boolean().optional(),
