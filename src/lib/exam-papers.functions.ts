@@ -401,3 +401,21 @@ export const unpublishExamPaper = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await server()).unpublishPaper(data.id);
   });
+
+// The question bank: every objective paper's questions, small, for filters
+// and progress reports.
+export const examQuestionBank = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await import("@/lib/exam-bank.server")).questionBank();
+  });
+
+// Questions in full (for proofreading across papers), and their papers.
+export const examBankQuestions = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ ids: z.array(id).max(300) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).questionsByIds(data.ids);
+  });

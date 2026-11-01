@@ -221,6 +221,22 @@ async function withOptional(
   }
 }
 
+// Questions by id (for proofreading across papers), with the migrations'
+// columns when they have run.
+export async function questionsByIds(ids: string[]): Promise<ExamQuestion[]> {
+  const out: ExamQuestion[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    const { rows } = await withOptional((cols) =>
+      from("exam_questions")
+        .select(cols)
+        .in("id", ids.slice(i, i + 200)),
+    );
+    out.push(...rows.map(readQuestion));
+  }
+  const at = new Map(ids.map((id, i) => [id, i]));
+  return out.sort((a, b) => (at.get(a.id) ?? 0) - (at.get(b.id) ?? 0));
+}
+
 // A paper's questions (those numbered, or all), with the migrations'
 // columns when they have run.
 async function selectQuestions(paperId: string, qNos?: number[]) {
@@ -280,7 +296,7 @@ const incomplete = (q: ExamQuestion, written = false, lang: "en" | "hi" | null =
 type SylRow = { id: string; name: string; stage: string; notified_on: string | null };
 // The syllabi in the Syllabus feature (old ones kept for old papers left
 // out).
-async function currentSyllabi(): Promise<SylRow[]> {
+export async function currentSyllabi(): Promise<SylRow[]> {
   let { data, error } = await from("syllabus_exams")
     .select("id,name,stage,notified_on")
     .eq("archived", false);
