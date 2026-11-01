@@ -150,7 +150,7 @@ const pending = new Map<string, File>();
 
 export function ExamPapers() {
   const [open, setOpen] = useOpenPaper();
-  const [tab, setTab] = useState<"overview" | "papers" | "bank" | "sets">("papers");
+  const [tab, setTab] = useState<"overview" | "papers" | "bank" | "sets" | "settings">("papers");
   // The bank's filter, kept here so the overview can open it filtered.
   const [bankFilter, setBankFilter] = useState<BankFilter>({});
   if (open) return <PaperView id={open} onBack={() => setOpen(null)} />;
@@ -167,6 +167,7 @@ export function ExamPapers() {
             ["papers", "Papers"],
             ["bank", "Question bank"],
             ["sets", "Export sets"],
+            ["settings", "Settings"],
           ] as const
         ).map(([k, label]) => (
           <button
@@ -190,6 +191,8 @@ export function ExamPapers() {
         />
       ) : tab === "sets" ? (
         <ExportSets />
+      ) : tab === "settings" ? (
+        <PaperSettings />
       ) : tab === "overview" ? (
         <ExamOverview
           onFilter={(f) => {
@@ -315,6 +318,8 @@ function PaperList({ onOpen }: { onOpen: (id: string) => void }) {
     refetchOnMount: true,
   });
   const [search, setSearch] = useState("");
+  // The add form or the upload-many form, opened from the toolbar.
+  const [panel, setPanel] = useState<"" | "add" | "many">("");
   if (q.isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (q.error)
     return <p className="text-sm text-destructive">{errorText(q.error, "Couldn't load")}</p>;
@@ -334,94 +339,269 @@ function PaperList({ onOpen }: { onOpen: (id: string) => void }) {
   );
   return (
     <div className="space-y-4">
-      <AddPaper onAdded={onOpen} />
-      <PaperQueue onOpen={onOpen} />
-      <ExamWeights />
-      <PyqSets />
-      <SectionsSettings />
-      {data.lessons.length > 0 && (
-        <section className="space-y-1 rounded-2xl border border-border bg-card p-4 text-sm">
-          <h3 className="font-semibold">Lessons in use for picking stories</h3>
-          <ul className="list-disc space-y-0.5 pl-5 text-muted-foreground">
-            {data.lessons.map((l) => (
-              <li key={l}>{l}</li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {data.papers.length > 3 && (
-        <div className="relative sm:max-w-xs">
+      <div className="flex flex-wrap items-center gap-2" data-papers-toolbar>
+        <div className="relative min-w-[12rem] flex-1 sm:max-w-xs">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             aria-label="Search papers"
-            placeholder="Search papers"
+            placeholder={`Search ${data.papers.length} paper${data.papers.length === 1 ? "" : "s"}`}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="h-9 pl-8"
           />
         </div>
-      )}
+        <span className="ml-auto flex gap-2">
+          <Button
+            variant={panel === "many" ? "secondary" : "outline"}
+            onClick={() => setPanel(panel === "many" ? "" : "many")}
+            aria-expanded={panel === "many"}
+          >
+            <Layers className="mr-1 h-4 w-4" /> Upload many
+          </Button>
+          <Button
+            onClick={() => setPanel(panel === "add" ? "" : "add")}
+            aria-expanded={panel === "add"}
+          >
+            <Plus className="mr-1 h-4 w-4" /> Add a paper
+          </Button>
+        </span>
+      </div>
+      {panel === "add" && <AddPaper onAdded={onOpen} onClose={() => setPanel("")} />}
+      <PaperQueue onOpen={onOpen} showForm={panel === "many"} onClose={() => setPanel("")} />
       {shown.length ? (
-        <ul className="space-y-2" data-testid="papers">
+        <ul
+          className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card"
+          data-testid="papers"
+        >
           {shown.map((p) => (
             <li key={p.id}>
-              <button
-                type="button"
-                onClick={() => onOpen(p.id)}
-                className="w-full rounded-2xl border border-border bg-card p-3 text-left hover:border-primary/50"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="min-w-0 flex-1 break-words font-medium">
-                    {p.exam}
-                    {p.subject && <span className="text-muted-foreground"> · {p.subject}</span>}
-                  </span>
-                  {p.conducted_by && <Badge>{p.conducted_by}</Badge>}
-                  {p.exam_date && (
-                    <span className="text-xs text-muted-foreground">
-                      {formatDate(p.exam_date, "en")}
-                    </span>
-                  )}
-                </div>
-                <PaperBadges p={p} />
-              </button>
+              <PaperRow p={p} onOpen={() => onOpen(p.id)} />
             </li>
           ))}
         </ul>
       ) : (
         <p className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-          {data.papers.length ? "No paper matches." : "No papers yet."}
+          {data.papers.length ? "No paper matches." : "No papers yet: add one, or upload many."}
         </p>
       )}
     </div>
   );
 }
 
+const PAGE = 30;
+
+// One step of proofreading a paper: its number, where it's got to, and its
+// button.
+function Step({
+  n,
+  title,
+  note,
+  done,
+  children,
+}: {
+  n: number;
+  title: string;
+  note: string;
+  done: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <li
+      className={`flex flex-col gap-2 rounded-xl border p-3 ${done ? "border-emerald-500/40 bg-emerald-500/5" : "border-border"}`}
+      data-step={title}
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-semibold ${done ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground"}`}
+        >
+          {done ? <Check className="h-3.5 w-3.5" /> : n}
+        </span>
+        <span className="text-sm font-medium">{title}</span>
+      </div>
+      <p className="text-xs text-muted-foreground">{note}</p>
+      <div className="mt-auto">{children}</div>
+    </li>
+  );
+}
+
+function SetupRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid gap-1 px-4 py-3 sm:grid-cols-[8rem_1fr] sm:gap-3">
+      <span className="pt-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
+function Collapsible({
+  title,
+  note,
+  open: open0 = false,
+  children,
+}: {
+  title: string;
+  note?: string;
+  open?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(open0);
+  return (
+    <div className="rounded-2xl border border-border bg-card" data-collapsible={title}>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 px-4 py-3 text-left"
+      >
+        <ChevronRight className={`h-4 w-4 transition-transform ${open ? "rotate-90" : ""}`} />
+        <span className="font-semibold">{title}</span>
+        {note && <span className="text-sm text-muted-foreground">{note}</span>}
+      </button>
+      {open && <div className="border-t border-border [&>section]:border-0">{children}</div>}
+    </div>
+  );
+}
+
+// A paper's progress: finished questions, and its key.
+function PaperProgress({
+  questions,
+  total,
+  written,
+  keyAdded,
+  answered,
+  deleted,
+  toCheck,
+}: {
+  questions: ExamQuestion[];
+  total: number | null;
+  written: boolean;
+  keyAdded: boolean;
+  answered: number;
+  deleted: number;
+  toCheck: number;
+}) {
+  const done = questions.filter((x) => x.verified).length;
+  const pct = questions.length ? Math.round((done / questions.length) * 100) : 0;
+  return (
+    <div className="space-y-1.5" data-paper-progress>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">
+          {questions.length}
+          {total ? ` of ${total}` : ""} questions
+        </span>
+        {written ? (
+          <span>
+            Written · {questions.filter((x) => !x.deleted).reduce((n, x) => n + (x.marks ?? 0), 0)}{" "}
+            marks
+          </span>
+        ) : keyAdded ? (
+          <span>
+            {answered} answers{deleted ? `, ${deleted} deleted` : ""}
+          </span>
+        ) : (
+          <span>No answer key</span>
+        )}
+        {toCheck > 0 && (
+          <span className="text-amber-700 dark:text-amber-400">{toCheck} to check</span>
+        )}
+        <span className="ml-auto tabular-nums">
+          {done} of {questions.length} finished
+        </span>
+      </div>
+      <span className="block h-1.5 overflow-hidden rounded-full bg-muted">
+        <span
+          className={`block h-full ${pct === 100 ? "bg-emerald-500" : "bg-primary"}`}
+          style={{ width: `${pct}%` }}
+        />
+      </span>
+    </div>
+  );
+}
+
+// A paper in the list: its name and details, state, and how far it's
+// proofread.
+function PaperRow({ p, onOpen }: { p: PaperSummary; onOpen: () => void }) {
+  const done = p.verified ?? 0;
+  const pct = p.questions ? Math.round((done / p.questions) * 100) : 0;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="grid w-full gap-x-4 gap-y-1.5 p-3 text-left transition-colors hover:bg-muted/40 sm:grid-cols-[1fr_14rem]"
+    >
+      <div className="min-w-0 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="break-words font-semibold">{p.exam}</span>
+          {p.status === "published" ? (
+            <Badge tone="good">Published</Badge>
+          ) : (
+            <Badge tone="muted">Draft</Badge>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {[
+            p.subject,
+            p.conducted_by,
+            p.exam_date && formatDate(p.exam_date, "en"),
+            `${p.questions}${p.questions_total ? ` of ${p.questions_total}` : ""} questions`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
+        <PaperBadges p={p} />
+      </div>
+      <div className="space-y-1 self-center" title={`${done} of ${p.questions} finished`}>
+        <div className="flex justify-between text-xs">
+          <span className="text-muted-foreground">Finished</span>
+          <span className="tabular-nums">
+            {done} / {p.questions}
+          </span>
+        </div>
+        <span className="block h-1.5 overflow-hidden rounded-full bg-muted">
+          <span
+            className={`block h-full ${pct === 100 ? "bg-emerald-500" : "bg-primary"}`}
+            style={{ width: `${pct}%` }}
+          />
+        </span>
+      </div>
+    </button>
+  );
+}
+
+// Settings for every paper: the section list, exam weights, practice sets
+// and the lessons used in picking stories.
+function PaperSettings() {
+  const listFn = useServerFn(listExamPapers);
+  const q = useQuery({ queryKey: ["examPapers"], queryFn: () => listFn() });
+  const lessons = q.data?.lessons ?? [];
+  return (
+    <div className="space-y-4">
+      <SectionsSettings />
+      <PyqSets />
+      <ExamWeights />
+      {lessons.length > 0 && (
+        <section className="space-y-1 rounded-2xl border border-border bg-card p-4 text-sm">
+          <h3 className="font-semibold">Lessons in use for picking stories</h3>
+          <ul className="list-disc space-y-0.5 pl-5 text-muted-foreground">
+            {lessons.map((l) => (
+              <li key={l}>{l}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// What a paper still needs, in short.
 function PaperBadges({ p }: { p: PaperSummary }) {
   const reading = p.source === "pdf" && p.pages > 0 && p.pages_done < p.pages;
   const written = p.kind === "subjective";
   return (
-    <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
-      {p.status === "published" ? (
-        <Badge tone="good">Published</Badge>
-      ) : (
-        <Badge tone="muted">Draft</Badge>
-      )}
-      <Badge tone="primary">
-        {p.questions}
-        {p.questions_total ? ` of ${p.questions_total}` : ""} questions
-      </Badge>
+    <div className="flex flex-wrap gap-1.5 text-xs">
       {written && <Badge tone="primary">Written (Mains)</Badge>}
-      {p.questions > 0 && p.status !== "published" && (
-        <Badge tone={p.verified === p.questions ? "good" : "muted"}>
-          {p.verified} of {p.questions} finished
-          {written
-            ? ""
-            : ` · ① ${p.proof_question ?? 0} · ② ${p.proof_answer ?? 0} · ③ ${p.proof_explanation ?? 0} of ${p.explained} explained`}
-        </Badge>
-      )}
-      {!written && (p.need_explanation ?? 0) > 0 && (
-        <Badge tone="warn">{p.need_explanation} need an explanation</Badge>
-      )}
       {reading && (
         <Badge tone="warn">
           Read {p.pages_done} of {p.pages} pages
@@ -434,6 +614,15 @@ function PaperBadges({ p }: { p: PaperSummary }) {
       ) : (
         <Badge tone="muted">No answer key</Badge>
       )}
+      {p.questions > 0 && p.status !== "published" && !written && (
+        <Badge tone="muted">
+          ① {p.proof_question ?? 0} · ② {p.proof_answer ?? 0} · ③ {p.proof_explanation ?? 0}/
+          {p.explained ?? 0}
+        </Badge>
+      )}
+      {!written && (p.need_explanation ?? 0) > 0 && (
+        <Badge tone="warn">{p.need_explanation} need an explanation</Badge>
+      )}
       {p.incomplete > 0 && <Badge tone="warn">{p.incomplete} to check</Badge>}
       {p.checked_at && (
         <Badge tone="primary">
@@ -444,7 +633,7 @@ function PaperBadges({ p }: { p: PaperSummary }) {
   );
 }
 
-function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
+function AddPaper({ onAdded, onClose }: { onAdded: (id: string) => void; onClose: () => void }) {
   const qc = useQueryClient();
   const createFn = useServerFn(createExamPaper);
   const importFn = useServerFn(importExamPapers);
@@ -455,7 +644,6 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
   // The paper's type (its sections) and the syllabus to tag on.
   const [type, setType] = useState<TypeChoice>(NEW_TYPE);
   const [guessed, setGuessed] = useState<string | null>(null);
-  const [openForm, setOpenForm] = useState(false);
   const [exam, setExam] = useState("");
   const [body, setBody] = useState("RPSC");
   const [date, setDate] = useState("");
@@ -570,29 +758,18 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
     }
   }
 
-  if (!openForm)
-    return (
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="min-w-0 flex-1 text-sm text-muted-foreground">
-          Question papers with their answer keys, exam by exam. Import a paper from Excel: one row
-          per language (S. No. “E-1” English, “H-1” Hindi) with the columns{" "}
-          {SHEET_COLUMNS.slice(0, 11).join(", ")}; or one sheet per language in the columns{" "}
-          {EXCEL_COLUMNS.join(", ")}. Each paper starts as a draft: fill its explanations, proofread
-          every question (question, answer, explanation), then publish it. Export gives the same
-          sheet with the explanations.
-        </p>
-        <Button onClick={() => setOpenForm(true)}>
-          <Plus className="mr-1 h-4 w-4" /> Add a paper
-        </Button>
-      </div>
-    );
   return (
     <form
       onSubmit={add}
       aria-label="Add a paper"
       className="space-y-3 rounded-2xl border border-border bg-card p-4"
     >
-      <h3 className="font-semibold">Add a paper</h3>
+      <div className="flex flex-wrap items-baseline gap-2">
+        <h3 className="font-semibold">Add a paper</h3>
+        <span className="text-xs text-muted-foreground">
+          A PDF (scans too) or an Excel sheet, with its answer key if you have it.
+        </span>
+      </div>
       <div
         role="radiogroup"
         aria-label="Objective or written"
@@ -712,10 +889,18 @@ function AddPaper({ onAdded }: { onAdded: (id: string) => void }) {
         <Button type="submit" disabled={!!busy || !paperFile}>
           <FileUp className="mr-1 h-4 w-4" /> {busy || "Add paper"}
         </Button>
-        <Button type="button" variant="ghost" onClick={() => setOpenForm(false)}>
+        <Button type="button" variant="ghost" onClick={onClose}>
           Cancel
         </Button>
       </div>
+      <details className="text-xs text-muted-foreground">
+        <summary className="cursor-pointer">Excel columns</summary>
+        <p className="mt-1">
+          One row per language (S. No. “E-1” English, “H-1” Hindi) with the columns{" "}
+          {SHEET_COLUMNS.slice(0, 11).join(", ")}; or one sheet per language in the columns{" "}
+          {EXCEL_COLUMNS.join(", ")}. Export gives the same sheet with the explanations.
+        </p>
+      </details>
     </form>
   );
 }
@@ -814,6 +999,8 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
   });
   const [reading, setReading] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
+  // Questions shown (more on request): a long paper stays quick.
+  const [limit, setLimit] = useState(PAGE);
   // The subject section shown ("" for all).
   const [subject, setSubject] = useState("");
   // A question jumped to: scrolled to and lit up once it's in the list.
@@ -1008,13 +1195,20 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
           <ArrowLeft className="mr-1 h-4 w-4" /> All papers
         </Button>
 
-        <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+        <section className="space-y-3 rounded-2xl border border-border bg-card p-4" data-paper-head>
           {editing ? (
             <PaperDetails paper={paper} onDone={() => setEditing(false)} onSaved={refresh} />
           ) : (
             <div className="flex flex-wrap items-start gap-2">
               <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
-                <h2 className="break-words text-lg font-semibold">{paper.exam}</h2>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="break-words text-lg font-semibold">{paper.exam}</h2>
+                  {published ? (
+                    <Badge tone="good">Published</Badge>
+                  ) : (
+                    <Badge tone="muted">Draft</Badge>
+                  )}
+                </div>
                 <p className="text-sm text-muted-foreground">
                   {[
                     paper.subject,
@@ -1057,39 +1251,14 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
               </Button>
             </div>
           )}
-          <div className="flex flex-wrap gap-1.5 text-xs">
-            <Badge tone="primary">
-              {questions.length}
-              {paper.questions_total ? ` of ${paper.questions_total}` : ""} questions
-            </Badge>
-            {written ? (
-              <Badge tone="muted">
-                Written ·{" "}
-                {questions.filter((x) => !x.deleted).reduce((n, x) => n + (x.marks ?? 0), 0)} marks
-              </Badge>
-            ) : paper.key_added ? (
-              <Badge tone="good">
-                {answered} answers{deleted ? `, ${deleted} deleted` : ""}
-              </Badge>
-            ) : (
-              <Badge tone="muted">No answer key</Badge>
-            )}
-            {toCheck.length > 0 && <Badge tone="warn">{toCheck.length} to check</Badge>}
-          </div>
-          <PaperSyllabus
-            paper={paper}
-            syllabus={
-              (data as { syllabus?: Parameters<typeof PaperSyllabus>[0]["syllabus"] }).syllabus ??
-              null
-            }
-            onChanged={refresh}
-          />
-          <PaperSections
-            paper={paper}
+          <PaperProgress
             questions={questions}
-            tagging={tagging}
-            locked={paper.status === "published"}
-            onChanged={refresh}
+            total={paper.questions_total}
+            written={written}
+            keyAdded={paper.key_added}
+            answered={answered}
+            deleted={deleted}
+            toCheck={toCheck.length}
           />
           {reading ? (
             <p className="flex items-center gap-2 text-sm text-primary" role="status">
@@ -1130,27 +1299,6 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
               </div>
             ))
           )}
-          <label className={`flex flex-wrap items-center gap-2 text-sm ${written ? "hidden" : ""}`}>
-            <KeyRound className="h-4 w-4 text-primary" />
-            <span className="font-medium">
-              {paper.key_added ? "Answer key added" : "Add the answer key"}
-            </span>
-            <Input
-              type="file"
-              aria-label="Answer key"
-              accept=".pdf,.xlsx,.xls,.csv,image/*"
-              disabled={!!reading}
-              className="h-9 max-w-xs"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void addKey(f);
-                e.target.value = "";
-              }}
-            />
-            {paper.key_added && (
-              <span className="text-xs text-muted-foreground">A new key replaces its answers.</span>
-            )}
-          </label>
           {askSeries && (
             <div
               role="group"
@@ -1183,17 +1331,88 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
           )}
         </section>
 
+        <section
+          className="divide-y divide-border rounded-2xl border border-border bg-card"
+          aria-label="Setup"
+          data-paper-setup
+        >
+          {!written && (
+            <SetupRow label="Answer key">
+              <label className="flex flex-wrap items-center gap-2 text-sm">
+                <span
+                  className={
+                    paper.key_added
+                      ? "text-emerald-700 dark:text-emerald-300"
+                      : "text-muted-foreground"
+                  }
+                >
+                  {paper.key_added ? "Added" : "Not added yet"}
+                </span>
+                <Input
+                  type="file"
+                  aria-label="Answer key"
+                  accept=".pdf,.xlsx,.xls,.csv,image/*"
+                  disabled={!!reading}
+                  className="h-9 max-w-xs"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void addKey(f);
+                    e.target.value = "";
+                  }}
+                />
+                {paper.key_added && (
+                  <span className="text-xs text-muted-foreground">
+                    A new key replaces its answers.
+                  </span>
+                )}
+              </label>
+            </SetupRow>
+          )}
+          <SetupRow label="Paper type">
+            <PaperSections
+              paper={paper}
+              questions={questions}
+              tagging={tagging}
+              locked={paper.status === "published"}
+              onChanged={refresh}
+            />
+          </SetupRow>
+          <SetupRow label="Old syllabus">
+            <PaperSyllabus
+              paper={paper}
+              syllabus={
+                (data as { syllabus?: Parameters<typeof PaperSyllabus>[0]["syllabus"] }).syllabus ??
+                null
+              }
+              onChanged={refresh}
+            />
+          </SetupRow>
+        </section>
+
         <Proofread paper={paper} questions={questions} lang={lang} onChanged={refresh} />
 
-        <MagazineCheck
-          paper={paper}
-          questions={questions}
-          stories={data!.stories}
-          lessonsInUse={data!.lessons}
-          onChanged={refresh}
-        />
+        <Collapsible
+          title="Against the magazine"
+          note={
+            paper.checked_at
+              ? "Checked: which questions our magazine covered"
+              : "Which questions our current affairs magazine covered"
+          }
+          open={!!paper.checked_at}
+        >
+          <MagazineCheck
+            paper={paper}
+            questions={questions}
+            stories={data!.stories}
+            lessonsInUse={data!.lessons}
+            onChanged={refresh}
+          />
+        </Collapsible>
 
-        <div className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-2 bg-background/95 px-1 py-1.5 backdrop-blur">
+        <div
+          className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-2 border-b border-border bg-background/95 px-1 py-2 backdrop-blur"
+          data-questions-toolbar
+        >
           <QuestionJump
             questions={questions}
             onJump={(x) => {
@@ -1202,12 +1421,25 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
                 setFilter("all");
                 setSubject("");
               }
+              // Past the questions shown: show up to it.
+              const at = (shown.some((y) => y.id === x.id) ? shown : questions).findIndex(
+                (y) => y.id === x.id,
+              );
+              if (at >= limit) setLimit(at + PAGE);
               jumpTo.current = x.q_no;
               // A new value each time, so the same question can be jumped to again.
               setJumped(Date.now());
             }}
           />
-          <div role="radiogroup" aria-label="Show questions" className="flex flex-wrap gap-1">
+          <select
+            aria-label="Show questions"
+            value={filter}
+            onChange={(e) => {
+              setFilter(e.target.value as Filter);
+              setLimit(PAGE);
+            }}
+            className={`h-8 max-w-[16rem] rounded-md border bg-background px-2 text-xs ${filter === "all" ? "border-input" : "border-primary"}`}
+          >
             {(
               (written
                 ? [
@@ -1275,24 +1507,20 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
                       : []),
                   ]) as [Filter, string][]
             ).map(([k, label]) => (
-              <button
-                key={k}
-                type="button"
-                role="radio"
-                aria-checked={filter === k}
-                onClick={() => setFilter(k)}
-                className={`rounded-full border px-3 py-1 text-xs ${filter === k ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:bg-muted"}`}
-              >
-                {label}
-              </button>
+              <option key={k} value={k}>
+                {k === "all" ? `All questions${label.replace(/^All/, "")}` : label}
+              </option>
             ))}
-          </div>
+          </select>
           {subjects.length > 1 || (subjects[0] && subjects[0][0] !== "—") ? (
             <select
               aria-label="Subject section"
               value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              className="h-7 rounded-md border border-input bg-background px-2 text-xs"
+              onChange={(e) => {
+                setSubject(e.target.value);
+                setLimit(PAGE);
+              }}
+              className="h-8 rounded-md border border-input bg-background px-2 text-xs"
             >
               <option value="">All subjects</option>
               {subjects.map(([name, n]) => (
@@ -1319,7 +1547,7 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
 
         {shown.length ? (
           <ol className="space-y-2" data-testid="questions">
-            {shown.map((x) => (
+            {shown.slice(0, limit).map((x) => (
               <QuestionCard
                 key={x.id}
                 q={x}
@@ -1332,7 +1560,15 @@ function PaperView({ id, onBack }: { id: string; onBack: () => void }) {
               />
             ))}
           </ol>
-        ) : (
+        ) : null}
+        {shown.length > limit && (
+          <div className="flex justify-center">
+            <Button variant="outline" onClick={() => setLimit(limit + PAGE)}>
+              Show {Math.min(PAGE, shown.length - limit)} more ({shown.length - limit} left)
+            </Button>
+          </div>
+        )}
+        {shown.length ? null : (
           <p className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
             {questions.length
               ? "No question here."
@@ -1606,6 +1842,14 @@ function QuestionCard({
           {(["hi", "en"] as const).filter(show).map((l) => {
             const text = l === "hi" ? q.question_hi : q.question_en;
             const extra = l === "hi" ? q.extra_hi : q.extra_en;
+            // Nothing in this language (not read yet, or a language
+            // question of the other): one line, not rows of dashes.
+            if (!text && !extra && q.options.every((o) => !o[l]))
+              return (
+                <p key={l} className="text-xs italic text-muted-foreground" data-no-lang={l}>
+                  No {l === "hi" ? "Hindi" : "English"} text.
+                </p>
+              );
             return (
               <div key={l} lang={l} className="space-y-1">
                 <p className="break-words">
@@ -2243,29 +2487,34 @@ function Proofread({
           {reviewed ? ` · ${flaggedCount} flagged by the AI check` : ""}
         </span>
       </div>
-      {written && !published ? (
-        <p className="text-sm text-muted-foreground">
-          Run the AI check: it sorts the questions into subject sections and topics and flags
-          language mistakes. Add model answers on each question (private, for learning only). Then
-          link the questions to the master outlines, finish every question and publish it.
-        </p>
-      ) : published ? (
-        <p className="text-sm text-muted-foreground">
-          {written
-            ? "The other features use it, and its questions can still be linked to the outlines."
-            : "Students can take it as a test, and the other features use it."}{" "}
-          Unpublish it to make other changes.
-        </p>
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          Fill the explanations, then run the AI check: it sorts the questions into subject sections
-          and topics and flags likely mistakes (a wrong key, an explanation that disagrees, Hindi
-          and English that differ) to proofread first. Then proofread every question in three
-          checks: ① the question and options, ② the answer, ③ the explanation (once one is written;
-          tick ② first). A question with no explanation yet is finished with ① and ② and marked
-          “Needs explanation”. When all are finished, publish it.
-        </p>
-      )}
+      <details className="text-sm text-muted-foreground">
+        <summary className="cursor-pointer text-xs">How it works</summary>
+        <div className="mt-1">
+          {written && !published ? (
+            <p className="text-sm text-muted-foreground">
+              Run the AI check: it sorts the questions into subject sections and topics and flags
+              language mistakes. Add model answers on each question (private, for learning only).
+              Then link the questions to the master outlines, finish every question and publish it.
+            </p>
+          ) : published ? (
+            <p className="text-sm text-muted-foreground">
+              {written
+                ? "The other features use it, and its questions can still be linked to the outlines."
+                : "Students can take it as a test, and the other features use it."}{" "}
+              Unpublish it to make other changes.
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Fill the explanations, then run the AI check: it sorts the questions into subject
+              sections and topics and flags likely mistakes (a wrong key, an explanation that
+              disagrees, Hindi and English that differ) to proofread first. Then proofread every
+              question in three checks: ① the question and options, ② the answer, ③ the explanation
+              (once one is written; tick ② first). A question with no explanation yet is finished
+              with ① and ② and marked “Needs explanation”. When all are finished, publish it.
+            </p>
+          )}
+        </div>
+      </details>
       {busy && (
         <p role="status" className="flex items-center gap-2 text-sm text-primary">
           <RefreshCw className="h-4 w-4 animate-spin" /> {busy}
@@ -2278,67 +2527,119 @@ function Proofread({
           )}
         </p>
       )}
-      <div className="flex flex-wrap gap-2">
-        {!published && !written && (
+      <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5" data-proof-steps>
+        {!written && (
+          <Step
+            n={1}
+            title="Explanations"
+            note={`${explained} of ${questions.length} written`}
+            done={!toExplain}
+          >
+            {!published && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full"
+                disabled={!!busy || !toExplain}
+                onClick={() => void explain()}
+                aria-label={toExplain ? `Fill explanations (${toExplain})` : "All explained"}
+              >
+                <Sparkles className="mr-1 h-4 w-4" />
+                {toExplain ? `Write ${toExplain}` : "Done"}
+              </Button>
+            )}
+          </Step>
+        )}
+        <Step
+          n={written ? 1 : 2}
+          title="AI check"
+          note={`${reviewed} of ${questions.length} checked${flaggedCount ? ` · ${flaggedCount} flagged` : ""}`}
+          done={!toReview}
+        >
+          {!published && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full"
+              disabled={!!busy || !toReview}
+              title="Subjects, topics and likely mistakes (an AI request per 8 questions)"
+              onClick={() => void review()}
+              aria-label={toReview ? `AI check & subjects (${toReview})` : "All checked"}
+            >
+              <ShieldAlert className="mr-1 h-4 w-4" />
+              {toReview ? `Check ${toReview}` : "Done"}
+            </Button>
+          )}
+        </Step>
+        <Step
+          n={written ? 2 : 3}
+          title="Outlines"
+          note={`${questions.length - toLink} of ${questions.length} linked`}
+          done={!toLink}
+        >
           <Button
             size="sm"
             variant="outline"
-            disabled={!!busy || !toExplain}
-            onClick={() => void explain()}
+            className="w-full"
+            disabled={!!busy || !linkable}
+            title={
+              toLink && !linkable
+                ? "Run the AI check first: questions are linked within their subject section"
+                : "File each question under its master outline topic (an AI request per 20 questions)"
+            }
+            onClick={() => void link()}
+            aria-label={toLink ? `Link to outlines (${linkable})` : "All linked"}
           >
-            <Sparkles className="mr-1 h-4 w-4" />
-            {toExplain ? `Fill explanations (${toExplain})` : "All explained"}
+            <ListTree className="mr-1 h-4 w-4" />
+            {toLink ? `Link ${linkable}` : "Done"}
           </Button>
-        )}
-        {!published && (
+        </Step>
+        <Step
+          n={written ? 3 : 4}
+          title="Proofread"
+          note={`${verified} of ${questions.length} finished`}
+          done={!!questions.length && verified === questions.length}
+        >
           <Button
             size="sm"
-            variant="outline"
-            disabled={!!busy || !toReview}
-            title="Subjects, topics and likely mistakes (an AI request per 8 questions)"
-            onClick={() => void review()}
+            variant={published ? "outline" : "default"}
+            className="w-full"
+            disabled={!questions.length}
+            onClick={() => setCards(true)}
+            aria-label={published ? "Read as cards" : "Proofread one by one"}
           >
-            <ShieldAlert className="mr-1 h-4 w-4" />
-            {toReview ? `AI check & subjects (${toReview})` : "All checked"}
+            <Layers className="mr-1 h-4 w-4" /> {published ? "Read" : "Start"}
           </Button>
-        )}
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!!busy || !linkable}
-          title={
-            toLink && !linkable
-              ? "Run the AI check first: questions are linked within their subject section"
-              : "File each question under its master outline topic (an AI request per 20 questions)"
-          }
-          onClick={() => void link()}
+        </Step>
+        <Step
+          n={written ? 4 : 5}
+          title="Publish"
+          note={published ? "Live for students" : "When all are finished"}
+          done={published}
         >
-          <ListTree className="mr-1 h-4 w-4" />
-          {toLink ? `Link to outlines (${linkable})` : "All linked"}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!questions.length}
-          onClick={() => setCards(true)}
-        >
-          <Layers className="mr-1 h-4 w-4" /> {published ? "Read as cards" : "Proofread one by one"}
-        </Button>
-        {published ? (
-          <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => void unpublish()}>
-            Unpublish
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            disabled={!!busy || !questions.length || verified < questions.length}
-            title={verified < questions.length ? "Finish every question first" : undefined}
-            onClick={() => void publish()}
-          >
-            <Upload className="mr-1 h-4 w-4" /> Publish
-          </Button>
-        )}
-      </div>
+          {published ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="w-full"
+              disabled={!!busy}
+              onClick={() => void unpublish()}
+            >
+              Unpublish
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              className="w-full"
+              disabled={!!busy || !questions.length || verified < questions.length}
+              title={verified < questions.length ? "Finish every question first" : undefined}
+              onClick={() => void publish()}
+            >
+              <Upload className="mr-1 h-4 w-4" /> Publish
+            </Button>
+          )}
+        </Step>
+      </ol>
       {cards && (
         <ProofCards
           questions={questions}

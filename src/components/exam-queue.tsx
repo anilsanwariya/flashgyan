@@ -47,7 +47,17 @@ const STATUS: Record<
   failed: { label: "Failed", tone: "bad" },
 };
 
-export function PaperQueue({ onOpen }: { onOpen: (paperId: string) => void }) {
+export function PaperQueue({
+  onOpen,
+  showForm = true,
+  onClose,
+}: {
+  onOpen: (paperId: string) => void;
+  // The upload form (opened from the papers toolbar); the queue shows
+  // whenever it has papers.
+  showForm?: boolean;
+  onClose?: () => void;
+}) {
   const qc = useQueryClient();
   const listFn = useServerFn(listPaperQueue);
   const startFn = useServerFn(startQueuedPaper);
@@ -157,6 +167,9 @@ export function PaperQueue({ onOpen }: { onOpen: (paperId: string) => void }) {
       </p>
     );
 
+  // Shown when opened, or while it holds papers.
+  const form = showForm || rows.length > 0;
+  if (!form && !items.length) return null;
   return (
     <section
       className="space-y-3 rounded-2xl border border-border bg-card p-4"
@@ -165,13 +178,22 @@ export function PaperQueue({ onOpen }: { onOpen: (paperId: string) => void }) {
     >
       <div className="flex flex-wrap items-center gap-2">
         <Layers className="h-4 w-4 text-primary" />
-        <h3 className="font-semibold">Upload many papers</h3>
-        <span className="text-sm text-muted-foreground">
-          PDFs are read on the server in the background, a few pages at a time: you can close the
-          browser. Add answer keys on each paper afterwards.
-        </span>
+        <h3 className="font-semibold">
+          {form ? "Upload many papers" : "Reading in the background"}
+        </h3>
+        {form && (
+          <span className="text-sm text-muted-foreground">
+            Read on the server a few pages at a time: you can close the browser. Add answer keys on
+            each paper afterwards.
+          </span>
+        )}
+        {form && onClose && !rows.length && (
+          <Button size="sm" variant="ghost" className="ml-auto" onClick={onClose}>
+            Close
+          </Button>
+        )}
       </div>
-      <div className="flex flex-wrap items-end gap-2">
+      <div className={`flex flex-wrap items-end gap-2 ${form ? "" : "hidden"}`}>
         <Input
           type="file"
           multiple
@@ -269,7 +291,7 @@ export function PaperQueue({ onOpen }: { onOpen: (paperId: string) => void }) {
       {items.length > 0 && (
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="font-medium">Queue</span>
+            {form && <span className="font-medium">Queue</span>}
             {active > 0 && <span className="text-muted-foreground">{active} to read</span>}
             {active > 0 &&
               (reading ? (
