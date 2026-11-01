@@ -94,7 +94,23 @@ export const getExamPaper = createServerFn({ method: "POST" })
       ...new Set(got.questions.map((q) => q.master_topic_id).filter((x): x is string => !!x)),
     ];
     const topics = ids.length ? await (await import("@/lib/outline.server")).topicNames(ids) : {};
-    return { ...got, stories, topics, lessons: await s.lessonsInUse() };
+    return {
+      ...got,
+      stories,
+      topics,
+      lessons: await s.lessonsInUse(),
+      syllabus: await s.paperSyllabus(got.paper.syllabus_id).catch(() => null),
+    };
+  });
+
+// The old syllabus a paper followed (or none).
+export const setExamPaperSyllabus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id, syllabus_id: id.nullable() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await server()).setPaperSyllabus(data.id, data.syllabus_id);
+    return { ok: true };
   });
 
 export const createExamPaper = createServerFn({ method: "POST" })

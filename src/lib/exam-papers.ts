@@ -31,6 +31,9 @@ export type ExamPaper = {
   mcq_test_id: string | null;
   // After the mains_papers migration: MCQs, or written answers (Mains).
   kind?: PaperKind;
+  // After the syllabus_stages migration: the old syllabus the paper
+  // followed, when it isn't the exam's current one.
+  syllabus_id?: string | null;
   created_at: string;
   updated_at: string;
 };
