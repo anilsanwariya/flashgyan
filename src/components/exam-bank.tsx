@@ -37,18 +37,30 @@ import { Input } from "@/components/ui/input";
 import { ProofCards } from "@/components/exam-papers-panel";
 
 const LIST_SIZE = 60;
+
+export function useBank() {
+  const fn = useServerFn(examQuestionBank);
+  return useQuery({ queryKey: ["examBank"], queryFn: () => fn(), refetchOnMount: true });
+}
 // At most this many questions in one proofreading run.
 const CARDS_MAX = 300;
 
-export function QuestionBank({ onOpen }: { onOpen: (paperId: string) => void }) {
+export function QuestionBank({
+  onOpen,
+  filter: f,
+  onFilter: setF,
+}: {
+  onOpen: (paperId: string) => void;
+  // Kept by the page, so the overview can open the bank filtered.
+  filter: BankFilter;
+  onFilter: (f: BankFilter) => void;
+}) {
   const qc = useQueryClient();
-  const fn = useServerFn(examQuestionBank);
-  const q = useQuery({ queryKey: ["examBank"], queryFn: () => fn(), refetchOnMount: true });
-  const [f, setF] = useState<BankFilter>({});
+  const q = useBank();
   const [group, setGroup] = useState<Dimension | "">("");
   const [cards, setCards] = useState<string[] | null>(null);
-  const papers = q.data?.papers ?? [];
-  const rows = q.data?.rows ?? [];
+  const papers = useMemo(() => q.data?.papers ?? [], [q.data]);
+  const rows = useMemo(() => q.data?.rows ?? [], [q.data]);
   const byId = useMemo(() => new Map(papers.map((p) => [p.id, p])), [papers]);
   const shown = useMemo(() => filterRows(rows, papers, f), [rows, papers, f]);
   const choices = useMemo(() => facets(rows, papers, f), [rows, papers, f]);
@@ -62,8 +74,15 @@ export function QuestionBank({ onOpen }: { onOpen: (paperId: string) => void }) 
   if (q.data && !q.data.ready)
     return <p className="text-sm text-muted-foreground">Exam papers need the database update.</p>;
 
+  const names = q.data?.sectionNames ?? {};
   const label = (d: Dimension, v: string) =>
-    !v ? "(not set)" : d === "paper" ? (byId.get(v)?.exam ?? v) : v;
+    !v
+      ? "(not set)"
+      : d === "paper"
+        ? (byId.get(v)?.exam ?? v)
+        : d === "section"
+          ? (names[v] ?? v)
+          : v;
   const set = (patch: BankFilter) => setF({ ...f, ...patch });
   const any = Object.values(f).some(Boolean);
   // To proofread: the filtered questions not finished, from draft papers.

@@ -109,6 +109,8 @@ import {
 } from "@/components/exam-paper-sections";
 import { langOf, sectionOf } from "@/lib/exam-sections";
 import { QuestionBank } from "@/components/exam-bank";
+import { ExamOverview } from "@/components/exam-overview";
+import type { BankFilter } from "@/lib/exam-bank";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -146,7 +148,9 @@ const pending = new Map<string, File>();
 
 export function ExamPapers() {
   const [open, setOpen] = useOpenPaper();
-  const [tab, setTab] = useState<"papers" | "bank">("papers");
+  const [tab, setTab] = useState<"overview" | "papers" | "bank">("papers");
+  // The bank's filter, kept here so the overview can open it filtered.
+  const [bankFilter, setBankFilter] = useState<BankFilter>({});
   if (open) return <PaperView id={open} onBack={() => setOpen(null)} />;
   return (
     <div className="space-y-4">
@@ -157,6 +161,7 @@ export function ExamPapers() {
       >
         {(
           [
+            ["overview", "Overview"],
             ["papers", "Papers"],
             ["bank", "Question bank"],
           ] as const
@@ -173,7 +178,18 @@ export function ExamPapers() {
           </button>
         ))}
       </div>
-      {tab === "bank" ? <QuestionBank onOpen={setOpen} /> : <PaperList onOpen={setOpen} />}
+      {tab === "bank" ? (
+        <QuestionBank onOpen={setOpen} filter={bankFilter} onFilter={setBankFilter} />
+      ) : tab === "overview" ? (
+        <ExamOverview
+          onFilter={(f) => {
+            setBankFilter(f);
+            setTab("bank");
+          }}
+        />
+      ) : (
+        <PaperList onOpen={setOpen} />
+      )}
     </div>
   );
 }
