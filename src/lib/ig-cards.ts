@@ -199,7 +199,7 @@ const BASE = `
   .title { display: flex; justify-content: space-between; align-items: baseline; font-size: 40px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
   .title .date { font-size: 32px; font-weight: 400; letter-spacing: 0; text-transform: none; }
   .pos { font-size: 34px; font-weight: 600; }
-  .word { font-size: 150px; line-height: 1.05; font-weight: 800; margin: 6px 0 4px; overflow-wrap: anywhere; }
+  .word { font-size: 150px; line-height: 1.05; font-weight: 800; margin: 6px 0 4px; overflow-wrap: normal; word-break: normal; hyphens: none; }
   html[lang=hi] .word { line-height: 1.3; }
   .say { font-size: 38px; }
   .ipa { opacity: .7; }
@@ -437,7 +437,24 @@ const DESIGN_CSS: Record<IgDesign, string> = {
 // Shrinks the card's middle until everything fits above the footer.
 const FIT_SCRIPT = `<script>
 (function () {
+  // The headword is never broken inside a word: too wide for the card
+  // (a long word, or a phrase's longest word), it gets smaller instead.
+  function fitWord() {
+    var w = document.querySelector('.word');
+    if (!w) return;
+    w.style.fontSize = '';
+    w.style.overflowWrap = '';
+    var size = parseFloat(getComputedStyle(w).fontSize);
+    while (w.scrollWidth > w.clientWidth + 1 && size > 56) {
+      size -= 4;
+      w.style.fontSize = size + 'px';
+    }
+    // Still too wide at the smallest size: break it rather than spill out.
+    if (w.scrollWidth > w.clientWidth + 1) w.style.overflowWrap = 'anywhere';
+    document.body.setAttribute('data-word-size', String(Math.round(size)));
+  }
   function fit() {
+    fitWord();
     var card = document.querySelector('.card'), box = document.querySelector('.fit');
     if (!card || !box) return;
     var z = 1;
