@@ -14,6 +14,458 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_usage: {
+        Row: {
+          cache_read_tokens: number
+          cache_write_tokens: number
+          calls: number
+          day: string
+          input_tokens: number
+          label: string
+          model: string
+          output_tokens: number
+          updated_at: string
+        }
+        Insert: {
+          cache_read_tokens?: number
+          cache_write_tokens?: number
+          calls?: number
+          day: string
+          input_tokens?: number
+          label: string
+          model?: string
+          output_tokens?: number
+          updated_at?: string
+        }
+        Update: {
+          cache_read_tokens?: number
+          cache_write_tokens?: number
+          calls?: number
+          day?: string
+          input_tokens?: number
+          label?: string
+          model?: string
+          output_tokens?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      atlas_districts: {
+        Row: {
+          checks: Json
+          district: string
+          meta: Json
+          name_hi: string
+          overview: Json | null
+          published_at: string | null
+          status: string
+          updated_at: string
+          versions: Json
+        }
+        Insert: {
+          checks?: Json
+          district: string
+          meta?: Json
+          name_hi?: string
+          overview?: Json | null
+          published_at?: string | null
+          status?: string
+          updated_at?: string
+          versions?: Json
+        }
+        Update: {
+          checks?: Json
+          district?: string
+          meta?: Json
+          name_hi?: string
+          overview?: Json | null
+          published_at?: string | null
+          status?: string
+          updated_at?: string
+          versions?: Json
+        }
+        Relationships: []
+      }
+      atlas_facts: {
+        Row: {
+          chapter: string
+          chapter_key: string
+          edited: boolean
+          entities: string[]
+          flags: number
+          heading: string
+          hi_ai: boolean
+          id: string
+          in_file: boolean
+          key: string
+          note: string
+          position: number
+          source: string
+          status: string
+          subject: string
+          table_head: string
+          text_en: string
+          text_hi: string
+          updated_at: string
+        }
+        Insert: {
+          chapter?: string
+          chapter_key?: string
+          edited?: boolean
+          entities?: string[]
+          flags?: number
+          heading?: string
+          hi_ai?: boolean
+          id?: string
+          in_file?: boolean
+          key: string
+          note?: string
+          position?: number
+          source?: string
+          status?: string
+          subject?: string
+          table_head?: string
+          text_en?: string
+          text_hi?: string
+          updated_at?: string
+        }
+        Update: {
+          chapter?: string
+          chapter_key?: string
+          edited?: boolean
+          entities?: string[]
+          flags?: number
+          heading?: string
+          hi_ai?: boolean
+          id?: string
+          in_file?: boolean
+          key?: string
+          note?: string
+          position?: number
+          source?: string
+          status?: string
+          subject?: string
+          table_head?: string
+          text_en?: string
+          text_hi?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      atlas_layers: {
+        Row: {
+          approx: boolean
+          edited: boolean
+          grp: string
+          items: Json
+          key: string
+          name_en: string
+          name_hi: string
+          note: string
+          position: number
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          approx?: boolean
+          edited?: boolean
+          grp?: string
+          items?: Json
+          key: string
+          name_en: string
+          name_hi?: string
+          note?: string
+          position?: number
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          approx?: boolean
+          edited?: boolean
+          grp?: string
+          items?: Json
+          key?: string
+          name_en?: string
+          name_hi?: string
+          note?: string
+          position?: number
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      atlas_mcqs: {
+        Row: {
+          answer: number
+          created_at: string
+          edited: boolean
+          explanation: Json
+          id: string
+          key: string
+          kind: string
+          note: string
+          options: Json
+          pending: boolean
+          question: Json
+          set_name: string
+          source: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          answer: number
+          created_at?: string
+          edited?: boolean
+          explanation?: Json
+          id?: string
+          key: string
+          kind: string
+          note?: string
+          options: Json
+          pending?: boolean
+          question: Json
+          set_name?: string
+          source?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          answer?: number
+          created_at?: string
+          edited?: boolean
+          explanation?: Json
+          id?: string
+          key?: string
+          kind?: string
+          note?: string
+          options?: Json
+          pending?: boolean
+          question?: Json
+          set_name?: string
+          source?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      atlas_news: {
+        Row: {
+          created_at: string
+          hidden: boolean
+          how: string
+          id: string
+          issue_date: string
+          item_id: string
+          place_key: string
+        }
+        Insert: {
+          created_at?: string
+          hidden?: boolean
+          how: string
+          id?: string
+          issue_date: string
+          item_id: string
+          place_key: string
+        }
+        Update: {
+          created_at?: string
+          hidden?: boolean
+          how?: string
+          id?: string
+          issue_date?: string
+          item_id?: string
+          place_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "atlas_news_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "ca_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      atlas_places: {
+        Row: {
+          cat: string
+          district: string
+          edited: boolean
+          era_from: number | null
+          era_to: number | null
+          hi_ai: boolean
+          id: string
+          in_file: boolean
+          key: string
+          label_en: string
+          label_hi: string
+          lat: number
+          lon: number
+          months: number[]
+          name_en: string
+          name_hi: string
+          note_en: string
+          note_hi: string
+          refs: Json
+          source: string
+          status: string
+          tehsil: string
+          updated_at: string
+        }
+        Insert: {
+          cat: string
+          district?: string
+          edited?: boolean
+          era_from?: number | null
+          era_to?: number | null
+          hi_ai?: boolean
+          id?: string
+          in_file?: boolean
+          key: string
+          label_en?: string
+          label_hi?: string
+          lat: number
+          lon: number
+          months?: number[]
+          name_en: string
+          name_hi?: string
+          note_en?: string
+          note_hi?: string
+          refs?: Json
+          source?: string
+          status?: string
+          tehsil?: string
+          updated_at?: string
+        }
+        Update: {
+          cat?: string
+          district?: string
+          edited?: boolean
+          era_from?: number | null
+          era_to?: number | null
+          hi_ai?: boolean
+          id?: string
+          in_file?: boolean
+          key?: string
+          label_en?: string
+          label_hi?: string
+          lat?: number
+          lon?: number
+          months?: number[]
+          name_en?: string
+          name_hi?: string
+          note_en?: string
+          note_hi?: string
+          refs?: Json
+          source?: string
+          status?: string
+          tehsil?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      atlas_reports: {
+        Row: {
+          correction: string
+          created_at: string
+          id: string
+          kind: string
+          label: string
+          message: string
+          note: string
+          page: string
+          ref: string
+          status: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          correction?: string
+          created_at?: string
+          id?: string
+          kind: string
+          label?: string
+          message: string
+          note?: string
+          page?: string
+          ref: string
+          status?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          correction?: string
+          created_at?: string
+          id?: string
+          kind?: string
+          label?: string
+          message?: string
+          note?: string
+          page?: string
+          ref?: string
+          status?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      atlas_suggestions: {
+        Row: {
+          created_at: string
+          data: Json
+          facts: string[]
+          id: string
+          key: string
+          kind: string
+          place_key: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          data: Json
+          facts?: string[]
+          id?: string
+          key: string
+          kind: string
+          place_key?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          data?: Json
+          facts?: string[]
+          id?: string
+          key?: string
+          kind?: string
+          place_key?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      atlas_usage: {
+        Row: {
+          day: string
+          kind: string
+          n: number
+          ref: string
+        }
+        Insert: {
+          day: string
+          kind: string
+          n?: number
+          ref: string
+        }
+        Update: {
+          day?: string
+          kind?: string
+          n?: number
+          ref?: string
+        }
+        Relationships: []
+      }
       bot_auto_replies: {
         Row: {
           buttons: Json
@@ -1513,6 +1965,133 @@ export type Database = {
         }
         Relationships: []
       }
+      exam_export_items: {
+        Row: {
+          app_id: string
+          gone_at: string | null
+          label: string
+          lang: string
+          position: number
+          question_id: string
+          set_id: string
+          sig: string
+          updated_at: string
+        }
+        Insert: {
+          app_id?: string
+          gone_at?: string | null
+          label?: string
+          lang: string
+          position: number
+          question_id: string
+          set_id: string
+          sig?: string
+          updated_at?: string
+        }
+        Update: {
+          app_id?: string
+          gone_at?: string | null
+          label?: string
+          lang?: string
+          position?: number
+          question_id?: string
+          set_id?: string
+          sig?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "exam_export_items_set_id_fkey"
+            columns: ["set_id"]
+            isOneToOne: false
+            referencedRelation: "exam_export_sets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      exam_export_sets: {
+        Row: {
+          created_at: string
+          downloaded: Json
+          filter: Json
+          id: string
+          name: string
+          titles: Json
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          downloaded?: Json
+          filter?: Json
+          id?: string
+          name: string
+          titles?: Json
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          downloaded?: Json
+          filter?: Json
+          id?: string
+          name?: string
+          titles?: Json
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      exam_paper_queue: {
+        Row: {
+          attempts: number
+          created_at: string
+          error: string | null
+          file_name: string
+          file_path: string
+          id: string
+          locked_until: string | null
+          pages: number
+          pages_done: number
+          paper_id: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          error?: string | null
+          file_name?: string
+          file_path: string
+          id?: string
+          locked_until?: string | null
+          pages?: number
+          pages_done?: number
+          paper_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          error?: string | null
+          file_name?: string
+          file_path?: string
+          id?: string
+          locked_until?: string | null
+          pages?: number
+          pages_done?: number
+          paper_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "exam_paper_queue_paper_id_fkey"
+            columns: ["paper_id"]
+            isOneToOne: false
+            referencedRelation: "exam_papers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       exam_papers: {
         Row: {
           checked_at: string | null
@@ -1521,6 +2100,7 @@ export type Database = {
           error: string | null
           exam: string
           exam_date: string | null
+          exam_syllabus_id: string | null
           id: string
           key_added: boolean
           kind: string
@@ -1529,12 +2109,15 @@ export type Database = {
           pages: number
           pages_done: number
           paper_code: string
+          paper_type: string
           published_at: string | null
           questions_total: number | null
+          sections: Json
           series: string
           source: string
           status: string
           subject: string
+          syllabus_id: string | null
           updated_at: string
         }
         Insert: {
@@ -1544,6 +2127,7 @@ export type Database = {
           error?: string | null
           exam: string
           exam_date?: string | null
+          exam_syllabus_id?: string | null
           id?: string
           key_added?: boolean
           kind?: string
@@ -1552,12 +2136,15 @@ export type Database = {
           pages?: number
           pages_done?: number
           paper_code?: string
+          paper_type?: string
           published_at?: string | null
           questions_total?: number | null
+          sections?: Json
           series?: string
           source?: string
           status?: string
           subject?: string
+          syllabus_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -1567,6 +2154,7 @@ export type Database = {
           error?: string | null
           exam?: string
           exam_date?: string | null
+          exam_syllabus_id?: string | null
           id?: string
           key_added?: boolean
           kind?: string
@@ -1575,15 +2163,25 @@ export type Database = {
           pages?: number
           pages_done?: number
           paper_code?: string
+          paper_type?: string
           published_at?: string | null
           questions_total?: number | null
+          sections?: Json
           series?: string
           source?: string
           status?: string
           subject?: string
+          syllabus_id?: string | null
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "exam_papers_exam_syllabus_id_fkey"
+            columns: ["exam_syllabus_id"]
+            isOneToOne: false
+            referencedRelation: "syllabus_exams"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "exam_papers_mcq_test_id_fkey"
             columns: ["mcq_test_id"]
@@ -1591,15 +2189,24 @@ export type Database = {
             referencedRelation: "mcq_tests"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "exam_papers_syllabus_id_fkey"
+            columns: ["syllabus_id"]
+            isOneToOne: false
+            referencedRelation: "syllabus_exams"
+            referencedColumns: ["id"]
+          },
         ]
       }
       exam_questions: {
         Row: {
           ai_check: Json | null
+          also_correct: number[]
           ca: boolean | null
           correct: number | null
           created_at: string
           deleted: boolean
+          difficulty: string | null
           embedding: string | null
           explanation_en: string
           explanation_general: boolean
@@ -1607,6 +2214,7 @@ export type Database = {
           explanation_source: string
           extra_en: string
           extra_hi: string
+          has_explanation: boolean | null
           id: string
           key_note: string
           marks: number | null
@@ -1618,12 +2226,17 @@ export type Database = {
           model_source: string
           options: Json
           paper_id: string
+          paper_section: string
           part: string
+          proof_answer: boolean
+          proof_explanation: boolean
+          proof_question: boolean
           q_no: number
           question_en: string
           question_hi: string
           section: string | null
           subject_section: string
+          syllabus_node_id: string | null
           topic_en: string
           topic_hi: string
           unit: string
@@ -1633,10 +2246,12 @@ export type Database = {
         }
         Insert: {
           ai_check?: Json | null
+          also_correct?: number[]
           ca?: boolean | null
           correct?: number | null
           created_at?: string
           deleted?: boolean
+          difficulty?: string | null
           embedding?: string | null
           explanation_en?: string
           explanation_general?: boolean
@@ -1644,6 +2259,7 @@ export type Database = {
           explanation_source?: string
           extra_en?: string
           extra_hi?: string
+          has_explanation?: boolean | null
           id?: string
           key_note?: string
           marks?: number | null
@@ -1655,12 +2271,17 @@ export type Database = {
           model_source?: string
           options?: Json
           paper_id: string
+          paper_section?: string
           part?: string
+          proof_answer?: boolean
+          proof_explanation?: boolean
+          proof_question?: boolean
           q_no: number
           question_en?: string
           question_hi?: string
           section?: string | null
           subject_section?: string
+          syllabus_node_id?: string | null
           topic_en?: string
           topic_hi?: string
           unit?: string
@@ -1670,10 +2291,12 @@ export type Database = {
         }
         Update: {
           ai_check?: Json | null
+          also_correct?: number[]
           ca?: boolean | null
           correct?: number | null
           created_at?: string
           deleted?: boolean
+          difficulty?: string | null
           embedding?: string | null
           explanation_en?: string
           explanation_general?: boolean
@@ -1681,6 +2304,7 @@ export type Database = {
           explanation_source?: string
           extra_en?: string
           extra_hi?: string
+          has_explanation?: boolean | null
           id?: string
           key_note?: string
           marks?: number | null
@@ -1692,12 +2316,17 @@ export type Database = {
           model_source?: string
           options?: Json
           paper_id?: string
+          paper_section?: string
           part?: string
+          proof_answer?: boolean
+          proof_explanation?: boolean
+          proof_question?: boolean
           q_no?: number
           question_en?: string
           question_hi?: string
           section?: string | null
           subject_section?: string
+          syllabus_node_id?: string | null
           topic_en?: string
           topic_hi?: string
           unit?: string
@@ -1725,6 +2354,13 @@ export type Database = {
             columns: ["paper_id"]
             isOneToOne: false
             referencedRelation: "exam_papers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "exam_questions_syllabus_node_id_fkey"
+            columns: ["syllabus_node_id"]
+            isOneToOne: false
+            referencedRelation: "syllabus_nodes"
             referencedColumns: ["id"]
           },
         ]
@@ -1821,6 +2457,154 @@ export type Database = {
           },
         ]
       }
+      flash_dictionary: {
+        Row: {
+          entry: Json
+          fetched_at: string
+          word: string
+        }
+        Insert: {
+          entry: Json
+          fetched_at?: string
+          word: string
+        }
+        Update: {
+          entry?: Json
+          fetched_at?: string
+          word?: string
+        }
+        Relationships: []
+      }
+      flash_en_spell: {
+        Row: {
+          lower: string
+          word: string
+        }
+        Insert: {
+          lower: string
+          word: string
+        }
+        Update: {
+          lower?: string
+          word?: string
+        }
+        Relationships: []
+      }
+      flash_enwn_synsets: {
+        Row: {
+          antonyms: string[]
+          example: string
+          gloss: string
+          id: string
+          loaded_at: string
+          pos: string
+          words: string[]
+        }
+        Insert: {
+          antonyms?: string[]
+          example?: string
+          gloss?: string
+          id: string
+          loaded_at?: string
+          pos: string
+          words: string[]
+        }
+        Update: {
+          antonyms?: string[]
+          example?: string
+          gloss?: string
+          id?: string
+          loaded_at?: string
+          pos?: string
+          words?: string[]
+        }
+        Relationships: []
+      }
+      flash_enwn_words: {
+        Row: {
+          lower: string
+          rank: number
+          synset_id: string
+          word: string
+        }
+        Insert: {
+          lower: string
+          rank?: number
+          synset_id: string
+          word: string
+        }
+        Update: {
+          lower?: string
+          rank?: number
+          synset_id?: string
+          word?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flash_enwn_words_synset_id_fkey"
+            columns: ["synset_id"]
+            isOneToOne: false
+            referencedRelation: "flash_enwn_synsets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      flash_jobs: {
+        Row: {
+          created_at: string
+          done: number
+          error: string | null
+          fails: number
+          found: number
+          id: string
+          ids: Json
+          kind: string
+          locked_until: string | null
+          status: string
+          topic_id: string
+          total: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          done?: number
+          error?: string | null
+          fails?: number
+          found?: number
+          id?: string
+          ids?: Json
+          kind: string
+          locked_until?: string | null
+          status?: string
+          topic_id: string
+          total?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          done?: number
+          error?: string | null
+          fails?: number
+          found?: number
+          id?: string
+          ids?: Json
+          kind?: string
+          locked_until?: string | null
+          status?: string
+          topic_id?: string
+          total?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flash_jobs_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "flash_topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       flash_sources: {
         Row: {
           book: string
@@ -1880,6 +2664,30 @@ export type Database = {
           },
         ]
       }
+      flash_spellings: {
+        Row: {
+          accepted: string[]
+          key: string
+          preferred: string | null
+          rejected: string[]
+          updated_at: string
+        }
+        Insert: {
+          accepted?: string[]
+          key: string
+          preferred?: string | null
+          rejected?: string[]
+          updated_at?: string
+        }
+        Update: {
+          accepted?: string[]
+          key?: string
+          preferred?: string | null
+          rejected?: string[]
+          updated_at?: string
+        }
+        Relationships: []
+      }
       flash_templates: {
         Row: {
           columns: Json
@@ -1887,11 +2695,13 @@ export type Database = {
           examples: Json
           id: string
           key: string
+          language: string
           name: string
           prompt: string
           sort: number
           updated_at: string
           word_key: string
+          wrong_front: boolean
         }
         Insert: {
           columns?: Json
@@ -1899,11 +2709,13 @@ export type Database = {
           examples?: Json
           id?: string
           key: string
+          language?: string
           name: string
           prompt?: string
           sort?: number
           updated_at?: string
           word_key?: string
+          wrong_front?: boolean
         }
         Update: {
           columns?: Json
@@ -1911,11 +2723,13 @@ export type Database = {
           examples?: Json
           id?: string
           key?: string
+          language?: string
           name?: string
           prompt?: string
           sort?: number
           updated_at?: string
           word_key?: string
+          wrong_front?: boolean
         }
         Relationships: []
       }
@@ -1968,6 +2782,112 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      flash_trash: {
+        Row: {
+          card: Json
+          deleted_at: string
+          id: string
+          topic_id: string
+          why: string
+        }
+        Insert: {
+          card: Json
+          deleted_at?: string
+          id: string
+          topic_id: string
+          why?: string
+        }
+        Update: {
+          card?: Json
+          deleted_at?: string
+          id?: string
+          topic_id?: string
+          why?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flash_trash_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "flash_topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      flash_wn_synsets: {
+        Row: {
+          antonyms: number[]
+          example: string
+          gloss: string
+          id: number
+          loaded_at: string
+          pos: number
+          words: string[]
+        }
+        Insert: {
+          antonyms?: number[]
+          example?: string
+          gloss?: string
+          id: number
+          loaded_at?: string
+          pos: number
+          words: string[]
+        }
+        Update: {
+          antonyms?: number[]
+          example?: string
+          gloss?: string
+          id?: number
+          loaded_at?: string
+          pos?: number
+          words?: string[]
+        }
+        Relationships: []
+      }
+      flash_wn_words: {
+        Row: {
+          loose: string
+          synset_id: number
+          word: string
+        }
+        Insert: {
+          loose: string
+          synset_id: number
+          word: string
+        }
+        Update: {
+          loose?: string
+          synset_id?: number
+          word?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flash_wn_words_synset_id_fkey"
+            columns: ["synset_id"]
+            isOneToOne: false
+            referencedRelation: "flash_wn_synsets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      flash_words: {
+        Row: {
+          loose: string
+          updated_at: string
+          word: string
+        }
+        Insert: {
+          loose: string
+          updated_at?: string
+          word: string
+        }
+        Update: {
+          loose?: string
+          updated_at?: string
+          word?: string
+        }
+        Relationships: []
       }
       flashcard_decks: {
         Row: {
@@ -2058,6 +2978,208 @@ export type Database = {
           },
         ]
       }
+      gk_cards: {
+        Row: {
+          card: Json | null
+          checked: boolean
+          checks: Json
+          created_at: string
+          day: string
+          id: string
+          idea: Json
+          image_en: string | null
+          image_hi: string | null
+          position: number
+          proofed: boolean
+          updated_at: string
+          versions: Json
+        }
+        Insert: {
+          card?: Json | null
+          checked?: boolean
+          checks?: Json
+          created_at?: string
+          day: string
+          id?: string
+          idea: Json
+          image_en?: string | null
+          image_hi?: string | null
+          position?: number
+          proofed?: boolean
+          updated_at?: string
+          versions?: Json
+        }
+        Update: {
+          card?: Json | null
+          checked?: boolean
+          checks?: Json
+          created_at?: string
+          day?: string
+          id?: string
+          idea?: Json
+          image_en?: string | null
+          image_hi?: string | null
+          position?: number
+          proofed?: boolean
+          updated_at?: string
+          versions?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gk_cards_day_fkey"
+            columns: ["day"]
+            isOneToOne: false
+            referencedRelation: "gk_days"
+            referencedColumns: ["day"]
+          },
+        ]
+      }
+      gk_days: {
+        Row: {
+          caption_en: string
+          caption_hi: string
+          day: string
+          day_no: number
+          error: string | null
+          ideas: Json
+          locked_until: string | null
+          material_note: string
+          notified: string[]
+          posted_at: string | null
+          scheduled_for: string | null
+          status: string
+          subject_id: string | null
+          topic_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          caption_en?: string
+          caption_hi?: string
+          day: string
+          day_no?: number
+          error?: string | null
+          ideas?: Json
+          locked_until?: string | null
+          material_note?: string
+          notified?: string[]
+          posted_at?: string | null
+          scheduled_for?: string | null
+          status?: string
+          subject_id?: string | null
+          topic_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          caption_en?: string
+          caption_hi?: string
+          day?: string
+          day_no?: number
+          error?: string | null
+          ideas?: Json
+          locked_until?: string | null
+          material_note?: string
+          notified?: string[]
+          posted_at?: string | null
+          scheduled_for?: string | null
+          status?: string
+          subject_id?: string | null
+          topic_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gk_days_subject_id_fkey"
+            columns: ["subject_id"]
+            isOneToOne: false
+            referencedRelation: "gk_subjects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gk_days_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "gk_topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      gk_subjects: {
+        Row: {
+          created_at: string
+          id: string
+          kb_subjects: string[]
+          name_en: string
+          name_hi: string
+          started_on: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          kb_subjects?: string[]
+          name_en: string
+          name_hi?: string
+          started_on?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          kb_subjects?: string[]
+          name_en?: string
+          name_hi?: string
+          started_on?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      gk_topics: {
+        Row: {
+          created_at: string
+          id: string
+          name_en: string
+          name_hi: string
+          note: string
+          position: number
+          posted_on: string | null
+          status: string
+          subject_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name_en: string
+          name_hi?: string
+          note?: string
+          position?: number
+          posted_on?: string | null
+          status?: string
+          subject_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name_en?: string
+          name_hi?: string
+          note?: string
+          position?: number
+          posted_on?: string | null
+          status?: string
+          subject_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gk_topics_subject_id_fkey"
+            columns: ["subject_id"]
+            isOneToOne: false
+            referencedRelation: "gk_subjects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       home_banners: {
         Row: {
           created_at: string
@@ -2089,11 +3211,11 @@ export type Database = {
           cta_subtitle: string
           cta_url: string
           hide_app_store: boolean
+          hide_atlas: boolean
           hide_flashcards: boolean
           hide_google_play: boolean
           hide_mcq: boolean
           hide_mcq_practice: boolean
-          hide_atlas: boolean
           hide_saathi: boolean
           id: number
           lock_cta: boolean
@@ -2101,6 +3223,7 @@ export type Database = {
           lock_mcq: boolean
           lock_mcq_practice: boolean
           lock_saathi: boolean
+          saathi_wordnet: boolean
           updated_at: string
         }
         Insert: {
@@ -2109,11 +3232,11 @@ export type Database = {
           cta_subtitle?: string
           cta_url?: string
           hide_app_store?: boolean
+          hide_atlas?: boolean
           hide_flashcards?: boolean
           hide_google_play?: boolean
           hide_mcq?: boolean
           hide_mcq_practice?: boolean
-          hide_atlas?: boolean
           hide_saathi?: boolean
           id?: number
           lock_cta?: boolean
@@ -2121,6 +3244,7 @@ export type Database = {
           lock_mcq?: boolean
           lock_mcq_practice?: boolean
           lock_saathi?: boolean
+          saathi_wordnet?: boolean
           updated_at?: string
         }
         Update: {
@@ -2129,11 +3253,11 @@ export type Database = {
           cta_subtitle?: string
           cta_url?: string
           hide_app_store?: boolean
+          hide_atlas?: boolean
           hide_flashcards?: boolean
           hide_google_play?: boolean
           hide_mcq?: boolean
           hide_mcq_practice?: boolean
-          hide_atlas?: boolean
           hide_saathi?: boolean
           id?: number
           lock_cta?: boolean
@@ -2141,7 +3265,140 @@ export type Database = {
           lock_mcq?: boolean
           lock_mcq_practice?: boolean
           lock_saathi?: boolean
+          saathi_wordnet?: boolean
           updated_at?: string
+        }
+        Relationships: []
+      }
+      ig_days: {
+        Row: {
+          caption: string
+          created_at: string
+          day: string
+          design: string | null
+          design_reason: string
+          error: string | null
+          locked_until: string | null
+          notified: string[]
+          posted_at: string | null
+          scheduled_for: string | null
+          status: string
+          suggested: string[]
+          telegram_message_id: number | null
+          updated_at: string
+        }
+        Insert: {
+          caption?: string
+          created_at?: string
+          day: string
+          design?: string | null
+          design_reason?: string
+          error?: string | null
+          locked_until?: string | null
+          notified?: string[]
+          posted_at?: string | null
+          scheduled_for?: string | null
+          status?: string
+          suggested?: string[]
+          telegram_message_id?: number | null
+          updated_at?: string
+        }
+        Update: {
+          caption?: string
+          created_at?: string
+          day?: string
+          design?: string | null
+          design_reason?: string
+          error?: string | null
+          locked_until?: string | null
+          notified?: string[]
+          posted_at?: string | null
+          scheduled_for?: string | null
+          status?: string
+          suggested?: string[]
+          telegram_message_id?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      ig_words: {
+        Row: {
+          base: string
+          card: Json | null
+          checked: boolean
+          checks: Json
+          created_at: string
+          day: string
+          for_day: string | null
+          id: string
+          image_path: string | null
+          key: string
+          lang: string
+          own: boolean
+          paper: string
+          pos_hint: string
+          position: number
+          posted_on: string | null
+          proofed: boolean
+          sentence: string
+          source_id: string | null
+          status: string
+          updated_at: string
+          versions: Json
+          why: string
+          word: string
+        }
+        Insert: {
+          base?: string
+          card?: Json | null
+          checked?: boolean
+          checks?: Json
+          created_at?: string
+          day: string
+          for_day?: string | null
+          id?: string
+          image_path?: string | null
+          key: string
+          lang: string
+          own?: boolean
+          paper?: string
+          pos_hint?: string
+          position?: number
+          posted_on?: string | null
+          proofed?: boolean
+          sentence?: string
+          source_id?: string | null
+          status?: string
+          updated_at?: string
+          versions?: Json
+          why?: string
+          word: string
+        }
+        Update: {
+          base?: string
+          card?: Json | null
+          checked?: boolean
+          checks?: Json
+          created_at?: string
+          day?: string
+          for_day?: string | null
+          id?: string
+          image_path?: string | null
+          key?: string
+          lang?: string
+          own?: boolean
+          paper?: string
+          pos_hint?: string
+          position?: number
+          posted_on?: string | null
+          proofed?: boolean
+          sentence?: string
+          source_id?: string | null
+          status?: string
+          updated_at?: string
+          versions?: Json
+          why?: string
+          word?: string
         }
         Relationships: []
       }
@@ -2252,6 +3509,7 @@ export type Database = {
         Row: {
           created_at: string
           description: string
+          from_atlas: boolean
           from_papers: boolean
           id: string
           is_public: boolean
@@ -2264,6 +3522,7 @@ export type Database = {
         Insert: {
           created_at?: string
           description?: string
+          from_atlas?: boolean
           from_papers?: boolean
           id?: string
           is_public?: boolean
@@ -2276,6 +3535,7 @@ export type Database = {
         Update: {
           created_at?: string
           description?: string
+          from_atlas?: boolean
           from_papers?: boolean
           id?: string
           is_public?: boolean
@@ -3022,42 +4282,51 @@ export type Database = {
       }
       syllabus_exams: {
         Row: {
+          archived: boolean
           body: string
           created_at: string
           error: string | null
           id: string
+          mode: string
           name: string
           notified_on: string | null
           pages: number
           pages_done: number
+          paper_days: string | null
           scheme: Json | null
           stage: string
           status: string
           updated_at: string
         }
         Insert: {
+          archived?: boolean
           body?: string
           created_at?: string
           error?: string | null
           id?: string
+          mode?: string
           name: string
           notified_on?: string | null
           pages?: number
           pages_done?: number
+          paper_days?: string | null
           scheme?: Json | null
           stage?: string
           status?: string
           updated_at?: string
         }
         Update: {
+          archived?: boolean
           body?: string
           created_at?: string
           error?: string | null
           id?: string
+          mode?: string
           name?: string
           notified_on?: string | null
           pages?: number
           pages_done?: number
+          paper_days?: string | null
           scheme?: Json | null
           stage?: string
           status?: string
@@ -3171,6 +4440,18 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      ai_usage_add: {
+        Args: {
+          p_cache_read: number
+          p_cache_write: number
+          p_input: number
+          p_label: string
+          p_model: string
+          p_output: number
+        }
+        Returns: undefined
+      }
+      atlas_usage_bump: { Args: { p_rows: Json }; Returns: undefined }
       bot_auto_reply_hit: { Args: { reply_id: string }; Returns: undefined }
       bot_check_add_photo: {
         Args: { p_chat_id: number; p_max: number; p_photo: Json }
@@ -3327,6 +4608,21 @@ export type Database = {
         Returns: {
           id: string
           similarity: number
+        }[]
+      }
+      flash_en_lookup: {
+        Args: { p_lower: string[] }
+        Returns: {
+          lower: string
+          src: string
+          word: string
+        }[]
+      }
+      flash_wn_lookup: {
+        Args: { p_loose: string[]; p_words: string[] }
+        Returns: {
+          loose: string
+          word: string
         }[]
       }
       has_role: {
