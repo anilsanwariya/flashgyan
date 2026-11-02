@@ -88,7 +88,11 @@ async function all<T>(q: () => Rangeable): Promise<T[]> {
 
 // ---------- Jobs (background work, a step at a time) ----------
 
-type Jobs = { translate: boolean; kb: string[] };
+// stuck: translation steps in a row that translated nothing; at
+// TRANSLATE_GIVE_UP the job stops with an error instead of calling the AI
+// every minute for nothing.
+type Jobs = { translate: boolean; kb: string[]; stuck?: number; error?: string };
+const TRANSLATE_GIVE_UP = 3;
 const JOBS_KEY = "atlas_jobs";
 const KB_KEY = "atlas_kb_docs";
 async function setting<T>(key: string, dflt: T): Promise<T> {
@@ -294,24 +298,50 @@ async function translateBatch(items: string[]): Promise<string[]> {
     { role: "system", content: TRANSLATE_SYSTEM(await glossary()) },
     { role: "user", content: items.map((t, i) => `${i + 1}. ${t}`).join("\n") },
   ]);
-  const t = raw.replace(/```(?:json)?/g, "");
-  const o = JSON.parse(t.slice(t.indexOf("{"), t.lastIndexOf("}") + 1)) as {
-    items?: { n: number; hi: string }[];
+  return parseTranslations(raw, items.length);
+}
+
+// The reply's items. A reply cut off at the length limit isn't whole JSON:
+// the items finished before the cut are still kept, so the next step only
+// asks for the rest.
+export function parseTranslations(raw: string, count: number): string[] {
+  const out: string[] = Array.from({ length: count }, () => "");
+  const put = (n: unknown, hi: unknown) => {
+    const i = Number(n);
+    if (Number.isInteger(i) && i >= 1 && i <= count && typeof hi === "string" && hi.trim())
+      out[i - 1] = hi.trim();
   };
-  const out = items.map(() => "");
-  for (const x of o.items ?? [])
-    if (Number(x.n) >= 1 && Number(x.n) <= items.length && typeof x.hi === "string")
-      out[Number(x.n) - 1] = x.hi.trim();
+  const t = raw.replace(/```(?:json)?/g, "");
+  try {
+    const o = JSON.parse(t.slice(t.indexOf("{"), t.lastIndexOf("}") + 1)) as {
+      items?: { n: number; hi: string }[];
+    };
+    for (const x of o.items ?? []) put(x?.n, x?.hi);
+    return out;
+  } catch {
+    // Cut off or broken: take each finished {"n": .., "hi": ".."}.
+  }
+  const one = /\{\s*"n"\s*:\s*(\d+)\s*,\s*"hi"\s*:\s*("(?:[^"\\]|\\.)*")\s*\}/g;
+  for (const m of t.matchAll(one)) {
+    try {
+      put(m[1], JSON.parse(m[2]));
+    } catch {
+      // A broken item: asked again next step.
+    }
+  }
   return out;
 }
 
-async function translateStep(): Promise<boolean> {
+// Translates the next small batch. Returns how many items it translated,
+// or null when nothing is left. Batches stay small so a reply (Hindi takes
+// many tokens) fits well inside the length limit.
+async function translateStep(): Promise<number | null> {
   // Place names first (short), then facts, then the layers' legends.
   const { data: places } = await from("atlas_places")
     .select("id,name_en,label_en,name_hi,label_hi")
     .or("name_hi.eq.,label_hi.eq.")
     .neq("status", "hidden")
-    .limit(60);
+    .limit(15);
   const ps = (places ?? []) as Row[];
   if (ps.length) {
     const items = ps.flatMap((p) => [String(p.name_en), String(p.label_en || p.name_en)]);
@@ -331,14 +361,14 @@ async function translateStep(): Promise<boolean> {
           .eq("id", String(p.id));
       else fail(error);
     }
-    return true;
+    return hi.filter(Boolean).length;
   }
   const { data: facts } = await from("atlas_facts")
     .select("id,text_en")
     .eq("text_hi", "")
     .neq("status", "hidden")
     .order("position")
-    .limit(25);
+    .limit(10);
   const fs = (facts ?? []) as Row[];
   if (fs.length) {
     const hi = await translateBatch(fs.map((f) => String(f.text_en)));
@@ -354,15 +384,16 @@ async function translateStep(): Promise<boolean> {
         await from("atlas_facts")
           .update({ text_hi: String(f.text_en), hi_ai: true } as never)
           .eq("id", String(f.id));
-    return true;
+    return hi.filter(Boolean).length;
   }
   const { data: layers } = await from("atlas_layers").select("key,items");
   for (const l of (layers ?? []) as Row[]) {
     const items = (l.items as AtlasLayer["items"]) ?? [];
     const names = [...new Set(items.filter((f) => f.name.en && !f.name.hi).map((f) => f.name.en))];
     if (!names.length) continue;
-    const hi = await translateBatch(names.slice(0, 80));
-    const map = new Map(names.slice(0, 80).map((n, i) => [n, hi[i] || n]));
+    const batch = names.slice(0, 30);
+    const hi = await translateBatch(batch);
+    const map = new Map(batch.map((n, i) => [n, hi[i] || n]));
     await from("atlas_layers")
       .update({
         items: items.map((f) =>
@@ -372,9 +403,9 @@ async function translateStep(): Promise<boolean> {
         ),
       } as never)
       .eq("key", String(l.key));
-    return true;
+    return hi.filter(Boolean).length;
   }
-  return false;
+  return null;
 }
 
 // ---------- The knowledge base (a chapter a step) ----------
@@ -924,13 +955,34 @@ export async function atlasStep(): Promise<{ did: string | null }> {
   }
   const j = await jobs();
   if (j.translate) {
+    let done: number | null = 0;
+    let error = "the AI's replies had no Hindi in them";
     try {
-      if (await translateStep()) return { did: "translate" };
+      done = await translateStep();
     } catch (e) {
-      console.error("atlas translate:", saathiErrorDetail(e));
-      return { did: null };
+      error = saathiErrorDetail(e);
+      console.error("atlas translate:", error);
     }
-    await saveSetting(JOBS_KEY, { ...j, translate: false });
+    if (done === null) await saveSetting(JOBS_KEY, { ...j, translate: false, stuck: 0 });
+    else {
+      // Nothing translated: counted, and after a few in a row the job stops
+      // (Redo all starts it again) rather than paying for the same failing
+      // call every minute.
+      const stuck = done > 0 ? 0 : (j.stuck ?? 0) + 1;
+      const stop = stuck >= TRANSLATE_GIVE_UP;
+      if (stuck !== (j.stuck ?? 0) || stop)
+        await saveSetting(JOBS_KEY, {
+          ...(await jobs()),
+          stuck: stop ? 0 : stuck,
+          ...(stop
+            ? {
+                translate: false,
+                error: `Stopped after ${TRANSLATE_GIVE_UP} tries in a row: ${error}`.slice(0, 300),
+              }
+            : {}),
+        });
+      if (done > 0 || !stop) return { did: done > 0 ? "translate" : null };
+    }
   }
   if (j.kb.length) {
     const [ch, ...rest] = j.kb;
@@ -989,6 +1041,7 @@ export async function resumeAtlasJobs(what: { translate?: boolean; kb?: boolean 
   await saveSetting(JOBS_KEY, {
     translate: what.translate ? true : j.translate,
     kb: what.kb ? chapters : j.kb,
+    ...(what.translate ? { stuck: 0 } : { stuck: j.stuck, error: j.error }),
   } satisfies Jobs);
 }
 

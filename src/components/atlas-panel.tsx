@@ -239,9 +239,16 @@ function Overview() {
             Hindi translation:{" "}
             {s.jobs.translate ? (
               <Badge tone="primary">{s.factsNoHindi + s.placesNoHindi} left</Badge>
+            ) : s.jobs.error ? (
+              <Badge tone="bad">stopped</Badge>
             ) : (
               <Badge tone="good">done</Badge>
             )}{" "}
+            {!s.jobs.translate && s.jobs.error && (
+              <span className="block text-xs text-destructive" role="alert">
+                {s.jobs.error}
+              </span>
+            )}
             <span className="text-xs text-muted-foreground">
               AI Hindi stays marked until you check it (Facts tab).
             </span>
