@@ -12,6 +12,7 @@ import {
   addOwnIgWord,
   advanceIgDay,
   approveIgDay,
+  setIgDesign,
   cancelIgDay,
   getIgDay,
   getIgSettings,
@@ -506,6 +507,20 @@ function Review({
     }
   };
   const approveFn = useServerFn(approveIgDay);
+  const designFn = useServerFn(setIgDesign);
+  const [designBusy, setDesignBusy] = useState(false);
+  const changeDesign = async (d: IgDesign) => {
+    setDesignBusy(true);
+    try {
+      await designFn({ data: { date, design: d } });
+      toast.success("Design changed for this day");
+      await onChange();
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't change the design"));
+    } finally {
+      setDesignBusy(false);
+    }
+  };
   const [caption, setCaption] = useState(() => view.day?.caption || captionFor(view, date));
   const [busy, setBusy] = useState(false);
   // When it posts: the posting time today, or soon once that has passed.
@@ -538,11 +553,22 @@ function Review({
       <div className="grid gap-4 rounded-xl border border-border p-4 lg:grid-cols-2">
         <div className="space-y-2">
           <p className="text-sm font-medium">Design</p>
-          <p className="text-sm" data-day-design>
-            {IG_DESIGNS.find((d) => d.key === design)?.name ?? design}
-          </p>
+          <select
+            data-day-design
+            aria-label="Design for this day"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            value={design}
+            disabled={designBusy}
+            onChange={(e) => changeDesign(e.target.value as IgDesign)}
+          >
+            {IG_DESIGNS.map((d) => (
+              <option key={d.key} value={d.key}>
+                {d.name}
+              </option>
+            ))}
+          </select>
           <p className="text-xs text-muted-foreground">
-            The channel&apos;s design, the same every day. Change it in Settings.
+            New days use the design from Settings; change it here for this day only.
           </p>
         </div>
         <div className="space-y-2">

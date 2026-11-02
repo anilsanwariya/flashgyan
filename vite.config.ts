@@ -12,4 +12,9 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
+  vite: {
+    // pdf-lib's CommonJS build requires tslib; the CJS interop yields undefined
+    // in the Worker bundle, so point tslib at its ESM build.
+    resolve: { alias: { tslib: "tslib/tslib.es6.mjs" } },
+  },
 });
