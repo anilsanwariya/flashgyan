@@ -1,5 +1,5 @@
 // Server function: parse a PDF via LlamaCloud's LlamaParse API and return markdown.
-// Requires LLAMA_CLOUD_API_KEY in server env. Requires an authenticated user.
+// Requires LLAMA_CLOUD_API_KEY in server env. Admins only: each parse spends LlamaParse credits.
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
@@ -9,6 +9,18 @@ function b64ToBytes(b64: string): Uint8Array {
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
+}
+
+async function assertAdmin(userId: string) {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data, error } = await supabaseAdmin
+    .from("user_roles")
+    .select("user_id")
+    .eq("user_id", userId)
+    .eq("role", "admin")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Admin access required");
 }
 
 export const parsePdfWithLlama = createServerFn({ method: "POST" })
@@ -24,7 +36,8 @@ export const parsePdfWithLlama = createServerFn({ method: "POST" })
       })
       .parse(input),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
     const { parsePdfBytes } = await import("@/lib/saathi-pdf.server");
     return parsePdfBytes(b64ToBytes(data.base64), data);
   });

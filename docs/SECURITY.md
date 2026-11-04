@@ -21,8 +21,8 @@ turned off in Supabase Auth (see **Open questions**).
 
 - `/_authenticated` (the admin area) only checks that **someone** is signed in. Admin
   rights must be checked **in every admin server function** with `assertAdmin()` (or the
-  `has_role` database function); one function misses it today (see **Open questions**).
-  **An admin function without that check is open to anyone who can sign in.**
+  `has_role` database function). **An admin function without that check is open to anyone
+  who can sign in.**
 - Admin server functions use the `requireSupabaseAuth` middleware, then `assertAdmin()`,
   then the service-role client. Never use the service-role client before that check.
 - Never trust the browser to hide or lock a feature; check on the server.
@@ -92,11 +92,10 @@ A new public endpoint needs input validation **and** a rate limit, especially if
    function URL.
 3. **No automatic checks before merging.** Type-check, build and tests only run if someone
    runs them by hand.
-4. **One admin tool has no admin check.** `parsePdfWithLlama` (`saathi-pdf.functions.ts`)
-   requires sign-in but not the admin role, so any signed-in account can spend LlamaParse
-   credits. Add the admin check. Also confirm that **new sign-ups are turned off** in
-   Supabase Auth settings: the website has no sign-up page, but the Supabase sign-up API
-   still accepts new accounts unless sign-ups are disabled there.
+4. **Confirm that new sign-ups are turned off** in Supabase Auth settings. The website has
+   no sign-up page, but the Supabase sign-up API still accepts new accounts unless sign-ups
+   are disabled there, and any account passes the admin area's sign-in check. (The one admin
+   function that lacked an admin check, `parsePdfWithLlama`, was fixed on 4 November 2026.)
 
 ## Before every release
 
