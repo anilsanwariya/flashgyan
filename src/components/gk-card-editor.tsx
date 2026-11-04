@@ -800,6 +800,7 @@ function MapTab({
             <iframe
               title="Map preview"
               srcDoc={preview.data.html}
+              sandbox="allow-scripts"
               className="h-80 w-full rounded-lg border border-border bg-white"
             />
           ) : (

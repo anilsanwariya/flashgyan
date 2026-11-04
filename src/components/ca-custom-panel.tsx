@@ -1417,6 +1417,7 @@ function PreviewDialog({
           <iframe
             title="Magazine preview"
             srcDoc={q.data.html}
+            sandbox="allow-same-origin"
             className="min-h-0 w-full flex-1 rounded-lg border border-border bg-white"
           />
         ) : (

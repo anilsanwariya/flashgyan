@@ -58,6 +58,7 @@ IP and site-wide through `saathi_consume_rate_limit`.
 | `reportAtlasMistake` | 8 per IP per hour |
 | `atlasUsageFn` | 120 per IP per hour |
 | `recordPracticeSession` (finished-session count) | 60 per IP per hour, 200,000 a day site-wide |
+| Telegram bot `/ask`, `/answer` and plain questions | 8 a minute and 150 a day per Telegram user; 400 a minute bot-wide |
 | `/api/ca/tick` and the bot's `?task=broadcast` | Do only work that is already due; safe to call without credentials |
 | Telegram webhook | Checks Telegram's `X-Telegram-Bot-Api-Secret-Token` header once a secret is set in Admin → Telegram bot → Connection; **accepts everything until then** |
 
@@ -79,6 +80,16 @@ A new public endpoint needs input validation **and** a rate limit, especially if
   instructions or reach admin tools.
 - AI costs are visible in Admin → System → AI usage. Rate limits protect the budget.
 
+### Rendering HTML
+
+- Never render text from uploads, the web, news or AI as raw HTML. Escape it, or use
+  `ReactMarkdown` **without** `rehype-raw`.
+- Preview frames (`<iframe srcDoc>`) always get a `sandbox`: `allow-same-origin` (no
+  scripts) when the parent needs to read the frame, or `allow-scripts` (no same-origin)
+  when the content needs a script.
+- Values that go into HTML or SVG attributes on public pages are validated (for example,
+  map colours pass only if they look like a colour).
+
 ## Open questions (owner to resolve)
 
 1. **`is_public` has no controls yet.** The security rules require it, but no code reads or
@@ -95,6 +106,25 @@ A new public endpoint needs input validation **and** a rate limit, especially if
    no sign-up page, but the Supabase sign-up API still accepts new accounts unless sign-ups
    are disabled there, and any account passes the admin area's sign-in check. (The one admin
    function that lacked an admin check, `parsePdfWithLlama`, was fixed on 4 November 2026.)
+
+## Security review, 4 November 2026
+
+All 20 checks on the code (not the live site or dashboards):
+
+| Area | Result |
+| --- | --- |
+| SQL injection, CSRF, IDOR, CORS, source maps, default credentials, secrets in code, Git history or the browser bundle, logs, row-level security (93 tables, 56 rules) | Nothing found |
+| XSS | Fixed: SAATHI admin panel rendered uploaded text as raw HTML (`rehype-raw`); admin preview frames now sandboxed; public atlas map colours validated |
+| Rate limiting | Fixed: the Telegram bot's `/ask` and `/answer` had no limit |
+| Telegram signature and webhook secret | Fixed: compared in constant time |
+| Vulnerable dependencies | **Open:** `seroval` (via TanStack; server-function decoding), `pdfjs-dist` (script execution from a malicious PDF), `xlsx` 0.18.5, `@xmldom/xmldom`, `mermaid`/`dompurify`, `zod` 3. Upgrade through Lovable, since `bun.lock` points at its mirror. Build-only tools (`vite`, `shell-quote`, `postcss`…) don't run on the live site |
+| Multi-factor authentication | **Open:** admins sign in with a password only. Supabase supports authenticator-app codes |
+| Admin sessions in `localStorage` | Accepted (Supabase default); keep XSS out and add MFA and a CSP |
+| Security headers | **Open:** no Content-Security-Policy, `X-Frame-Options` or HSTS |
+| Webhook | **Open until set:** the bot accepts unsigned requests until a secret is set in Admin → Telegram bot → Connection |
+| Passwords | Supabase bcrypt. **Open:** set the server-side minimum to 8 and turn on leaked-password protection in Supabase Auth |
+| Feature locks | Flashcards and MCQ locks only change the homepage button; only the SAATHI lock is enforced on the server |
+| SSRF | Low: only admin-entered addresses and news links are fetched, from Cloudflare Workers |
 
 ## Before every release
 
