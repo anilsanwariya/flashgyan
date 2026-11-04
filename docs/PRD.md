@@ -30,13 +30,22 @@ Good material in Hindi is hard to find.
 - **The FlashGyan content team** (admins), who turn books, newspapers and past papers
   into cards, quizzes, magazines and the atlas.
 
+## North star
+
+**Goal:** exam aspirants master what RAS, PSI and other state exams ask.
+**Metric:** practice sessions completed to their summary page each day.
+(Set by the owner in Lovable on 4 November 2026; also in `.lovable/north-star/north-star.md`.)
+
+Today nothing records this number: sessions finish in the browser, and analytics is off
+until `VITE_GA_MEASUREMENT_ID` is set.
+
 ## Goals
 
 1. Let students study effectively for free on the website and in Telegram.
 2. Bring students to the Android app (paid Premium, through Google Play subscriptions).
 3. Let a small team produce a large amount of accurate, bilingual exam content with AI help.
 
-**Owner:** confirm the order of these goals and add numbers (e.g. installs per month).
+**Owner:** confirm the order of these goals and add targets (e.g. sessions per day, installs per month).
 
 ## Features: students
 
