@@ -71,6 +71,9 @@ supabase/
                           except behind checks.
 public/                   Static files: manifest, service worker (sw.js), offline page, icons
 scripts/                  One-off build scripts (map data)
+e2e/                      Browser tests (Playwright) with a fake Supabase and sample data;
+                          own package.json, not part of the app build
+.github/workflows/        GitHub checks on every pull request and push to main
 docs/                     Project documentation (this folder)
 ```
 
