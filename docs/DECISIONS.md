@@ -101,3 +101,14 @@ are not in the migrations, so remember them if the database is ever rebuilt.
 it was shown, and download prompts show at most once a day and never on iPhones.
 **Reason:** measure which placements bring installs; open the Play Store correctly inside
 Telegram; avoid annoying students.
+
+## ADR-013: Count finished practice sessions on the server, anonymously (4 November 2026)
+
+**Decision:** The north-star number (practice sessions finished each day) is counted in
+`practice_sessions_daily` by day and kind, through a public, rate-limited server function
+called when a session reaches its summary or result page. Each browser tab counts a session
+once, so reloading doesn't add to it. No student is identified.
+**Reason:** sessions run entirely in the browser, so nothing recorded them, and Google
+Analytics is optional and off. A server count works without analytics or cookies.
+**Consequence:** someone scripting the endpoint could add up to 60 sessions an hour from
+one address; treat sudden spikes with care.

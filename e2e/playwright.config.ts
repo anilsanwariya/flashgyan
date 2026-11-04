@@ -39,6 +39,8 @@ export default defineConfig({
       env: {
         SUPABASE_URL: MOCK_URL,
         VITE_SUPABASE_URL: MOCK_URL,
+        // Server-side code needs a key; the mock accepts any.
+        SUPABASE_SERVICE_ROLE_KEY: "e2e-placeholder",
         NO_PROXY: "127.0.0.1,localhost",
         no_proxy: "127.0.0.1,localhost",
       },

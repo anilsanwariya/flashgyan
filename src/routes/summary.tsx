@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { loadSession, type SessionDetail, type Rating, type SessionCardResult } from "@/lib/session-store";
 import finalLogo from "@/assets/final-logo.png";
 import { shareScore } from "@/lib/app-promo";
+import { countSessionOnce } from "@/lib/practice-sessions";
 
 const summarySchema = z.object({
   deckId: fallback(z.string(), "").default(""),
@@ -48,6 +49,11 @@ function Summary() {
   useEffect(() => {
     if (sessionId) setDetail(loadSession(sessionId));
   }, [sessionId]);
+
+  // The north-star number: a session finished to its summary.
+  useEffect(() => {
+    countSessionOnce(practiceId ? "mcq_practice" : "flashcards", sessionId || `${deckId}${practiceId}:${seconds}`);
+  }, [sessionId, deckId, practiceId, seconds]);
 
   const isPractice = !!practiceId;
   const correct = easy;

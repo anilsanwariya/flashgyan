@@ -139,6 +139,7 @@ import { SaathiAnswersPanel } from "@/components/saathi-answers-panel";
 import { CurrentAffairsPanel, type CaSection } from "@/components/current-affairs-panel";
 import { HomePanel } from "@/components/home-panel";
 import { AiUsagePanel } from "@/components/ai-usage-panel";
+import { PracticeSessionsPanel } from "@/components/practice-sessions-panel";
 import { AtlasPanel } from "@/components/atlas-panel";
 import { FlashStudio } from "@/components/flash-studio-panel";
 import { BotManagerPanel, type BotSection } from "@/components/bot-manager-panel";
@@ -294,6 +295,8 @@ function Admin() {
         <CurrentAffairsPanel section={section.slice(3) as CaSection} />
       ) : section === "users" ? (
         <TelegramUsersPanel />
+      ) : section === "sessions" ? (
+        <PracticeSessionsPanel />
       ) : section === "aiUsage" ? (
         <AiUsagePanel />
       ) : (
