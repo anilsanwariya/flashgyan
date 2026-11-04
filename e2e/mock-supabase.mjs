@@ -109,14 +109,26 @@ function send(res, status, body, headers = {}) {
   res.end(body === undefined ? "" : JSON.stringify(body));
 }
 
+const rpcCalls = [];
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
   if (url.pathname === "/health") return send(res, 200, { ok: true });
+  // Database function calls so far, for tests that check something was recorded.
+  if (url.pathname === "/__rpc") return send(res, 200, rpcCalls);
   if (url.pathname.startsWith("/auth/")) return send(res, 200, {});
   if (!url.pathname.startsWith("/rest/v1/")) return send(res, 200, {});
 
   const name = url.pathname.slice("/rest/v1/".length);
-  if (name.startsWith("rpc/")) return send(res, 200, null);
+  if (name.startsWith("rpc/")) {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      rpcCalls.push({ name: name.slice(4), args: body ? JSON.parse(body) : {} });
+      send(res, 200, null);
+    });
+    return;
+  }
   if (req.method !== "GET" && req.method !== "HEAD") return send(res, 201, []);
 
   let rows = filterRows(tables[name] ?? [], url.searchParams);

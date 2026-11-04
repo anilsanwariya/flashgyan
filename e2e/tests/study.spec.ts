@@ -1,7 +1,15 @@
 import { expect, test } from "@playwright/test";
-import { DECK_ID, TEST_ID, continuePastDownloadPopup, rateAllCards } from "./helpers";
+import {
+  DECK_ID,
+  TEST_ID,
+  continuePastDownloadPopup,
+  expectCountedOnce,
+  rateAllCards,
+  sessionsCounted,
+} from "./helpers";
 
-test("a flashcard session ends on its summary", async ({ page }) => {
+test("a flashcard session ends on its summary and is counted once", async ({ page }) => {
+  const before = await sessionsCounted("flashcards");
   await page.goto("/flashcards");
   await page.getByRole("link", { name: /Rajasthan Forts/ }).click();
   await expect(page).toHaveURL(new RegExp(`/practice/${DECK_ID}`));
@@ -11,9 +19,11 @@ test("a flashcard session ends on its summary", async ({ page }) => {
 
   await expect(page).toHaveURL(/\/summary/);
   await expect(page.getByRole("button", { name: "Share my progress" })).toBeVisible();
+  await expectCountedOnce(page, "flashcards", before);
 });
 
-test("a timed MCQ test is scored with negative marking", async ({ page }) => {
+test("a timed MCQ test is scored with negative marking and counted once", async ({ page }) => {
+  const before = await sessionsCounted("mcq_test");
   await page.goto("/mcq-tests");
   await page.getByRole("link", { name: /Polity Test 1/ }).click();
   await expect(page).toHaveURL(new RegExp(`/mcq/${TEST_ID}`));
@@ -36,4 +46,5 @@ test("a timed MCQ test is scored with negative marking", async ({ page }) => {
   // 2 right (+2), 1 wrong (−1/3) = 1.67 out of 3.
   await expect(page.getByText("1.67")).toBeVisible();
   await expect(page.getByText("out of 3 points")).toBeVisible();
+  await expectCountedOnce(page, "mcq_test", before);
 });

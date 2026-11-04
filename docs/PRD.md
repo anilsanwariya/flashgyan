@@ -36,8 +36,9 @@ Good material in Hindi is hard to find.
 **Metric:** practice sessions completed to their summary page each day.
 (Set by the owner in Lovable on 4 November 2026; also in `.lovable/north-star/north-star.md`.)
 
-Today nothing records this number: sessions finish in the browser, and analytics is off
-until `VITE_GA_MEASUREMENT_ID` is set.
+Counted since 4 November 2026 in **Admin → System → Practice sessions**, by day and by kind:
+flashcards and MCQ practice when they reach the summary page, MCQ tests when they reach
+the result page. Each session counts once; no student is identified.
 
 ## Goals
 

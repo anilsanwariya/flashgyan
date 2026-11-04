@@ -57,6 +57,7 @@ IP and site-wide through `saathi_consume_rate_limit`.
 | SAATHI ask and check (`/api/saathi/ask`, `/api/saathi/check`), `saathiQuiz`, `submitSaathiFeedback` | Per IP and site-wide |
 | `reportAtlasMistake` | 8 per IP per hour |
 | `atlasUsageFn` | 120 per IP per hour |
+| `recordPracticeSession` (finished-session count) | 60 per IP per hour, 200,000 a day site-wide |
 | `/api/ca/tick` and the bot's `?task=broadcast` | Do only work that is already due; safe to call without credentials |
 | Telegram webhook | Checks Telegram's `X-Telegram-Bot-Api-Secret-Token` header once a secret is set in Admin → Telegram bot → Connection; **accepts everything until then** |
 

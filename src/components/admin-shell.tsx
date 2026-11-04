@@ -28,6 +28,7 @@ import {
   Sparkles,
   SquarePen,
   Target,
+  TrendingUp,
   Users,
   UserSquare2,
   Images,
@@ -66,6 +67,7 @@ export type AdminSectionId =
   | "bot.flashcards"
   | "bot.mcq"
   | "users"
+  | "sessions"
   | "aiUsage";
 
 type SectionDef = { id: AdminSectionId; label: string; icon: Icon; description: string };
@@ -275,6 +277,12 @@ export const ADMIN_GROUPS: { label: string; sections: SectionDef[] }[] = [
   {
     label: "System",
     sections: [
+      {
+        id: "sessions",
+        label: "Practice sessions",
+        icon: TrendingUp,
+        description: "The north-star number: practice sessions students finished each day.",
+      },
       {
         id: "aiUsage",
         label: "AI usage",

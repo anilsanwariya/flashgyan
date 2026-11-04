@@ -22,3 +22,22 @@ export async function rateAllCards(page: Page, count: number, rating = "Easy") {
     await page.waitForTimeout(600);
   }
 }
+
+// How many finished sessions of this kind the site has recorded in the mock database.
+export async function sessionsCounted(kind: "flashcards" | "mcq_practice" | "mcq_test") {
+  const res = await fetch("http://127.0.0.1:54321/__rpc");
+  const calls = (await res.json()) as { name: string; args: { p_kind?: string } }[];
+  return calls.filter((c) => c.name === "practice_session_count" && c.args.p_kind === kind).length;
+}
+
+// Checks a page counted one finished session, and that reloading it doesn't count again.
+export async function expectCountedOnce(
+  page: Page,
+  kind: "flashcards" | "mcq_practice" | "mcq_test",
+  before: number,
+) {
+  await expect.poll(() => sessionsCounted(kind)).toBe(before + 1);
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+  expect(await sessionsCounted(kind)).toBe(before + 1);
+}

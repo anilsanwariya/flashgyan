@@ -5,6 +5,7 @@ import type { McqAttempt } from "./mcq.$testId";
 import { ArrowLeft, CheckCircle2, XCircle, MinusCircle, Trophy, ChevronDown, Share2 } from "lucide-react";
 import { AppDownloadPopup } from "@/components/app-download-popup";
 import { shareScore, shouldShowAppPrompt } from "@/lib/app-promo";
+import { countSessionOnce } from "@/lib/practice-sessions";
 import finalLogo from "@/assets/final-logo.png";
 
 const STORAGE_KEY = (id: string) => `mcq-attempt:${id}`;
@@ -29,6 +30,11 @@ function Result() {
       /* ignore */
     }
   }, [testId]);
+
+  // The north-star number: a test finished to its result.
+  useEffect(() => {
+    if (attempt) countSessionOnce("mcq_test", `${testId}:${attempt.startedAt}`);
+  }, [attempt, testId]);
 
   const stats = useMemo(() => {
     if (!attempt) return null;

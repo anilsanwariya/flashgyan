@@ -93,6 +93,7 @@ docs/                     Project documentation (this folder)
 | GK and Words in the News | admin only | `gk*.ts`, `ig*.ts` | `gk_`, `ig_` |
 | Notes books | admin only | `notes-*.ts` | `notes_` |
 | Telegram bot | Telegram | edge function, `bot-*.functions.ts` | `bot_` |
+| North-star count | `summary`, `mcq-result.$testId`; Admin → Practice sessions | `practice-sessions*.ts` | `practice_sessions_daily` |
 | Admin roles, AI cost | `/admin` | `ai-usage*.ts` | `user_roles`, `ai_usage` |
 
 ## Key patterns
