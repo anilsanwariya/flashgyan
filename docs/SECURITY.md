@@ -29,13 +29,13 @@ turned off in Supabase Auth (see **Open questions**).
 
 ### Database
 
-- Every table in the migrations has Row Level Security enabled (89 of 89 checked on
-  4 November 2026). Every new table must enable it in the same migration.
+- Every table has Row Level Security enabled (93 of 93 across both migration folders,
+  checked on 4 November 2026). Every new table must enable it in the same migration.
 - Public reads use the anon key so policies apply. Writes go through server functions.
 - Policies use `has_role(auth.uid(), 'admin')`; that function is not callable by the
   public.
-- Public catalog reads should require the parent's `is_public` flag (see AGENTS.md), and
-  study image buckets should be private with signed URLs. See **Open questions**.
+- Public catalog reads require the parent's `is_public` flag, and study image buckets are
+  private with signed URLs (`drizzle/migrations/0001`–`0003`; see AGENTS.md).
 
 ### Secrets
 
@@ -80,13 +80,11 @@ A new public endpoint needs input validation **and** a rate limit, especially if
 
 ## Open questions (owner to resolve)
 
-1. **The migrations don't match AGENTS.md or the live database.** The migrations make
-   `flashcard-images` and `mcq-images` publicly readable and catalog tables readable by
-   everyone (`USING (true)`). AGENTS.md says buckets are private and catalog reads need
-   `is_public`, and the live database has `is_public` columns, but **no migration creates
-   them**. The live database was probably changed outside Git. Check the current policies
-   in Lovable Cloud → Database and save them as a migration, so the database can be
-   rebuilt from Git. No code reads or sets `is_public` today.
+1. **Two migration folders.** Lovable's migrations, including the security changes
+   (private image buckets, `is_public` catalogs), are in `drizzle/migrations/`; older ones
+   and those made outside Lovable are in `supabase/migrations/` (see ARCHITECTURE.md →
+   Database changes). Confirm with Lovable that both are applied. Also, no code reads or
+   sets `is_public` yet: everything defaults to public and admins can't unpublish.
 2. **No monitoring for outages.** The Telegram bot was down from about 13 July to October
    2026 without anyone noticing. Add an uptime check on the website and on the bot's
    function URL.
