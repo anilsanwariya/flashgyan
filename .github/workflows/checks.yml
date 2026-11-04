@@ -1,0 +1,80 @@
+# Runs on every pull request and every push to main (including Lovable's commits).
+# A red check means: don't merge until it's fixed.
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  website:
+    name: Website (type check + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      # bun.lock pins the exact versions Lovable builds with, but its download links
+      # point at Lovable's private mirror. The same files (same checksums) are on the
+      # public npm registry, so point the links there for this run only.
+      - name: Install exact dependencies from bun.lock
+        run: |
+          sed -i -E 's#https://[a-z0-9-]+-npm\.pkg\.dev/lovable-core-prod/sandbox-npm-cache/#https://registry.npmjs.org/#g' bun.lock
+          bun install --frozen-lockfile
+
+      - name: Type check
+        run: npx tsc --noEmit -p .
+
+      - name: Production build
+        run: bun run build
+
+  telegram-bot:
+    name: Telegram bot (tests + starts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Tests
+        run: deno test --allow-all supabase/functions/_shared/
+
+      # Starts the bot the way Supabase does and asks it for "ok". A bot that can't
+      # start (like the duplicate QUIZ_LIMIT that took it down from July to October
+      # 2026) fails here instead of in production.
+      - name: Bot starts
+        env:
+          TELEGRAM_BOT_TOKEN: ci-placeholder
+          SUPABASE_URL: http://127.0.0.1:1
+          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder
+        run: |
+          deno run --allow-all supabase/functions/telegram-demo-bot/index.ts > bot.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8000/ | grep -q '^ok$'; then
+              echo "Bot started and answered ok"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Bot did not start:"
+          cat bot.log
+          exit 1
