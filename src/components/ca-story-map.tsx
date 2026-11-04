@@ -98,6 +98,7 @@ export function StoryMap({
             <iframe
               title="Map preview"
               srcDoc={preview.data.html}
+              sandbox="allow-same-origin"
               className="h-72 w-full rounded-lg border border-border bg-white sm:h-80"
             />
           ) : (

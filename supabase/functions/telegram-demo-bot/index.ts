@@ -633,6 +633,42 @@ function mainsHeader(info: MainsInfo): string {
 }
 
 // mains: write a descriptive exam answer (/answer) instead of a chat answer.
+// Per-user limits on AI questions (/ask, /answer and plain messages), the same as the
+// website's per-address limits, plus a bot-wide ceiling: each answer is a paid AI call.
+const SAATHI_TG_LIMITS = [
+  { key: (u: number) => `tg-ask:user:${u}:min`, windowSeconds: 60, maxHits: 8, over: "busy" },
+  { key: (u: number) => `tg-ask:user:${u}:day`, windowSeconds: 86_400, maxHits: 150, over: "day" },
+  { key: () => "tg-ask:global:min", windowSeconds: 60, maxHits: 400, over: "busy" },
+] as const;
+
+// Counts one question; returns which limit it went over, or null. Fails open, like the
+// website, so a database hiccup never locks students out.
+async function saathiLimitHit(user_id: number): Promise<"busy" | "day" | null> {
+  for (const l of SAATHI_TG_LIMITS) {
+    const { data, error } = await supabase.rpc("saathi_consume_rate_limit", {
+      rl_key: l.key(user_id),
+      window_seconds: l.windowSeconds,
+      max_hits: l.maxHits,
+    });
+    if (error) {
+      console.error("saathi limit", error.message);
+      return null;
+    }
+    if (data === false) return l.over;
+  }
+  return null;
+}
+
+async function sendSaathiLimit(chat_id: number, hit: "busy" | "day") {
+  await tg("sendMessage", {
+    chat_id,
+    text:
+      hit === "day"
+        ? "You've reached today's limit of SAATHI questions. Come back tomorrow!\nआज के SAATHI प्रश्न पूरे हो गए। कल फिर आइए!"
+        : "Too many questions at once. Please wait a minute and try again.\nएक साथ बहुत सारे प्रश्न। कृपया एक मिनट रुककर फिर पूछें।",
+  });
+}
+
 async function handleSaathiAsk(
   chat_id: number,
   user_id: number,
@@ -652,6 +688,14 @@ async function handleSaathiAsk(
   if (!LOVABLE_API_KEY) {
     await tg("sendMessage", { chat_id, text: "SAATHI is not configured." });
     return;
+  }
+  // Background /answer jobs (the ones with a signal) were counted before they were queued.
+  if (!signal) {
+    const hit = await saathiLimitHit(user_id);
+    if (hit) {
+      await sendSaathiLimit(chat_id, hit);
+      return;
+    }
   }
   question = question.slice(0, 2000);
   const userKey = String(user_id);
@@ -839,6 +883,11 @@ async function queueMainsAnswer(chat_id: number, user_id: number, args: string) 
   // Usage and configuration errors remain immediate, without a drafting notice.
   if (!question || !LOVABLE_API_KEY) {
     await handleSaathiAsk(chat_id, user_id, question, { marks });
+    return;
+  }
+  const hit = await saathiLimitHit(user_id);
+  if (hit) {
+    await sendSaathiLimit(chat_id, hit);
     return;
   }
   await tg("sendMessage", {
@@ -2257,8 +2306,16 @@ async function handleMyChatMember(update: any) {
 async function verifyTelegramSecret(req: Request): Promise<boolean> {
   const got = req.headers.get("x-telegram-bot-api-secret-token");
   let expected = (await getSettings()).webhook_secret;
-  if (expected && got !== expected) expected = (await getSettings(true)).webhook_secret;
-  return !expected || got === expected;
+  if (expected && !sameSecret(got, expected)) expected = (await getSettings(true)).webhook_secret;
+  return !expected || sameSecret(got, expected);
+}
+
+// Constant-time string comparison, so response timing reveals nothing about the secret.
+function sameSecret(got: string | null, expected: string): boolean {
+  if (got === null || got.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < got.length; i++) diff |= got.charCodeAt(i) ^ expected.charCodeAt(i);
+  return diff === 0;
 }
 
 // ---------- Webhook ----------

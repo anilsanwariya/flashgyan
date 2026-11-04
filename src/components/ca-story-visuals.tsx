@@ -98,6 +98,7 @@ export function VisualFrame({ visual }: { visual: Visual }) {
       ref={frame}
       title="Visual preview"
       srcDoc={html}
+      sandbox="allow-same-origin"
       onLoad={() => {
         fit();
         // Web fonts can change the height after load.

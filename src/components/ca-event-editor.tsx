@@ -345,6 +345,7 @@ export function EventSummaryEditor({
                   <iframe
                     title="Preview of the summary"
                     srcDoc={previewHtml}
+                    sandbox="allow-same-origin"
                     className="h-[70vh] w-full rounded-lg border border-border bg-white"
                   />
                 </div>

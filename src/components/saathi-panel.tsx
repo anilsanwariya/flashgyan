@@ -24,7 +24,6 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
 import {
   appendSaathiDoc,
   createSaathiDoc,
@@ -749,7 +748,8 @@ function ChunkRow({
       {open && (
         <div className="px-3 pb-3 pt-1 border-t border-border">
           <div className="prose prose-sm max-w-none text-foreground/90 prose-headings:font-bold">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+            {/* No raw HTML: chunk text comes from uploaded files, so HTML in it must not run. */}
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {chunk.content}
             </ReactMarkdown>
           </div>

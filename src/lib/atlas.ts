@@ -401,6 +401,14 @@ export function layerLegend(
 // `project` maps longitude/latitude to the map's x/y; `k` keeps strokes
 // the same size however close the view is; `districts` gives a district's
 // outline for district-coloured layers.
+// Layer colours come from imported map files and go into SVG attributes on public
+// pages, so only plain colour values pass; anything else is drawn grey.
+const COLOR_RE = /^(#[0-9a-f]{3,8}|[a-z]{3,20}|(rgb|hsl)a?\([\d\s.,%/]+\))$/i;
+function safeColor(c: string): string {
+  const v = String(c ?? "").trim();
+  return COLOR_RE.test(v) ? v : "#888888";
+}
+
 export function layerSvg(
   layer: Pick<AtlasLayer, "items">,
   project: (lon: number, lat: number) => [number, number],
@@ -429,15 +437,15 @@ export function layerSvg(
   for (const f of layer.items) {
     const name = pickBi(f.name, lang);
     if (f.kind === "area" && f.rings?.length) {
-      areas += `<path d="${f.rings.map(d).join("Z")}Z" fill="${f.color}" fill-opacity="${op}" stroke="${f.color}" stroke-width="${(0.8 * k).toFixed(2)}" fill-rule="evenodd"/>`;
+      areas += `<path d="${f.rings.map(d).join("Z")}Z" fill="${safeColor(f.color)}" fill-opacity="${op}" stroke="${safeColor(f.color)}" stroke-width="${(0.8 * k).toFixed(2)}" fill-rule="evenodd"/>`;
       if (f.at) labels += label(f.at, name, "#1f2430", 11);
     } else if (f.kind === "district" && f.district && districts) {
       const rings = districts(f.district);
       if (rings?.length)
-        areas += `<path d="${rings.map(d).join("Z")}Z" fill="${f.color}" fill-opacity="${op}" stroke="#ffffff" stroke-width="${(0.6 * k).toFixed(2)}"/>`;
+        areas += `<path d="${rings.map(d).join("Z")}Z" fill="${safeColor(f.color)}" fill-opacity="${op}" stroke="#ffffff" stroke-width="${(0.6 * k).toFixed(2)}"/>`;
     } else if (f.kind === "line" && f.line && f.line.length > 1) {
       const w = (f.width ?? 2) * k;
-      lines += `<path d="${d(f.line)}" fill="none" stroke="${f.color}" stroke-width="${w.toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"${
+      lines += `<path d="${d(f.line)}" fill="none" stroke="${safeColor(f.color)}" stroke-width="${w.toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"${
         f.dash
           ? ` stroke-dasharray="${f.dash
               .split(/\s+/)
@@ -452,11 +460,11 @@ export function layerSvg(
         const s = 9 * k;
         const p = (da: number) =>
           `${(x2 - s * Math.cos(a + da)).toFixed(1)},${(y2 - s * Math.sin(a + da)).toFixed(1)}`;
-        lines += `<path d="M${p(0.45)}L${x2.toFixed(1)},${y2.toFixed(1)}L${p(-0.45)}" fill="none" stroke="${f.color}" stroke-width="${w.toFixed(2)}"/>`;
+        lines += `<path d="M${p(0.45)}L${x2.toFixed(1)},${y2.toFixed(1)}L${p(-0.45)}" fill="none" stroke="${safeColor(f.color)}" stroke-width="${w.toFixed(2)}"/>`;
       }
-      if (f.at) labels += label(f.at, name, f.color, 11);
+      if (f.at) labels += label(f.at, name, safeColor(f.color), 11);
     } else if (f.kind === "label" && f.at) {
-      labels += label(f.at, name, f.color, 12);
+      labels += label(f.at, name, safeColor(f.color), 12);
     }
   }
   return areas + lines + labels;

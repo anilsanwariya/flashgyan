@@ -1,4 +1,5 @@
-import { createHmac } from "crypto";
+import { Buffer } from "buffer";
+import { createHmac, timingSafeEqual } from "crypto";
 
 // Checks a Telegram mini app's initData signature; returns its fields, or null
 // when the signature is wrong or older than a day.
@@ -16,7 +17,10 @@ export function verifyInitData(initData: string, botToken: string): Record<strin
 
   const secretKey = createHmac("sha256", "WebAppData").update(botToken).digest();
   const computed = createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
-  if (computed !== hash) return null;
+  // Constant-time comparison, so response timing reveals nothing about the signature.
+  const a = Buffer.from(computed, "utf8");
+  const b = Buffer.from(hash, "utf8");
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
 
   // Optional freshness check (24h)
   const authDate = Number(params.get("auth_date") ?? 0);

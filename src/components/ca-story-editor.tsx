@@ -1800,6 +1800,7 @@ function PreviewFrame({ html, label, quiet }: { html: string; label: string; qui
         ref={frame}
         title={quiet ? `Live preview: ${label}` : `Preview: ${label}`}
         srcDoc={srcDoc}
+        sandbox="allow-same-origin"
         onLoad={() => {
           fit();
           setTimeout(fit, 700);
