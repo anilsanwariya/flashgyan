@@ -9,6 +9,7 @@
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
 
+- Read README.md and the docs/ folder (PRD, ARCHITECTURE, DESIGN, SECURITY, DECISIONS) before changing the project, and update them in the same change when behaviour, structure or a decision changes; docs describing an app that no longer exists mislead the next session.
 - Keep the homepage flashcard demo read-only and source its randomized cards through a public server function, because demo ratings must never alter study history.
 - Public catalog reads require the parent's is_public flag, and question reads require a matching public parent; keep separate admin reads so unpublished content stays manageable.
 - Keep study image buckets private with admin-only direct reads; students and the homepage demo receive signed image URLs through existing server flows.
