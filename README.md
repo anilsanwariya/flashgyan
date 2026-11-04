@@ -39,16 +39,25 @@ show a "not configured" error.
 
 ## Checks before merging
 
-```sh
-npx tsc --noEmit   # type check: must show no errors
-npm run build      # production build: must succeed
-npm run lint       # many existing formatting warnings; don't add new non-formatting ones
-```
+GitHub runs these automatically on every pull request and every push to `main`
+([.github/workflows/checks.yml](.github/workflows/checks.yml)). Don't merge while a check
+is red.
 
-Edge-function tests run with Deno, from `supabase/functions/_shared`:
+| Check | What it catches |
+| --- | --- |
+| Website: type check | TypeScript errors |
+| Website: build | A site that won't build |
+| Telegram bot: tests | Broken shared bot logic |
+| Telegram bot: starts | A bot that crashes on start-up (the July 2026 outage) |
+
+The checks install the exact package versions in `bun.lock`, which is what Lovable builds
+with. To run the same checks yourself:
 
 ```sh
-deno test --allow-all telegram-check-input.test.ts
+npx tsc --noEmit                                    # type check
+npm run build                                       # production build
+deno test --allow-all supabase/functions/_shared/   # bot tests
+npm run lint   # not in CI yet: ~4,800 existing formatting warnings; add no new non-formatting ones
 ```
 
 ## Deploying

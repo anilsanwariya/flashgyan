@@ -90,8 +90,9 @@ A new public endpoint needs input validation **and** a rate limit, especially if
 2. **No monitoring for outages.** The Telegram bot was down from about 13 July to October
    2026 without anyone noticing. Add an uptime check on the website and on the bot's
    function URL.
-3. **No automatic checks before merging.** Type-check, build and tests only run if someone
-   runs them by hand.
+3. **Lint is not checked automatically.** Since 4 November 2026 GitHub checks every pull
+   request and push to `main` (type check, build, bot tests, bot start-up), but lint is left
+   out until the ~4,800 existing formatting warnings are cleaned up.
 4. **Confirm that new sign-ups are turned off** in Supabase Auth settings. The website has
    no sign-up page, but the Supabase sign-up API still accepts new accounts unless sign-ups
    are disabled there, and any account passes the admin area's sign-in check. (The one admin
@@ -103,5 +104,5 @@ A new public endpoint needs input validation **and** a rate limit, especially if
 - [ ] New tables have Row Level Security and policies
 - [ ] New admin functions call `assertAdmin()`
 - [ ] New public endpoints validate input and are rate-limited
-- [ ] `npx tsc --noEmit` and `npm run build` pass
+- [ ] The GitHub "Checks" are green
 - [ ] If the bot changed: redeployed, and its URL shows `ok`
