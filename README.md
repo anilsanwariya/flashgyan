@@ -80,9 +80,10 @@ change. When a tested page reads a new table, add sample rows to `mock-supabase.
 ## Deploying
 
 - **Website:** Lovable builds and publishes it. Changes merged into `main` sync to Lovable.
-- **Database:** migrations live in two folders, `drizzle/migrations/` (Lovable's) and
-  `supabase/migrations/`; see docs/ARCHITECTURE.md → Database changes. Never edit one that
-  has already run.
+- **Database:** Lovable writes and applies its own migrations in `drizzle/migrations/`. A
+  migration added to `supabase/migrations/` from outside Lovable is **not** applied
+  automatically: after merging, run its SQL in Lovable's SQL editor. See
+  docs/ARCHITECTURE.md → Database changes. Never edit one that has already run.
 - **Telegram bot** (`supabase/functions/telegram-demo-bot`): merging on GitHub does **not**
   redeploy it. Ask Lovable to redeploy the function, then open
   `https://ueldzqtaqepehyeivppm.supabase.co/functions/v1/telegram-demo-bot`; it must show `ok`.

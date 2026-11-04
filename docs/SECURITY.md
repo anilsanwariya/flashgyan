@@ -81,11 +81,10 @@ A new public endpoint needs input validation **and** a rate limit, especially if
 
 ## Open questions (owner to resolve)
 
-1. **Two migration folders.** Lovable's migrations, including the security changes
-   (private image buckets, `is_public` catalogs), are in `drizzle/migrations/`; older ones
-   and those made outside Lovable are in `supabase/migrations/` (see ARCHITECTURE.md →
-   Database changes). Confirm with Lovable that both are applied. Also, no code reads or
-   sets `is_public` yet: everything defaults to public and admins can't unpublish.
+1. **`is_public` has no controls yet.** The security rules require it, but no code reads or
+   sets it: everything defaults to public and admins can't unpublish. (Migrations: Lovable's
+   are in `drizzle/migrations/`; ones added outside Lovable must be run by hand in Lovable's
+   SQL editor. See ARCHITECTURE.md → Database changes.)
 2. **No monitoring for outages.** The Telegram bot was down from about 13 July to October
    2026 without anyone noticing. Add an uptime check on the website and on the bot's
    function URL.
