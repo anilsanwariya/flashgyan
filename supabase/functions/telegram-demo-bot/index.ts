@@ -137,9 +137,9 @@ function explanationFrom(sections: any): string {
 const CACHE_MS = 60_000;
 let botAdminReady = true;
 
-type BotSettings = BotTexts & { webhook_secret: string | null };
+type BotSettings = BotTexts & { webhook_secret: string | null; cron_secret: string | null };
 
-const DEFAULT_SETTINGS: BotSettings = { ...BOT_DEFAULT_TEXTS, webhook_secret: null };
+const DEFAULT_SETTINGS: BotSettings = { ...BOT_DEFAULT_TEXTS, webhook_secret: null, cron_secret: null };
 
 type BotCommand = {
   command: string;
@@ -2121,7 +2121,11 @@ async function runBroadcastTick(): Promise<{ processed: number; more: boolean }>
       .eq("id", b.id);
     if (!finished && !cancelled) {
       // Out of time: let a fresh run continue where this one stopped.
-      continueInBackground(fetch(TICK_URL, { method: "POST" }).then(() => undefined));
+      continueInBackground(
+        getSettings().then((st) =>
+          fetch(TICK_URL, { method: "POST", headers: { "x-cron-secret": st.cron_secret ?? "" } }).then(() => undefined),
+        ),
+      );
       return { processed, more: true };
     }
   }
@@ -2322,9 +2326,12 @@ function sameSecret(got: string | null, expected: string): boolean {
 Deno.serve(async (req) => {
   const url = new URL(req.url);
   if (url.searchParams.get("task") === "broadcast") {
-    // Only sends broadcasts an admin already created and that are due, so it is
-    // safe to trigger from cron or the admin panel without credentials. Replies
-    // at once; sending continues in the background.
+    // Scheduled/internal job: requires the scheduler secret (x-cron-secret).
+    // Replies at once; sending continues in the background.
+    let cronSecret = (await getSettings()).cron_secret;
+    const gotCron = req.headers.get("x-cron-secret");
+    if (cronSecret && !sameSecret(gotCron, cronSecret)) cronSecret = (await getSettings(true)).cron_secret;
+    if (!cronSecret || !sameSecret(gotCron, cronSecret)) return new Response("forbidden", { status: 401 });
     continueInBackground(runBroadcastTick());
     continueInBackground(runMagazineTick());
     continueInBackground(runDailyQuizTick());

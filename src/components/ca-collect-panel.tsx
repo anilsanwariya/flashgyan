@@ -12,6 +12,7 @@ import {
   deleteCaWatchSite,
   getCaCollection,
   listCaWatchSites,
+  getCaCronSecret,
   runCaCollectionTick,
   saveCaWatchSite,
   setCaArticleStatus,
