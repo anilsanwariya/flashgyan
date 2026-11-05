@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Bookmark,
-  BookOpen,
   Columns3,
   GraduationCap,
   Gamepad2,
@@ -50,8 +49,9 @@ import {
 import {
   DistrictPlaces,
   DistrictTopics,
-  FactsList,
   LangToggle,
+  PlaceFacts,
+  placeMarks,
   useAtlasLang,
 } from "@/components/atlas-ui";
 
@@ -732,23 +732,16 @@ function PlaceCard({
         </div>
       </dl>
       {pickBi(place.note, lang) && <p className="text-sm">{pickBi(place.note, lang)}</p>}
-      <div>
-        <p className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">
-          <BookOpen className="h-4 w-4" /> {L(lang, "नोट्स से तथ्य", "From the notes")} (
-          {facts.length})
-        </p>
-        <FactsList facts={facts} lang={lang} limit={12} />
-      </div>
       <NewsList items={q.data.news ?? []} lang={lang} />
       <AskedInExams lang={lang} place={place.key} />
-      {mentions.length > 0 && (
-        <div>
-          <p className="mb-1.5 text-sm font-semibold">
-            {L(lang, "नोट्स में इसका उल्लेख", "Mentioned in the notes")} ({mentions.length})
-          </p>
-          <FactsList facts={mentions} lang={lang} limit={6} />
-        </div>
-      )}
+      <PlaceFacts
+        facts={facts}
+        mentions={mentions}
+        lang={lang}
+        title={pickBi(place.name, lang)}
+        mark={placeMarks(place.name)}
+        limit={6}
+      />
       {near.length > 0 && (
         <div>
           <p className="mb-1.5 text-sm font-semibold">

@@ -563,6 +563,7 @@ export function DistrictTopics({
   mark,
   placeOf,
   onPlace,
+  openFirst = true,
 }: {
   facts: PublicFact[];
   lang: AtlasLang;
@@ -570,6 +571,8 @@ export function DistrictTopics({
   // A heading's place on the map (its key), if it is one; and opening it.
   placeOf?: (name: string) => string | null;
   onPlace?: (key: string) => void;
+  // The first topic open (else all closed).
+  openFirst?: boolean;
 }) {
   const topics = districtTopics(facts, mark, lang);
   const [more, setMore] = useState<string[]>([]);
@@ -584,7 +587,7 @@ export function DistrictTopics({
       {topics.map((t, i) => (
         <details
           key={t.key}
-          open={i === 0}
+          open={openFirst && i === 0}
           className="group/s rounded-xl border border-border bg-background"
           data-fact-section={t.name}
         >
@@ -834,4 +837,99 @@ export function DistrictPlaces({
       ))}
     </div>
   );
+}
+
+// ====================== A place's facts ======================
+//
+// The place's own block in the notes ("Places › Kumbhalgarh": also
+// called, where, built, about…) as one card; its other facts by topic →
+// subtopic → heading, as on a district; facts that only name it below,
+// folded.
+
+const isPlaceBlock = (f: PublicFact) => /^(places|स्थान)$/i.test(f.heading.split(" › ")[0] ?? "");
+
+export function PlaceFacts({
+  facts,
+  mentions,
+  lang,
+  title,
+  mark,
+  limit = 8,
+}: {
+  facts: PublicFact[];
+  mentions: PublicFact[];
+  lang: AtlasLang;
+  title: string;
+  // Its names, picked out in the facts.
+  mark: string[];
+  // Points shown on the own card before "All N facts".
+  limit?: number;
+}) {
+  const own = facts.filter(isPlaceBlock);
+  const rest = facts.filter((f) => !isPlaceBlock(f));
+  const blocks: Block[] = [];
+  const seen = new Set<string>();
+  for (const f of own) {
+    const sig = f.text.en.trim().toLowerCase();
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    const parts = f.heading.split(" › ");
+    const hiParts = (f.headingHi || "").split(" › ");
+    const label = parts.slice(2).join(" › ");
+    const shown = (lang === "hi" && f.headingHi ? parts.map((x, k) => hiParts[k] || x) : parts)
+      .slice(2)
+      .join(" › ");
+    let b = blocks.find((x) => x.label === label);
+    if (!b) blocks.push((b = { label, title: shown, facts: [] }));
+    b.facts.push(f);
+  }
+  blocks.sort((a, b) => Number(b.label === "") - Number(a.label === ""));
+  const heading = (en: string, hi: string, n?: number) => (
+    <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+      {lang === "hi" ? hi : en}
+      {n !== undefined && <span className="font-medium">· {n}</span>}
+    </p>
+  );
+  if (!facts.length && !mentions.length)
+    return (
+      <p className="text-sm text-muted-foreground">
+        {lang === "hi" ? "अभी कोई तथ्य नहीं।" : "No facts yet."}
+      </p>
+    );
+  return (
+    <div className="space-y-4" data-place-facts>
+      {blocks.length > 0 && (
+        <EntityCard
+          e={{ name: title, title: lang === "hi" ? "परिचय" : "About", blocks, places: [] }}
+          lang={lang}
+          mark={mark}
+          limit={limit}
+        />
+      )}
+      {rest.length > 0 && (
+        <section>
+          {heading("From the notes", "नोट्स से", rest.length)}
+          <DistrictTopics facts={rest} lang={lang} mark={mark} />
+        </section>
+      )}
+      {mentions.length > 0 && (
+        <section>
+          {heading("Mentioned in the notes", "नोट्स में उल्लेख", mentions.length)}
+          <DistrictTopics facts={mentions} lang={lang} mark={mark} openFirst={false} />
+        </section>
+      )}
+    </div>
+  );
+}
+
+// A place's names to pick out in its facts: "Kumbhalgarh fort (UNESCO)" →
+// "Kumbhalgarh", with its Hindi name.
+export function placeMarks(name: { en: string; hi: string }): string[] {
+  const clean = (x: string) =>
+    (x.split(",")[0] ?? "")
+      .replace(/\([^)]*\)/g, " ")
+      .replace(/\b(fort|temple|palace|lake|dam|sanctuary|fair|festival)\b/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  return [clean(name.en), clean(name.hi)].filter((x) => x.length >= 3);
 }
