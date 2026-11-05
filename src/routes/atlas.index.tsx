@@ -333,186 +333,324 @@ function AtlasPage() {
           </div>
         </div>
       </section>
-      <section>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          {L(lang, "मानचित्र का रंग", "Colour the map by")}
-        </p>
-        <div className="space-y-2">
-          <label className="flex items-center gap-2 text-sm">
-            <input type="radio" name="colour" checked={!colour} onChange={() => setColour(null)} />
-            {L(lang, "केवल जिले", "Districts only")}
-          </label>
+      <MapSummary
+        lang={lang}
+        colourName={
+          active ? (lang === "hi" ? active.name_hi || active.name_en : active.name_en) : null
+        }
+        lines={overlays.length}
+        kinds={cats.length}
+        filter={
+          asked
+            ? L(lang, "परीक्षाओं में पूछे गए", "Asked in exams")
+            : month
+              ? pickBi(MONTHS[month - 1], lang)
+              : time
+                ? `${time.from}–${time.to}`
+                : null
+        }
+        onReset={() => {
+          setColour("divisions");
+          setOverlays([]);
+          setCats(DEFAULT_CATS);
+          setTime(null);
+          setMonth(null);
+          setAsked(false);
+        }}
+      />
+      <LayerSection
+        title={L(lang, "मानचित्र का रंग", "Colour the map by")}
+        summary={
+          active
+            ? lang === "hi"
+              ? active.name_hi || active.name_en
+              : active.name_en
+            : L(lang, "केवल जिले", "Districts only")
+        }
+        open
+        id="colour"
+      >
+        <div className="space-y-3">
+          <ColourTile
+            on={!colour}
+            name={L(lang, "केवल जिले", "Districts only")}
+            colors={["#fffdf6", "#e2e8f0"]}
+            onClick={() => setColour(null)}
+          />
           {LAYER_GROUPS.map((g) => {
             const ls = colourLayers.filter((l) => l.grp === g.key);
             if (!ls.length) return null;
             return (
               <div key={g.key}>
-                <p className="text-[11px] font-semibold text-muted-foreground">
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   {pickBi(g.name, lang)}
                 </p>
-                {ls.map((l) => (
-                  <label key={l.key} className="flex items-center gap-2 py-0.5 text-sm">
-                    <input
-                      type="radio"
-                      name="colour"
-                      checked={colour === l.key}
-                      onChange={() => setColour(l.key)}
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-1">
+                  {ls.map((l) => (
+                    <ColourTile
+                      key={l.key}
+                      on={colour === l.key}
+                      name={lang === "hi" ? l.name_hi || l.name_en : l.name_en}
+                      colors={
+                        l.key === "agro"
+                          ? AGRO_ZONES.map((z) => z.color)
+                          : layerLegend(l).map((x) => x.color)
+                      }
+                      note={l.approx ? L(lang, "सांकेतिक", "Schematic") : undefined}
+                      onClick={() => setColour(l.key)}
                     />
-                    {lang === "hi" ? l.name_hi || l.name_en : l.name_en}
-                    {l.approx && (
-                      <span className="text-[10px] text-muted-foreground">
-                        {L(lang, "(सांकेतिक)", "(schematic)")}
-                      </span>
-                    )}
-                  </label>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      </section>
-      {lineLayers.length > 0 && (
-        <section>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {L(lang, "रेखाएँ", "Lines")}
-          </p>
-          {lineLayers.map((l) => (
-            <label key={l.key} className="flex items-center gap-2 py-0.5 text-sm">
-              <input
-                type="checkbox"
-                checked={overlays.includes(l.key)}
-                onChange={(e) =>
-                  setOverlays((o) =>
-                    e.target.checked ? [...o, l.key] : o.filter((x) => x !== l.key),
-                  )
-                }
-              />
-              {lang === "hi" ? l.name_hi || l.name_en : l.name_en}
-            </label>
-          ))}
-        </section>
-      )}
-      <InTheNews lang={lang} onPlace={(k) => pick("place", k)} />
-      {!!askedCounts && Object.keys(askedCounts.places).length > 0 && (
-        <button
-          type="button"
-          aria-pressed={asked}
-          onClick={() => {
-            setAsked(!asked);
-            setTime(null);
-            setMonth(null);
-          }}
-          className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm ${asked ? "border-indigo-500 bg-indigo-500/10 font-semibold" : "border-border hover:bg-muted"}`}
-          data-asked-filter
-        >
-          <GraduationCap className="h-4 w-4 text-indigo-600" />
-          {L(lang, "परीक्षाओं में पूछे गए स्थान", "Places asked in exams")}
-          <span className="ml-auto text-xs text-muted-foreground">
-            {Object.keys(askedCounts.places).length}
-          </span>
-        </button>
-      )}
-      <ThemeLinks lang={lang} all={all} />
-      {timed.length > 0 && (
-        <TimeFilter
-          lang={lang}
-          value={time}
-          count={
-            time
-              ? timed.filter((p) => inEra({ era_from: p[8], era_to: p[9] }, time.from, time.to))
-                  .length
-              : timed.length
-          }
-          onChange={(t) => {
-            setTime(t);
-            if (t) {
-              setMonth(null);
-              setAsked(false);
-            }
-          }}
-        />
-      )}
-      {monthly.length > 0 && (
-        <section>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {L(lang, "माह के मेले-उत्सव", "Fairs by month")}
-          </p>
-          <div className="flex flex-wrap gap-1" role="group" aria-label={L(lang, "माह", "Month")}>
-            {MONTHS.map((m, i) => {
-              const n = monthly.filter((p) => p[10]!.includes(i + 1)).length;
-              const on = month === i + 1;
-              return (
-                <button
-                  key={m.en}
-                  type="button"
-                  aria-pressed={on}
-                  disabled={!n}
-                  onClick={() => {
-                    setMonth(on ? null : i + 1);
-                    setTime(null);
-                    setAsked(false);
-                  }}
-                  className={`rounded-md border px-1.5 py-0.5 text-xs disabled:opacity-40 ${on ? "border-primary bg-primary text-primary-foreground" : "border-border"}`}
-                >
-                  {pickBi(m, lang)}
-                  {n ? <span className="opacity-70"> {n}</span> : null}
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      )}
-      <section className={time || month || asked ? "opacity-50" : ""}>
-        <div className="mb-2 flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {L(lang, "स्थान", "Places")}
-          </p>
-          <button
-            type="button"
-            className="text-xs underline"
-            onClick={() => setCats(cats.length ? [] : ATLAS_CATS.map((c) => c.key))}
-          >
-            {cats.length ? L(lang, "सब हटाएँ", "Clear") : L(lang, "सभी", "All")}
-          </button>
-        </div>
-        <div className="space-y-2">
-          {ATLAS_GROUPS.map((g) => {
-            const cs = ATLAS_CATS.filter((c) => c.group === g.key && counts.get(c.key));
-            if (!cs.length) return null;
-            return (
-              <div key={g.key}>
-                <p className="text-[11px] font-semibold" style={{ color: g.color }}>
-                  {pickBi(g.name, lang)}
-                </p>
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {cs.map((c) => {
-                    const on = cats.includes(c.key);
-                    return (
-                      <button
-                        key={c.key}
-                        type="button"
-                        aria-pressed={on}
-                        onClick={() =>
-                          setCats((x) => (on ? x.filter((k) => k !== c.key) : [...x, c.key]))
-                        }
-                        className={`rounded-full border px-2 py-0.5 text-xs ${on ? "text-white" : "bg-background"}`}
-                        style={
-                          on
-                            ? { background: c.color, borderColor: c.color }
-                            : { borderColor: `${c.color}66` }
-                        }
-                      >
-                        {c.icon} {pickBi(c.name, lang)}{" "}
-                        <span className="opacity-70">{counts.get(c.key)}</span>
-                      </button>
-                    );
-                  })}
+                  ))}
                 </div>
               </div>
             );
           })}
         </div>
-      </section>
+      </LayerSection>
+      {lineLayers.length > 0 && (
+        <LayerSection
+          title={L(lang, "रेखाएँ", "Lines")}
+          summary={
+            overlays.length
+              ? L(lang, `${overlays.length} चालू`, `${overlays.length} on`)
+              : L(lang, "कोई नहीं", "None")
+          }
+          open
+          id="lines"
+        >
+          <div className="space-y-1">
+            {lineLayers.map((l) => {
+              const on = overlays.includes(l.key);
+              const color = layerLegend(l).find((x) => x.kind === "line")?.color ?? "#2563eb";
+              return (
+                <button
+                  key={l.key}
+                  type="button"
+                  role="switch"
+                  aria-checked={on}
+                  onClick={() =>
+                    setOverlays((o) => (on ? o.filter((x) => x !== l.key) : [...o, l.key]))
+                  }
+                  className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-muted ${on ? "font-medium" : ""}`}
+                  data-line-layer={l.key}
+                >
+                  <svg width="22" height="10" aria-hidden className="shrink-0">
+                    <path
+                      d="M1 7 Q6 1 11 5 T21 3"
+                      fill="none"
+                      stroke={color}
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <span className="min-w-0 flex-1">
+                    {lang === "hi" ? l.name_hi || l.name_en : l.name_en}
+                  </span>
+                  <Toggle on={on} />
+                </button>
+              );
+            })}
+          </div>
+        </LayerSection>
+      )}
+      <LayerSection
+        title={L(lang, "स्थान", "Places")}
+        summary={L(
+          lang,
+          `${cats.length} प्रकार चालू`,
+          `${cats.length} of ${ATLAS_CATS.filter((c) => counts.get(c.key)).length} kinds`,
+        )}
+        open
+        id="places"
+      >
+        <div className={time || month || asked ? "opacity-50" : ""}>
+          {(time || month || asked) && (
+            <p className="mb-2 rounded-lg bg-amber-50 px-2 py-1 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+              {L(
+                lang,
+                "अभी नीचे का एक फ़िल्टर चालू है, यह सूची उस पर लागू नहीं।",
+                "A filter below is on, so these choices wait until it's off.",
+              )}
+            </p>
+          )}
+          <div className="mb-2 flex gap-1.5">
+            <button
+              type="button"
+              className="rounded-full border border-border px-2.5 py-0.5 text-xs hover:bg-muted"
+              onClick={() => setCats(ATLAS_CATS.map((c) => c.key))}
+            >
+              {L(lang, "सभी", "All")}
+            </button>
+            <button
+              type="button"
+              className="rounded-full border border-border px-2.5 py-0.5 text-xs hover:bg-muted"
+              onClick={() => setCats([])}
+            >
+              {L(lang, "कोई नहीं", "None")}
+            </button>
+            <button
+              type="button"
+              className="rounded-full border border-border px-2.5 py-0.5 text-xs hover:bg-muted"
+              onClick={() => setCats(DEFAULT_CATS)}
+            >
+              {L(lang, "शुरुआती", "Default")}
+            </button>
+          </div>
+          <div className="space-y-2.5">
+            {ATLAS_GROUPS.map((g) => {
+              const cs = ATLAS_CATS.filter((c) => c.group === g.key && counts.get(c.key));
+              if (!cs.length) return null;
+              const onN = cs.filter((c) => cats.includes(c.key)).length;
+              return (
+                <div key={g.key} data-place-group={g.key}>
+                  <div className="flex items-center gap-1.5">
+                    <i
+                      className="inline-block h-2.5 w-2.5 rounded-full"
+                      style={{ background: g.color }}
+                    />
+                    <p className="text-xs font-semibold">{pickBi(g.name, lang)}</p>
+                    <span className="text-[11px] text-muted-foreground">
+                      {onN}/{cs.length}
+                    </span>
+                    <button
+                      type="button"
+                      className="ml-auto text-[11px] text-primary hover:underline"
+                      onClick={() =>
+                        setCats((x) =>
+                          onN === cs.length
+                            ? x.filter((k) => !cs.some((c) => c.key === k))
+                            : [...new Set([...x, ...cs.map((c) => c.key)])],
+                        )
+                      }
+                    >
+                      {onN === cs.length
+                        ? L(lang, "सब बंद", "All off")
+                        : L(lang, "सब चालू", "All on")}
+                    </button>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {cs.map((c) => {
+                      const on = cats.includes(c.key);
+                      return (
+                        <button
+                          key={c.key}
+                          type="button"
+                          aria-pressed={on}
+                          onClick={() =>
+                            setCats((x) => (on ? x.filter((k) => k !== c.key) : [...x, c.key]))
+                          }
+                          className={`rounded-full border px-2 py-1 text-xs transition-colors ${on ? "text-white shadow-sm" : "bg-background text-foreground"}`}
+                          style={
+                            on
+                              ? { background: c.color, borderColor: c.color }
+                              : { borderColor: `${c.color}66` }
+                          }
+                        >
+                          {c.icon} {pickBi(c.name, lang)}{" "}
+                          <span className="opacity-70">{counts.get(c.key)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </LayerSection>
+      {(timed.length > 0 ||
+        monthly.length > 0 ||
+        (!!askedCounts && Object.keys(askedCounts.places).length > 0)) && (
+        <LayerSection
+          title={L(lang, "फ़िल्टर", "Filters")}
+          summary={
+            asked || month || time
+              ? L(lang, "1 चालू", "1 on")
+              : L(lang, "परीक्षा, समय, माह", "Exams, time, month")
+          }
+          open={!!(asked || month || time)}
+          id="filters"
+        >
+          <div className="space-y-4">
+            {!!askedCounts && Object.keys(askedCounts.places).length > 0 && (
+              <button
+                type="button"
+                aria-pressed={asked}
+                onClick={() => {
+                  setAsked(!asked);
+                  setTime(null);
+                  setMonth(null);
+                }}
+                className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm ${asked ? "border-indigo-500 bg-indigo-500/10 font-semibold" : "border-border hover:bg-muted"}`}
+                data-asked-filter
+              >
+                <GraduationCap className="h-4 w-4 text-indigo-600" />
+                {L(lang, "परीक्षाओं में पूछे गए स्थान", "Places asked in exams")}
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {Object.keys(askedCounts.places).length}
+                </span>
+              </button>
+            )}
+            {timed.length > 0 && (
+              <TimeFilter
+                lang={lang}
+                value={time}
+                count={
+                  time
+                    ? timed.filter((p) =>
+                        inEra({ era_from: p[8], era_to: p[9] }, time.from, time.to),
+                      ).length
+                    : timed.length
+                }
+                onChange={(t) => {
+                  setTime(t);
+                  if (t) {
+                    setMonth(null);
+                    setAsked(false);
+                  }
+                }}
+              />
+            )}
+            {monthly.length > 0 && (
+              <section>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {L(lang, "माह के मेले-उत्सव", "Fairs by month")}
+                </p>
+                <div
+                  className="flex flex-wrap gap-1"
+                  role="group"
+                  aria-label={L(lang, "माह", "Month")}
+                >
+                  {MONTHS.map((m, i) => {
+                    const n = monthly.filter((p) => p[10]!.includes(i + 1)).length;
+                    const on = month === i + 1;
+                    return (
+                      <button
+                        key={m.en}
+                        type="button"
+                        aria-pressed={on}
+                        disabled={!n}
+                        onClick={() => {
+                          setMonth(on ? null : i + 1);
+                          setTime(null);
+                          setAsked(false);
+                        }}
+                        className={`rounded-md border px-1.5 py-0.5 text-xs disabled:opacity-40 ${on ? "border-primary bg-primary text-primary-foreground" : "border-border"}`}
+                      >
+                        {pickBi(m, lang)}
+                        {n ? <span className="opacity-70"> {n}</span> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+          </div>
+        </LayerSection>
+      )}
+      <LayerSection title={L(lang, "विषय पृष्ठ", "Theme pages")} summary="" id="themes">
+        <ThemeLinks lang={lang} all={all} />
+      </LayerSection>
+      <InTheNews lang={lang} onPlace={(k) => pick("place", k)} />
     </div>
   );
 
@@ -801,16 +939,32 @@ function AtlasPage() {
           aria-label={L(lang, "परतें", "Layers")}
         >
           <div className="absolute inset-0 bg-black/40" onClick={() => setPanel(false)} />
-          <div className="relative ml-auto h-full w-[85%] max-w-sm overflow-y-auto bg-background p-4">
-            <button
-              type="button"
-              aria-label={L(lang, "बंद करें", "Close")}
-              onClick={() => setPanel(false)}
-              className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"
-            >
-              <X className="h-4 w-4" />
-            </button>
-            {Panel}
+          <div
+            className="relative ml-auto flex h-full w-[88%] max-w-sm flex-col bg-background shadow-xl"
+            data-layers-drawer
+          >
+            <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+              <Layers className="h-4 w-4 text-muted-foreground" />
+              <p className="font-semibold">{L(lang, "परतें एवं फ़िल्टर", "Layers & filters")}</p>
+              <button
+                type="button"
+                aria-label={L(lang, "बंद करें", "Close")}
+                onClick={() => setPanel(false)}
+                className="ml-auto grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">{Panel}</div>
+            <div className="border-t border-border p-3">
+              <button
+                type="button"
+                onClick={() => setPanel(false)}
+                className="h-10 w-full rounded-lg bg-primary text-sm font-semibold text-primary-foreground"
+              >
+                {L(lang, "मानचित्र देखें", "Show the map")}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1546,5 +1700,134 @@ function ContinueStrip({ lang, onOpen }: { lang: AtlasLang; onOpen: (i: RecentIt
         ))}
       </div>
     </section>
+  );
+}
+
+// ---------- The Layers panel's pieces ----------
+
+// A section of the panel that folds (its state shown when folded).
+function LayerSection({
+  title,
+  summary,
+  open = false,
+  id,
+  children,
+}: {
+  title: string;
+  summary: string;
+  open?: boolean;
+  id: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <details
+      open={open}
+      className="group/l rounded-xl border border-border bg-background"
+      data-layer-section={id}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+        <span className="text-sm font-semibold">{title}</span>
+        {summary && (
+          <span className="ml-auto min-w-0 truncate text-xs text-muted-foreground">{summary}</span>
+        )}
+        <span
+          className={`${summary ? "" : "ml-auto"} text-muted-foreground transition-transform group-open/l:rotate-90`}
+        >
+          ›
+        </span>
+      </summary>
+      <div className="border-t border-border px-3 pb-3 pt-2.5">{children}</div>
+    </details>
+  );
+}
+
+// A map colouring to choose: its colours as a strip, its name.
+function ColourTile({
+  on,
+  name,
+  colors,
+  note,
+  onClick,
+}: {
+  on: boolean;
+  name: string;
+  colors: string[];
+  note?: string;
+  onClick: () => void;
+}) {
+  const strip = [...new Set(colors)].slice(0, 6);
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={on}
+      onClick={onClick}
+      className={`flex w-full items-center gap-2.5 rounded-lg border px-2 py-1.5 text-left text-sm transition-colors ${
+        on
+          ? "border-primary bg-primary/10 font-medium ring-1 ring-primary"
+          : "border-border hover:bg-muted"
+      }`}
+      data-colour-tile={name}
+    >
+      <span className="flex h-6 w-9 shrink-0 overflow-hidden rounded border border-black/10">
+        {(strip.length ? strip : ["#e2e8f0"]).map((c, i) => (
+          <i key={i} className="h-full flex-1" style={{ background: c }} />
+        ))}
+      </span>
+      <span className="min-w-0 flex-1 leading-tight">{name}</span>
+      {note && (
+        <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">
+          {note}
+        </span>
+      )}
+    </button>
+  );
+}
+
+// An on/off switch (drawn; the row is the button).
+const Toggle = ({ on }: { on: boolean }) => (
+  <span
+    aria-hidden
+    className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${on ? "bg-primary" : "bg-muted-foreground/30"}`}
+  >
+    <span
+      className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${on ? "left-[18px]" : "left-0.5"}`}
+    />
+  </span>
+);
+
+// What's on the map now, in a line, with a way back to the start.
+function MapSummary({
+  lang,
+  colourName,
+  lines,
+  kinds,
+  filter,
+  onReset,
+}: {
+  lang: AtlasLang;
+  colourName: string | null;
+  lines: number;
+  kinds: number;
+  filter: string | null;
+  onReset: () => void;
+}) {
+  const parts = [
+    colourName ?? L(lang, "केवल जिले", "Districts only"),
+    lines ? L(lang, `${lines} रेखाएँ`, `${lines} line${lines > 1 ? "s" : ""}`) : null,
+    filter ?? L(lang, `${kinds} प्रकार के स्थान`, `${kinds} kinds of places`),
+  ].filter(Boolean);
+  return (
+    <div className="rounded-xl bg-muted/60 p-2.5 text-xs" data-map-summary>
+      <div className="flex items-center gap-2">
+        <p className="font-semibold uppercase tracking-wide text-muted-foreground">
+          {L(lang, "मानचित्र पर", "On the map")}
+        </p>
+        <button type="button" onClick={onReset} className="ml-auto text-primary hover:underline">
+          {L(lang, "शुरुआत पर लौटें", "Reset")}
+        </button>
+      </div>
+      <p className="mt-0.5 text-sm text-foreground">{parts.join(" · ")}</p>
+    </div>
   );
 }
