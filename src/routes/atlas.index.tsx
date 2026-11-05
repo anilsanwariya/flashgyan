@@ -39,6 +39,7 @@ import {
   type AtlasLang,
 } from "@/lib/atlas";
 import { AtlasMap } from "@/components/atlas-map";
+import { NOTES_THEMES } from "@/lib/atlas-notes-themes";
 import {
   useAtlasBase,
   useAtlasCards,
@@ -1058,10 +1059,14 @@ function DistrictCard({
 
 // The theme pages with places in them.
 function ThemeLinks({ lang, all }: { lang: AtlasLang; all: { 3: string }[] }) {
-  const themes = ATLAS_THEMES.map((t) => ({
-    t,
-    n: all.filter((p) => t.cats.includes(p[3])).length,
-  })).filter((x) => x.n > 0);
+  const themes = [
+    // From the notes (always there once the notes are in).
+    ...NOTES_THEMES.map((t) => ({ t, n: null as number | null })),
+    ...ATLAS_THEMES.map((t) => ({
+      t,
+      n: all.filter((p) => t.cats.includes(p[3])).length as number | null,
+    })).filter((x) => x.n),
+  ];
   if (!themes.length) return null;
   return (
     <section>
@@ -1076,7 +1081,7 @@ function ThemeLinks({ lang, all }: { lang: AtlasLang; all: { 3: string }[] }) {
             params={{ theme: t.key }}
             className="rounded-full border border-border px-2 py-0.5 text-xs hover:bg-muted"
           >
-            {pickBi(t.name, lang)} <span className="opacity-60">{n}</span>
+            {pickBi(t.name, lang)} {n !== null && <span className="opacity-60">{n}</span>}
           </Link>
         ))}
       </div>

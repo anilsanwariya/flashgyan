@@ -51,9 +51,15 @@ export const Route = createFileRoute("/sitemap.xml")({
               const { atlasPublicPlaces } = await import("@/lib/atlas.server");
               const { ATLAS_THEMES, placePath } = await import("@/lib/atlas");
               const places = await atlasPublicPlaces();
+              const { NOTES_THEMES } = await import("@/lib/atlas-notes-themes");
               const cats = new Set(places.map((p) => p[3]));
+              // The pages made from the notes, once a subject's notes are in.
+              const notesIn = places.some((p) => p[0].startsWith("notes:"));
               return {
-                themes: ATLAS_THEMES.filter((t) => t.cats.some((c) => cats.has(c))),
+                themes: [
+                  ...(notesIn ? NOTES_THEMES : []),
+                  ...ATLAS_THEMES.filter((t) => t.cats.some((c) => cats.has(c))),
+                ],
                 placeKeys: places.filter((p) => p[7] > 0).map((p) => placePath(p[0])),
               };
             })().catch(() => ({ themes: [], placeKeys: [] as string[] }));

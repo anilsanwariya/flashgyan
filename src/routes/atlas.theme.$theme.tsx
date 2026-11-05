@@ -15,11 +15,13 @@ import {
 import { AtlasMap } from "@/components/atlas-map";
 import { useAtlasBase, useAtlasPlace, useAtlasPlaces } from "@/components/atlas-data";
 import { FactsList, LangToggle, useAtlasLang } from "@/components/atlas-ui";
+import { NotesThemeView } from "@/components/atlas-notes-theme";
+import { NOTES_THEMES, notesThemeOf } from "@/lib/atlas-notes-themes";
 
 export const Route = createFileRoute("/atlas/theme/$theme")({
   ssr: false,
   head: ({ params }) => {
-    const t = atlasTheme(params.theme);
+    const t = atlasTheme(params.theme) ?? notesThemeOf(params.theme);
     return {
       meta: [
         { title: `${t ? t.name.en : "Theme"} of Rajasthan — Rajasthan Atlas · FlashGyan` },
@@ -41,7 +43,12 @@ const name = (p: PublicPlace, lang: AtlasLang) => (lang === "hi" ? p[2] || p[1] 
 // A fresh page (map view, open item) for each theme.
 function ThemePage() {
   const { theme } = Route.useParams();
-  return <ThemeView key={theme} theme={theme} />;
+  const notes = notesThemeOf(theme);
+  return notes ? (
+    <NotesThemeView key={theme} theme={notes.key} />
+  ) : (
+    <ThemeView key={theme} theme={theme} />
+  );
 }
 
 function ThemeView({ theme }: { theme: string }) {
@@ -200,16 +207,18 @@ function ThemeView({ theme }: { theme: string }) {
                 {L(lang, "और विषय", "More themes")}
               </p>
               <div className="flex flex-wrap gap-1">
-                {ATLAS_THEMES.filter((x) => x.key !== t.key).map((x) => (
-                  <Link
-                    key={x.key}
-                    to="/atlas/theme/$theme"
-                    params={{ theme: x.key }}
-                    className="rounded-full border border-border px-2 py-0.5 text-xs hover:bg-muted"
-                  >
-                    {pickBi(x.name, lang)}
-                  </Link>
-                ))}
+                {[...NOTES_THEMES, ...ATLAS_THEMES]
+                  .filter((x) => x.key !== t.key)
+                  .map((x) => (
+                    <Link
+                      key={x.key}
+                      to="/atlas/theme/$theme"
+                      params={{ theme: x.key }}
+                      className="rounded-full border border-border px-2 py-0.5 text-xs hover:bg-muted"
+                    >
+                      {pickBi(x.name, lang)}
+                    </Link>
+                  ))}
               </div>
             </nav>
           </div>

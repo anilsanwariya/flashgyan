@@ -100,6 +100,14 @@ so dark mode works.
   first time it is opened (grey placeholder lines while they come), and the Places tab's
   when that tab is opened.
 
+- Theme pages made from the notes (`/atlas/theme/folk-deities`, `sakas`, `fair-calendar`,
+  `painting`; `atlas-notes-theme.tsx`): the map beside a list that shows the places it
+  names. Folk deities and goddesses as cards (dates, fair lines in amber, temples and
+  fairs table); sakas as a red timeline per fort; the fair calendar as 12 Hindu-month
+  tabs (the current one marked "now") with fairs and festivals; painting schools as
+  districts coloured by school, with each style's points. Place names in them show the
+  place on the map.
+
 **Admin pages:** dense and practical. Tables, forms and clear status; no decoration.
 
 - Atlas data quality (admin): the Quality tab starts with "Duplicate places" (same name and

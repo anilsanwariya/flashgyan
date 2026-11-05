@@ -135,6 +135,10 @@ docs/                     Project documentation (this folder)
   topic's facts or the Places tab's ("places"). The server works the district out once and
   keeps it with the atlas's other data (5 minutes, cleared by `invalidateAtlas`); offline,
   the same helpers run on the saved pack.
+- **Atlas theme pages from the notes:** `src/lib/atlas-notes-themes.ts` turns a subject's
+  notes (found by chapter title) into the four pages' data, from their headings and tables
+  ("Sakas and Jauhars…", "Fairs month by month › Chaitra", "Mewar School › Nathdwara
+  style"); `atlasNotesThemeFn` serves it, cached with the atlas's data.
 - **PWA:** `public/sw.js` and `public/offline.html`, registered by `src/lib/pwa.ts`.
 
 ## Database changes
