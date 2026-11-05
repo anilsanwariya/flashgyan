@@ -1,4 +1,4 @@
-// Keeping the atlas right (admin): dated facts due for a recheck, students'
+// Keeping the atlas right (admin): duplicate places to merge, dated facts due for a recheck, students'
 // reports of mistakes (fixed
 // here or dismissed), the notes' source codes and their names (shown under
 // every fact), and places whose position disagrees with the surveyed place
@@ -23,6 +23,9 @@ import {
   setAtlasReport,
   type AtlasReport,
   type PositionCheck,
+  atlasDuplicates,
+  mergeAtlasPlaces,
+  keepAtlasApart,
 } from "@/lib/atlas.functions";
 import { atlasCat, placePath, type SourceNames } from "@/lib/atlas";
 import { googleMapsUrl } from "@/lib/map-spec";
@@ -36,11 +39,125 @@ const MIGRATION = "Reports need the migration 20261217090000_atlas_reports.sql."
 export function AtlasQuality() {
   return (
     <div className="space-y-6">
+      <Duplicates />
       <Recheck />
       <Reports />
       <Sources />
       <Positions />
     </div>
+  );
+}
+
+// ====================== Duplicate places ======================
+
+// The same place twice (the master map's and the notes'): pick the one to
+// keep; its pin stays, the others' facts move to it and they're hidden.
+// Remembered for the next import.
+function Duplicates() {
+  const fn = useServerFn(atlasDuplicates);
+  const mergeFn = useServerFn(mergeAtlasPlaces);
+  const apartFn = useServerFn(keepAtlasApart);
+  const [run, setRun] = useState(false);
+  const q = useQuery({ queryKey: ["atlasDuplicates"], queryFn: () => fn(), enabled: run });
+  const [keep, setKeep] = useState<Record<string, string>>({});
+  const groups = q.data ?? [];
+  const act = async (f: () => Promise<unknown>, ok: string) => {
+    try {
+      await f();
+      toast.success(ok);
+      await q.refetch();
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't save"));
+    }
+  };
+  return (
+    <section className="space-y-3 rounded-xl border border-border p-4" data-duplicates>
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="font-semibold">Duplicate places</h3>
+        <Button
+          size="sm"
+          variant="outline"
+          className="ml-auto"
+          onClick={() => (run ? q.refetch() : setRun(true))}
+        >
+          {q.isFetching ? "Looking…" : run ? "Look again" : "Find duplicates"}
+        </Button>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Places of the same name and kind in one district (e.g. the master map's “Karni Mata,
+        Deshnok” and the notes' “Karni Mata temple, Deshnok”). Choose the one to keep: the others'
+        facts move to it and they're hidden. Importing the files again keeps it merged.
+      </p>
+      {run && q.data && !groups.length && <p className="text-sm">None found.</p>}
+      <ul className="space-y-2">
+        {groups.map((g) => {
+          const id = g.places.map((p) => p.key).join("~");
+          const kept = keep[id] ?? g.places[0].key;
+          return (
+            <li
+              key={id}
+              className="space-y-1.5 rounded-lg border border-border p-2.5"
+              data-duplicate={id}
+            >
+              <p className="text-xs font-semibold uppercase text-muted-foreground">{g.district}</p>
+              {g.places.map((p) => (
+                <label key={p.key} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name={id}
+                    checked={kept === p.key}
+                    onChange={() => setKeep({ ...keep, [id]: p.key })}
+                    aria-label={`Keep ${p.name}`}
+                  />
+                  <span>{atlasCat(p.cat).icon}</span>
+                  <span className="font-medium">{p.name}</span>
+                  <Badge>{p.source}</Badge>
+                  <span className="text-xs text-muted-foreground">{p.facts} facts</span>
+                  <a
+                    href={placePath(p.key)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="ml-auto text-xs underline"
+                  >
+                    Open
+                  </a>
+                </label>
+              ))}
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  className="h-7"
+                  onClick={() =>
+                    act(
+                      () =>
+                        mergeFn({
+                          data: {
+                            keep: kept,
+                            others: g.places.map((p) => p.key).filter((k) => k !== kept),
+                          },
+                        }),
+                      "Merged",
+                    )
+                  }
+                >
+                  Merge into the one kept
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7"
+                  onClick={() =>
+                    act(() => apartFn({ data: { keys: g.places.map((p) => p.key) } }), "Kept apart")
+                  }
+                >
+                  They're different places
+                </Button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

@@ -416,8 +416,17 @@ export async function importSubjectNotes(en: string, hi: string): Promise<NotesI
     notPlaced: [],
   };
   const rename = new Map<string, string>(); // notes' key → existing atlas key
+  // Places the editor merged, links they removed.
+  const { linkFixes, fixEntities } = await import("@/lib/atlas-cleanup.server");
+  const fx = await linkFixes();
   const placeRows: Row[] = [];
   for (const p of notes.places) {
+    // Merged into another place by the editor: its points go there.
+    if (fx.merged[p.key]) {
+      rename.set(p.key, fx.merged[p.key]);
+      pr.linked++;
+      continue;
+    }
     const kind = kindOf(p.cat);
     const same = p.district
       ? (sameName.get(`${norm(p.name_en)}|${p.district}|${kind}`) ??
@@ -537,10 +546,14 @@ export async function importSubjectNotes(en: string, hi: string): Promise<NotesI
   const fr = { added: 0, updated: 0, kept: 0, gone: 0, toCheck: 0 };
   const rows: Row[] = [];
   for (const f of notes.facts) {
-    const entities = f.entities
-      .map((e) => (e.startsWith("P:") ? `P:${rename.get(e.slice(2)) ?? e.slice(2)}` : e))
-      // A place that couldn't be pinned isn't linked.
-      .filter((e) => !e.startsWith("P:") || placed.has(e.slice(2)));
+    const entities = fixEntities(
+      f.key,
+      f.entities
+        .map((e) => (e.startsWith("P:") ? `P:${rename.get(e.slice(2)) ?? e.slice(2)}` : e))
+        // A place that couldn't be pinned isn't linked.
+        .filter((e) => !e.startsWith("P:") || placed.has(e.slice(2))),
+      fx,
+    );
     const old = factByKey.get(f.key);
     if (old?.edited) {
       fr.kept++;

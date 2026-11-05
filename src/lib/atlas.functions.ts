@@ -1025,3 +1025,60 @@ export const atlasUsageView = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await usage()).usageView(data.days);
   });
+
+// ---------- Keeping links clean (admin) ----------
+
+async function cleanup() {
+  return import("@/lib/atlas-cleanup.server");
+}
+const placeKeyZ = z.string().min(2).max(200);
+
+export const atlasDuplicates = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await cleanup()).placeDuplicates();
+  });
+
+export const mergeAtlasPlaces = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ keep: placeKeyZ, others: z.array(placeKeyZ).min(1).max(20) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await cleanup()).mergePlaces(data.keep, data.others);
+  });
+
+export const keepAtlasApart = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ keys: z.array(placeKeyZ).min(2).max(20) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await cleanup()).keepApart(data.keys);
+    return { ok: true };
+  });
+
+export const unlinkAtlasFact = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid(), place: placeKeyZ }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await cleanup()).unlinkFactPlace(data.id, data.place);
+    return { ok: true };
+  });
+
+export const precheckAtlasFact = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await cleanup()).precheckFact(data.id);
+  });
+
+export const atlasToCheckIds = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await cleanup()).toCheckIds();
+  });

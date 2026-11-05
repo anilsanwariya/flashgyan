@@ -96,6 +96,12 @@ so dark mode works.
 
 **Admin pages:** dense and practical. Tables, forms and clear status; no decoration.
 
+- Atlas data quality (admin): the Quality tab starts with "Duplicate places" (same name and
+  kind in one district; pick the one to keep, then merge or say they're different). In the
+  Facts tab each place link has a × to unlink it, and "to check" facts have "AI pre-check"
+  (one at a time, or all not yet checked with a Stop button); the pre-check's line shows in
+  blue under the notes' own doubt.
+
 ## Every screen needs
 
 - **Loading state:** a skeleton or a short "Loading…" message in the right place.
