@@ -97,14 +97,31 @@ function AtlasPage() {
   // district or place brings it into view.
   const cardRef = useRef<HTMLElement>(null);
   const selKey = sel ? `${sel.kind}:${sel.key}` : "";
+  // Full screen: the map edge to edge, the card a sheet over it (peeking,
+  // or pulled up tall).
+  const [full, setFull] = useState(false);
+  const [sheet, setSheet] = useState<"peek" | "tall">("peek");
+  useEffect(() => setSheet("peek"), [selKey]);
   useEffect(() => {
-    if (!selKey || typeof window === "undefined" || window.innerWidth >= 1280) return;
+    if (!full) return;
+    const el = document.documentElement;
+    const before = el.style.overflow;
+    el.style.overflow = "hidden";
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setFull(false);
+    window.addEventListener("keydown", esc);
+    return () => {
+      el.style.overflow = before;
+      window.removeEventListener("keydown", esc);
+    };
+  }, [full]);
+  useEffect(() => {
+    if (full || !selKey || typeof window === "undefined" || window.innerWidth >= 1280) return;
     const t = window.setTimeout(
       () => cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
       150,
     );
     return () => window.clearTimeout(t);
-  }, [selKey]);
+  }, [selKey, full]);
   const [q, setQ] = useState("");
   // In time: the places of a span of years, or a month's fairs (across all
   // kinds, instead of the kinds chosen).
@@ -422,6 +439,43 @@ function AtlasPage() {
     </div>
   );
 
+  // The card for what's chosen (beside or under the map, or the sheet in
+  // full screen).
+  const cardBody = base.data ? (
+    <PlaceLinks value={placeLinks(sel?.kind === "place" ? sel.key : undefined)}>
+      {sel?.kind === "place" ? (
+        <PlaceCard
+          k={sel.key}
+          lang={lang}
+          all={all}
+          onPlace={(k) => pick("place", k)}
+          onClose={() => setSel(null)}
+          onDistrict={(d) => pick("district", d)}
+        />
+      ) : sel?.kind === "district" ? (
+        <DistrictCard
+          name={sel.key}
+          base={base.data!}
+          lang={lang}
+          places={all}
+          onClose={() => setSel(null)}
+          onPlace={(k) => pick("place", k)}
+          onDistrict={(x) => pick("district", x)}
+        />
+      ) : (
+        <div className="space-y-3 text-sm text-muted-foreground">
+          <p>
+            {L(
+              lang,
+              "किसी स्थान या जिले पर टैप करें — उससे जुड़े सभी परीक्षा-तथ्य यहाँ दिखेंगे।",
+              "Tap a place or a district: all its exam facts show here.",
+            )}
+          </p>
+          <DistrictLinks base={base.data!} lang={lang} />
+        </div>
+      )}
+    </PlaceLinks>
+  ) : null;
   return (
     <div className="flex min-h-[100dvh] flex-col bg-background">
       <header className="sticky top-0 z-20 flex flex-wrap items-center gap-2 border-b border-border bg-background/95 px-3 py-2 backdrop-blur sm:px-4">
@@ -496,7 +550,14 @@ function AtlasPage() {
           <aside className="hidden overflow-y-auto border-r border-border p-4 lg:block lg:max-h-[calc(100dvh-53px)]">
             {Panel}
           </aside>
-          <main className="relative flex min-h-0 flex-col gap-2 p-2 sm:p-3">
+          <main
+            className={
+              full
+                ? "fixed inset-0 z-40 flex flex-col bg-background"
+                : "relative flex min-h-0 flex-col gap-2 p-2 sm:p-3"
+            }
+            data-map-full={full || undefined}
+          >
             <AtlasMap
               base={base.data!}
               places={shown}
@@ -509,7 +570,12 @@ function AtlasPage() {
               onDistrict={(d) => setSel({ kind: "district", key: d })}
               highlight={sel?.kind === "district" ? sel.key : null}
               cluster
-              className="h-[62dvh] lg:h-[calc(100dvh-120px)]"
+              nearMe
+              fullscreen={full}
+              onFullscreen={() => setFull(!full)}
+              className={
+                full ? "h-[100dvh] rounded-none border-0" : "h-[62dvh] lg:h-[calc(100dvh-120px)]"
+              }
             />
             {active && (
               <div
@@ -544,41 +610,19 @@ function AtlasPage() {
             className="scroll-mt-2 border-t border-border p-4 xl:max-h-[calc(100dvh-53px)] xl:overflow-y-auto xl:border-l xl:border-t-0"
             aria-live="polite"
           >
-            <PlaceLinks value={placeLinks(sel?.kind === "place" ? sel.key : undefined)}>
-              {sel?.kind === "place" ? (
-                <PlaceCard
-                  k={sel.key}
-                  lang={lang}
-                  all={all}
-                  onPlace={(k) => pick("place", k)}
-                  onClose={() => setSel(null)}
-                  onDistrict={(d) => pick("district", d)}
-                />
-              ) : sel?.kind === "district" ? (
-                <DistrictCard
-                  name={sel.key}
-                  base={base.data!}
-                  lang={lang}
-                  places={all}
-                  onClose={() => setSel(null)}
-                  onPlace={(k) => pick("place", k)}
-                  onDistrict={(x) => pick("district", x)}
-                />
-              ) : (
-                <div className="space-y-3 text-sm text-muted-foreground">
-                  <p>
-                    {L(
-                      lang,
-                      "किसी स्थान या जिले पर टैप करें — उससे जुड़े सभी परीक्षा-तथ्य यहाँ दिखेंगे।",
-                      "Tap a place or a district: all its exam facts show here.",
-                    )}
-                  </p>
-                  <DistrictLinks base={base.data!} lang={lang} />
-                </div>
-              )}
-            </PlaceLinks>
+            {!full && cardBody}
           </aside>
         </div>
+      )}
+      {full && sel && (
+        <Sheet
+          lang={lang}
+          tall={sheet === "tall"}
+          onTall={(t) => setSheet(t ? "tall" : "peek")}
+          onClose={() => setSel(null)}
+        >
+          {cardBody}
+        </Sheet>
       )}
       {panel && (
         <div
@@ -1202,5 +1246,58 @@ function CardsLink({ lang }: { lang: AtlasLang }) {
         <span className="rounded-full bg-indigo-100 px-1.5 text-xs text-indigo-900">{n}</span>
       )}
     </Link>
+  );
+}
+
+// The card in full screen: a sheet over the bottom of the map. Pull its
+// handle up for more, down to peek or close.
+function Sheet({
+  lang,
+  tall,
+  onTall,
+  onClose,
+  children,
+}: {
+  lang: AtlasLang;
+  tall: boolean;
+  onTall: (tall: boolean) => void;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const start = useRef<number | null>(null);
+  const end = (y: number) => {
+    if (start.current === null) return;
+    const dy = y - start.current;
+    start.current = null;
+    if (dy < -30) onTall(true);
+    else if (dy > 30) {
+      if (tall) onTall(false);
+      else onClose();
+    } else onTall(!tall);
+  };
+  return (
+    <section
+      className={`fixed inset-x-0 bottom-0 z-50 flex flex-col rounded-t-2xl border-t border-border bg-background shadow-[0_-8px_30px_rgba(0,0,0,0.18)] transition-[height] duration-200 ${
+        tall ? "h-[88dvh]" : "h-[42dvh]"
+      }`}
+      aria-label={L(lang, "विवरण", "Details")}
+      data-sheet={tall ? "tall" : "peek"}
+    >
+      <button
+        type="button"
+        aria-label={tall ? L(lang, "नीचे करें", "Show less") : L(lang, "ऊपर करें", "Show more")}
+        className="flex w-full touch-none justify-center py-2.5"
+        onPointerDown={(e) => {
+          start.current = e.clientY;
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        }}
+        onPointerUp={(e) => end(e.clientY)}
+        onPointerCancel={() => (start.current = null)}
+        data-sheet-handle
+      >
+        <span className="h-1.5 w-12 rounded-full bg-muted-foreground/40" />
+      </button>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-6">{children}</div>
+    </section>
   );
 }

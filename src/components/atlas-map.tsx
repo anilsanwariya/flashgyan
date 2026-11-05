@@ -3,7 +3,7 @@
 // category. Drag to move, wheel or pinch to zoom; places and districts are
 // tapped. Shared by the students' atlas and the district pages.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Minus, Plus, RotateCcw } from "lucide-react";
+import { LocateFixed, Maximize2, Minimize2, Minus, Plus, RotateCcw } from "lucide-react";
 import {
   atlasCat,
   clusterDots,
@@ -66,6 +66,9 @@ export function AtlasMap({
   named = [],
   cluster = false,
   className = "",
+  fullscreen,
+  onFullscreen,
+  nearMe = false,
 }: {
   base: AtlasBase;
   places: PublicPlace[];
@@ -91,6 +94,11 @@ export function AtlasMap({
   // Crowded dots drawn as one, with a list of the places there.
   cluster?: boolean;
   className?: string;
+  // A full-screen button (the page decides what full screen is).
+  fullscreen?: boolean;
+  onFullscreen?: () => void;
+  // A "Near me" button: the device's position on the map.
+  nearMe?: boolean;
 }) {
   const own = district ? base.districts.find((d) => d.en === district) : null;
   const home = useMemo(
@@ -199,6 +207,65 @@ export function AtlasMap({
   }, [colour, overlays.join(","), lang, own]);
 
   const shown = own ? base.districts.filter((d) => d.en === own.en) : base.districts;
+  // Each district's width (map units): its name shows only when it fits.
+  const widths = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const d of base.districts) {
+      const xs = d.rings.flat().map(([lon, lat]) => project(lon, lat)[0]);
+      m.set(d.en, Math.max(...xs) - Math.min(...xs));
+    }
+    return m;
+  }, [base.districts]);
+  // Near me: where the device is (shown as a blue dot), or why not.
+  const [me, setMe] = useState<{ x: number; y: number } | null>(null);
+  const [meNote, setMeNote] = useState("");
+  const locate = () => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setMeNote(
+        lang === "hi" ? "यह डिवाइस स्थान नहीं बताता।" : "This device can't tell its location.",
+      );
+      return;
+    }
+    setMeNote(lang === "hi" ? "स्थान खोज रहे हैं…" : "Finding you…");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { longitude: lon, latitude: lat } = pos.coords;
+        if (lon < 69 || lon > 78.6 || lat < 22.8 || lat > 30.5) {
+          setMe(null);
+          setMeNote(lang === "hi" ? "आप राजस्थान से बाहर हैं।" : "You're outside Rajasthan.");
+          return;
+        }
+        const [x, y] = project(lon, lat);
+        setMe({ x, y });
+        setMeNote("");
+        const w = home.w / 6;
+        const h = w * (home.h / home.w);
+        setView({ x: x - w / 2, y: y - h / 2, w, h });
+      },
+      () =>
+        setMeNote(
+          lang === "hi" ? "स्थान की अनुमति नहीं मिली।" : "Location permission wasn't given.",
+        ),
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 },
+    );
+  };
+  useEffect(() => {
+    if (!meNote || meNote.endsWith("…")) return;
+    const t = setTimeout(() => setMeNote(""), 4000);
+    return () => clearTimeout(t);
+  }, [meNote]);
+  // A scale bar about 80px long, in a round number of km (1 map unit ≈ 1.11 km).
+  const kmPerPx = u * (111.32 / 100);
+  const scaleKm = (() => {
+    const raw = 80 * kmPerPx;
+    const p10 = 10 ** Math.floor(Math.log10(raw));
+    return (
+      [1, 2, 5, 10]
+        .map((m) => m * p10)
+        .filter((v) => v <= raw)
+        .pop() ?? p10
+    );
+  })();
   const stateD = useMemo(
     () => base.districts.map((d) => d.rings.map(ring).join("")).join(""),
     [base.districts],
@@ -412,6 +479,12 @@ export function AtlasMap({
             // Small on a phone's whole-state view (41 names in 360px), full
             // size once zoomed.
             const size = (own ? 22 : narrow && zoom < 1.8 ? 9 : 12) * u;
+            // Only names that fit across their district (fewer, not crowded,
+            // on a phone's whole-state view; all of them once zoomed).
+            const name = lang === "hi" ? d.hi : d.en;
+            const textW = name.length * size * (lang === "hi" ? 0.5 : 0.56);
+            if (!own && !named.includes(d.en) && textW > (widths.get(d.en) ?? 0) * 1.05)
+              return null;
             return (
               <text
                 key={d.en}
@@ -494,6 +567,37 @@ export function AtlasMap({
                   stroke="#fff"
                   strokeWidth={r * 0.35}
                 />
+                {on && (
+                  // The tapped dot answers: a ring that spreads twice.
+                  <circle
+                    key={`pulse:${p[0]}`}
+                    cx={x}
+                    cy={y}
+                    r={r * 1.6}
+                    fill="none"
+                    stroke={c.color}
+                    strokeWidth={r * 0.5}
+                    style={{ pointerEvents: "none" }}
+                    data-pulse
+                  >
+                    <animate
+                      attributeName="r"
+                      from={r * 1.6}
+                      to={r * 5}
+                      dur="0.9s"
+                      repeatCount="2"
+                      fill="freeze"
+                    />
+                    <animate
+                      attributeName="opacity"
+                      from="0.9"
+                      to="0"
+                      dur="0.9s"
+                      repeatCount="2"
+                      fill="freeze"
+                    />
+                  </circle>
+                )}
                 {labelled.has(p[0]) && (
                   <text
                     x={x + r * 1.6}
@@ -516,7 +620,40 @@ export function AtlasMap({
             );
           })}
         </g>
+        {me && (
+          <g style={{ pointerEvents: "none" }} data-me>
+            <circle cx={me.x} cy={me.y} r={14 * u} fill="#2563eb" fillOpacity={0.18} />
+            <circle
+              cx={me.x}
+              cy={me.y}
+              r={6 * u}
+              fill="#2563eb"
+              stroke="#fff"
+              strokeWidth={2.5 * u}
+            />
+          </g>
+        )}
       </svg>
+      {!blind && (
+        <div
+          className="pointer-events-none absolute bottom-2 left-2 rounded bg-background/80 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 dark:text-slate-200 print:hidden"
+          data-scale
+        >
+          <div
+            className="h-1.5 border-x-2 border-b-2 border-slate-700 dark:border-slate-200"
+            style={{ width: `${Math.round(scaleKm / kmPerPx)}px` }}
+          />
+          {scaleKm} km
+        </div>
+      )}
+      {meNote && (
+        <p
+          className="absolute inset-x-2 top-2 mx-auto w-fit max-w-[80%] rounded-lg bg-background/95 px-3 py-1.5 text-center text-xs shadow"
+          role="status"
+        >
+          {meNote}
+        </p>
+      )}
       {here && (
         <div
           className="absolute inset-x-2 bottom-2 max-h-[45%] overflow-y-auto rounded-xl border border-border bg-background/95 p-2 shadow-lg sm:right-auto sm:w-80"
@@ -584,6 +721,24 @@ export function AtlasMap({
             label: lang === "hi" ? "पूरा मानचित्र" : "Whole map",
             on: () => setView(home),
           },
+          ...(nearMe
+            ? [{ icon: LocateFixed, label: lang === "hi" ? "मेरे पास" : "Near me", on: locate }]
+            : []),
+          ...(onFullscreen
+            ? [
+                {
+                  icon: fullscreen ? Minimize2 : Maximize2,
+                  label: fullscreen
+                    ? lang === "hi"
+                      ? "पूर्ण स्क्रीन बंद करें"
+                      : "Exit full screen"
+                    : lang === "hi"
+                      ? "पूर्ण स्क्रीन"
+                      : "Full screen",
+                  on: onFullscreen,
+                },
+              ]
+            : []),
         ].map((b) => (
           <button
             key={b.label}

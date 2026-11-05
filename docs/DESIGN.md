@@ -113,6 +113,14 @@ so dark mode works.
   Wikimedia Commons", the author linking to the file and the licence to its text. A photo
   that fails to load is hidden.
 
+- The atlas map sizes names and dots in screen pixels (place names 12–13px, dots 5–6px):
+  readable on phones at every zoom. A district's name shows only when it fits across the
+  district, so a phone's whole-state view isn't crowded. A tapped dot pulses twice. The
+  map has a km scale bar (bottom left), "Near me" (the device's position as a blue dot,
+  Rajasthan only) and a full-screen button. In full screen the chosen place's or
+  district's card is a bottom sheet: it peeks at 42% of the screen, a drag up makes it
+  tall, a drag down lowers it or closes it, and Escape leaves full screen.
+
 **Admin pages:** dense and practical. Tables, forms and clear status; no decoration.
 
 - Atlas data quality (admin): the Quality tab starts with "Duplicate places" (same name and
