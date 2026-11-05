@@ -76,8 +76,10 @@ so dark mode works.
   an accessible name, Report as a small flag), then tabs (Overview, Places by kind, Facts by
   chapter in sections that open). The open district is outlined on the map, and on screens
   without the side column a tap scrolls its card into view. Facts use `FactsList` /
-  `FactSections` (`atlas-ui.tsx`): table rows read as "Header: value" pairs, the district's
-  name is picked out, and the report flag shows on hover or focus.
+  `FactSections` (`atlas-ui.tsx`): table rows read as "Header: value" pairs, the report flag
+  shows on hover or focus, and in a district's facts a state-wide list row shows only that
+  district's part ("Copper — Anjani", the whole row a tap away), long paragraphs fold to
+  three lines, and the district's name is picked out.
 
 **Admin pages:** dense and practical. Tables, forms and clear status; no decoration.
 
