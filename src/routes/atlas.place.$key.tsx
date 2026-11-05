@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeft, BookOpen, Map as MapIcon } from "lucide-react";
+import { ArrowLeft, Map as MapIcon } from "lucide-react";
 import { atlasPlaceFn } from "@/lib/atlas.functions";
 import {
   atlasCat,
@@ -17,7 +17,7 @@ import { SaveButton, ShareButton } from "@/components/atlas-actions";
 import { NewsList } from "@/components/atlas-news";
 import { AskedInExams } from "@/components/atlas-exams";
 import { ReportButton } from "@/components/atlas-report";
-import { FactsList, LangToggle, useAtlasLang } from "@/components/atlas-ui";
+import { LangToggle, PlaceFacts, placeMarks, useAtlasLang } from "@/components/atlas-ui";
 
 // A place's own page: what a shared link opens, with its link preview
 // (the place's name, district and a fact, and its picture on the map).
@@ -170,12 +170,13 @@ function PlacePage() {
           {pickBi(p.note, lang) && <p className="text-sm">{pickBi(p.note, lang)}</p>}
           <NewsList items={data.news ?? []} lang={lang} />
           <AskedInExams lang={lang} place={p.key} />
-          <div>
-            <p className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">
-              <BookOpen className="h-4 w-4" /> {L(lang, "नोट्स से तथ्य", "From the notes")}
-            </p>
-            <FactsList facts={[...data.facts, ...data.mentions]} lang={lang} />
-          </div>
+          <PlaceFacts
+            facts={data.facts}
+            mentions={data.mentions}
+            lang={lang}
+            title={pickBi(p.name, lang)}
+            mark={placeMarks(p.name)}
+          />
         </section>
         {base.data && (
           <AtlasMap

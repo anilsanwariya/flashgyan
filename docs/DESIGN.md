@@ -86,6 +86,10 @@ so dark mode works.
   The Places tab is built the same way: kind (the map's groups) → category → a card per place
   with its facts (key facts strip, its main points, "On the map"); the same place twice (the
   master map's and the notes') is one card, and places with no facts yet are compact chips.
+  A place (its card beside the map and its own page) uses `PlaceFacts`: the place's own block
+  in the notes as an "About" card (key facts strip, its labelled points), then its other facts
+  by topic → subtopic → heading, then "Mentioned in the notes" with every topic folded; the
+  notes' heading block about the same thing (Karni Mata for the Deshnok temple) is included.
   In Hindi mode the topics, subtopics, headings and table labels show in Hindi too (the
   `atlas_headings_hi` setting: from a subject's Hindi notes file at import, and the master
   map's translated by the background Hindi job).

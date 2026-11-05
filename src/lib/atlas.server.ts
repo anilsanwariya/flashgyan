@@ -33,6 +33,7 @@ import {
   type OverviewSection,
   chapterOrder,
   factEntityKey,
+  APPROX_NOTE,
 } from "@/lib/atlas";
 import { parseMasterMap, slug, districtAt } from "@/lib/atlas-import.server";
 import { practiceStep } from "@/lib/atlas-practice.server";
@@ -1591,13 +1592,43 @@ export async function atlasPlace(key: string) {
     .maybeSingle();
   fail(error);
   if (!data) throw new Error("That place isn't in the atlas.");
-  const { data: facts } = await from("atlas_facts")
+  const { data: factRows } = await from("atlas_facts")
     .select(FACT_COLS)
     .contains("entities", [`P:${key}`])
     .eq("status", "verified")
     .order("position")
-    .limit(80);
+    .limit(300);
+  const facts = (factRows ?? []) as unknown as AtlasFact[];
   const p = data as unknown as AtlasPlace;
+  // The notes' heading block about the same thing elsewhere ("Karni Mata"
+  // under the folk goddesses, for "Karni Mata temple, Deshnok").
+  const entity = (p.name_en.split(",")[0] ?? "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\b(temple|fort|palace|mahal|mandir|dargah|fair|ji)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (entity.length >= 4) {
+    const { data: block } = await from("atlas_facts")
+      .select(FACT_COLS)
+      .ilike("heading", `%› ${entity}%`)
+      .eq("status", "verified")
+      .order("position")
+      .limit(200);
+    const norm = (x: string) =>
+      x
+        .toLowerCase()
+        .replace(/\b(temple|fort|palace|mahal|mandir|dargah|fair|ji)\b/g, " ")
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .trim();
+    const have = new Set(((facts ?? []) as unknown as AtlasFact[]).map((f) => f.id));
+    for (const f of (block ?? []) as unknown as AtlasFact[]) {
+      const parts = f.heading.split(" › ");
+      if (parts.length >= 2 && norm(parts[1]) === norm(entity) && !have.has(f.id)) {
+        have.add(f.id);
+        facts.push(f);
+      }
+    }
+  }
   // Facts that name the place without being linked to it.
   const name = p.name_en
     .replace(/\([^)]*\)/g, " ")
@@ -1618,9 +1649,16 @@ export async function atlasPlace(key: string) {
           .order("position")
           .limit(40)
       : { data: [] };
+  // In syllabus order (History, Art & Culture, Geography…), as on a district.
+  const bySyllabus = (a: AtlasFact, b: AtlasFact) =>
+    chapterOrder(a.chapter_key) - chapterOrder(b.chapter_key) ||
+    a.chapter_key.localeCompare(b.chapter_key, undefined, { numeric: true }) ||
+    a.position - b.position;
+  facts.sort(bySyllabus);
   return {
     mentions: ((named ?? []) as unknown as AtlasFact[])
       .filter((f) => !linked.has(f.id))
+      .sort(bySyllabus)
       .map(publicFact),
     place: {
       key: p.key,
@@ -1630,7 +1668,12 @@ export async function atlasPlace(key: string) {
       lon: p.lon,
       district: p.district,
       tehsil: p.tehsil,
-      note: { en: p.note_en, hi: p.note_hi },
+      // The approximate-pin note is the editor's (position checks), not
+      // the students'.
+      note: {
+        en: (p.note_en ?? "").startsWith(APPROX_NOTE) ? "" : p.note_en,
+        hi: p.note_hi,
+      },
       chapters: [...new Set(p.refs.map((r) => r[0]))],
       era_from: p.era_from ?? null,
       era_to: p.era_to ?? null,
