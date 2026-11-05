@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+const imgs = () => import("@/lib/storage-images.server");
 
 function publicClient() {
   return createClient<Database>(
@@ -256,6 +257,7 @@ export const updateMcqQuestion = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const supabaseAdmin = await assertAdmin(context.userId);
     const { id, ...rest } = data;
+    await (await imgs()).releaseOldImage(supabaseAdmin, "mcq-images", "mcq_questions", id, rest.image_url);
     const { error } = await supabaseAdmin.from("mcq_questions").update(rest).eq("id", id);
     if (error) throw new Error(error.message);
     return { ok: true };
@@ -266,6 +268,7 @@ export const deleteMcqQuestion = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const supabaseAdmin = await assertAdmin(context.userId);
+    await (await imgs()).releaseOldImage(supabaseAdmin, "mcq-images", "mcq_questions", data.id, null);
     const { error } = await supabaseAdmin
       .from("mcq_questions")
       .delete()
@@ -281,6 +284,7 @@ export const setMcqQuestionImage = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const supabaseAdmin = await assertAdmin(context.userId);
+    await (await imgs()).releaseOldImage(supabaseAdmin, "mcq-images", "mcq_questions", data.id, data.image_url);
     const { error } = await supabaseAdmin
       .from("mcq_questions")
       .update({ image_url: data.image_url })
@@ -316,12 +320,13 @@ export const uploadMcqImage = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const supabaseAdmin = await assertAdmin(context.userId);
-    const ext = data.filename.split(".").pop() || "png";
+    const { validateImageUpload, releaseOldImage } = await imgs();
+    const { bytes, contentType, ext } = validateImageUpload(data.contentType, data.dataBase64);
     const path = `${data.id}/${Date.now()}.${ext}`;
-    const bytes = Buffer.from(data.dataBase64, "base64");
+    await releaseOldImage(supabaseAdmin, "mcq-images", "mcq_questions", data.id, null);
     const { error: upErr } = await supabaseAdmin.storage
       .from("mcq-images")
-      .upload(path, bytes, { upsert: true, contentType: data.contentType });
+      .upload(path, bytes, { upsert: true, contentType });
     if (upErr) throw new Error(upErr.message);
     const { data: signed, error: sErr } = await supabaseAdmin.storage
       .from("mcq-images")
