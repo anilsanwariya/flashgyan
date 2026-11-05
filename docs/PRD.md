@@ -73,7 +73,7 @@ the Telegram Mini App they are identified by their Telegram account.
 | Card studio | Build decks from several books: proofread, split, export to the app |
 | Rajasthan atlas | Places, facts, layers, district overviews, reports from students; import a subject's notes (English + Hindi files from the extraction project) |
 | SAATHI | Knowledge base it answers from; model answers for Mains |
-| Current affairs | Daily, monthly and custom bilingual magazines; collection from news sites; Words in the News and GK image cards; scheme register |
+| Current affairs | Daily, monthly and custom bilingual magazines; collection from news sites; Words in the News (exam-style example sentences, posted to one or more Telegram channels by language) and GK image cards; scheme register |
 | Syllabus and exam papers | Official syllabi; RPSC/RSSB past papers with answer keys, as a question bank exported to the app |
 | Telegram bot | Broadcasts, commands, auto-replies, stats, users, webhook connection |
 | System | AI usage and cost |

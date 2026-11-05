@@ -29,6 +29,12 @@ import {
   cardTexts,
   channelChatId,
   channelLabel,
+  channelCaption,
+  channelLink,
+  footerChannel,
+  igAlbums,
+  igChannelsOn,
+  type IgChannel,
   CAPTION_MAX,
   captionHtml,
   captionText,
@@ -219,6 +225,8 @@ export type IgDayView = {
   reserve: IgWord[];
   settings: IgSettings;
   yesterdayDesign: string | null;
+  // Each channel's approved caption and what was posted where.
+  posts: IgDayPosts;
 };
 
 export async function getIgDay(day: string): Promise<IgDayView> {
@@ -257,6 +265,7 @@ export async function getIgDay(day: string): Promise<IgDayView> {
       .filter((w) => !posted.has(`${w.lang}:${w.key}`)),
     settings,
     yesterdayDesign: (((prev.data ?? []) as Row[])[0]?.design as string | undefined) ?? null,
+    posts: await dayPosts(day),
   };
 }
 
@@ -696,7 +705,8 @@ async function renderSome(
       n,
       total: cards.length,
       date: day,
-      channel: channelLabel(settings.channel),
+      // The one channel's name, or a neutral footer when it goes to several.
+      channel: footerChannel(settings),
       assetBase: origin,
       watermark: settings.watermark,
     });
@@ -716,19 +726,51 @@ async function renderSome(
 
 // ---------- Posting ----------
 
-async function postAlbum(day: string, settings: IgSettings) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not set.");
-  const chat = channelChatId(settings.channel);
-  if (!chat) throw new Error("Add the channel link in Infographics settings.");
-  const row = await readDay(day);
-  const cards = await cardsOf(day);
-  if (cards.some((c) => !c.image_path)) throw new Error("Some cards have no image yet.");
-  const media = cards.slice(0, 10).map((c, i) => ({
-    type: "photo",
-    media: `${publicUrl(c.image_path)}?v=${Date.now()}`,
-    ...(i === 0 && row?.caption ? telegramCaption(row.caption) : {}),
-  }));
+// A day's captions per channel (as approved) and what was posted where.
+export type IgDayPosts = {
+  captions: Record<string, string>;
+  posts: Record<string, { at: string; ok: boolean; ids?: number[]; error?: string }>;
+};
+const postsKey = (day: string) => `ig_posts:${day}`;
+export async function dayPosts(day: string): Promise<IgDayPosts> {
+  const { data } = await from("bot_settings")
+    .select("value")
+    .eq("key", postsKey(day))
+    .maybeSingle();
+  const v = ((data as Row | null)?.value ?? {}) as Partial<IgDayPosts>;
+  return { captions: v.captions ?? {}, posts: v.posts ?? {} };
+}
+async function saveDayPosts(day: string, v: IgDayPosts) {
+  fail(
+    (
+      await from("bot_settings").upsert(
+        { key: postsKey(day), value: v, updated_at: now() } as never,
+        { onConflict: "key" },
+      )
+    ).error,
+  );
+}
+
+// A channel's caption for the day: as approved, else from its template.
+function captionOfChannel(
+  ch: IgChannel,
+  settings: IgSettings,
+  day: string,
+  cards: IgWord[],
+  approved: IgDayPosts,
+): string {
+  return (
+    approved.captions[ch.id] ??
+    channelCaption(ch, settings, {
+      date: igDate(day, "long"),
+      english: cards.filter((c) => c.lang === "en").map((c) => c.card?.word || c.word),
+      hindi: cards.filter((c) => c.lang === "hi").map((c) => c.card?.word || c.word),
+      appLink: settings.daily_app_link,
+    })
+  );
+}
+
+async function sendAlbum(token: string, chat: string, media: unknown[]): Promise<number[]> {
   const res = await fetch(`https://api.telegram.org/bot${token}/sendMediaGroup`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -740,18 +782,71 @@ async function postAlbum(day: string, settings: IgSettings) {
     result?: { message_id: number }[];
   };
   if (!json.ok) throw new Error(`Telegram: ${json.description ?? res.status}`);
-  const ids = cards.map((c) => c.id);
-  fail(
-    (
-      await from("ig_words")
-        .update({ status: "posted", posted_on: day, updated_at: now() } as never)
-        .in("id", ids)
-    ).error,
-  );
+  return (json.result ?? []).map((r) => r.message_id);
+}
+
+// The day's cards posted to every channel that takes them (its languages,
+// albums of 10 at most, its caption on the first photo). A channel already
+// posted to isn't posted to again; one that fails doesn't stop the others.
+async function postAlbum(day: string, settings: IgSettings) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not set.");
+  const channels = igChannelsOn(settings);
+  if (!channels.length) throw new Error("Add a channel in Infographics settings.");
+  const cards = await cardsOf(day);
+  if (cards.some((c) => !c.image_path)) throw new Error("Some cards have no image yet.");
+  const state = await dayPosts(day);
+  const failed: string[] = [];
+  let first: number | null = null;
+  for (const ch of channels) {
+    if (state.posts[ch.id]?.ok) continue;
+    const albums = igAlbums(cards, ch.langs);
+    if (!albums.length) continue;
+    const caption = captionOfChannel(ch, settings, day, cards, state);
+    try {
+      const ids: number[] = [];
+      for (const [k, album] of albums.entries())
+        ids.push(
+          ...(await sendAlbum(
+            token,
+            channelChatId(ch.chat),
+            album.map((c, i) => ({
+              type: "photo",
+              media: `${publicUrl(c.image_path)}?v=${Date.now()}`,
+              ...(k === 0 && i === 0 && caption ? telegramCaption(caption) : {}),
+            })),
+          )),
+        );
+      state.posts[ch.id] = { at: now(), ok: true, ids };
+      first ??= ids[0] ?? null;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      state.posts[ch.id] = { at: now(), ok: false, error: msg };
+      failed.push(`${channelLabel(ch.chat) || ch.chat}: ${msg}`);
+    }
+    await saveDayPosts(day, state);
+  }
+  const anyOk = channels.some((ch) => state.posts[ch.id]?.ok);
+  if (anyOk) {
+    fail(
+      (
+        await from("ig_words")
+          .update({ status: "posted", posted_on: day, updated_at: now() } as never)
+          .in(
+            "id",
+            cards.map((c) => c.id),
+          )
+      ).error,
+    );
+  }
+  if (failed.length)
+    throw new Error(
+      `${anyOk ? "Posted to some channels, but not " : "Not posted to "}${failed.join("; ")}`,
+    );
   await patchDay(day, {
     status: "posted",
     posted_at: now(),
-    telegram_message_id: json.result?.[0]?.message_id ?? null,
+    ...(first ? { telegram_message_id: first } : {}),
     error: null,
   });
 }
@@ -914,7 +1009,7 @@ export async function igStep(origin?: string): Promise<void> {
   }
   // The weekly round-up, when it is due and not yet posted.
   const due = weeklyDue(settings);
-  if (due && channelChatId(settings.channel)) {
+  if (due && igChannelsOn(settings).length) {
     const mark = await weekMark(due);
     if (!mark || (mark.status === "failed" && (mark.tries ?? 1) < 3)) {
       try {
@@ -959,6 +1054,8 @@ type WeekMark = {
   status: "posting" | "posted" | "failed";
   at: string;
   error?: string;
+  // Each channel's result (a channel already sent isn't sent again).
+  channels?: Record<string, { ok: boolean; message_id?: number | null; error?: string }>;
   tries?: number;
   message_id?: number | null;
   path?: string;
@@ -1017,13 +1114,19 @@ export async function listIgWeeks(weeks = 8): Promise<IgWeek[]> {
   return out;
 }
 
-function weekCaption(settings: IgSettings, f: string, to: string, count: number) {
+function weekCaption(
+  settings: IgSettings,
+  f: string,
+  to: string,
+  count: number,
+  chat = settings.channel,
+) {
   return fillWeeklyCaption(settings.weekly_caption, {
     from: igDate(f, "long"),
     to: igDate(to, "long"),
     count,
     appLink: settings.weekly_app_link,
-    channel: channelLabel(settings.channel) ? `https://${channelLabel(settings.channel)}` : "",
+    channel: channelLink(chat),
   });
 }
 
@@ -1045,18 +1148,19 @@ export async function igWeekPreview(to: string, origin?: string) {
       from: f,
       to,
       assetBase: origin ?? "",
-      channel: channelLabel(settings.channel),
+      channel: footerChannel(settings),
     }),
     caption: weekCaption(settings, f, to, words.length),
     count: words.length,
   };
 }
 
-// The week's round-up made into a PDF and posted to the channel.
+// The week's round-up made into a PDF and posted to every channel: each gets
+// the words in its languages (an English-only channel, an English-only PDF).
 export async function postIgWeek(to: string, origin?: string, auto = false): Promise<void> {
   const settings = await getIgSettings();
-  const chat = channelChatId(settings.channel);
-  if (!chat) throw new Error("Add the channel link in Infographics settings.");
+  const channels = igChannelsOn(settings);
+  if (!channels.length) throw new Error("Add a channel in Infographics settings.");
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not set.");
   const { from: f } = weekOf(to);
@@ -1073,16 +1177,28 @@ export async function postIgWeek(to: string, origin?: string, auto = false): Pro
     throw new Error("No words were posted that week.");
   }
   if (auto && before?.status === "posting") return;
-  await setWeekMark(to, { status: "posting", at: now(), tries: (before?.tries ?? 0) + 1 });
-  try {
-    const html = roundupHtml(words, {
+  const tries = (before?.tries ?? 0) + 1;
+  // A week that failed somewhere is posted only where it failed; one posted
+  // everywhere and posted again by hand goes to every channel again.
+  const done: NonNullable<WeekMark["channels"]> =
+    before?.status === "posted" ? {} : { ...(before?.channels ?? {}) };
+  await setWeekMark(to, { status: "posting", at: now(), tries, channels: done });
+  // One PDF per set of languages.
+  const pdfs = new Map<string, { pdf: Uint8Array; path: string; count: number }>();
+  const pdfFor = async (langs: IgLang[]) => {
+    const key = [...langs].sort().join("+");
+    const hit = pdfs.get(key);
+    if (hit) return hit;
+    const mine = words.filter((w) => langs.includes(w.lang));
+    const html = roundupHtml(mine, {
       from: f,
       to,
       assetBase: origin ?? "",
-      channel: channelLabel(settings.channel),
+      channel: footerChannel(settings),
     });
     const { pdf } = await CA.renderPdf(html, await CA.getMagazineSettings(), "en");
-    const path = `infographics/weekly/Words-in-the-News-${f}-to-${to}.pdf`;
+    const tag = langs.length === 2 ? "" : langs[0] === "en" ? "-English" : "-Hindi";
+    const path = `infographics/weekly/Words-in-the-News${tag}-${f}-to-${to}.pdf`;
     fail(
       (
         await supabaseAdmin.storage
@@ -1090,42 +1206,66 @@ export async function postIgWeek(to: string, origin?: string, auto = false): Pro
           .upload(path, pdf, { contentType: "application/pdf", upsert: true })
       ).error,
     );
-    const form = new FormData();
-    form.append("chat_id", chat);
-    form.append(
-      "document",
-      new Blob([pdf as BlobPart], { type: "application/pdf" }),
-      path.split("/").pop()!,
-    );
-    const cap = telegramCaption(weekCaption(settings, f, to, words.length));
-    form.append("caption", cap.caption);
-    if (cap.parse_mode) form.append("parse_mode", cap.parse_mode);
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
-      method: "POST",
-      body: form,
-    });
-    const json = (await res.json().catch(() => ({}))) as {
-      ok?: boolean;
-      description?: string;
-      result?: { message_id?: number };
-    };
-    if (!json.ok) throw new Error(`Telegram: ${json.description ?? res.status}`);
-    await setWeekMark(to, {
-      status: "posted",
-      at: now(),
-      tries: (before?.tries ?? 0) + 1,
-      message_id: json.result?.message_id ?? null,
-      path,
-    });
-  } catch (e) {
+    const out = { pdf: pdf as Uint8Array, path, count: mine.length };
+    pdfs.set(key, out);
+    return out;
+  };
+  const failed: string[] = [];
+  let firstPath: string | undefined;
+  let firstId: number | null = null;
+  for (const ch of channels) {
+    if (done[ch.id]?.ok) continue;
+    try {
+      const doc = await pdfFor(ch.langs);
+      if (!doc.count) continue;
+      firstPath ??= doc.path;
+      const form = new FormData();
+      form.append("chat_id", channelChatId(ch.chat));
+      form.append(
+        "document",
+        new Blob([doc.pdf as BlobPart], { type: "application/pdf" }),
+        doc.path.split("/").pop()!,
+      );
+      const cap = telegramCaption(weekCaption(settings, f, to, doc.count, ch.chat));
+      form.append("caption", cap.caption);
+      if (cap.parse_mode) form.append("parse_mode", cap.parse_mode);
+      const res = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
+        method: "POST",
+        body: form,
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        description?: string;
+        result?: { message_id?: number };
+      };
+      if (!json.ok) throw new Error(`Telegram: ${json.description ?? res.status}`);
+      done[ch.id] = { ok: true, message_id: json.result?.message_id ?? null };
+      firstId ??= json.result?.message_id ?? null;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      done[ch.id] = { ok: false, error: msg };
+      failed.push(`${channelLabel(ch.chat) || ch.chat}: ${msg}`);
+    }
+  }
+  if (failed.length) {
     await setWeekMark(to, {
       status: "failed",
       at: now(),
-      tries: (before?.tries ?? 0) + 1,
-      error: e instanceof Error ? e.message : String(e),
+      tries,
+      error: failed.join("; "),
+      channels: done,
+      path: firstPath,
     });
-    throw e;
+    throw new Error(failed.join("; "));
   }
+  await setWeekMark(to, {
+    status: "posted",
+    at: now(),
+    tries,
+    message_id: firstId,
+    path: firstPath ?? before?.path,
+    channels: done,
+  });
 }
 
 // ---------- Learning from the editor's picks ----------
@@ -1479,7 +1619,10 @@ export async function rewriteIgPart(id: string, part: IgPart, note: string) {
   const w = data as unknown as Row;
   const card = w.card as IgCard | null;
   if (!card) throw new Error("The card isn't written yet.");
-  const article = (await articleOf((w.source_id as string | null) ?? null))
+  // Exam-style sentences don't need the article (and cost less without it).
+  const article = (
+    part === "sentence" ? "" : await articleOf((w.source_id as string | null) ?? null)
+  )
     .replace(/^Source: .*$/gm, "")
     .replace(/\s+/g, " ")
     .slice(0, 6000);
@@ -1564,22 +1707,45 @@ export async function approveIgDay(
   caption: string,
   postNow = false,
   at?: string,
+  captions: Record<string, string> = {},
 ): Promise<void> {
   const row = await readDay(day);
   if (!row || !["review", "failed", "cancelled"].includes(row.status))
     throw new Error("Only cards waiting for review can be approved.");
   const cards = await cardsOf(day);
   const settings = await getIgSettings();
-  if (!channelChatId(settings.channel))
-    throw new Error("Add the channel link in Infographics settings first.");
+  const channels = igChannelsOn(settings);
+  if (!channels.length) throw new Error("Add a channel in Infographics settings first.");
   if (!cards.length || cards.some((c) => !c.card))
     throw new Error("Some cards aren't written yet.");
   const unticked = cards.filter((c) => !c.checked);
   if (unticked.length)
     throw new Error(`Tick every card as checked first: ${unticked.map((c) => c.word).join(", ")}.`);
-  const shown = captionText(caption).length;
-  if (shown > CAPTION_MAX)
-    throw new Error(`The caption is ${shown} characters; Telegram allows ${CAPTION_MAX}.`);
+  // Each channel's caption (the one caption when there's one channel).
+  const prev = await dayPosts(day);
+  const caps: Record<string, string> = {};
+  for (const ch of channels) {
+    // Trying again keeps the captions approved before.
+    const c =
+      captions[ch.id] ?? (channels.length === 1 ? caption : prev.captions[ch.id] || undefined);
+    caps[ch.id] = c ?? captionOfChannel(ch, settings, day, cards, { captions: {}, posts: {} });
+    const shown = captionText(caps[ch.id]).length;
+    if (shown > CAPTION_MAX)
+      throw new Error(
+        `The caption for ${channelLabel(ch.chat) || ch.chat} is ${shown} characters; Telegram allows ${CAPTION_MAX}.`,
+      );
+  }
+  await saveDayPosts(day, { captions: caps, posts: prev.posts });
+  // Approved from review: the images made again (the footer follows the
+  // channels as they are now). Trying a failed post again keeps them.
+  if (row.status !== "failed")
+    fail(
+      (
+        await from("ig_words")
+          .update({ image_path: null, updated_at: now() } as never)
+          .eq("for_day", day)
+      ).error,
+    );
   let when = postNow ? new Date() : igPostDefault(settings.post_time);
   if (!postNow && at) {
     const t = new Date(at);
@@ -1592,7 +1758,7 @@ export async function approveIgDay(
   }
   await patchDay(day, {
     status: "rendering",
-    caption,
+    caption: caps[channels[0].id] ?? caption,
     scheduled_for: when.toISOString(),
     error: null,
   });

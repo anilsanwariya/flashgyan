@@ -86,8 +86,8 @@ const TIP_TITLES = {
 };
 
 const SENTENCE_ASKS = {
-  en: ["Simpler", "Shorter", "More like an exam sentence", "Closer to the paper's words"],
-  hi: ["सरल भाषा में", "छोटा", "परीक्षा जैसा वाक्य", "अख़बार के शब्दों के करीब"],
+  en: ["Simpler", "Shorter", "Fill-in-the-blank style", "A different context"],
+  hi: ["सरल भाषा में", "छोटा", "रिक्त स्थान वाले प्रश्न जैसा", "किसी और संदर्भ में"],
 };
 
 export function IgCardEditor({
@@ -785,7 +785,7 @@ function SentenceTab({
       const hi = "options" in out ? out.options[0]?.newsHi : "";
       if (hi)
         await keep(
-          { news, newsHi: hi, rewritten: false },
+          { news, newsHi: hi, rewritten: false, exam: false },
           "Before using another line of the paper",
         );
     } catch (e) {
@@ -796,20 +796,22 @@ function SentenceTab({
   };
   return (
     <Section
-      title="News line"
-      hint="The sentence that shows the word at work. A line of the paper is quoted as it is; a rewritten line shows on the card as “Based on today's news”."
+      title="Sentence"
+      hint="The sentence that shows the word at work. By default it's an exam-style sentence (no names, dates or numbers from the news), shown as “Exam-style sentence · Spotted in the paper”. You can still quote a line of the paper instead."
     >
       <div className="space-y-1">
         <Field
           label="The line on the card"
           rows={3}
           value={card.news}
-          onChange={(v) => set({ news: v, rewritten: !fromPaper(v) })}
+          onChange={(v) => set({ news: v, rewritten: !fromPaper(v), exam: !fromPaper(v) })}
         />
         <p className="text-xs text-muted-foreground">
-          {card.rewritten
-            ? "Rewritten: shown as based on today's news, without quotation marks."
-            : `Quoted from ${card.paper || "the paper"}.`}
+          {card.exam
+            ? `Exam-style sentence, shown with “Spotted in ${card.paper || "the paper"}”.`
+            : card.rewritten
+              ? "Rewritten: shown as based on today's news, without quotation marks."
+              : `Quoted from ${card.paper || "the paper"}.`}
         </p>
         {card.news && (
           <p
@@ -834,10 +836,13 @@ function SentenceTab({
           onClick={() =>
             void (en
               ? translate(original)
-              : keep({ news: original, rewritten: false }, "Before going back to the paper's line"))
+              : keep(
+                  { news: original, rewritten: false, exam: false },
+                  "Before going back to the paper's line",
+                ))
           }
         >
-          Back to the paper&apos;s line
+          Use the paper&apos;s line instead
         </Button>
       )}
 
@@ -845,10 +850,10 @@ function SentenceTab({
         className="space-y-2 rounded-xl border border-dashed border-primary/40 p-3"
         aria-label="Rewrite with AI"
       >
-        <h3 className="text-sm font-semibold">Rewrite with AI</h3>
+        <h3 className="text-sm font-semibold">Write exam-style sentences</h3>
         <p className="text-xs text-muted-foreground">
-          Three sentences from the same article, using the word in the same sense. Nothing the
-          article doesn&apos;t say is added.
+          Three sentences the way RPSC, RSSB and SSC papers use the word, in the card&apos;s sense:
+          general and timeless, with no names, dates or numbers from the news.
         </p>
         <div className="flex flex-wrap gap-1.5">
           {SENTENCE_ASKS[card.lang].map((a) => (
@@ -895,7 +900,7 @@ function SentenceTab({
               size="sm"
               onClick={async () => {
                 await keep(
-                  { news: o.news, newsHi: o.newsHi, rewritten: true },
+                  { news: o.news, newsHi: o.newsHi, rewritten: true, exam: true },
                   "Before the AI rewrote the news line",
                 );
                 setOptions([]);
@@ -927,7 +932,10 @@ function SentenceTab({
                 onClick={() =>
                   void (en
                     ? translate(s)
-                    : keep({ news: s, rewritten: false }, "Before using another line of the paper"))
+                    : keep(
+                        { news: s, rewritten: false, exam: false },
+                        "Before using another line of the paper",
+                      ))
                 }
               >
                 Use this

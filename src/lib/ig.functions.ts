@@ -245,6 +245,8 @@ export const approveIgDay = createServerFn({ method: "POST" })
       .object({
         date,
         caption: text(4000),
+        // Each channel's caption, by channel id.
+        captions: z.record(z.string().max(40), text(4000)).optional(),
         now: z.boolean().optional(),
         at: z.string().datetime().optional(),
       })
@@ -252,7 +254,9 @@ export const approveIgDay = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    await (await server()).approveIgDay(data.date, data.caption, data.now ?? false, data.at);
+    await (
+      await server()
+    ).approveIgDay(data.date, data.caption, data.now ?? false, data.at, data.captions ?? {});
     return { ok: true };
   });
 
@@ -288,6 +292,18 @@ export const saveIgSettings = createServerFn({ method: "POST" })
       .object({
         auto_suggest: z.boolean(),
         channel: text(200),
+        channels: z
+          .array(
+            z.object({
+              id: z.string().min(1).max(40),
+              chat: z.string().trim().max(200),
+              langs: z.array(z.enum(["en", "hi"])).max(2),
+              caption: z.string().max(3000),
+              on: z.boolean(),
+            }),
+          )
+          .max(10)
+          .default([]),
         post_time: z.string().regex(/^\d{1,2}:\d{2}$/, "Use HH:MM"),
         suggest_en: z.number().int().min(0).max(20),
         suggest_hi: z.number().int().min(0).max(20),
@@ -308,11 +324,13 @@ export const saveIgSettings = createServerFn({ method: "POST" })
         weekly_time: z.string().regex(/^\d{1,2}:\d{2}$/, "Use HH:MM"),
         weekly_caption: z.string().min(1).max(3000),
         weekly_app_link: z.string().max(400),
+        daily_app_link: z.string().max(400).default(""),
         monthly_page: z.boolean(),
       })
-      .refine((s) => s.pick_en + s.pick_hi >= 1 && s.pick_en + s.pick_hi <= 10, {
-        message: "A Telegram album holds 1 to 10 cards.",
+      .refine((s) => s.pick_en + s.pick_hi >= 1, {
+        message: "Choose at least 1 card a day.",
       })
+      // A channel with both languages and more than 10 cards gets two albums.
       .refine((s) => (!s.pick_en || s.suggest_en > 0) && (!s.pick_hi || s.suggest_hi > 0), {
         message: "A language with cards needs at least 1 suggestion.",
       })
