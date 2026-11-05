@@ -5,6 +5,9 @@ import type { Bi } from "@/lib/current-affairs";
 
 export type AtlasLang = "en" | "hi";
 export type AtlasStatus = "verified" | "to_check" | "hidden";
+// The start of an approximate pin's note (places from notes that give no
+// position); the position checks list these until a position is set.
+export const APPROX_NOTE = "📍 Approximate position:";
 export const pickBi = (b: Bi | undefined | null, lang: AtlasLang) =>
   !b ? "" : lang === "hi" ? b.hi || b.en : b.en || b.hi;
 
@@ -334,7 +337,7 @@ export type AtlasFact = {
 const CHECK = "(?:check|जाँचें|जांचें)";
 export const cleanFactText = (t: string) =>
   t
-    .replace(/\[verify[^\]]*\]/gi, "")
+    .replace(/\[(?:verify|सत्यापन)[^\]]*\]/gi, "")
     .replace(/[⟪⟫⟦⟧]|🔄\uFE0F?/gu, "")
     .replace(new RegExp(`(?:\\s*[—–]\\s*${CHECK})+(?=\\s*(?:\\)|$))`, "gi"), "")
     .replace(new RegExp(`\\s*\\(${CHECK}\\)`, "gi"), "")

@@ -71,7 +71,7 @@ the Telegram Mini App they are identified by their Telegram account.
 | Home page | Banners, call to action, which features show or are locked |
 | Flashcards, MCQ tests, MCQ practice | Create and edit content |
 | Card studio | Build decks from several books: proofread, split, export to the app |
-| Rajasthan atlas | Places, facts, layers, district overviews, reports from students |
+| Rajasthan atlas | Places, facts, layers, district overviews, reports from students; import a subject's notes (English + Hindi files from the extraction project) |
 | SAATHI | Knowledge base it answers from; model answers for Mains |
 | Current affairs | Daily, monthly and custom bilingual magazines; collection from news sites; Words in the News and GK image cards; scheme register |
 | Syllabus and exam papers | Official syllabi; RPSC/RSSB past papers with answer keys, as a question bank exported to the app |

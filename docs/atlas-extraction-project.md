@@ -194,15 +194,20 @@ Attach the source PDFs in the chat, not as project knowledge, so each chapter on
 
 ## What the atlas does with a subject file
 
-The format is designed for an importer that the atlas doesn't have yet; it is the next stage to build. Until then, the subject files are clean study notes you can use in SAATHI's knowledge base. Once the importer is built, uploading `Rajasthan-History.en.md` will do this:
+On the admin Atlas page, **Import a subject's notes** takes the subject's English and Hindi files together (`src/lib/atlas-notes.server.ts`). The two files must have the same lines in the same order. If any line differs (a heading, a bullet, a table row), the import stops and names the line. The subject comes from the first line, `# <Subject>`.
 
 | In the file | In the atlas |
 | --- | --- |
-| `## Chapter 03: …`, `### <Topic>`, bullets | Facts under that subject, chapter and topic, filed under the syllabus outline |
-| `Kumbhalgarh fort (Rajsamand)` inside a fact | The fact linked to that place and district, so it shows on their cards |
-| `#### Place: Kumbhalgarh fort \| Rajsamand \| fort` | The place's detailed write-up, under "History" on its card and page, beside the write-ups from other subjects (Art & Culture, Geography…) |
-| A place block with no matching place on the map | A suggestion for you to put on the map; the write-up waits until you do |
-| `Question? Answer` lines | Revision cards and MCQ practice |
-| `(as of …)` and `[verify: …]` | The Recheck list, and notes hidden from students |
-| The same file uploaded again | Replaces only that subject's content; your edits to other subjects stay |
-| The `.hi.md` file | The Hindi side of the same facts and write-ups |
+| `## Chapter 03: …`, `### <Topic>`, bullets | Facts under that subject and chapter (`his-n03`, `art-n03`…), with the topic as their heading, in English and Hindi from the two files |
+| A table | One fact per row, with the header row kept beside it |
+| `Dadrewa (Churu)` inside a fact | The fact linked to that district |
+| `#### Place: Kumbhalgarh \| Rajsamand \| fort` | A place on the map with every point of its block linked to it. A like place already on the map (a fort, temple, fair…) in that district is joined instead of pinned twice |
+| A place with no position (the notes never give one) | Pinned at its village or town from the surveyed place list, in its own district, and marked approximate. If the list doesn't have it, it is held at the district headquarters and not shown to students until its position is set. Both are listed in Quality → Position checks, where a pasted "lat, lon" or Google Maps link sets it |
+| `Trick:` bullets | Facts marked as memory tricks |
+| `### Revision questions` lines | Facts marked as revision cards (MCQ practice from them is the next stage) |
+| `[verify: …]` / `[सत्यापन: …]` | The fact comes in "to check" (Facts tab), not shown to students, with the doubt as its note. The marker itself is never shown to students |
+| `(as of …)` | The fact is on the Recheck list |
+| The same subject imported again | Replaces only that subject's facts. Facts you edited or already checked stay as they are; facts no longer in the file are marked, not deleted |
+| `## Places index` | Not imported (the place blocks carry everything) |
+
+After the import, each chapter goes to SAATHI's knowledge base in the background (subject "Rajasthan Atlas").

@@ -103,6 +103,24 @@ export const importMasterMap = createServerFn({ method: "POST" })
     return (await server()).importMasterMap(data.html);
   });
 
+// A subject's notes (docs/atlas-extraction-project.md): the English and
+// Hindi markdown files together.
+export const importSubjectNotes = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        en: z.string().min(1000).max(10_000_000),
+        hi: z.string().min(1000).max(10_000_000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    const { importSubjectNotes } = await import("@/lib/atlas-notes.server");
+    return importSubjectNotes(data.en, data.hi);
+  });
+
 export const runAtlasStep = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -782,7 +800,7 @@ export const decideAtlasPosition = createServerFn({ method: "POST" })
         key: z.string().min(2).max(200),
         decision: z.discriminatedUnion("use", [
           z.object({
-            use: z.literal("list"),
+            use: z.enum(["list", "set"]),
             lat: z.number().min(20).max(33),
             lon: z.number().min(66).max(80),
           }),
