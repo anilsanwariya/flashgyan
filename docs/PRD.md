@@ -57,7 +57,7 @@ the result page. Each session counts once; no student is identified.
 | MCQ practice | Questions with instant feedback and explanations | `/mcq-practice`, `/practice-mcq/$testId` |
 | MCQ tests | Timed tests, marked +1 / −⅓, with review | `/mcq-tests`, `/mcq/$testId` |
 | SAATHI | AI study assistant that answers **only** from FlashGyan's study material, with sources; also marks Mains answers (typed or photos) | `/saathi` |
-| Rajasthan Atlas | Interactive map: districts, places, themes, quizzes, drills, daily challenge, compare, then and now, one-page sheets, revision cards | `/atlas/...` |
+| Rajasthan Atlas | Interactive map: districts, places, themes (also from the notes: folk deities, sakas, fair calendar, painting schools), quizzes, drills, daily challenge, compare, then and now, one-page sheets, revision cards | `/atlas/...` |
 | Telegram bot | Flashcards, MCQ quizzes, daily quiz with streaks, `/ask` (SAATHI), `/answer`, `/check` (answer marking), admin-defined commands | Telegram |
 | Telegram channel | Daily current affairs magazine, quizzes, image cards | Set in Admin → Magazine settings |
 

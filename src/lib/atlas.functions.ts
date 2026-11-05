@@ -392,6 +392,14 @@ export const atlasDistrictPartFn = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ district, part: z.string().min(1).max(200) }).parse(d))
   .handler(async ({ data }) => (await server()).atlasDistrictPart(data.district, data.part));
 
+// A theme page made from the notes (folk deities, sakas, fair calendar,
+// painting schools).
+export const atlasNotesThemeFn = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) =>
+    z.object({ key: z.enum(["folk-deities", "sakas", "fair-calendar", "painting"]) }).parse(d),
+  )
+  .handler(async ({ data }) => (await server()).atlasNotesTheme(data.key));
+
 export const atlasDistrictFn = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ district }).parse(d))
   .handler(async ({ data }) => {

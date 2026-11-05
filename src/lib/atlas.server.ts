@@ -41,6 +41,15 @@ import {
 } from "@/lib/atlas";
 import { parseMasterMap, slug, districtAt } from "@/lib/atlas-import.server";
 import { practiceStep } from "@/lib/atlas-practice.server";
+import {
+  fairCalendar,
+  folkDeities,
+  nameKeys,
+  notesThemeOf,
+  paintingSchools,
+  sakas,
+  type NotesThemeKey,
+} from "@/lib/atlas-notes-themes";
 import type { Bi } from "@/lib/current-affairs";
 
 const from = (table: string) => supabaseAdmin.from(table as never);
@@ -1413,6 +1422,7 @@ let cache: {
   base?: unknown;
   places?: unknown;
   districts?: Map<string, Promise<PublicFact[]>>;
+  themes?: Map<string, Promise<unknown>>;
 } = { at: 0 };
 const invalidate = () => {
   cache = { at: 0 };
@@ -1798,6 +1808,85 @@ export async function atlasDistrictPart(district: string, part: string): Promise
     (await atlasPublicPlaces()).filter((p) => p[6] === district).map((p) => p[0]),
   );
   return all.filter((f) => f.places.some((k) => keys.has(k)));
+}
+
+// ---------- Theme pages from the notes ----------
+
+// The verified facts of the notes chapters whose titles match.
+async function notesChapterFacts(pattern: string): Promise<PublicFact[]> {
+  await sourceCodes();
+  const { data, error } = await from("atlas_facts")
+    .select("chapter_key")
+    .like("source", "notes-%")
+    .ilike("chapter", pattern)
+    .limit(5000);
+  fail(error);
+  const keys = [...new Set(((data ?? []) as Row[]).map((r) => String(r.chapter_key)))];
+  if (!keys.length) return [];
+  const rows = await all<AtlasFact>(() =>
+    from("atlas_facts")
+      .select(FACT_COLS)
+      .in("chapter_key", keys)
+      .eq("status", "verified")
+      .order("chapter_key")
+      .order("position"),
+  );
+  return rows.map(publicFact);
+}
+
+export async function atlasNotesTheme(key: NotesThemeKey) {
+  const c = fresh();
+  c.themes ??= new Map();
+  const hit = c.themes.get(key);
+  if (hit) return hit as ReturnType<typeof buildNotesTheme>;
+  const p = buildNotesTheme(key);
+  c.themes.set(key, p);
+  p.catch(() => c.themes?.delete(key));
+  return p;
+}
+
+async function buildNotesTheme(key: NotesThemeKey) {
+  const t = notesThemeOf(key)!;
+  const [a, b] = await Promise.all(t.chapters.map(notesChapterFacts));
+  if (key === "folk-deities") return { key, deities: folkDeities(a) } as const;
+  if (key === "sakas") return { key, ...sakas(a) } as const;
+  if (key === "fair-calendar") {
+    // The atlas's fairs, temples and towns by name, for the fairs the notes
+    // don't link (a fair's own place first).
+    const RANK = ["fair", "cattlefair", "temple", "folkdeity", "town", "lsc"];
+    const known = new Map<string, string>();
+    for (const p of [...(await atlasPublicPlaces())]
+      .filter((p) => RANK.includes(p[3]))
+      .sort((x, y) => RANK.indexOf(x[3]) - RANK.indexOf(y[3])))
+      for (const k of nameKeys(p[1].split(",")[0])) if (!known.has(k)) known.set(k, p[0]);
+    return { key, months: fairCalendar(a, b ?? [], known) } as const;
+  }
+  // Painting: each style's town on the map, and its district.
+  const places = await atlasPublicPlaces();
+  // Only a town, a region or a landmark of it, not a mine or a rainfall record.
+  const PREFER = ["town", "lsc", "region", "fort", "heritage", "temple"];
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .split(",")[0]
+      .replace(/\([^)]*\)/g, "")
+      .trim();
+  const schools = paintingSchools(a).map((s) => ({
+    ...s,
+    styles: s.styles.map((st) => {
+      const at = (town: string) =>
+        places
+          .filter((p) => norm(p[1]) === town.toLowerCase() && PREFER.includes(p[3]))
+          .sort((x, y) => PREFER.indexOf(x[3]) - PREFER.indexOf(y[3]))[0] ?? null;
+      const districtOf = (town: string) =>
+        RAJ_DISTRICTS.find((d) => d.en.toLowerCase() === town.toLowerCase())?.en ??
+        at(town)?.[6] ??
+        null;
+      const districts = [...new Set(st.towns.map(districtOf).filter((d): d is string => !!d))];
+      return { ...st, place: at(st.towns[0] ?? "")?.[0] ?? null, districts };
+    }),
+  }));
+  return { key, schools } as const;
 }
 
 // A district's page: its published overview, details and places.
