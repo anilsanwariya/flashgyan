@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+const imgs = () => import("@/lib/storage-images.server");
 
 const BUCKET = "home-banners";
 
@@ -137,12 +138,15 @@ export const uploadHomeBanner = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const admin = await assertAdmin(context.userId);
-    const ext = (data.filename.split(".").pop() || "jpg").toLowerCase();
+    const { bytes, contentType, ext } = (await imgs()).validateImageUpload(
+      data.contentType,
+      data.dataBase64,
+      8 * 1024 * 1024,
+    );
     const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-    const bytes = Buffer.from(data.dataBase64, "base64");
     const { error: upErr } = await admin.storage
       .from(BUCKET)
-      .upload(path, bytes, { upsert: false, contentType: data.contentType });
+      .upload(path, bytes, { upsert: false, contentType });
     if (upErr) throw new Error(upErr.message);
     const { data: maxRow } = await admin
       .from("home_banners")

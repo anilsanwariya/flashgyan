@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+const imgs = () => import("@/lib/storage-images.server");
 
 function publicClient() {
   return createClient<Database>(
@@ -302,6 +303,7 @@ export const updateCard = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const admin = await assertAdmin(context.userId);
     const { id, ...rest } = data;
+    await (await imgs()).releaseOldImage(admin, "flashcard-images", "flashcards", id, rest.image_url);
     const { error } = await admin
       .from("flashcards")
       .update({
@@ -322,6 +324,7 @@ export const deleteCard = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const admin = await assertAdmin(context.userId);
+    await (await imgs()).releaseOldImage(admin, "flashcard-images", "flashcards", data.id, null);
     const { error } = await admin.from("flashcards").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
@@ -334,6 +337,7 @@ export const setCardImage = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const admin = await assertAdmin(context.userId);
+    await (await imgs()).releaseOldImage(admin, "flashcard-images", "flashcards", data.id, data.image_url);
     const { error } = await admin
       .from("flashcards")
       .update({ image_url: data.image_url })
@@ -368,12 +372,13 @@ export const uploadFlashcardImage = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const admin = await assertAdmin(context.userId);
-    const ext = data.filename.split(".").pop() || "png";
+    const { validateImageUpload, releaseOldImage } = await imgs();
+    const { bytes, contentType, ext } = validateImageUpload(data.contentType, data.dataBase64);
     const path = `${data.id}/${Date.now()}.${ext}`;
-    const bytes = Buffer.from(data.dataBase64, "base64");
+    await releaseOldImage(admin, "flashcard-images", "flashcards", data.id, null);
     const { error: upErr } = await admin.storage
       .from("flashcard-images")
-      .upload(path, bytes, { upsert: true, contentType: data.contentType });
+      .upload(path, bytes, { upsert: true, contentType });
     if (upErr) throw new Error(upErr.message);
     const { error: dbErr } = await admin
       .from("flashcards")

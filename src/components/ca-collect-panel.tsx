@@ -12,6 +12,7 @@ import {
   deleteCaWatchSite,
   getCaCollection,
   listCaWatchSites,
+  getCaCronSecret,
   runCaCollectionTick,
   saveCaWatchSite,
   setCaArticleStatus,
@@ -605,12 +606,15 @@ export function WatchSitesSettings() {
   const [origin, setOrigin] = useState("https://your-site");
   useEffect(() => setOrigin(window.location.origin), []);
   const reload = () => qc.invalidateQueries({ queryKey: ["caWatchSites"] });
+  const cronSecretFn = useServerFn(getCaCronSecret);
+  const cronSecretQ = useQuery({ queryKey: ["caCronSecret"], queryFn: () => cronSecretFn() });
+  const cronSecret = cronSecretQ.data ?? "loading…";
 
   const cronSql = `-- Runs the evening collection even when the admin page is closed.
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
 select cron.schedule('ca-collector', '* * * * *',
-  $$select net.http_post(url := '${origin}/api/ca/tick', timeout_milliseconds := 120000)$$);`;
+  $$select net.http_post(url := '${origin}/api/ca/tick', headers := jsonb_build_object('x-cron-secret', '${cronSecret}'), timeout_milliseconds := 120000)$$);`;
 
   return (
     <div className="space-y-3">

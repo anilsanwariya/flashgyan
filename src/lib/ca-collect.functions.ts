@@ -193,3 +193,12 @@ export const setCaBackfillStatus = createServerFn({ method: "POST" })
     await (await server()).setBackfillStatus(data.id, data.action);
     return { ok: true };
   });
+
+// Scheduler secret shown in the pg_cron setup SQL (admins only).
+export const getCaCronSecret = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<string> => {
+    await assertAdmin(context.userId);
+    const { getCronSecret } = await import("@/lib/cron-secret.server");
+    return getCronSecret();
+  });

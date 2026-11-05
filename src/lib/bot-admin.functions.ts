@@ -464,6 +464,7 @@ function webhookUrl(): string {
 export type WebhookStatus = {
   url: string;
   expected_url: string;
+  cron_secret: string;
   pending_update_count: number;
   last_error_date: string | null;
   last_error_message: string | null;
@@ -490,6 +491,7 @@ export const getWebhookStatus = createServerFn({ method: "GET" })
     return {
       url: info.url,
       expected_url: webhookUrl(),
+      cron_secret: await (await import("@/lib/cron-secret.server")).getCronSecret(),
       pending_update_count: info.pending_update_count,
       last_error_date: info.last_error_date
         ? new Date(info.last_error_date * 1000).toISOString()
@@ -615,7 +617,11 @@ function checkMessage(m: z.infer<typeof broadcastMessage>) {
 // Wakes the bot to send due broadcasts now instead of waiting for its schedule.
 async function triggerBroadcastSending() {
   try {
-    await fetch(`${webhookUrl()}?task=broadcast`, { method: "POST" });
+    const { getCronSecret } = await import("@/lib/cron-secret.server");
+    await fetch(`${webhookUrl()}?task=broadcast`, {
+      method: "POST",
+      headers: { "x-cron-secret": await getCronSecret() },
+    });
   } catch (e) {
     console.error("broadcast trigger:", e);
   }

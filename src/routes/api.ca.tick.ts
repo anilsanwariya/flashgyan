@@ -1,14 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-// Advances the automatic current affairs collection by one short tick. Only
-// does work that is already due (the evening collection, or one an admin
-// started), so it is safe to call from pg_cron without credentials.
+// Advances the automatic current affairs collection by one short tick. Called
+// by pg_cron, which must send the scheduler secret in the x-cron-secret header.
 async function run(request: Request) {
+  const { verifyCronSecret } = await import("@/lib/cron-secret.server");
+  if (!(await verifyCronSecret(request))) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const { tick } = await import("@/lib/ca-collect.server");
   try {
     return Response.json(await tick(new URL(request.url).origin));
   } catch (e) {
-    return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    console.error("ca tick", e);
+    return Response.json({ error: "Tick failed" }, { status: 500 });
   }
 }
 
