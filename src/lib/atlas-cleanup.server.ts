@@ -72,20 +72,32 @@ export const UNLINKED_KEY = "atlas_unlinked";
 
 // ---------- Links on import ----------
 
-export type LinkFixes = { merged: Record<string, string>; unlinked: Record<string, string[]> };
+// Tags the editor added while proofreading ("P:<place>", "D:<district>"),
+// and facts they deleted: kept through every import too.
+export const LINKED_KEY = "atlas_linked";
+export const DELETED_KEY = "atlas_fact_deleted";
+export type LinkFixes = {
+  merged: Record<string, string>;
+  unlinked: Record<string, string[]>;
+  linked: Record<string, string[]>;
+  deleted: Set<string>;
+};
 export async function linkFixes(): Promise<LinkFixes> {
   return {
     merged: await setting<Record<string, string>>(MERGED_KEY, {}),
     unlinked: await setting<Record<string, string[]>>(UNLINKED_KEY, {}),
+    linked: await setting<Record<string, string[]>>(LINKED_KEY, {}),
+    deleted: new Set(await setting<string[]>(DELETED_KEY, [])),
   };
 }
 // A fact's entities with merged places pointing at the one kept and the
 // links the editor removed left out.
 export function fixEntities(factKey: string, entities: string[], fx: LinkFixes): string[] {
+  // Unlinked: a place's key, or a whole entity ("D:Bikaner").
   const off = new Set(fx.unlinked[factKey] ?? []);
-  const out = entities
+  const out = [...entities, ...(fx.linked?.[factKey] ?? [])]
     .map((e) => (e.startsWith("P:") && fx.merged[e.slice(2)] ? `P:${fx.merged[e.slice(2)]}` : e))
-    .filter((e) => !(e.startsWith("P:") && off.has(e.slice(2))));
+    .filter((e) => !(e.startsWith("P:") && off.has(e.slice(2))) && !off.has(e));
   return [...new Set(out)].sort();
 }
 

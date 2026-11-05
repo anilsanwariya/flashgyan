@@ -545,7 +545,8 @@ export async function importSubjectNotes(en: string, hi: string): Promise<NotesI
   const factByKey = new Map(oldFacts.map((f) => [f.key, f]));
   const fr = { added: 0, updated: 0, kept: 0, gone: 0, toCheck: 0 };
   const rows: Row[] = [];
-  for (const f of notes.facts) {
+  // Facts the editor deleted stay deleted.
+  for (const f of notes.facts.filter((x) => !fx.deleted.has(x.key))) {
     const entities = fixEntities(
       f.key,
       f.entities

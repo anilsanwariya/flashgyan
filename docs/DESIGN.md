@@ -150,6 +150,14 @@ so dark mode works.
   None / Default and per-group "All on/off" and counts, "Filters" (asked in exams, time,
   month; only when there are any) and "Theme pages".
 
+- Atlas Proofread tab (admin): subject chips, then topics with a progress bar (verified
+  green, to check amber, hidden grey) and their subtopics; on the right the chosen
+  topic's or subtopic's facts with a status filter, search, select-all and a sticky bulk
+  bar (Verify / To check / Hide / Delete). Each fact: status buttons, Edit (English,
+  Hindi, heading, note; "Save and verify"), AI pre-check, Delete, and its tags (district
+  and place chips with ×, "Tag a place or district" with search and "Make a new place").
+  Keys on a focused fact: V, C, H, E, X, J/K.
+
 **Admin pages:** dense and practical. Tables, forms and clear status; no decoration.
 
 - Atlas data quality (admin): the Quality tab starts with "Duplicate places" (same name and

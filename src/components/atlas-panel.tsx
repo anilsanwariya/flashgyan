@@ -43,6 +43,7 @@ import { AtlasSuggestions, TimeFields } from "@/components/atlas-themes-panel";
 import { AtlasAcross } from "@/components/atlas-news-panel";
 import { AtlasQuality } from "@/components/atlas-quality-panel";
 import { AtlasPhotos } from "@/components/atlas-photos-panel";
+import { AtlasProofread } from "@/components/atlas-proofread-panel";
 import { AtlasSyllabus } from "@/components/atlas-syllabus-panel";
 import { AtlasDrills } from "@/components/atlas-drills-panel";
 import { AtlasUsage } from "@/components/atlas-usage-panel";
@@ -54,6 +55,7 @@ import { Textarea } from "@/components/ui/textarea";
 const TABS = [
   "overview",
   "districts",
+  "proofread",
   "facts",
   "places",
   "photos",
@@ -88,6 +90,7 @@ export function AtlasPanel() {
         tabs={[
           { id: "overview", label: "Overview" },
           { id: "districts", label: "District pages" },
+          { id: "proofread", label: "Proofread" },
           { id: "facts", label: "Facts" },
           { id: "places", label: "Places" },
           { id: "photos", label: "Photos" },
@@ -116,6 +119,7 @@ export function AtlasPanel() {
       {tab === "across" && <AtlasAcross />}
       {tab === "quality" && <AtlasQuality />}
       {tab === "photos" && <AtlasPhotos />}
+      {tab === "proofread" && <AtlasProofread />}
       {tab === "syllabus" && <AtlasSyllabus />}
       {tab === "practice" && <AtlasPractice />}
       {tab === "drills" && <AtlasDrills />}

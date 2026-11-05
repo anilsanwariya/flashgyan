@@ -153,7 +153,11 @@ deleted, with "Merged into …" above its own note.
 would otherwise restore every link the editor removed. Settings need no migration, and
 the lists stay small.
 **Consequence:** to undo a merge, show the hidden place again and remove its line from
-`atlas_place_merged`. The AI pre-check of "to check" facts only writes a line into the
+`atlas_place_merged`. The Proofread tab follows the same rule: tags it adds are kept in
+`atlas_linked` (fact key → entities), tags it removes in `atlas_unlinked`, and facts it
+deletes in `atlas_fact_deleted` (their keys), so neither importer brings them back; a
+place made while proofreading is pinned at its district's centre with the approximate
+note, so it appears in the position checks. The AI pre-check of "to check" facts only writes a line into the
 fact's note ("AI pre-check: …"); deciding stays with the editor.
 
 ## ADR-017: Place photos come from Wikimedia Commons, free licences only, shown with credit (5 November 2026)

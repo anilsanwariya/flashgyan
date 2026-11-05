@@ -1174,3 +1174,91 @@ export const suggestAtlasPhotos = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await photosServer()).suggestPhotos(data.places);
   });
+
+// ---------- Proofreading desk ----------
+
+const proof = () => import("@/lib/atlas-proofread.server");
+const ids = z.array(z.string().uuid()).min(1).max(500);
+const entityZ = z.string().regex(/^[DP]:[^\n]{1,200}$/);
+
+export const atlasProofOutline = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await proof()).proofOutline();
+  });
+
+export const atlasProofList = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        chapter: z.string().min(1).max(200),
+        subtopic: z.string().max(400).optional(),
+        status: z.enum(["all", "verified", "to_check", "hidden"]).default("all"),
+        q: z.string().max(120).default(""),
+        page: z.number().int().min(0).max(1000).default(0),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await proof()).proofList(data);
+  });
+
+export const atlasProofStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ ids, status: z.enum(["verified", "to_check", "hidden"]) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await proof()).setStatus(data.ids, data.status);
+    return { ok: true };
+  });
+
+export const atlasProofDelete = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ ids }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await proof()).deleteFacts(data.ids);
+  });
+
+export const atlasProofTag = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), entity: entityZ, on: z.boolean() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    const p = await proof();
+    return data.on ? p.tagFact(data.id, data.entity) : p.untagFact(data.id, data.entity);
+  });
+
+export const atlasProofPlaces = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ q: z.string().max(80) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await proof()).findPlaces(data.q);
+  });
+
+export const atlasProofNewPlace = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        name_en: z.string().trim().min(2).max(120),
+        name_hi: z.string().trim().max(120).default(""),
+        cat: z.string().min(1).max(40),
+        district: z.string().min(2).max(60),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    const { id, ...p } = data;
+    return (await proof()).newPlaceForFact(id, p);
+  });
