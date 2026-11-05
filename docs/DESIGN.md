@@ -83,6 +83,9 @@ so dark mode works.
   A place block joins the heading it is about (Karni Mata's temple into Karni Mata), the same
   fact shows once, a heading's table keeps only the district's rows, a state-wide list row
   shows only the district's part ("Copper — Anjani"), and the district's name is picked out.
+  The Places tab is built the same way: kind (the map's groups) → category → a card per place
+  with its facts (key facts strip, its main points, "On the map"); the same place twice (the
+  master map's and the notes') is one card, and places with no facts yet are compact chips.
   In Hindi mode the topics, subtopics, headings and table labels show in Hindi too (the
   `atlas_headings_hi` setting: from a subject's Hindi notes file at import, and the master
   map's translated by the background Hindi job).
