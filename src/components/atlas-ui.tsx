@@ -1184,3 +1184,65 @@ export function placeMarks(name: { en: string; hi: string }): string[] {
       .trim();
   return [clean(name.en), clean(name.hi)].filter((x) => x.length >= 3);
 }
+
+// ---------- A place's photo ----------
+
+export type PhotoCredit = {
+  thumb: string;
+  w: number;
+  h: number;
+  page: string;
+  author: string;
+  license: string;
+  licenseUrl: string;
+};
+
+// A place's photo from Wikimedia Commons with its credit (author, licence,
+// a link to the file), as the licence asks.
+export function PlacePhoto({
+  photo,
+  alt,
+  lang,
+}: {
+  photo: PhotoCredit | null | undefined;
+  alt: string;
+  lang: AtlasLang;
+}) {
+  const [broken, setBroken] = useState(false);
+  if (!photo || broken) return null;
+  return (
+    <figure className="overflow-hidden rounded-xl border border-border bg-muted" data-place-photo>
+      <img
+        src={photo.thumb}
+        alt={alt}
+        width={photo.w}
+        height={photo.h}
+        loading="lazy"
+        decoding="async"
+        referrerPolicy="no-referrer"
+        onError={() => setBroken(true)}
+        className="aspect-[3/2] w-full object-cover"
+      />
+      <figcaption className="truncate px-2 py-1 text-[10px] text-muted-foreground">
+        {lang === "hi" ? "फ़ोटो: " : "Photo: "}
+        <a href={photo.page} target="_blank" rel="noreferrer noopener" className="underline">
+          {photo.author}
+        </a>
+        {" · "}
+        {photo.licenseUrl ? (
+          <a
+            href={photo.licenseUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="underline"
+          >
+            {photo.license}
+          </a>
+        ) : (
+          photo.license
+        )}
+        {lang === "hi" ? " · विकिमीडिया कॉमन्स से" : " · via Wikimedia Commons"}
+      </figcaption>
+    </figure>
+  );
+}

@@ -1103,3 +1103,69 @@ export const atlasToCheckIds = createServerFn({ method: "GET" })
     await assertAdmin(context.userId);
     return (await cleanup()).toCheckIds();
   });
+
+// ---------- Place photos (Wikimedia Commons) ----------
+
+const photosServer = () => import("@/lib/atlas-photos.server");
+const photoPlace = z.string().min(2).max(200);
+
+export const atlasPhotoQueue = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        search: z.string().max(80).default(""),
+        missing: z.boolean().default(false),
+        page: z.number().int().min(0).max(200).default(0),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).photoQueue(data);
+  });
+
+export const searchAtlasPhotos = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ query: z.string().trim().min(2).max(120) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await photosServer()).searchCommons(data.query);
+  });
+
+export const setAtlasPhoto = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        key: photoPlace,
+        title: z
+          .string()
+          .regex(/^File:[^\n|#<>[\]{}]{1,240}$/)
+          .nullable(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await photosServer()).setPlacePhoto(data.key, data.title);
+  });
+
+export const suggestAtlasPhotos = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        places: z
+          .array(
+            z.object({ key: photoPlace, name: z.string().max(200), district: z.string().max(60) }),
+          )
+          .min(1)
+          .max(10),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await photosServer()).suggestPhotos(data.places);
+  });
