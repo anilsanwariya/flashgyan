@@ -303,10 +303,15 @@ export function AtlasMap({
     const xs = pts.map((q) => q.x);
     const ys = pts.map((q) => q.y);
     const pad = r * 6;
-    const w = Math.max(
-      home.w / 40,
-      Math.max(...xs) - Math.min(...xs) + pad * 2,
-      ((Math.max(...ys) - Math.min(...ys) + pad * 2) * home.w) / home.h,
+    // Far enough in that a crowd's places show as their own dots (crowds
+    // are drawn only up to 8x).
+    const w = Math.min(
+      home.w / 9,
+      Math.max(
+        home.w / 40,
+        Math.max(...xs) - Math.min(...xs) + pad * 2,
+        ((Math.max(...ys) - Math.min(...ys) + pad * 2) * home.w) / home.h,
+      ),
     );
     const h = w * (home.h / home.w);
     const cx = (Math.max(...xs) + Math.min(...xs)) / 2;
