@@ -12,6 +12,7 @@ import {
   type SourceNames,
 } from "@/lib/atlas";
 import { districtAt } from "@/lib/atlas-import.server";
+import { APPROX_NOTE } from "@/lib/atlas";
 import {
   SOURCES_KEY,
   invalidateAtlas,
@@ -241,7 +242,11 @@ export type PositionCheck = {
   district: string;
   lat: number;
   lon: number;
-  problems: ("far" | "district" | "outside")[];
+  problems: ("far" | "district" | "outside" | "approx")[];
+  // An approximate pin (the art & culture notes give no positions): why.
+  note?: string;
+  // Not shown to students until its position is set.
+  hidden?: boolean;
   // The surveyed place list's place of that name, and how far it is.
   list?: { name: string; lat: number; lon: number; km: number; district: string };
   // The district its position is in.
@@ -261,7 +266,7 @@ export async function positionChecks(): Promise<{
   const rows: Row[] = [];
   for (let a = 0; ; a += 1000) {
     const { data, error } = await from("atlas_places")
-      .select("key,name_en,label_en,cat,district,lat,lon")
+      .select("key,name_en,label_en,cat,district,lat,lon,note_en,status")
       .neq("status", "hidden")
       .order("key")
       .range(a, a + 999);
@@ -275,6 +280,8 @@ export async function positionChecks(): Promise<{
     const key = String(r.key);
     if (kept[key] === at(p.lat, p.lon)) continue;
     const problems: PositionCheck["problems"] = [];
+    const approx = String(r.note_en ?? "").startsWith(APPROX_NOTE);
+    if (approx) problems.push("approx");
     const inDistrict = districtAt(p.lon, p.lat);
     if (!inDistrict) problems.push("outside");
     else if (r.district && r.district !== inDistrict) problems.push("district");
@@ -312,10 +319,19 @@ export async function positionChecks(): Promise<{
         lon: p.lon,
         problems,
         ...(list ? { list } : {}),
+        ...(approx
+          ? {
+              note: String(r.note_en).slice(APPROX_NOTE.length).trim(),
+              hidden: r.status !== "verified",
+            }
+          : {}),
         inDistrict,
       });
   }
-  out.sort((a, b) => (b.list?.km ?? 0) - (a.list?.km ?? 0));
+  // Wrong positions first, then approximate pins (hidden ones first).
+  const rank = (c: PositionCheck) =>
+    c.problems.some((p) => p !== "approx") ? 0 : c.hidden ? 1 : 2;
+  out.sort((a, b) => rank(a) - rank(b) || (b.list?.km ?? 0) - (a.list?.km ?? 0));
   return { checks: out, checked: rows.length, kept: Object.keys(kept).length };
 }
 
@@ -323,14 +339,45 @@ export async function positionChecks(): Promise<{
 // district its position is in, or the place kept as it is.
 export async function decidePosition(
   key: string,
-  d: { use: "list"; lat: number; lon: number } | { use: "district" } | { use: "keep" },
+  d: { use: "list" | "set"; lat: number; lon: number } | { use: "district" } | { use: "keep" },
 ) {
-  const { data, error } = await from("atlas_places").select("id,lat,lon").eq("key", key).single();
+  const { data, error } = await from("atlas_places")
+    .select("id,lat,lon,note_en,status")
+    .eq("key", key)
+    .single();
   fail(error);
-  const p = data as unknown as { id: string; lat: number; lon: number };
-  if (d.use === "list") await savePlace({ id: p.id, lat: d.lat, lon: d.lon, district: "" });
-  else if (d.use === "district") await savePlace({ id: p.id, district: districtAt(p.lon, p.lat) });
+  const p = data as unknown as {
+    id: string;
+    lat: number;
+    lon: number;
+    note_en: string | null;
+    status: string;
+  };
+  // A position given (or an approximate one kept): no longer approximate,
+  // and a place held back for its position is shown.
+  const approx = String(p.note_en ?? "").startsWith(APPROX_NOTE);
+  const settle = async () => {
+    if (!approx) return;
+    fail(
+      (
+        await from("atlas_places")
+          .update({
+            note_en: "",
+            ...(p.status === "to_check" ? { status: "verified" } : {}),
+          } as never)
+          .eq("id", p.id)
+      ).error,
+    );
+  };
+  if (d.use === "list" || d.use === "set") {
+    await savePlace({ id: p.id, lat: d.lat, lon: d.lon, district: "" });
+    await settle();
+  } else if (d.use === "district")
+    await savePlace({ id: p.id, district: districtAt(p.lon, p.lat) });
   else {
+    if (approx && p.status === "to_check")
+      throw new Error("This place has no position yet: paste its position first.");
+    await settle();
     const kept = await setting<Kept>(POS_KEY, {});
     kept[key] = at(p.lat, p.lon);
     await saveSetting(POS_KEY, kept);

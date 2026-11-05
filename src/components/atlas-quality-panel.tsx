@@ -547,12 +547,48 @@ const PROBLEM: Record<PositionCheck["problems"][number], string> = {
   far: "far from the place list's",
   district: "in another district",
   outside: "outside Rajasthan",
+  approx: "approximate pin",
 };
+
+// "26.9124, 75.7873" or a Google Maps link ("…/@26.9124,75.7873,15z").
+function parseLatLon(s: string): { lat: number; lon: number } | null {
+  const m = /(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)/.exec(s);
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lon = Number(m[2]);
+  return lat >= 20 && lat <= 33 && lon >= 66 && lon <= 80 ? { lat, lon } : null;
+}
+
+function SetPosition({ onSet }: { onSet: (p: { lat: number; lon: number }) => void }) {
+  const [v, setV] = useState("");
+  const p = parseLatLon(v);
+  return (
+    <span className="flex items-center gap-1">
+      <Input
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+        placeholder="Paste “lat, lon” or a Google Maps link"
+        aria-label="Its position"
+        className="h-7 w-64 text-xs"
+      />
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7"
+        disabled={!p}
+        onClick={() => p && onSet(p)}
+      >
+        Set position
+      </Button>
+    </span>
+  );
+}
 
 function Positions() {
   const fn = useServerFn(atlasPositionChecks);
   const decideFn = useServerFn(decideAtlasPosition);
   const [run, setRun] = useState(false);
+  const [shown, setShown] = useState(150);
   const q = useQuery({
     queryKey: ["atlasPositions"],
     queryFn: () => fn(),
@@ -560,7 +596,10 @@ function Positions() {
   });
   const decide = async (
     key: string,
-    decision: { use: "list"; lat: number; lon: number } | { use: "district" } | { use: "keep" },
+    decision:
+      | { use: "list" | "set"; lat: number; lon: number }
+      | { use: "district" }
+      | { use: "keep" },
   ) => {
     try {
       await decideFn({ data: { key, decision } });
@@ -587,7 +626,10 @@ function Positions() {
         Each place is compared with the surveyed place list: a place of exactly the same name there
         5–60 km away, a position in another district than the one given, or outside Rajasthan. Use
         the list's position, take the district its position is in, or keep it as it is (it isn't
-        shown again unless it moves).
+        shown again unless it moves). Approximate pins (places from notes that give no position,
+        pinned at their village or town) are listed too: paste the real position, or keep the pin.
+        Those pinned at the district headquarters aren't shown to students until their position is
+        set.
       </p>
       {d && (
         <p className="text-sm">
@@ -597,7 +639,7 @@ function Positions() {
       )}
       {d && d.checks.length > 0 && (
         <ul className="divide-y divide-border text-sm">
-          {d.checks.slice(0, 150).map((c) => (
+          {d.checks.slice(0, shown).map((c) => (
             <li key={c.key} className="space-y-1 py-2" data-position={c.key}>
               <div className="flex flex-wrap items-center gap-2">
                 <span>{atlasCat(c.cat).icon}</span>
@@ -608,7 +650,9 @@ function Positions() {
                     {PROBLEM[p]}
                   </Badge>
                 ))}
+                {c.hidden && <Badge tone="bad">not shown to students yet</Badge>}
               </div>
+              {c.note && <p className="text-xs text-muted-foreground">{c.note}</p>}
               <p className="text-xs text-muted-foreground">
                 <a
                   href={googleMapsUrl(c.lat, c.lon)}
@@ -657,18 +701,28 @@ function Positions() {
                     Make it {c.inDistrict}
                   </Button>
                 )}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7"
-                  onClick={() => decide(c.key, { use: "keep" })}
-                >
-                  Keep as it is
-                </Button>
+                {c.problems.includes("approx") && (
+                  <SetPosition onSet={(p) => decide(c.key, { use: "set", ...p })} />
+                )}
+                {!c.hidden && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7"
+                    onClick={() => decide(c.key, { use: "keep" })}
+                  >
+                    Keep as it is
+                  </Button>
+                )}
               </div>
             </li>
           ))}
         </ul>
+      )}
+      {d && d.checks.length > shown && (
+        <Button size="sm" variant="outline" onClick={() => setShown((n) => n + 150)}>
+          Show {Math.min(150, d.checks.length - shown)} more
+        </Button>
       )}
     </section>
   );

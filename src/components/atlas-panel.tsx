@@ -11,6 +11,7 @@ import {
   atlasChapters,
   atlasStatus,
   importMasterMap,
+  importCultureNotes,
   listAtlasDistricts,
   listAtlasFacts,
   listAtlasLayers,
@@ -112,6 +113,96 @@ export function AtlasPanel() {
       {tab === "drills" && <AtlasDrills />}
       {tab === "usage" && <AtlasUsage />}
     </div>
+  );
+}
+
+// ====================== Art & culture notes ======================
+
+type CultureResult = Awaited<ReturnType<typeof importCultureNotes>>;
+
+// The art & culture notes: the English and the Hindi file (the same lines in
+// the same order), imported together.
+function CultureImport({ onDone }: { onDone: () => Promise<unknown> }) {
+  const importFn = useServerFn(importCultureNotes);
+  const [files, setFiles] = useState<{ en?: File; hi?: File }>({});
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<CultureResult | null>(null);
+  const pick = (lang: "en" | "hi") => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) setFiles((x) => ({ ...x, [lang]: f }));
+  };
+  return (
+    <section className="space-y-2 rounded-xl border border-border p-4" data-culture-import>
+      <h3 className="font-semibold">Import the art &amp; culture notes</h3>
+      <p className="text-sm text-muted-foreground">
+        Choose the English and the Hindi file (markdown, the same lines in the same order). Each
+        chapter's points, tables and revision questions become facts in both languages; each place
+        goes on the map at its village or town (approximate: they're listed in the position checks
+        to set exactly). Points the notes mark “[verify: …]” come in to check, not shown to
+        students. Importing again updates the facts, keeping the ones you've edited.
+      </p>
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <label className="flex items-center gap-2">
+          English
+          <input
+            type="file"
+            accept=".md,.markdown,.txt,text/markdown,text/plain"
+            onChange={pick("en")}
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          Hindi
+          <input
+            type="file"
+            accept=".md,.markdown,.txt,text/markdown,text/plain"
+            onChange={pick("hi")}
+          />
+        </label>
+        <Button
+          disabled={busy || !files.en || !files.hi}
+          onClick={async () => {
+            if (!files.en || !files.hi) return;
+            setBusy(true);
+            try {
+              const r = await importFn({
+                data: { en: await files.en.text(), hi: await files.hi.text() },
+              });
+              setResult(r);
+              toast.success("Imported");
+              await onDone();
+            } catch (err) {
+              toast.error(errorText(err, "Couldn't import them"));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? (
+            <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+          ) : (
+            <Upload className="mr-1 h-4 w-4" />
+          )}
+          {busy ? "Importing…" : "Import both"}
+        </Button>
+      </div>
+      {result && (
+        <div className="space-y-1 text-sm" data-culture-result>
+          <p>
+            {result.chapters} chapters. Facts: {result.facts.added} added, {result.facts.updated}{" "}
+            updated, {result.facts.kept} kept as you edited them, {result.facts.gone} no longer in
+            the files; <strong>{result.facts.toCheck} to check</strong> (Facts tab, “To check”).
+          </p>
+          <p>
+            Places: {result.places.added} added, {result.places.linked} joined to places already on
+            the map, {result.places.approximate} pinned at their village or town,{" "}
+            {result.places.atHeadquarters} at the district headquarters (not shown until placed) —
+            set them in Quality → Position checks.
+            {result.places.notPlaced.length > 0 &&
+              ` Not placed (no district, not in the place list): ${result.places.notPlaced.join(", ")}.`}
+          </p>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -232,6 +323,7 @@ function Overview() {
           </p>
         )}
       </section>
+      <CultureImport onDone={refresh} />
       <section className="space-y-2 rounded-xl border border-border p-4">
         <h3 className="font-semibold">Background work</h3>
         <ul className="space-y-1 text-sm">
