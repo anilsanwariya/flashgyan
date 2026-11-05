@@ -121,6 +121,15 @@ so dark mode works.
   district's card is a bottom sheet: it peeks at 42% of the screen, a drag up makes it
   tall, a drag down lowers it or closes it, and Escape leaves full screen.
 
+- A district card's tabs stick under the page header while scrolling, and an open topic's
+  title sticks just below them. Each topic has a "🧠 Revise" button: its facts blur until
+  tapped one by one ("Show all" brings them back).
+- Search results show the place's photo (or its category icon), its kind and district,
+  and a District/Place tag. Focusing the empty search box shows the last six picks
+  ("Recent", with Clear). The atlas home shows "Continue where you left off": the last
+  three places and districts opened, a district with the topic last read, which reopens
+  at that topic. Both are kept on the device only (`src/lib/atlas-recent.ts`).
+
 **Admin pages:** dense and practical. Tables, forms and clear status; no decoration.
 
 - Atlas data quality (admin): the Quality tab starts with "Duplicate places" (same name and

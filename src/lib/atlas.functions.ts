@@ -1106,6 +1106,11 @@ export const atlasToCheckIds = createServerFn({ method: "GET" })
 
 // ---------- Place photos (Wikimedia Commons) ----------
 
+// Public: the places' photo thumbnails, for search results.
+export const atlasPhotoThumbsFn = createServerFn({ method: "GET" }).handler(async () =>
+  (await import("@/lib/atlas-photos.server")).photoThumbs(),
+);
+
 const photosServer = () => import("@/lib/atlas-photos.server");
 const photoPlace = z.string().min(2).max(200);
 

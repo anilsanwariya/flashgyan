@@ -7,10 +7,10 @@ import {
   GraduationCap,
   Gamepad2,
   Layers,
-  MapPin,
   Printer,
   Search,
   X,
+  History,
 } from "lucide-react";
 import { OfflineButton, SaveButton, ShareButton } from "@/components/atlas-actions";
 import { InTheNews, NewsList } from "@/components/atlas-news";
@@ -19,7 +19,18 @@ import { AskedInExams, useAtlasAskedCounts } from "@/components/atlas-exams";
 import { readSchedule, sendUsage, useAtlasSaved } from "@/lib/atlas-device";
 import { dayOf, todaysCards } from "@/lib/atlas-cards";
 import { searchRank } from "@/lib/atlas-search";
-import { atlasBaseFn, atlasPlacesFn } from "@/lib/atlas.functions";
+import { atlasBaseFn, atlasPhotoThumbsFn, atlasPlacesFn } from "@/lib/atlas.functions";
+import { useQuery } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import {
+  clearSearches,
+  continueList,
+  forgetOpened,
+  recentSearches,
+  rememberOpened,
+  rememberSearch,
+  type RecentItem,
+} from "@/lib/atlas-recent";
 import {
   AGRO_ZONES,
   ATLAS_CATS,
@@ -123,6 +134,30 @@ function AtlasPage() {
     return () => window.clearTimeout(t);
   }, [selKey, full]);
   const [q, setQ] = useState("");
+  const [searching, setSearching] = useState(false);
+  // The sticky page header's height, under which the card's tabs stick
+  // (none where the card scrolls on its own, beside the map).
+  const headRef = useRef<HTMLElement>(null);
+  const [headH, setHeadH] = useState(0);
+  useEffect(() => {
+    const el = headRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() =>
+      setHeadH(window.innerWidth >= 1280 ? 0 : el.getBoundingClientRect().height),
+    );
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const blurTimer = useRef<number | undefined>(undefined);
+  const [recent, setRecent] = useState<RecentItem[]>([]);
+  // Opened from "Continue": the district's topic to open.
+  const [topicStart, setTopicStart] = useState<string | undefined>(undefined);
+  const thumbsFn = useServerFn(atlasPhotoThumbsFn);
+  const thumbs = useQuery({
+    queryKey: ["atlasPhotoThumbs"],
+    queryFn: () => thumbsFn(),
+    staleTime: 30 * 60_000,
+  }).data;
   // In time: the places of a span of years, or a month's fairs (across all
   // kinds, instead of the kinds chosen).
   const [time, setTime] = useState<{ from: number; to: number } | null>(null);
@@ -161,7 +196,9 @@ function AtlasPage() {
       kind: "district" as const,
       key: x.en,
       name: lang === "hi" ? x.hi : x.en,
-      sub: L(lang, "जिला", "District"),
+      bi: { en: x.en, hi: x.hi },
+      icon: "🗺️",
+      sub: L(lang, "राजस्थान का जिला", "District of Rajasthan"),
     }));
     const p = searchRank(q, all, (x) => [x[1], x[2]])
       .slice(0, 12)
@@ -169,6 +206,8 @@ function AtlasPage() {
         kind: "place" as const,
         key: x[0],
         name: lang === "hi" ? x[2] || x[1] : x[1],
+        bi: { en: x[1], hi: x[2] || x[1] },
+        icon: atlasCat(x[3]).icon,
         sub: `${pickBi(atlasCat(x[3]).name, lang)} · ${x[6]}`,
       }));
     return [...d, ...p].slice(0, 14);
@@ -192,7 +231,20 @@ function AtlasPage() {
     open: (k) => pick("place", k),
     self,
   });
-  const pick = (kind: "place" | "district", key: string) => {
+  // What's opened is remembered on the device ("Continue where you left off").
+  useEffect(() => {
+    if (!sel) return;
+    if (sel.kind === "place") {
+      const p = all.find((x) => x[0] === sel.key);
+      if (p) rememberOpened({ kind: "place", key: p[0], name: { en: p[1], hi: p[2] || p[1] } });
+    } else {
+      const d = base.data?.districts.find((x) => x.en === sel.key);
+      if (d) rememberOpened({ kind: "district", key: d.en, name: { en: d.en, hi: d.hi } });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selKey]);
+  const pick = (kind: "place" | "district", key: string, topic?: string) => {
+    setTopicStart(topic);
     setSel({ kind, key });
     setQ("");
     if (kind === "place") {
@@ -461,9 +513,11 @@ function AtlasPage() {
           onClose={() => setSel(null)}
           onPlace={(k) => pick("place", k)}
           onDistrict={(x) => pick("district", x)}
+          topic={topicStart}
         />
       ) : (
         <div className="space-y-3 text-sm text-muted-foreground">
+          <ContinueStrip lang={lang} onOpen={(i) => pick(i.kind, i.key, i.topic)} />
           <p>
             {L(
               lang,
@@ -478,7 +532,10 @@ function AtlasPage() {
   ) : null;
   return (
     <div className="flex min-h-[100dvh] flex-col bg-background">
-      <header className="sticky top-0 z-20 flex flex-wrap items-center gap-2 border-b border-border bg-background/95 px-3 py-2 backdrop-blur sm:px-4">
+      <header
+        ref={headRef}
+        className="sticky top-0 z-20 flex flex-wrap items-center gap-2 border-b border-border bg-background/95 px-3 py-2 backdrop-blur sm:px-4"
+      >
         <Link
           to="/"
           aria-label={L(lang, "मुख्य पृष्ठ", "Home")}
@@ -494,6 +551,14 @@ function AtlasPage() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
+            onFocus={() => {
+              window.clearTimeout(blurTimer.current);
+              setRecent(recentSearches());
+              setSearching(true);
+            }}
+            onBlur={() => {
+              blurTimer.current = window.setTimeout(() => setSearching(false), 150);
+            }}
             placeholder={L(
               lang,
               "जिला, दुर्ग, खान, दर्रा, बाँध खोजें…",
@@ -503,21 +568,91 @@ function AtlasPage() {
             className="h-9 w-full rounded-lg border border-input bg-background pl-8 pr-3 text-sm"
           />
           {results.length > 0 && (
-            <ul className="absolute inset-x-0 top-10 z-30 max-h-80 overflow-y-auto rounded-xl border border-border bg-background p-1 shadow-lg">
+            <ul
+              className="absolute inset-x-0 top-10 z-30 max-h-80 overflow-y-auto rounded-xl border border-border bg-background p-1 shadow-lg"
+              data-search-results
+            >
               {results.map((r) => (
                 <li key={`${r.kind}:${r.key}`}>
                   <button
                     type="button"
-                    onClick={() => pick(r.kind, r.key)}
+                    onClick={() => {
+                      rememberSearch({ kind: r.kind, key: r.key, name: r.bi });
+                      pick(r.kind, r.key);
+                    }}
                     className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-muted"
                   >
-                    <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate">{r.name}</span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">{r.sub}</span>
+                    {thumbs?.[r.key] ? (
+                      <img
+                        src={thumbs[r.key]}
+                        alt=""
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                        className="h-8 w-8 shrink-0 rounded-md object-cover"
+                      />
+                    ) : (
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-muted text-base">
+                        {r.icon}
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{r.name}</span>
+                      <span className="block truncate text-[11px] text-muted-foreground">
+                        {r.sub}
+                      </span>
+                    </span>
+                    <span
+                      className={`shrink-0 rounded-full px-1.5 text-[10px] font-semibold ${
+                        r.kind === "district"
+                          ? "bg-indigo-100 text-indigo-900 dark:bg-indigo-500/20 dark:text-indigo-200"
+                          : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      {r.kind === "district"
+                        ? L(lang, "जिला", "District")
+                        : L(lang, "स्थान", "Place")}
+                    </span>
                   </button>
                 </li>
               ))}
             </ul>
+          )}
+          {searching && !q.trim() && recent.length > 0 && (
+            <div
+              className="absolute inset-x-0 top-10 z-30 rounded-xl border border-border bg-background p-1 shadow-lg"
+              data-search-recent
+            >
+              <div className="flex items-center px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {L(lang, "हाल की खोजें", "Recent")}
+                <button
+                  type="button"
+                  className="ml-auto font-medium normal-case text-primary hover:underline"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    clearSearches();
+                    setRecent([]);
+                  }}
+                >
+                  {L(lang, "मिटाएँ", "Clear")}
+                </button>
+              </div>
+              {recent.map((r) => (
+                <button
+                  key={`${r.kind}:${r.key}`}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    setSearching(false);
+                    rememberSearch({ kind: r.kind, key: r.key, name: r.name });
+                    pick(r.kind, r.key);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-muted"
+                >
+                  <History className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate">{pickBi(r.name, lang)}</span>
+                </button>
+              ))}
+            </div>
           )}
         </div>
         <Link
@@ -607,6 +742,7 @@ function AtlasPage() {
           </main>
           <aside
             ref={cardRef}
+            style={{ "--atlas-head": `${headH}px` } as React.CSSProperties}
             className="scroll-mt-2 border-t border-border p-4 xl:max-h-[calc(100dvh-53px)] xl:overflow-y-auto xl:border-l xl:border-t-0"
             aria-live="polite"
           >
@@ -852,6 +988,7 @@ function DistrictCard({
   onClose,
   onPlace,
   onDistrict,
+  topic,
 }: {
   name: string;
   base: BaseData;
@@ -860,10 +997,12 @@ function DistrictCard({
   onClose: () => void;
   onPlace: (k: string) => void;
   onDistrict: (d: string) => void;
+  // Opened from "Continue": the Facts tab, at this topic.
+  topic?: string;
 }) {
   const dn = base.districts.find((x) => x.en === name);
   const mark = useMemo(() => [name, dn?.hi ?? ""], [name, dn?.hi]);
-  const [tab, setTab] = useState<DistrictTab>("overview");
+  const [tab, setTab] = useState<DistrictTab>(topic ? "facts" : "overview");
   // Its topics and counts first; a topic's facts when opened, the Places
   // tab's when that is.
   const outline = useAtlasDistrictOutline(name, mark);
@@ -872,9 +1011,9 @@ function DistrictCard({
   // first group open.
   const [openGroups, setOpenGroups] = useState<string[] | null>(null);
   useEffect(() => {
-    setTab("overview");
+    setTab(topic ? "facts" : "overview");
     setOpenGroups(null);
-  }, [name]);
+  }, [name, topic]);
   const d = base.districts.find((x) => x.en === name);
   if (!d) return null;
   const mine = places.filter((p) => p[6] === name);
@@ -903,7 +1042,12 @@ function DistrictCard({
       </div>
     ) : null;
   return (
-    <div className="space-y-3" data-district-card={name}>
+    <div
+      className="space-y-3"
+      data-district-card={name}
+      // An open topic's title stays just below the sticky tabs.
+      style={{ "--atlas-sticky": "calc(var(--atlas-head, 0px) + 40px)" } as React.CSSProperties}
+    >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <h2 className="font-serif text-2xl font-bold leading-tight text-[#1f2a5c] dark:text-indigo-200">
@@ -962,7 +1106,7 @@ function DistrictCard({
       <div
         role="tablist"
         aria-label={title}
-        className="flex gap-1 rounded-xl bg-muted/60 p-1"
+        className="sticky top-[var(--atlas-head,0px)] z-10 flex gap-1 rounded-xl bg-muted p-1 shadow-[0_6px_10px_-8px_rgba(0,0,0,0.25)]"
         data-district-tabs
       >
         {tabs.map((t) => (
@@ -1093,6 +1237,16 @@ function DistrictCard({
                 return hit?.[0] ?? null;
               }}
               onPlace={onPlace}
+              first={topic}
+              onTopic={(t) =>
+                rememberOpened({
+                  kind: "district",
+                  key: d.en,
+                  name: { en: d.en, hi: d.hi },
+                  topic: t.key,
+                  topicTitle: t.title,
+                })
+              }
             />
           ) : (
             <p className="text-sm text-muted-foreground">…</p>
@@ -1297,7 +1451,61 @@ function Sheet({
       >
         <span className="h-1.5 w-12 rounded-full bg-muted-foreground/40" />
       </button>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-6">{children}</div>
+      <div
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-6"
+        style={{ "--atlas-head": "0px" } as React.CSSProperties}
+      >
+        {children}
+      </div>
+    </section>
+  );
+}
+
+// "Continue where you left off": the last places and districts opened on
+// this device (a district at the topic last read).
+function ContinueStrip({ lang, onOpen }: { lang: AtlasLang; onOpen: (i: RecentItem) => void }) {
+  const [list, setList] = useState<RecentItem[]>([]);
+  useEffect(() => setList(continueList()), []);
+  if (!list.length) return null;
+  return (
+    <section className="rounded-xl border border-border bg-background p-3" data-continue>
+      <div className="mb-2 flex items-center">
+        <p className="text-xs font-semibold uppercase tracking-wide text-foreground">
+          {L(lang, "जहाँ छोड़ा था वहीं से", "Continue where you left off")}
+        </p>
+        <button
+          type="button"
+          className="ml-auto text-xs text-muted-foreground hover:underline"
+          onClick={() => {
+            forgetOpened();
+            setList([]);
+          }}
+        >
+          {L(lang, "हटाएँ", "Clear")}
+        </button>
+      </div>
+      <div className="grid gap-1.5">
+        {list.map((i) => (
+          <button
+            key={`${i.kind}:${i.key}`}
+            type="button"
+            onClick={() => onOpen(i)}
+            className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-2 text-left text-sm text-foreground hover:bg-muted"
+            data-continue-item={i.key}
+          >
+            <span>{i.kind === "district" ? "🗺️" : "📍"}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium">{pickBi(i.name, lang)}</span>
+              {i.topicTitle && (
+                <span className="block truncate text-xs text-muted-foreground">
+                  {pickBi(i.topicTitle, lang)}
+                </span>
+              )}
+            </span>
+            <span className="text-muted-foreground">›</span>
+          </button>
+        ))}
+      </div>
     </section>
   );
 }
