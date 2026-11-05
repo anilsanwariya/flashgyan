@@ -16,7 +16,7 @@ import {
   type PublicPlace,
 } from "@/lib/atlas.functions";
 import { idbGet, idbSet, OFFLINE_PACK, withOffline } from "@/lib/atlas-device";
-import { ATLAS_THEMES } from "@/lib/atlas";
+import { ATLAS_THEMES, factEntityKey } from "@/lib/atlas";
 
 type Pack = Awaited<ReturnType<typeof atlasOfflinePackFn>>;
 const pack = () => idbGet<Pack>(OFFLINE_PACK);
@@ -98,7 +98,21 @@ export function useAtlasEntityFacts(entity: string | null) {
       withOffline(
         `entity:${entity}`,
         () => fn({ data: { entity: entity! } }),
-        async () => (await pack())?.facts.filter((f) => f.entities.includes(entity!)),
+        async () => {
+          const facts = (await pack())?.facts;
+          if (!facts) return undefined;
+          const seed = facts.filter((f) => f.entities.includes(entity!));
+          if (!entity!.startsWith("D:")) return seed;
+          // A district: whole heading blocks, as online.
+          const keys = new Set(
+            seed.map((f) => factEntityKey(f.chapterKey ?? "", f.heading)).filter(Boolean),
+          );
+          return facts.filter(
+            (f) =>
+              f.entities.includes(entity!) ||
+              keys.has(factEntityKey(f.chapterKey ?? "", f.heading)),
+          );
+        },
       ),
     enabled: !!entity,
   });
