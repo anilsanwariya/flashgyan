@@ -101,7 +101,19 @@ export function AtlasMap({
   useEffect(() => setView(home), [home]);
   const svg = useRef<SVGSVGElement>(null);
   const zoom = home.w / view.w;
-  const k = view.w / (W + 20);
+  // The map's width on screen, so names and dots are sized in screen pixels:
+  // as readable on a phone as on a laptop, at every zoom.
+  const [px, setPx] = useState(0);
+  useEffect(() => {
+    const el = svg.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => setPx(e.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // Map units per screen pixel (before the first measure: as a laptop).
+  const u = view.w / (px || 940);
+  const narrow = px > 0 && px < 560;
 
   useEffect(() => {
     if (!focus) return;
@@ -191,7 +203,9 @@ export function AtlasMap({
     () => base.districts.map((d) => d.rings.map(ring).join("")).join(""),
     [base.districts],
   );
-  const r = 5.5 * k;
+  // A dot's radius: 6px (5px on a phone); a place's name 13px (12px).
+  const r = (narrow ? 5 : 6) * u;
+  const labelPx = own ? 13 : narrow ? 12 : 12.5;
   // Crowded dots: groups of two or more (the chosen place always alone).
   const groups = useMemo(() => {
     if (!cluster || zoom > 8) return null;
@@ -203,7 +217,7 @@ export function AtlasMap({
       });
     return clusterDots(dots, r * 2.6);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [places, cluster, Math.round(k * 40), selected]);
+  }, [places, cluster, Math.round(r * 40), selected]);
   const crowds = groups?.filter((g) => g.members.length > 1) ?? [];
   const alone = useMemo(() => {
     if (!groups) return places;
@@ -241,7 +255,7 @@ export function AtlasMap({
       if (selected) out.add(selected);
       return out;
     }
-    const size = (own ? 12 : 10) * k;
+    const size = labelPx * u;
     const boxes: [number, number, number, number][] = alone.map((p) => {
       const [x, y] = project(p[5], p[4]);
       return [x - r, y - r, x + r, y + r];
@@ -267,7 +281,7 @@ export function AtlasMap({
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alone, zoom > 3.5, Math.round(k * 50), own, selected, lang, blind]);
+  }, [alone, zoom > 3.5, Math.round(u * 500), own, selected, lang, blind]);
   return (
     <div
       className={`relative overflow-hidden rounded-2xl border border-border bg-[#eef2f7] dark:bg-slate-900 ${className}`}
@@ -395,7 +409,9 @@ export function AtlasMap({
           {shown.map((d) => {
             if (blind && !named.includes(d.en)) return null;
             const [x, y] = project(d.at[0], d.at[1]);
-            const size = (own ? 22 : 11) * k;
+            // Small on a phone's whole-state view (41 names in 360px), full
+            // size once zoomed.
+            const size = (own ? 22 : narrow && zoom < 1.8 ? 9 : 12) * u;
             return (
               <text
                 key={d.en}
@@ -442,7 +458,7 @@ export function AtlasMap({
                   x={g.x}
                   y={g.y + r * 0.55}
                   textAnchor="middle"
-                  fontSize={r * 1.5}
+                  fontSize={Math.max(r * 1.5, 10 * u)}
                   fontWeight={700}
                   fill="#fff"
                   style={{ pointerEvents: "none" }}
@@ -464,7 +480,12 @@ export function AtlasMap({
                 role="button"
                 aria-label={blind ? undefined : lang === "hi" ? p[2] || p[1] : p[1]}
               >
-                <circle cx={x} cy={y} r={r * 2.2} fill="transparent" />
+                <circle
+                  cx={x}
+                  cy={y}
+                  r={Math.max(r * 2.2, (narrow ? 14 : 10) * u)}
+                  fill="transparent"
+                />
                 <circle
                   cx={x}
                   cy={y}
@@ -477,10 +498,10 @@ export function AtlasMap({
                   <text
                     x={x + r * 1.6}
                     y={y + r * 0.6}
-                    fontSize={(own ? 12 : 10) * k}
+                    fontSize={labelPx * u}
                     fill="#1f2430"
                     stroke="#fffdf6"
-                    strokeWidth={2.4 * k}
+                    strokeWidth={3 * u}
                     paintOrder="stroke"
                     fontWeight={on ? 700 : 500}
                     style={{ pointerEvents: "none" }}
