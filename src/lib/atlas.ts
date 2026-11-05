@@ -21,6 +21,20 @@ export const ATLAS_SUBJECTS: { key: string; name: Bi }[] = [
   { key: "eco", name: { en: "Economy", hi: "अर्थव्यवस्था" } },
 ];
 
+// A fact's heading block in the notes: "Folk deities of Rajasthan ›
+// Biggaji › Worship" belongs to "Folk deities of Rajasthan › Biggaji" in its
+// chapter. Headings of one level (the master map's) have none.
+export function factEntityKey(chapterKey: string, heading: string): string | null {
+  const parts = heading.split(" › ");
+  return parts.length >= 2 ? `${chapterKey}|${parts[0]} › ${parts[1]}` : null;
+}
+// Chapters in the syllabus's subject order (History, Art, Geography…).
+const SUBJECT_ORDER = ["his", "art", "geo", "pol", "eco"];
+export const chapterOrder = (chapterKey: string) => {
+  const i = SUBJECT_ORDER.findIndex((s) => chapterKey.startsWith(`${s}-`));
+  return i < 0 ? SUBJECT_ORDER.length : i;
+};
+
 // ---------- Place categories ----------
 
 export type AtlasCat = { key: string; name: Bi; group: string; color: string; icon: string };

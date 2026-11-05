@@ -47,7 +47,7 @@ import {
   useAtlasPlace,
   useAtlasPlaces,
 } from "@/components/atlas-data";
-import { FactSections, FactsList, LangToggle, useAtlasLang } from "@/components/atlas-ui";
+import { DistrictTopics, FactsList, LangToggle, useAtlasLang } from "@/components/atlas-ui";
 
 export const Route = createFileRoute("/atlas/")({
   ssr: false,
@@ -1062,7 +1062,28 @@ function DistrictCard({
       {tab === "facts" && (
         <div role="tabpanel" data-district-facts>
           {q.data ? (
-            <FactSections facts={facts} lang={lang} mark={[d.en, d.hi]} />
+            <DistrictTopics
+              facts={facts}
+              lang={lang}
+              mark={[d.en, d.hi]}
+              placeOf={(n) => {
+                const k = n
+                  .toLowerCase()
+                  .replace(/[^\p{L}\p{N}]+/gu, " ")
+                  .trim();
+                const hit = mine.find((p) =>
+                  [p[1], placeShortName(p[1], [d.en])].some(
+                    (x) =>
+                      x
+                        .toLowerCase()
+                        .replace(/[^\p{L}\p{N}]+/gu, " ")
+                        .trim() === k,
+                  ),
+                );
+                return hit?.[0] ?? null;
+              }}
+              onPlace={onPlace}
+            />
           ) : (
             <p className="text-sm text-muted-foreground">…</p>
           )}

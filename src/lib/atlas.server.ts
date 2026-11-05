@@ -31,6 +31,8 @@ import {
   type DistrictOverview,
   type LonLat,
   type OverviewSection,
+  chapterOrder,
+  factEntityKey,
 } from "@/lib/atlas";
 import { parseMasterMap, slug, districtAt } from "@/lib/atlas-import.server";
 import { practiceStep } from "@/lib/atlas-practice.server";
@@ -1463,6 +1465,7 @@ export async function atlasPublicPlaces(): Promise<PublicPlace[]> {
 export type PublicFact = {
   id: string;
   chapter: string;
+  chapterKey: string;
   heading: string;
   text: Bi;
   head: string;
@@ -1495,6 +1498,7 @@ const publicFact = (f: AtlasFact): PublicFact => {
   return {
     id: f.id,
     chapter: f.chapter,
+    chapterKey: f.chapter_key,
     heading: h.heading,
     text: { en: en.text, hi: hi.text },
     head: f.table_head,
@@ -1574,9 +1578,38 @@ export async function atlasEntityFacts(entity: string): Promise<PublicFact[]> {
     .contains("entities", [entity])
     .eq("status", "verified")
     .order("position")
-    .limit(300);
+    .limit(400);
   fail(error);
-  return ((data ?? []) as unknown as AtlasFact[]).map(publicFact);
+  const seed = (data ?? []) as unknown as AtlasFact[];
+  if (!entity.startsWith("D:")) return seed.map(publicFact);
+  // A district: every fact under a heading one of its facts is under
+  // (Biggaji's whole block, not only the line naming Bikaner).
+  const keys = new Set(
+    seed.map((f) => factEntityKey(f.chapter_key, f.heading)).filter((k): k is string => !!k),
+  );
+  const chapters = [...new Set([...keys].map((k) => k.split("|")[0]))];
+  const more = chapters.length
+    ? await all<AtlasFact>(() =>
+        from("atlas_facts")
+          .select(FACT_COLS)
+          .in("chapter_key", chapters)
+          .eq("status", "verified")
+          .order("position"),
+      )
+    : [];
+  const byId = new Map(seed.map((f) => [f.id, f]));
+  for (const f of more) {
+    const k = factEntityKey(f.chapter_key, f.heading);
+    if (k && keys.has(k) && !byId.has(f.id)) byId.set(f.id, f);
+  }
+  return [...byId.values()]
+    .sort(
+      (a, b) =>
+        chapterOrder(a.chapter_key) - chapterOrder(b.chapter_key) ||
+        a.chapter_key.localeCompare(b.chapter_key, undefined, { numeric: true }) ||
+        a.position - b.position,
+    )
+    .map(publicFact);
 }
 
 // A district's page: its published overview, details and places.

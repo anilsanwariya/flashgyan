@@ -317,23 +317,225 @@ export function FactsList({
   );
 }
 
-// Facts in sections by chapter (the notes' chapters, biggest first), each
-// opening to its facts by topic; the first is open.
-export function FactSections({
+// ====================== A district's facts, as the notes have them ======================
+//
+// Topic (the chapter) → subtopic ("Folk deities of Rajasthan") → heading
+// ("Biggaji") with all its facts. A place block from the chapter's "Places"
+// list joins the heading it is about ("Karni Mata temple, Deshnok" → "Karni
+// Mata"), and the same fact twice is shown once.
+
+type Block = { label: string; facts: PublicFact[] };
+type Entity = { name: string; blocks: Block[]; places: string[] };
+type Subtopic = { name: string; entities: Entity[]; loose: PublicFact[] };
+type Topic = { key: string; name: string; subtopics: Subtopic[]; count: number };
+
+const KEY_FACT =
+  /^(also called|other names?|where|built \/ founded \/ established|propagator|distribution|उपनाम|अन्य नाम|कहाँ|स्थान)\s*:/i;
+const baseName = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, " ")
+    .split(",")[0]
+    .replace(/\b(temple|fort|palace|mahal|mandir|dargah|fair|ji)\b/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+
+function districtTopics(facts: PublicFact[], mark: string[]): Topic[] {
+  const seen = new Set<string>();
+  const names = mark.filter((w) => w.length >= 2).map((w) => w.toLowerCase());
+  const mine = (f: PublicFact) =>
+    names.some((w) => `${f.text.en} ${f.text.hi}`.toLowerCase().includes(w));
+  const topics = new Map<string, Topic>();
+  for (const f of facts) {
+    const sig = `${f.chapterKey}|${f.text.en.trim().toLowerCase()}`;
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    const parts = f.heading.split(" › ").filter(Boolean);
+    // A table under a heading is a list of separate records ("Other folk
+    // deities"): only the district's rows.
+    if (f.head && parts.length >= 2 && !mine(f)) continue;
+    const key = f.chapterKey || f.chapter;
+    let t = topics.get(key);
+    if (!t) topics.set(key, (t = { key, name: f.chapter, subtopics: [], count: 0 }));
+    t.count++;
+    const subName = parts[0] ?? "";
+    let sub = t.subtopics.find((x) => x.name === subName);
+    if (!sub) t.subtopics.push((sub = { name: subName, entities: [], loose: [] }));
+    if (parts.length < 2) {
+      sub.loose.push(f);
+      continue;
+    }
+    let e = sub.entities.find((x) => x.name === parts[1]);
+    if (!e) sub.entities.push((e = { name: parts[1], blocks: [], places: [] }));
+    const label = parts.slice(2).join(" › ");
+    let b = e.blocks.find((x) => x.label === label);
+    if (!b) e.blocks.push((b = { label, facts: [] }));
+    b.facts.push(f);
+  }
+  // Place blocks join the heading they are about, in the same topic.
+  for (const t of topics.values()) {
+    const places = t.subtopics.find((s) => /^(places|स्थान)$/i.test(s.name));
+    if (!places) continue;
+    const others = t.subtopics.filter((s) => s !== places).flatMap((s) => s.entities);
+    places.entities = places.entities.filter((pe) => {
+      const n = baseName(pe.name);
+      const host = others.find((e) => {
+        const m = baseName(e.name);
+        return m.length >= 3 && (m === n || n.startsWith(`${m} `) || m.startsWith(`${n} `));
+      });
+      if (!host) return true;
+      host.places.push(pe.name);
+      for (const b of pe.blocks)
+        host.blocks.push({
+          label: `📍 ${pe.name}${b.label ? ` › ${b.label}` : ""}`,
+          facts: b.facts,
+        });
+      return false;
+    });
+    t.subtopics = t.subtopics.filter((s) => s.entities.length || s.loose.length);
+  }
+  return [...topics.values()];
+}
+
+function Bullet({ f, lang, mark }: { f: PublicFact; lang: AtlasLang; mark: string[] }) {
+  const kinds = factKinds(f.flags);
+  const trick = kinds.some((k) => k.key === "mnemonic" || k.key === "why");
+  return (
+    <li
+      className={
+        trick
+          ? "group list-none rounded-lg border-l-4 border-amber-400 bg-amber-50 px-2.5 py-1.5 dark:bg-amber-500/10"
+          : "group ml-4 list-disc marker:text-muted-foreground"
+      }
+      data-fact
+    >
+      {kinds.length > 0 && !trick && (
+        <span className="mr-1 rounded bg-muted px-1 text-[10px] font-semibold">
+          {pickBi(kinds[0].name, lang)}
+        </span>
+      )}
+      <DistrictFact f={f} lang={lang} mark={mark} />
+      <span className="opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-50">
+        <ReportButton lang={lang} kind="fact" refKey={f.id} label={pickBi(f.text, lang)} compact />
+      </span>
+    </li>
+  );
+}
+
+function EntityCard({
+  e,
+  lang,
+  mark,
+  placeOf,
+  onPlace,
+}: {
+  e: Entity;
+  lang: AtlasLang;
+  mark: string[];
+  placeOf?: (name: string) => string | null;
+  onPlace?: (key: string) => void;
+}) {
+  const placeKey = [e.name, ...e.places].map((n) => placeOf?.(n) ?? null).find(Boolean) ?? null;
+  const [all, setAll] = useState(false);
+  const facts = e.blocks.flatMap((b) => b.facts);
+  const keyFacts = facts.filter((f) => KEY_FACT.test(f.text.en) && !f.head);
+  const rest = e.blocks
+    .map((b) => ({ ...b, facts: b.facts.filter((f) => !keyFacts.includes(f)) }))
+    .filter((b) => b.facts.length);
+  const total = rest.reduce((n, b) => n + b.facts.length, 0);
+  let left = all ? Infinity : 6;
+  return (
+    <article
+      className="rounded-xl border border-border bg-card p-3 shadow-sm"
+      data-fact-entity={e.name}
+    >
+      <header className="mb-1.5 flex items-start gap-2">
+        <h4 className="min-w-0 flex-1 font-serif text-base font-bold leading-snug text-[#1f2a5c] dark:text-indigo-200">
+          {e.name}
+        </h4>
+        {placeKey && onPlace && (
+          <button
+            type="button"
+            onClick={() => onPlace(placeKey)}
+            className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[11px] hover:bg-muted"
+          >
+            📍 {lang === "hi" ? "मानचित्र पर" : "On the map"}
+          </button>
+        )}
+      </header>
+      {keyFacts.length > 0 && (
+        <dl className="mb-2 grid gap-1 rounded-lg bg-muted/50 p-2 text-sm">
+          {keyFacts.map((f) => {
+            const t = pickBi(f.text, lang);
+            const i = t.indexOf(":");
+            return (
+              <div key={f.id} className="flex gap-2">
+                <dt className="w-24 shrink-0 text-xs text-muted-foreground">{t.slice(0, i)}</dt>
+                <dd className="min-w-0">
+                  <Marked text={t.slice(i + 1).trim()} mark={mark} />
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+      )}
+      <div className="space-y-2 text-sm leading-relaxed">
+        {rest.map((b, bi) => {
+          if (left <= 0) return null;
+          const shown = b.facts.slice(0, left);
+          left -= shown.length;
+          return (
+            <div key={bi}>
+              {b.label && (
+                <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {b.label}
+                </p>
+              )}
+              <ul className="space-y-1">
+                {shown.map((f) => (
+                  <Bullet key={f.id} f={f} lang={lang} mark={mark} />
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+      {total > 6 && (
+        <button
+          type="button"
+          onClick={() => setAll(!all)}
+          className="mt-1.5 text-xs font-medium text-primary hover:underline"
+        >
+          {all
+            ? lang === "hi"
+              ? "कम दिखाएँ"
+              : "Show fewer"
+            : lang === "hi"
+              ? `सभी ${total} तथ्य`
+              : `All ${total} facts`}
+        </button>
+      )}
+    </article>
+  );
+}
+
+export function DistrictTopics({
   facts,
   lang,
-  per = 8,
   mark,
+  placeOf,
+  onPlace,
 }: {
   facts: PublicFact[];
   lang: AtlasLang;
-  per?: number;
-  mark?: string[];
+  mark: string[];
+  // A heading's place on the map (its key), if it is one; and opening it.
+  placeOf?: (name: string) => string | null;
+  onPlace?: (key: string) => void;
 }) {
-  const chapters = new Map<string, PublicFact[]>();
-  for (const f of facts) chapters.set(f.chapter, [...(chapters.get(f.chapter) ?? []), f]);
-  const list = [...chapters.entries()].sort((a, b) => b[1].length - a[1].length);
-  if (!facts.length)
+  const topics = districtTopics(facts, mark);
+  const [more, setMore] = useState<string[]>([]);
+  if (!topics.length)
     return (
       <p className="text-sm text-muted-foreground">
         {lang === "hi" ? "अभी कोई तथ्य नहीं।" : "No facts yet."}
@@ -341,24 +543,69 @@ export function FactSections({
     );
   return (
     <div className="space-y-2" data-fact-sections>
-      {list.map(([chapter, fs], i) => (
+      {topics.map((t, i) => (
         <details
-          key={chapter}
+          key={t.key}
           open={i === 0}
-          className="group/s rounded-xl border border-border"
-          data-fact-section={chapter}
+          className="group/s rounded-xl border border-border bg-background"
+          data-fact-section={t.name}
         >
-          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-semibold [&::-webkit-details-marker]:hidden">
-            <span className="min-w-0 flex-1">{chapter || (lang === "hi" ? "अन्य" : "Other")}</span>
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+            <span className="min-w-0 flex-1 text-sm font-semibold leading-snug">
+              {t.name || (lang === "hi" ? "अन्य" : "Other")}
+            </span>
             <span className="rounded-full bg-muted px-2 text-xs font-medium text-muted-foreground">
-              {fs.length}
+              {t.count}
             </span>
             <span className="text-muted-foreground transition-transform group-open/s:rotate-90">
               ›
             </span>
           </summary>
-          <div className="border-t border-border p-2.5">
-            <FactsList facts={fs} lang={lang} limit={per} hideChapter mark={mark} />
+          <div className="space-y-4 border-t border-border p-2.5">
+            {t.subtopics.map((s) => {
+              const id = `${t.key}|${s.name}`;
+              const open = more.includes(id);
+              const ents = open ? s.entities : s.entities.slice(0, 5);
+              return (
+                <section key={s.name} data-fact-subtopic={s.name}>
+                  {s.name && (
+                    <h3 className="mb-2 border-l-4 border-[#1f2a5c] pl-2 text-xs font-bold uppercase tracking-wide text-[#1f2a5c] dark:border-indigo-300 dark:text-indigo-200">
+                      {s.name}
+                    </h3>
+                  )}
+                  <div className="space-y-2">
+                    {ents.map((e) => (
+                      <EntityCard
+                        key={e.name}
+                        e={e}
+                        lang={lang}
+                        mark={mark}
+                        placeOf={placeOf}
+                        onPlace={onPlace}
+                      />
+                    ))}
+                  </div>
+                  {s.entities.length > ents.length && (
+                    <button
+                      type="button"
+                      onClick={() => setMore([...more, id])}
+                      className="mt-1.5 text-xs font-medium text-primary hover:underline"
+                    >
+                      {lang === "hi"
+                        ? `${s.entities.length - ents.length} और`
+                        : `${s.entities.length - ents.length} more`}
+                    </button>
+                  )}
+                  {s.loose.length > 0 && (
+                    <ul className="mt-1 space-y-1.5 text-sm leading-relaxed">
+                      {s.loose.map((f) => (
+                        <Bullet key={f.id} f={f} lang={lang} mark={mark} />
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              );
+            })}
           </div>
         </details>
       ))}

@@ -76,10 +76,13 @@ so dark mode works.
   an accessible name, Report as a small flag), then tabs (Overview, Places by kind, Facts by
   chapter in sections that open). The open district is outlined on the map, and on screens
   without the side column a tap scrolls its card into view. Facts use `FactsList` /
-  `FactSections` (`atlas-ui.tsx`): table rows read as "Header: value" pairs, the report flag
-  shows on hover or focus, and in a district's facts a state-wide list row shows only that
-  district's part ("Copper — Anjani", the whole row a tap away), long paragraphs fold to
-  three lines, and the district's name is picked out.
+  `DistrictTopics` (`atlas-ui.tsx`): table rows read as "Header: value" pairs and the
+  report flag shows on hover or focus. A district's Facts tab follows the notes: topic
+  (chapter) → subtopic → a card per heading (Biggaji, Rupnath Ji…) with all its facts, its
+  "Also called / Where / Built" lines as a key-facts strip, tricks as a highlighted callout.
+  A place block joins the heading it is about (Karni Mata's temple into Karni Mata), the same
+  fact shows once, a heading's table keeps only the district's rows, a state-wide list row
+  shows only the district's part ("Copper — Anjani"), and the district's name is picked out.
 
 **Admin pages:** dense and practical. Tables, forms and clear status; no decoration.
 
