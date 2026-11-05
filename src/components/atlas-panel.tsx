@@ -11,7 +11,7 @@ import {
   atlasChapters,
   atlasStatus,
   importMasterMap,
-  importCultureNotes,
+  importSubjectNotes,
   listAtlasDistricts,
   listAtlasFacts,
   listAtlasLayers,
@@ -30,6 +30,7 @@ import {
   type AtlasFact,
   type AtlasPlace,
   type AtlasStatus,
+  ATLAS_SUBJECTS,
 } from "@/lib/atlas";
 import { googleMapsUrl as googleMapsHref } from "@/lib/map-spec";
 import { Badge, PageTabs, errorText, useUrlTab } from "@/components/ca-ui";
@@ -116,30 +117,34 @@ export function AtlasPanel() {
   );
 }
 
-// ====================== Art & culture notes ======================
+// ====================== A subject's notes ======================
 
-type CultureResult = Awaited<ReturnType<typeof importCultureNotes>>;
+type NotesResult = Awaited<ReturnType<typeof importSubjectNotes>>;
+const SUBJECT_NAMES = Object.fromEntries(ATLAS_SUBJECTS.map((s) => [s.key, s.name.en]));
 
-// The art & culture notes: the English and the Hindi file (the same lines in
-// the same order), imported together.
-function CultureImport({ onDone }: { onDone: () => Promise<unknown> }) {
-  const importFn = useServerFn(importCultureNotes);
+// A subject's notes (History, Art & Culture, Geography, Polity, Economy):
+// the English and the Hindi file (the same lines in the same order),
+// imported together.
+function NotesImport({ onDone }: { onDone: () => Promise<unknown> }) {
+  const importFn = useServerFn(importSubjectNotes);
   const [files, setFiles] = useState<{ en?: File; hi?: File }>({});
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<CultureResult | null>(null);
+  const [result, setResult] = useState<NotesResult | null>(null);
   const pick = (lang: "en" | "hi") => (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (f) setFiles((x) => ({ ...x, [lang]: f }));
   };
   return (
-    <section className="space-y-2 rounded-xl border border-border p-4" data-culture-import>
-      <h3 className="font-semibold">Import the art &amp; culture notes</h3>
+    <section className="space-y-2 rounded-xl border border-border p-4" data-notes-import>
+      <h3 className="font-semibold">Import a subject's notes</h3>
       <p className="text-sm text-muted-foreground">
-        Choose the English and the Hindi file (markdown, the same lines in the same order). Each
-        chapter's points, tables and revision questions become facts in both languages; each place
-        goes on the map at its village or town (approximate: they're listed in the position checks
-        to set exactly). Points the notes mark “[verify: …]” come in to check, not shown to
-        students. Importing again updates the facts, keeping the ones you've edited.
+        A subject file made with the extraction project (History, Art &amp; Culture, Geography,
+        Polity or Economy): choose the English and the Hindi file (the same lines in the same
+        order). Each chapter's points, tables and revision questions become facts in both languages;
+        each place goes on the map at its village or town (approximate: they're listed in the
+        position checks to set exactly). Points the notes mark “[verify: …]” come in to check, not
+        shown to students. Importing a subject again replaces only that subject's facts, keeping the
+        ones you've edited or checked.
       </p>
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <label className="flex items-center gap-2">
@@ -186,11 +191,12 @@ function CultureImport({ onDone }: { onDone: () => Promise<unknown> }) {
         </Button>
       </div>
       {result && (
-        <div className="space-y-1 text-sm" data-culture-result>
+        <div className="space-y-1 text-sm" data-notes-result>
           <p>
-            {result.chapters} chapters. Facts: {result.facts.added} added, {result.facts.updated}{" "}
-            updated, {result.facts.kept} kept as you edited them, {result.facts.gone} no longer in
-            the files; <strong>{result.facts.toCheck} to check</strong> (Facts tab, “To check”).
+            {SUBJECT_NAMES[result.subject] ?? result.subject}: {result.chapters} chapters. Facts:{" "}
+            {result.facts.added} added, {result.facts.updated} updated, {result.facts.kept} kept as
+            you edited them, {result.facts.gone} no longer in the files;{" "}
+            <strong>{result.facts.toCheck} to check</strong> (Facts tab, “To check”).
           </p>
           <p>
             Places: {result.places.added} added, {result.places.linked} joined to places already on
@@ -323,7 +329,7 @@ function Overview() {
           </p>
         )}
       </section>
-      <CultureImport onDone={refresh} />
+      <NotesImport onDone={refresh} />
       <section className="space-y-2 rounded-xl border border-border p-4">
         <h3 className="font-semibold">Background work</h3>
         <ul className="space-y-1 text-sm">

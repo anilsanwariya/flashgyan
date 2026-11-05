@@ -1,13 +1,14 @@
-// Server-only: the Rajasthan art & culture notes (two markdown files, English
-// and Hindi, the same lines in the same order) read into the atlas: each
-// chapter's points, tables and revision questions become facts with both
-// languages, and each "#### Place: name | district | type" block a place on
-// the map. The notes give no positions: a place is pinned at its village or
-// town from the surveyed place list (marked approximate, listed in the
-// position checks), or, when the list doesn't have it, at its district's
-// headquarters and kept "to check" (not shown to students) until placed.
-// Points the notes flag "[verify: …]" / "[सत्यापन: …]" come in "to check"
-// with the flag as the note.
+// Server-only: a subject's notes (docs/atlas-extraction-project.md: two
+// markdown files, English and Hindi, the same lines in the same order, "#
+// <Subject>" first) read into the atlas. Each chapter's points, tables and
+// revision questions become facts with both languages, and each
+// "#### Place: name | district | kind" block a place on the map. The notes
+// give no positions: a place is pinned at its village or town from the
+// surveyed place list (marked approximate, listed in the position checks),
+// or, when the list doesn't have it, at its district's headquarters and kept
+// "to check" (not shown to students) until placed. Points the notes flag
+// "[verify: …]" / "[सत्यापन: …]" come in "to check" with the flag as the
+// note. Importing a subject again replaces only that subject's facts.
 import { createHash } from "node:crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { RAJ_DISTRICTS } from "@/lib/geo-admin";
@@ -29,34 +30,63 @@ const now = () => new Date().toISOString();
 const hash = (s: string) => createHash("sha1").update(s).digest("hex").slice(0, 24);
 type Row = Record<string, unknown>;
 
-export const CULTURE_SOURCE = "art-culture-notes";
+// Facts and places from a subject's notes: source "notes-<subject>".
+export const NOTES_SOURCE = "notes-";
+const sourceOf = (subject: string) => `${NOTES_SOURCE}${subject}`;
+
+// "# Rajasthan Art & Culture" → the atlas's subject.
+export function subjectOf(title: string): string {
+  const t = title.toLowerCase();
+  if (/\bart\b|culture/.test(t)) return "art";
+  if (/histor/.test(t)) return "his";
+  if (/geograph/.test(t)) return "geo";
+  if (/polity|administration/.test(t)) return "pol";
+  if (/econom/.test(t)) return "eco";
+  return "";
+}
 const TABLE_FLAG = 256;
 const MNEMONIC_FLAG = 4;
 const REVISION_FLAG = 128;
 
-// The notes' place types → the atlas's categories.
+// The notes' place kinds (the extraction project's list) → the atlas's
+// categories.
 const CATS: Record<string, string> = {
   fort: "fort",
   palace: "fort",
+  haveli: "heritage",
   temple: "temple",
+  mosque: "temple",
   dargah: "temple",
-  fair: "fair",
+  church: "temple",
+  gurudwara: "temple",
   stepwell: "harvest",
   lake: "lake",
+  wetland: "lake",
+  river: "rsrc",
+  dam: "dam",
+  canal: "canal",
+  sanctuary: "sanct",
+  "national park": "tiger",
+  "conservation reserve": "cr",
   hill: "peak",
-  "archaeological site": "archaeo",
-  memorial: "heritage",
-  haveli: "heritage",
+  peak: "peak",
+  pass: "pass",
+  mine: "metal",
+  fair: "fair",
+  festival: "fair",
   museum: "heritage",
   institute: "heritage",
-  other: "heritage",
-  village: "town",
+  memorial: "heritage",
   city: "town",
+  village: "town",
+  battlefield: "battle",
+  "archaeological site": "archaeo",
+  other: "town",
 };
 
-export type CultureFact = {
+export type NotesFact = {
   key: string;
-  subject: "art";
+  subject: string;
   chapter_key: string;
   chapter: string;
   heading: string;
@@ -69,7 +99,7 @@ export type CultureFact = {
   status: "verified" | "to_check";
   note: string;
 };
-export type CulturePlace = {
+export type NotesPlace = {
   key: string;
   name_en: string;
   name_hi: string;
@@ -79,10 +109,12 @@ export type CulturePlace = {
   aliases: string[];
   where: string;
 };
-export type CultureNotes = {
+export type SubjectNotes = {
+  subject: string;
+  title: string;
   chapters: { key: string; title: string; title_hi: string; facts: number }[];
-  facts: CultureFact[];
-  places: CulturePlace[];
+  facts: NotesFact[];
+  places: NotesPlace[];
 };
 
 const DISTRICTS = RAJ_DISTRICTS.map((d) => d.en);
@@ -97,7 +129,7 @@ const districtOf = (s: string): string => {
 const VERIFY = /\[(?:verify|सत्यापन)\s*:?\s*([^\]]*)\]/gi;
 const flagged = (t: string) => [...t.matchAll(VERIFY)].map((m) => m[1].trim()).filter(Boolean);
 const placeKey = (name: string, district: string) =>
-  `ac:${slug(name)}${district ? `|${slug(district)}` : ""}`;
+  `notes:${slug(name)}${district ? `|${slug(district)}` : ""}`;
 const cells = (l: string) =>
   l
     .trim()
@@ -113,7 +145,7 @@ const shape = (l: string) => {
 };
 
 // The two files read together, line by line.
-export function parseCultureNotes(en: string, hi: string): CultureNotes {
+export function parseSubjectNotes(en: string, hi: string): SubjectNotes {
   const E = en.replace(/\r/g, "").split("\n");
   const H = hi.replace(/\r/g, "").split("\n");
   if (E.length !== H.length)
@@ -126,24 +158,30 @@ export function parseCultureNotes(en: string, hi: string): CultureNotes {
         `The English and Hindi files differ at line ${i + 1}: "${E[i].slice(0, 60)}" / "${H[i].slice(0, 60)}".`,
       );
 
-  const facts: CultureFact[] = [];
-  const chapters: CultureNotes["chapters"] = [];
-  const places = new Map<string, CulturePlace>();
+  const facts: NotesFact[] = [];
+  const chapters: SubjectNotes["chapters"] = [];
+  const places = new Map<string, NotesPlace>();
   const keys = new Map<string, number>();
-  let chapter: CultureNotes["chapters"][number] | null = null;
+  let chapter: SubjectNotes["chapters"][number] | null = null;
   // Headings below the chapter (### and down), and the open place block.
   const heads: string[] = [];
-  let place: CulturePlace | null = null;
+  let place: NotesPlace | null = null;
   let label = ""; // a "- About:" style label the next indented points sit under
   let table: { head: string; headHi: string } | null = null;
   let revision = false;
+  const title = (E.find((l) => /^#\s/.test(l)) ?? "").replace(/^#\s+/, "").trim();
+  const subject = subjectOf(title);
+  if (!subject)
+    throw new Error(
+      `The file's first line should name the subject ("# Rajasthan History", "# Rajasthan Art & Culture", …); it says "${title.slice(0, 60)}".`,
+    );
 
-  const add = (textEn: string, textHi: string, i: number, extra: Partial<CultureFact> = {}) => {
+  const add = (textEn: string, textHi: string, i: number, extra: Partial<NotesFact> = {}) => {
     if (!chapter) return;
     const en = textEn.trim();
     if (!en) return;
     const heading = [...heads, ...(label ? [label] : [])].join(" › ");
-    let key = hash(`${CULTURE_SOURCE}|${chapter.key}|${heading}|${en}`);
+    let key = hash(`${sourceOf(subject)}|${chapter.key}|${heading}|${en}`);
     const n = keys.get(key) ?? 0;
     keys.set(key, n + 1);
     if (n) key = hash(`${key}|${n}`);
@@ -164,7 +202,7 @@ export function parseCultureNotes(en: string, hi: string): CultureNotes {
     if (revision) flags |= REVISION_FLAG;
     facts.push({
       key,
-      subject: "art",
+      subject,
       chapter_key: chapter.key,
       chapter: chapter.title,
       heading,
@@ -199,7 +237,7 @@ export function parseCultureNotes(en: string, hi: string): CultureNotes {
           continue;
         }
         chapter = {
-          key: `art-ac${cm[1].padStart(2, "0")}`,
+          key: `${subject}-n${cm[1].padStart(2, "0")}`,
           title: cm[2].trim(),
           title_hi: textHi.replace(/^[^:]*:\s*/, "").trim(),
           facts: 0,
@@ -226,7 +264,7 @@ export function parseCultureNotes(en: string, hi: string): CultureNotes {
           name_hi: nameHi,
           district: d,
           type: t,
-          cat: CATS[t] ?? "heritage",
+          cat: CATS[t] ?? "town",
           aliases: [],
           where: "",
         };
@@ -278,12 +316,13 @@ export function parseCultureNotes(en: string, hi: string): CultureNotes {
     }
     add(textEn, textHi, i);
   }
-  return { chapters, facts, places: [...places.values()] };
+  return { subject, title, chapters, facts, places: [...places.values()] };
 }
 
 // ---------- Import ----------
 
-export type CultureImportResult = {
+export type NotesImportResult = {
+  subject: string;
   chapters: number;
   facts: { added: number; updated: number; kept: number; gone: number; toCheck: number };
   places: {
@@ -320,8 +359,9 @@ const norm = (s: string) =>
     .replace(/\b(fort|temple|lake)\s*$/u, "")
     .trim();
 
-export async function importCultureNotes(en: string, hi: string): Promise<CultureImportResult> {
-  const notes = parseCultureNotes(en, hi);
+export async function importSubjectNotes(en: string, hi: string): Promise<NotesImportResult> {
+  const notes = parseSubjectNotes(en, hi);
+  const source = sourceOf(notes.subject);
   if (!notes.chapters.length) throw new Error('No chapters found ("## Chapter 01: …").');
   const { matchPlace, placeKey: geoKey } = await import("@/lib/geo-places");
 
@@ -335,15 +375,15 @@ export async function importCultureNotes(en: string, hi: string): Promise<Cultur
   // An atlas place of the same name in the same district (from the master
   // map): the notes' points join it rather than a second pin.
   const sameName = new Map<string, AtlasPlace>();
-  // Only places of a like kind: "Kota fort" isn't the Kota dairy.
-  const kindOf = (cat: string) =>
-    cat === "town"
-      ? "town"
-      : ["culture", "history", "arts"].includes(atlasCat(cat).group)
-        ? "culture"
-        : "";
+  // Only places of a like kind: "Kota fort" isn't the Kota dairy. Places
+  // other subjects' notes added are joined the same way.
+  const kindOf = (cat: string) => {
+    if (cat === "town") return "town";
+    const g = atlasCat(cat).group;
+    return ["culture", "history", "arts"].includes(g) ? "culture" : g;
+  };
   for (const p of oldPlaces)
-    if (p.source !== CULTURE_SOURCE && kindOf(p.cat))
+    if (p.source !== source)
       for (const n of [p.name_en, p.label_en])
         if (n) sameName.set(`${norm(n)}|${p.district}|${kindOf(p.cat)}`, p);
   const { data: dRows, error: dErr } = await from("atlas_districts").select("district,meta");
@@ -354,7 +394,7 @@ export async function importCultureNotes(en: string, hi: string): Promise<Cultur
       (r.meta as { hq?: [number, number] } | null)?.hq ?? null,
     ]),
   );
-  const pr: CultureImportResult["places"] = {
+  const pr: NotesImportResult["places"] = {
     added: 0,
     linked: 0,
     approximate: 0,
@@ -364,7 +404,7 @@ export async function importCultureNotes(en: string, hi: string): Promise<Cultur
   const rename = new Map<string, string>(); // notes' key → existing atlas key
   const placeRows: Row[] = [];
   for (const p of notes.places) {
-    const kind = p.cat === "town" ? "town" : "culture";
+    const kind = kindOf(p.cat);
     const same = p.district
       ? (sameName.get(`${norm(p.name_en)}|${p.district}|${kind}`) ??
         p.aliases.map((a) => sameName.get(`${norm(a)}|${p.district}|${kind}`)).find(Boolean))
@@ -452,7 +492,7 @@ export async function importCultureNotes(en: string, hi: string): Promise<Cultur
       note_hi: "",
       // Hidden by the editor stays hidden.
       status: old?.status === "hidden" ? "hidden" : status,
-      source: CULTURE_SOURCE,
+      source,
       in_file: true,
       updated_at: now(),
     });
@@ -472,23 +512,12 @@ export async function importCultureNotes(en: string, hi: string): Promise<Cultur
           .eq("key", String(r.key))
       ).error,
     );
-  const placeKeys = new Set(notes.places.map((p) => p.key));
-  const gonePlaces = oldPlaces.filter((p) => p.source === CULTURE_SOURCE && !placeKeys.has(p.key));
-  for (const p of gonePlaces)
-    fail(
-      (
-        await from("atlas_places")
-          .update({ in_file: false } as never)
-          .eq("id", p.id)
-      ).error,
-    );
+  // Places aren't marked gone: other subjects' facts may still be on them.
   const placed = new Set([...placeRows.map((r) => String(r.key)), ...rename.values()]);
 
   // ---- Facts ----
   const oldFacts = await all<AtlasFact>(() =>
-    from("atlas_facts")
-      .select("id,key,status,note,edited,text_hi,source")
-      .eq("source", CULTURE_SOURCE),
+    from("atlas_facts").select("id,key,status,note,edited,text_hi,source").eq("source", source),
   );
   const factByKey = new Map(oldFacts.map((f) => [f.key, f]));
   const fr = { added: 0, updated: 0, kept: 0, gone: 0, toCheck: 0 };
@@ -513,7 +542,7 @@ export async function importCultureNotes(en: string, hi: string): Promise<Cultur
       status,
       note: old?.note && old.status !== "to_check" ? old.note : f.note,
       hi_ai: false,
-      source: CULTURE_SOURCE,
+      source,
       edited: false,
       in_file: true,
       updated_at: now(),
@@ -557,5 +586,5 @@ export async function importCultureNotes(en: string, hi: string): Promise<Cultur
   const { queueKb, invalidateAtlas } = await import("@/lib/atlas.server");
   await queueKb(notes.chapters.map((c) => c.key));
   invalidateAtlas();
-  return { chapters: notes.chapters.length, facts: fr, places: pr };
+  return { subject: notes.subject, chapters: notes.chapters.length, facts: fr, places: pr };
 }

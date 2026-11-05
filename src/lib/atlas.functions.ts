@@ -101,8 +101,9 @@ export const importMasterMap = createServerFn({ method: "POST" })
     return (await server()).importMasterMap(data.html);
   });
 
-// The art & culture notes: the English and Hindi markdown files together.
-export const importCultureNotes = createServerFn({ method: "POST" })
+// A subject's notes (docs/atlas-extraction-project.md): the English and
+// Hindi markdown files together.
+export const importSubjectNotes = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
     z
@@ -114,8 +115,8 @@ export const importCultureNotes = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    const { importCultureNotes } = await import("@/lib/atlas-culture.server");
-    return importCultureNotes(data.en, data.hi);
+    const { importSubjectNotes } = await import("@/lib/atlas-notes.server");
+    return importSubjectNotes(data.en, data.hi);
   });
 
 export const runAtlasStep = createServerFn({ method: "POST" })
