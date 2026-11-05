@@ -125,6 +125,11 @@ export async function photos(): Promise<Record<string, PlacePhoto>> {
   cache = { at: Date.now(), map };
   return map;
 }
+// Each place's photo thumbnail (for search results), by place key.
+export async function photoThumbs(): Promise<Record<string, string>> {
+  const map = await photos().catch(() => ({}) as Record<string, PlacePhoto>);
+  return Object.fromEntries(Object.entries(map).map(([k, p]) => [k, p.thumb]));
+}
 export async function placePhoto(key: string): Promise<PlacePhoto | null> {
   return (await photos().catch(() => ({}) as Record<string, PlacePhoto>))[key] ?? null;
 }

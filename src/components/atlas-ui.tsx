@@ -530,24 +530,41 @@ function districtTopics(facts: PublicFact[], mark: string[], lang: AtlasLang): T
   return [...topics.values()];
 }
 
+// Revise mode: a topic's facts hidden until tapped, to test oneself.
+const ReviseCtx = createContext(false);
+
 function Bullet({ f, lang, mark }: { f: PublicFact; lang: AtlasLang; mark: string[] }) {
   const kinds = factKinds(f.flags);
   const trick = kinds.some((k) => k.key === "mnemonic" || k.key === "why");
+  const revise = useContext(ReviseCtx);
+  const [shown, setShown] = useState(false);
+  useEffect(() => setShown(false), [revise]);
+  const hide = revise && !shown;
   return (
     <li
-      className={
+      className={`${
         trick
           ? "group list-none rounded-lg border-l-4 border-amber-400 bg-amber-50 px-2.5 py-1.5 dark:bg-amber-500/10"
           : "group ml-4 list-disc marker:text-muted-foreground"
-      }
+      } ${hide ? "cursor-pointer" : ""}`}
       data-fact
+      data-hidden={hide || undefined}
+      onClick={hide ? () => setShown(true) : undefined}
+      title={hide ? (lang === "hi" ? "देखने के लिए टैप करें" : "Tap to see") : undefined}
     >
-      {kinds.length > 0 && !trick && (
-        <span className="mr-1 rounded bg-muted px-1 text-[10px] font-semibold">
-          {pickBi(kinds[0].name, lang)}
+      <span className={hide ? "pointer-events-none select-none blur-[5px]" : ""} aria-hidden={hide}>
+        {kinds.length > 0 && !trick && (
+          <span className="mr-1 rounded bg-muted px-1 text-[10px] font-semibold">
+            {pickBi(kinds[0].name, lang)}
+          </span>
+        )}
+        <DistrictFact f={f} lang={lang} mark={mark} />
+      </span>
+      {hide && (
+        <span className="sr-only">
+          {lang === "hi" ? "छिपा तथ्य, देखने के लिए टैप करें" : "Hidden fact, tap to see"}
         </span>
       )}
-      <DistrictFact f={f} lang={lang} mark={mark} />
       <span className="opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-50">
         <ReportButton lang={lang} kind="fact" refKey={f.id} label={pickBi(f.text, lang)} compact />
       </span>
@@ -583,6 +600,7 @@ function EntityCard({
     .filter((b) => b.facts.length);
   const total = rest.reduce((n, b) => n + b.facts.length, 0);
   let left = all ? Infinity : limit;
+  const revise = useContext(ReviseCtx);
   const links = useContext(PlaceLinkCtx);
   // Its own name isn't a link inside its own card.
   const article = (
@@ -616,7 +634,7 @@ function EntityCard({
             return (
               <div key={f.id} className="flex gap-2">
                 <dt className="w-24 shrink-0 text-xs text-muted-foreground">{t.slice(0, i)}</dt>
-                <dd className="min-w-0">
+                <dd className={`min-w-0 ${revise ? "select-none blur-[5px]" : ""}`}>
                   <FactPlacesCtx.Provider value={f.places}>
                     <Marked text={t.slice(i + 1).trim()} mark={mark} />
                   </FactPlacesCtx.Provider>
@@ -714,6 +732,9 @@ const NoFacts = ({ lang }: { lang: AtlasLang }) => (
   </p>
 );
 
+// Told the name of a topic when it is opened (to come back to it later).
+const TopicOpenCtx = createContext<((name: string) => void) | null>(null);
+
 // A topic, folded; its body is drawn only once it has been opened.
 function TopicSection({
   name,
@@ -731,16 +752,20 @@ function TopicSection({
   children: React.ReactNode;
 }) {
   const [opened, setOpened] = useState(openAtFirst);
+  const onOpen = useContext(TopicOpenCtx);
   return (
     <details
       open={openAtFirst}
       onToggle={(e) => {
-        if ((e.currentTarget as HTMLDetailsElement).open) setOpened(true);
+        if ((e.currentTarget as HTMLDetailsElement).open) {
+          setOpened(true);
+          onOpen?.(name);
+        }
       }}
       className="group/s rounded-xl border border-border bg-background"
       data-fact-section={name}
     >
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+      <summary className="top-[var(--atlas-sticky,0px)] z-[5] flex cursor-pointer list-none items-center gap-2 rounded-xl bg-background px-3 py-2.5 group-open/s:sticky group-open/s:rounded-b-none group-open/s:shadow-[0_1px_0_hsl(var(--border))] [&::-webkit-details-marker]:hidden">
         <span className="min-w-0 flex-1 text-sm font-semibold leading-snug">
           {title || (lang === "hi" ? "अन्य" : "Other")}
         </span>
@@ -768,8 +793,35 @@ function TopicBody({
   onPlace?: (key: string) => void;
 }) {
   const [more, setMore] = useState<string[]>([]);
+  const [revise, setRevise] = useState(false);
   return (
-    <>
+    <ReviseCtx.Provider value={revise}>
+      <div className="flex items-center justify-end gap-2">
+        {revise && (
+          <span className="text-xs text-muted-foreground">
+            {lang === "hi" ? "याद करें, फिर तथ्य पर टैप करें" : "Recall it, then tap a fact"}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => setRevise(!revise)}
+          aria-pressed={revise}
+          className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+            revise
+              ? "border-amber-500 bg-amber-100 text-amber-900 dark:bg-amber-500/20 dark:text-amber-200"
+              : "border-border hover:bg-muted"
+          }`}
+          data-revise-toggle
+        >
+          {revise
+            ? lang === "hi"
+              ? "सब दिखाएँ"
+              : "Show all"
+            : lang === "hi"
+              ? "🧠 दोहराएँ"
+              : "🧠 Revise"}
+        </button>
+      </div>
       {t.subtopics.map((s) => {
         const open = more.includes(s.name);
         const ents = open ? s.entities : s.entities.slice(0, 5);
@@ -813,7 +865,7 @@ function TopicBody({
           </section>
         );
       })}
-    </>
+    </ReviseCtx.Provider>
   );
 }
 
@@ -826,6 +878,8 @@ export function LazyDistrictTopics({
   mark,
   placeOf,
   onPlace,
+  first,
+  onTopic,
 }: {
   district: string;
   outline: FactsOutline;
@@ -833,30 +887,42 @@ export function LazyDistrictTopics({
   mark: string[];
   placeOf?: (name: string) => string | null;
   onPlace?: (key: string) => void;
+  // The topic open at first (its key; else the first one), and told of
+  // each topic opened.
+  first?: string;
+  onTopic?: (t: FactsOutline["topics"][number]) => void;
 }) {
   if (!outline.topics.length) return <NoFacts lang={lang} />;
+  const firstKey = outline.topics.some((t) => t.key === first) ? first : outline.topics[0].key;
   return (
-    <div className="space-y-2" data-fact-sections>
-      {outline.topics.map((t, i) => (
-        <TopicSection
-          key={t.key}
-          name={t.title.en}
-          title={(lang === "hi" && t.title.hi) || t.title.en}
-          count={t.count}
-          lang={lang}
-          open={i === 0}
-        >
-          <LazyTopic
-            district={district}
-            topic={t.key}
+    <TopicOpenCtx.Provider
+      value={(name) => {
+        const t = outline.topics.find((x) => x.title.en === name);
+        if (t) onTopic?.(t);
+      }}
+    >
+      <div className="space-y-2" data-fact-sections>
+        {outline.topics.map((t) => (
+          <TopicSection
+            key={t.key}
+            name={t.title.en}
+            title={(lang === "hi" && t.title.hi) || t.title.en}
+            count={t.count}
             lang={lang}
-            mark={mark}
-            placeOf={placeOf}
-            onPlace={onPlace}
-          />
-        </TopicSection>
-      ))}
-    </div>
+            open={t.key === firstKey}
+          >
+            <LazyTopic
+              district={district}
+              topic={t.key}
+              lang={lang}
+              mark={mark}
+              placeOf={placeOf}
+              onPlace={onPlace}
+            />
+          </TopicSection>
+        ))}
+      </div>
+    </TopicOpenCtx.Provider>
   );
 }
 
