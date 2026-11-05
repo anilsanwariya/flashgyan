@@ -117,6 +117,8 @@ const importRowSchema = z.object({
 });
 
 async function assertAdmin(userId: string) {
+  const { requireAdminMfa } = await import("@/lib/admin-mfa.server");
+  await requireAdminMfa(userId);
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data, error } = await supabaseAdmin
     .from("user_roles")

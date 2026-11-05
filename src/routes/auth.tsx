@@ -5,6 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
+import { MfaEnroll, MfaVerify } from "@/components/admin-mfa";
+import { mfaStep } from "@/lib/admin-mfa";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
@@ -12,11 +14,12 @@ export const Route = createFileRoute("/auth")({
   component: Auth,
 });
 
-type Mode = "signin" | "forgot" | "reset";
+type Mode = "signin" | "forgot" | "reset" | "mfa-verify" | "mfa-enroll";
 
 // The admin's sign-in. There is no public sign-up: admin accounts are made by
 // the project owner. A password-reset link brings the admin back here to set
-// a new password.
+// a new password. After the password comes the second step: the code from an
+// authenticator app, or setting one up the first time.
 function Auth() {
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>(() =>
@@ -31,13 +34,21 @@ function Auth() {
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // After the password: the code step, the set-up step, or straight in.
+  async function continueSignIn() {
+    const step = await mfaStep();
+    if (step === "verify") setMode("mfa-verify");
+    else if (step === "enroll") setMode("mfa-enroll");
+    else navigate({ to: "/admin" });
+  }
+
   useEffect(() => {
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (event === "PASSWORD_RECOVERY") setMode("reset");
     });
     if (mode !== "reset") {
       supabase.auth.getUser().then(({ data }) => {
-        if (data.user) navigate({ to: "/admin" });
+        if (data.user) void continueSignIn();
       });
     }
     return () => sub.subscription.unsubscribe();
@@ -62,12 +73,12 @@ function Auth() {
         const { error } = await supabase.auth.updateUser({ password });
         if (error) throw error;
         toast.success("Password changed");
-        navigate({ to: "/admin" });
+        await continueSignIn();
         return;
       }
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      navigate({ to: "/admin" });
+      await continueSignIn();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Authentication failed");
     } finally {
@@ -80,13 +91,26 @@ function Auth() {
       ? "Admin sign in"
       : mode === "forgot"
         ? "Reset your password"
-        : "Set a new password";
+        : mode === "mfa-verify"
+          ? "Enter your code"
+          : mode === "mfa-enroll"
+            ? "Set up two-factor sign-in"
+            : "Set a new password";
   const hint =
     mode === "signin"
       ? "Only the admin needs to sign in. Students don't need an account."
       : mode === "forgot"
         ? "Enter your admin email and we'll send you a link to set a new password."
-        : "Choose a new password for your admin account.";
+        : mode === "mfa-verify"
+          ? "Open your authenticator app and enter the 6-digit code for FlashGyan."
+          : mode === "mfa-enroll"
+            ? "Admin accounts need a code from an authenticator app as well as the password. This takes a minute, once."
+            : "Choose a new password for your admin account.";
+  const enterAdmin = () => navigate({ to: "/admin" });
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setMode("signin");
+  };
   const field = "h-12 rounded-2xl bg-white/60 dark:bg-black/40 backdrop-blur-xl border-border/40";
   const label = "text-xs font-bold uppercase tracking-widest text-muted-foreground";
 
@@ -109,82 +133,100 @@ function Auth() {
         <div className="w-full max-w-sm rounded-[32px] p-8 bg-white/50 dark:bg-black/40 backdrop-blur-3xl border border-border/30 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.15)]">
           <h1 className="text-2xl font-extrabold tracking-tight">{title}</h1>
           <p className="mt-1.5 text-sm text-muted-foreground">{hint}</p>
-          <form onSubmit={onSubmit} className="mt-6 space-y-4">
-            {mode !== "reset" && (
-              <div className="space-y-1.5">
-                <Label htmlFor="email" className={label}>
-                  Email
-                </Label>
-                <Input
-                  id="email"
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  autoComplete="email"
-                  className={field}
-                />
-              </div>
-            )}
-            {mode !== "forgot" && (
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="password" className={label}>
-                    {mode === "reset" ? "New password" : "Password"}
+          {(mode === "mfa-verify" || mode === "mfa-enroll") && (
+            <div className="mt-6 space-y-4">
+              {mode === "mfa-verify" ? (
+                <MfaVerify onDone={enterAdmin} />
+              ) : (
+                <MfaEnroll onDone={enterAdmin} onUnavailable={enterAdmin} />
+              )}
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                className="text-sm font-semibold text-primary/80 hover:text-primary transition-colors"
+              >
+                Sign out
+              </button>
+            </div>
+          )}
+          {mode !== "mfa-verify" && mode !== "mfa-enroll" && (
+            <form onSubmit={onSubmit} className="mt-6 space-y-4">
+              {mode !== "reset" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="email" className={label}>
+                    Email
                   </Label>
-                  {mode === "signin" && (
-                    <button
-                      type="button"
-                      onClick={() => setMode("forgot")}
-                      className="text-xs font-semibold text-primary/80 hover:text-primary"
-                    >
-                      Forgot password?
-                    </button>
-                  )}
+                  <Input
+                    id="email"
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    autoComplete="email"
+                    className={field}
+                  />
                 </div>
-                <Input
-                  id="password"
-                  type="password"
-                  required
-                  minLength={mode === "reset" ? 8 : 6}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete={mode === "reset" ? "new-password" : "current-password"}
-                  className={field}
-                />
-              </div>
-            )}
-            {mode === "reset" && (
-              <div className="space-y-1.5">
-                <Label htmlFor="confirm" className={label}>
-                  New password again
-                </Label>
-                <Input
-                  id="confirm"
-                  type="password"
-                  required
-                  minLength={8}
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  autoComplete="new-password"
-                  className={field}
-                />
-              </div>
-            )}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full h-14 rounded-[24px] bg-primary/10 text-primary font-semibold text-[17px] border border-primary/20 backdrop-blur-xl hover:bg-primary/20 active:scale-[0.98] transition-all shadow-[0_4px_24px_rgba(var(--primary),0.1)] disabled:opacity-50 disabled:active:scale-100"
-            >
-              {loading
-                ? "…"
-                : mode === "signin"
-                  ? "Sign in"
-                  : mode === "forgot"
-                    ? "Send reset link"
-                    : "Save new password"}
-            </button>
-          </form>
+              )}
+              {mode !== "forgot" && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="password" className={label}>
+                      {mode === "reset" ? "New password" : "Password"}
+                    </Label>
+                    {mode === "signin" && (
+                      <button
+                        type="button"
+                        onClick={() => setMode("forgot")}
+                        className="text-xs font-semibold text-primary/80 hover:text-primary"
+                      >
+                        Forgot password?
+                      </button>
+                    )}
+                  </div>
+                  <Input
+                    id="password"
+                    type="password"
+                    required
+                    minLength={mode === "reset" ? 8 : 6}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete={mode === "reset" ? "new-password" : "current-password"}
+                    className={field}
+                  />
+                </div>
+              )}
+              {mode === "reset" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="confirm" className={label}>
+                    New password again
+                  </Label>
+                  <Input
+                    id="confirm"
+                    type="password"
+                    required
+                    minLength={8}
+                    value={confirm}
+                    onChange={(e) => setConfirm(e.target.value)}
+                    autoComplete="new-password"
+                    className={field}
+                  />
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full h-14 rounded-[24px] bg-primary/10 text-primary font-semibold text-[17px] border border-primary/20 backdrop-blur-xl hover:bg-primary/20 active:scale-[0.98] transition-all shadow-[0_4px_24px_rgba(var(--primary),0.1)] disabled:opacity-50 disabled:active:scale-100"
+              >
+                {loading
+                  ? "…"
+                  : mode === "signin"
+                    ? "Sign in"
+                    : mode === "forgot"
+                      ? "Send reset link"
+                      : "Save new password"}
+              </button>
+            </form>
+          )}
           {mode === "forgot" && (
             <button
               type="button"

@@ -112,3 +112,16 @@ once, so reloading doesn't add to it. No student is identified.
 Analytics is optional and off. A server count works without analytics or cookies.
 **Consequence:** someone scripting the endpoint could add up to 60 sessions an hour from
 one address; treat sudden spikes with care.
+
+## ADR-014: Admins sign in with an authenticator-app code (5 November 2026)
+
+**Decision:** Admin sign-in needs the password and a TOTP code from an authenticator app.
+Admins without one must set one up before `/admin` opens. Once an account has a verified
+authenticator, password-only sessions (`aal1`) are refused by every admin server function
+(`requireAdminMfa()` in `assertAdmin()`) and by the database's `has_role`.
+**Reason:** an admin can change everything, and a leaked password alone was enough. Admin
+sessions live in `localStorage`, so a stolen session is also short-lived without the code.
+**Consequence:** the rule follows Supabase's recommendation (required once an authenticator
+exists) so that a project with two-factor switched off doesn't lock the admin out; the
+sign-in page explains how to switch it on. Losing every authenticator needs one SQL line
+(see SECURITY.md); a backup authenticator avoids that.

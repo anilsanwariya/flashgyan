@@ -140,6 +140,7 @@ import { CurrentAffairsPanel, type CaSection } from "@/components/current-affair
 import { HomePanel } from "@/components/home-panel";
 import { AiUsagePanel } from "@/components/ai-usage-panel";
 import { PracticeSessionsPanel } from "@/components/practice-sessions-panel";
+import { SignInSecurityPanel } from "@/components/admin-mfa";
 import { AtlasPanel } from "@/components/atlas-panel";
 import { FlashStudio } from "@/components/flash-studio-panel";
 import { BotManagerPanel, type BotSection } from "@/components/bot-manager-panel";
@@ -297,6 +298,8 @@ function Admin() {
         <TelegramUsersPanel />
       ) : section === "sessions" ? (
         <PracticeSessionsPanel />
+      ) : section === "security" ? (
+        <SignInSecurityPanel />
       ) : section === "aiUsage" ? (
         <AiUsagePanel />
       ) : (
