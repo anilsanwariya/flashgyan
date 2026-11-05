@@ -86,7 +86,11 @@ export function ReportButton({
         <button
           type="button"
           onClick={() => setOpen(true)}
-          aria-label={L(lang, "इस तथ्य में गलती बताएँ", "Report a mistake in this fact")}
+          aria-label={
+            kind === "fact"
+              ? L(lang, "इस तथ्य में गलती बताएँ", "Report a mistake in this fact")
+              : L(lang, "गलती बताएँ", "Report a mistake")
+          }
           title={L(lang, "गलती बताएँ", "Report a mistake")}
           className="ml-1 inline-grid h-5 w-5 place-items-center rounded align-middle text-muted-foreground/60 hover:bg-muted hover:text-destructive"
         >

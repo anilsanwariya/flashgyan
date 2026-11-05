@@ -71,6 +71,13 @@ so dark mode works.
 - Study screens (flashcards, MCQ) fill the screen (`h-dvh`) with the action buttons fixed at
   the bottom, within thumb reach.
 - Rating colours are always Hard = destructive, Medium = warning, Easy = success.
+- Atlas side cards (a district or a place beside the map): the name and one line of
+  context, then one row of actions (Save and Share with labels, the rest as icon buttons with
+  an accessible name, Report as a small flag), then tabs (Overview, Places by kind, Facts by
+  chapter in sections that open). The open district is outlined on the map, and on screens
+  without the side column a tap scrolls its card into view. Facts use `FactsList` /
+  `FactSections` (`atlas-ui.tsx`): table rows read as "Header: value" pairs, the district's
+  name is picked out, and the report flag shows on hover or focus.
 
 **Admin pages:** dense and practical. Tables, forms and clear status; no decoration.
 

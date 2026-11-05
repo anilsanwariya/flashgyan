@@ -47,7 +47,7 @@ import {
   useAtlasPlace,
   useAtlasPlaces,
 } from "@/components/atlas-data";
-import { FactsList, LangToggle, useAtlasLang } from "@/components/atlas-ui";
+import { FactSections, FactsList, LangToggle, useAtlasLang } from "@/components/atlas-ui";
 
 export const Route = createFileRoute("/atlas/")({
   ssr: false,
@@ -82,6 +82,18 @@ function AtlasPage() {
   const [panel, setPanel] = useState(false);
   const [sel, setSel] = useState<{ kind: "place" | "district"; key: string } | null>(null);
   const [focus, setFocus] = useState<{ lon: number; lat: number; zoom?: number } | null>(null);
+  // Below the three-column layout the card sits under the map: a tap on a
+  // district or place brings it into view.
+  const cardRef = useRef<HTMLElement>(null);
+  const selKey = sel ? `${sel.kind}:${sel.key}` : "";
+  useEffect(() => {
+    if (!selKey || typeof window === "undefined" || window.innerWidth >= 1280) return;
+    const t = window.setTimeout(
+      () => cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      150,
+    );
+    return () => window.clearTimeout(t);
+  }, [selKey]);
   const [q, setQ] = useState("");
   // In time: the places of a span of years, or a month's fairs (across all
   // kinds, instead of the kinds chosen).
@@ -474,6 +486,7 @@ function AtlasPage() {
               focus={focus}
               onPlace={(k) => setSel({ kind: "place", key: k })}
               onDistrict={(d) => setSel({ kind: "district", key: d })}
+              highlight={sel?.kind === "district" ? sel.key : null}
               cluster
               className="h-[62dvh] lg:h-[calc(100dvh-120px)]"
             />
@@ -506,7 +519,8 @@ function AtlasPage() {
             )}
           </main>
           <aside
-            className="border-t border-border p-4 xl:max-h-[calc(100dvh-53px)] xl:overflow-y-auto xl:border-l xl:border-t-0"
+            ref={cardRef}
+            className="scroll-mt-2 border-t border-border p-4 xl:max-h-[calc(100dvh-53px)] xl:overflow-y-auto xl:border-l xl:border-t-0"
             aria-live="polite"
           >
             {sel?.kind === "place" ? (
@@ -526,6 +540,7 @@ function AtlasPage() {
                 places={all}
                 onClose={() => setSel(null)}
                 onPlace={(k) => pick("place", k)}
+                onDistrict={(x) => pick("district", x)}
               />
             ) : (
               <div className="space-y-3 text-sm text-muted-foreground">
@@ -635,7 +650,7 @@ function PlaceCard({
         <div className="min-w-0 flex-1">
           <h2 className="text-lg font-bold leading-tight">{pickBi(place.name, lang)}</h2>
           <p className="text-xs text-muted-foreground">{pickBi(c.name, lang)}</p>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <SaveButton
               lang={lang}
               place={{
@@ -656,6 +671,7 @@ function PlaceCard({
               kind="place"
               refKey={place.key}
               label={`${pickBi(place.name, lang)} · ${place.district} · ${place.lat.toFixed(3)}, ${place.lon.toFixed(3)}`}
+              compact
             />
           </div>
           {(place.era_from != null || place.era_to != null || place.months?.length > 0) && (
@@ -750,6 +766,23 @@ function PlaceCard({
   );
 }
 
+// A place's name in its district's list, without the district repeated:
+// "Ahar (Udaipur)", "Trimukhi baori, Udaipur", "Udaipur: maize", "[approx]".
+function placeShortName(name: string, district: string[]): string {
+  let n = name.replace(/\s*\[approx\]/gi, "");
+  for (const d of district.filter(Boolean)) {
+    const e = d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    n = n
+      .replace(new RegExp(`\\s*\\(${e}\\)`, "i"), "")
+      .replace(new RegExp(`,\\s*${e}$`, "i"), "")
+      .replace(new RegExp(`^${e}\\s*[:–-]\\s*`, "i"), "");
+  }
+  n = n.trim();
+  return n.length >= 2 ? n : name;
+}
+
+type DistrictTab = "overview" | "places" | "facts";
+
 function DistrictCard({
   name,
   base,
@@ -757,6 +790,7 @@ function DistrictCard({
   places,
   onClose,
   onPlace,
+  onDistrict,
 }: {
   name: string;
   base: BaseData;
@@ -764,58 +798,92 @@ function DistrictCard({
   places: Awaited<ReturnType<typeof atlasPlacesFn>>;
   onClose: () => void;
   onPlace: (k: string) => void;
+  onDistrict: (d: string) => void;
 }) {
   const q = useAtlasEntityFacts(`D:${name}`);
+  const [tab, setTab] = useState<DistrictTab>("overview");
+  // Open place groups (and "<group>:all" for one shown in full); null: the
+  // first group open.
+  const [openGroups, setOpenGroups] = useState<string[] | null>(null);
+  useEffect(() => {
+    setTab("overview");
+    setOpenGroups(null);
+  }, [name]);
   const d = base.districts.find((x) => x.en === name);
   if (!d) return null;
   const mine = places.filter((p) => p[6] === name);
   const zone = AGRO_ZONES.find((z) => z.key === d.meta.zone);
   const division = DIVISIONS.find((x) => x.key === d.meta.division);
+  const title = lang === "hi" ? d.hi : d.en;
+  // The district's places by kind (the map's groups, in their order).
+  const groups = ATLAS_GROUPS.map((g) => ({
+    g,
+    list: mine
+      .filter((p) => atlasCat(p[3]).group === g.key)
+      .sort((a, b) => a[1].localeCompare(b[1])),
+  })).filter((x) => x.list.length);
+  const facts = q.data ?? [];
+  const tabs: { key: DistrictTab; label: string; n?: number }[] = [
+    { key: "overview", label: L(lang, "सार", "Overview") },
+    { key: "places", label: L(lang, "स्थान", "Places"), n: mine.length },
+    { key: "facts", label: L(lang, "तथ्य", "Facts"), n: q.data ? facts.length : undefined },
+  ];
+  const iconBtn =
+    "inline-grid h-8 w-8 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-muted hover:text-foreground";
+  const stat = (label: string, value: string | number | undefined) =>
+    value ? (
+      <div className="min-w-0 rounded-lg bg-muted/50 px-2.5 py-2">
+        <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</dt>
+        <dd className="text-sm font-semibold leading-snug">{value}</dd>
+      </div>
+    ) : null;
   return (
     <div className="space-y-3" data-district-card={name}>
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <h2 className="font-serif text-2xl font-bold text-[#1f2a5c] dark:text-indigo-200">
-            {lang === "hi" ? d.hi : d.en}
+          <h2 className="font-serif text-2xl font-bold leading-tight text-[#1f2a5c] dark:text-indigo-200">
+            {title}
           </h2>
-          <p className="text-xs text-muted-foreground">{L(lang, "जिला", "District")}</p>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            <SaveButton lang={lang} district={d.en} />
-            <ShareButton
-              lang={lang}
-              path={`/atlas/${encodeURIComponent(d.en)}`}
-              title={`${lang === "hi" ? d.hi : d.en} · ${L(lang, "राजस्थान एटलस", "Rajasthan Atlas")}`}
-            />
-            <ReportButton
-              lang={lang}
-              kind="district"
-              refKey={d.en}
-              label={lang === "hi" ? d.hi : d.en}
-            />
-            <Link
-              to="/atlas/compare"
-              search={{ d: d.en }}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium hover:bg-muted"
-            >
-              <Columns3 className="h-3.5 w-3.5" /> {L(lang, "तुलना करें", "Compare")}
-            </Link>
-            <Link
-              to="/atlas/sheet/$district"
-              params={{ district: d.en }}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium hover:bg-muted"
-            >
-              <Printer className="h-3.5 w-3.5" /> {L(lang, "एक पेज का सार", "One-page sheet")}
-            </Link>
-          </div>
+          <p className="text-xs text-muted-foreground">
+            {L(lang, "जिला", "District")}
+            {division && ` · ${pickBi(division.name, lang)} ${L(lang, "संभाग", "division")}`}
+          </p>
         </div>
         <button
           type="button"
           aria-label={L(lang, "बंद करें", "Close")}
           onClick={onClose}
-          className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg hover:bg-muted"
         >
           <X className="h-4 w-4" />
         </button>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5" data-district-actions>
+        <SaveButton lang={lang} district={d.en} />
+        <ShareButton
+          lang={lang}
+          path={`/atlas/${encodeURIComponent(d.en)}`}
+          title={`${title} · ${L(lang, "राजस्थान एटलस", "Rajasthan Atlas")}`}
+        />
+        <Link
+          to="/atlas/compare"
+          search={{ d: d.en }}
+          className={iconBtn}
+          aria-label={L(lang, "तुलना करें", "Compare")}
+          title={L(lang, "तुलना करें", "Compare")}
+        >
+          <Columns3 className="h-3.5 w-3.5" />
+        </Link>
+        <Link
+          to="/atlas/sheet/$district"
+          params={{ district: d.en }}
+          className={iconBtn}
+          aria-label={L(lang, "एक पेज का सार", "One-page sheet")}
+          title={L(lang, "एक पेज का सार", "One-page sheet")}
+        >
+          <Printer className="h-3.5 w-3.5" />
+        </Link>
+        <ReportButton lang={lang} kind="district" refKey={d.en} label={title} compact />
       </div>
       {d.published && (
         <Link
@@ -826,74 +894,180 @@ function DistrictCard({
           {L(lang, "पूरा जिला दर्शन पढ़ें →", "Read the full district overview →")}
         </Link>
       )}
-      <dl className="grid grid-cols-2 gap-2 text-sm">
-        {division && (
-          <div className="rounded-lg bg-muted/50 p-2">
-            <dt className="text-[10px] uppercase text-muted-foreground">
-              {L(lang, "संभाग", "Division")}
-            </dt>
-            <dd className="font-semibold">{pickBi(division.name, lang)}</dd>
-          </div>
-        )}
-        {zone && (
-          <div className="rounded-lg bg-muted/50 p-2">
-            <dt className="text-[10px] uppercase text-muted-foreground">
-              {L(lang, "कृषि जलवायु क्षेत्र", "Agro-climatic zone")}
-            </dt>
-            <dd className="font-semibold">{pickBi(zone.name, lang)}</dd>
-          </div>
-        )}
-        {d.meta.tehsils && (
-          <div className="rounded-lg bg-muted/50 p-2">
-            <dt className="text-[10px] uppercase text-muted-foreground">
-              {L(lang, "तहसीलें", "Tehsils")}
-            </dt>
-            <dd className="font-semibold">{d.meta.tehsils}</dd>
-          </div>
-        )}
-        {!!d.meta.neighbours?.length && (
-          <div className="col-span-2 rounded-lg bg-muted/50 p-2">
-            <dt className="text-[10px] uppercase text-muted-foreground">
-              {L(lang, "पड़ोसी जिले", "Neighbouring districts")}
-            </dt>
-            <dd className="font-semibold">
-              {d.meta.neighbours
-                .map((n) => (lang === "hi" ? base.districts.find((x) => x.en === n)?.hi || n : n))
-                .join(", ")}
-            </dd>
-          </div>
-        )}
-      </dl>
-      {mine.length > 0 && (
-        <div>
-          <p className="mb-1.5 text-sm font-semibold">
-            {L(lang, "जिले के स्थान", "Places in the district")} ({mine.length})
-          </p>
-          <div className="flex flex-wrap gap-1">
-            {mine.slice(0, 40).map((p) => (
-              <button
-                key={p[0]}
-                type="button"
-                onClick={() => onPlace(p[0])}
-                className="rounded-full border border-border px-2 py-0.5 text-xs hover:bg-muted"
-              >
-                {atlasCat(p[3]).icon} {lang === "hi" ? p[2] || p[1] : p[1]}
-              </button>
-            ))}
-          </div>
+      <div
+        role="tablist"
+        aria-label={title}
+        className="flex gap-1 rounded-xl bg-muted/60 p-1"
+        data-district-tabs
+      >
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.key}
+            onClick={() => setTab(t.key)}
+            className={`flex-1 rounded-lg px-2 py-1.5 text-sm font-medium transition-colors ${
+              tab === t.key
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t.label}
+            {t.n !== undefined && <span className="ml-1 text-xs opacity-60">{t.n}</span>}
+          </button>
+        ))}
+      </div>
+      {tab === "overview" && (
+        <div className="space-y-3" role="tabpanel">
+          <dl className="grid grid-cols-2 gap-2">
+            {stat(L(lang, "तहसीलें", "Tehsils"), d.meta.tehsils)}
+            {stat(L(lang, "मानचित्र पर स्थान", "Places on the map"), mine.length)}
+            {zone && (
+              <div className="col-span-2">
+                {stat(
+                  L(lang, "कृषि जलवायु क्षेत्र", "Agro-climatic zone"),
+                  pickBi(zone.name, lang),
+                )}
+              </div>
+            )}
+          </dl>
+          {!!d.meta.neighbours?.length && (
+            <div>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {L(lang, "पड़ोसी जिले", "Neighbouring districts")}
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {d.meta.neighbours.map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => onDistrict(n)}
+                    className="rounded-full border border-border px-2.5 py-0.5 text-xs hover:bg-muted"
+                    data-neighbour={n}
+                  >
+                    {lang === "hi" ? base.districts.find((x) => x.en === n)?.hi || n : n}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {groups.length > 0 && (
+            <div>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {L(lang, "यहाँ क्या है", "What's here")}
+              </p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {groups.map(({ g, list }) => (
+                  <button
+                    key={g.key}
+                    type="button"
+                    onClick={() => {
+                      setOpenGroups([g.key]);
+                      setTab("places");
+                    }}
+                    className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 text-left text-xs hover:bg-muted"
+                  >
+                    <i
+                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ background: g.color }}
+                    />
+                    <span className="min-w-0 flex-1 truncate">{pickBi(g.name, lang)}</span>
+                    <span className="font-semibold">{list.length}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <AskedInExams lang={lang} district={d.en} />
         </div>
       )}
-      <div>
-        <p className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">
-          <BookOpen className="h-4 w-4" /> {L(lang, "नोट्स से तथ्य", "From the notes")}
-        </p>
-        {q.data ? (
-          <FactsList facts={q.data} lang={lang} limit={10} />
-        ) : (
-          <p className="text-sm text-muted-foreground">…</p>
-        )}
-      </div>
-      <AskedInExams lang={lang} district={d.en} />
+      {tab === "places" && (
+        <div className="space-y-2" role="tabpanel" data-district-places>
+          {!groups.length && (
+            <p className="text-sm text-muted-foreground">
+              {L(lang, "अभी कोई स्थान नहीं।", "No places yet.")}
+            </p>
+          )}
+          {groups.map(({ g, list }) => {
+            const current = openGroups ?? [groups[0].g.key];
+            const open = current.includes(g.key);
+            const all = current.includes(`${g.key}:all`);
+            const shownList = all ? list : list.slice(0, 8);
+            return (
+              <section
+                key={g.key}
+                className="rounded-xl border border-border"
+                data-place-group={g.key}
+              >
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  onClick={() =>
+                    setOpenGroups(open ? current.filter((k) => k !== g.key) : [...current, g.key])
+                  }
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold"
+                >
+                  <i
+                    className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ background: g.color }}
+                  />
+                  <span className="min-w-0 flex-1">{pickBi(g.name, lang)}</span>
+                  <span className="rounded-full bg-muted px-2 text-xs font-medium text-muted-foreground">
+                    {list.length}
+                  </span>
+                  <span
+                    className={`text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
+                  >
+                    ›
+                  </span>
+                </button>
+                {open && (
+                  <ul className="divide-y divide-border border-t border-border">
+                    {shownList.map((p) => (
+                      <li key={p[0]}>
+                        <button
+                          type="button"
+                          onClick={() => onPlace(p[0])}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted"
+                        >
+                          <span className="w-5 shrink-0 text-center">{atlasCat(p[3]).icon}</span>
+                          <span className="min-w-0 flex-1">
+                            {placeShortName(lang === "hi" ? p[2] || p[1] : p[1], [d.en, d.hi])}
+                          </span>
+                          <span className="shrink-0 text-[11px] text-muted-foreground">
+                            {pickBi(atlasCat(p[3]).name, lang).split(/\s*[/(]/)[0]}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                    {list.length > shownList.length && (
+                      <li>
+                        <button
+                          type="button"
+                          onClick={() => setOpenGroups([...current, `${g.key}:all`])}
+                          className="w-full px-3 py-1.5 text-left text-sm font-medium text-primary"
+                        >
+                          {L(lang, `सभी ${list.length} दिखाएँ`, `Show all ${list.length}`)}
+                        </button>
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      )}
+      {tab === "facts" && (
+        <div role="tabpanel" data-district-facts>
+          {q.data ? (
+            <FactSections facts={facts} lang={lang} mark={[d.en, d.hi]} />
+          ) : (
+            <p className="text-sm text-muted-foreground">…</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
