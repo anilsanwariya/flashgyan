@@ -12,6 +12,8 @@ import {
 } from "../../supabase/functions/_shared/telegram.ts";
 
 async function assertAdmin(userId: string) {
+  const { requireAdminMfa } = await import("@/lib/admin-mfa.server");
+  await requireAdminMfa(userId);
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin
     .from("user_roles")

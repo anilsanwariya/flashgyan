@@ -24,6 +24,7 @@ import {
   NotebookPen,
   PlugZap,
   ScrollText,
+  ShieldCheck,
   Settings2,
   Sparkles,
   SquarePen,
@@ -68,6 +69,7 @@ export type AdminSectionId =
   | "bot.mcq"
   | "users"
   | "sessions"
+  | "security"
   | "aiUsage";
 
 type SectionDef = { id: AdminSectionId; label: string; icon: Icon; description: string };
@@ -282,6 +284,12 @@ export const ADMIN_GROUPS: { label: string; sections: SectionDef[] }[] = [
         label: "Practice sessions",
         icon: TrendingUp,
         description: "The north-star number: practice sessions students finished each day.",
+      },
+      {
+        id: "security",
+        label: "Sign-in security",
+        icon: ShieldCheck,
+        description: "Your two-factor sign-in: authenticator apps, and adding a backup one.",
       },
       {
         id: "aiUsage",
