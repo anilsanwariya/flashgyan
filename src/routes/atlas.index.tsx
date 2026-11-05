@@ -62,6 +62,8 @@ import {
 import {
   DistrictPlaces,
   LazyDistrictTopics,
+  LoadFailed,
+  Loading,
   PlaceLinks,
   PlacePhoto,
   type PlaceLinkSet,
@@ -280,33 +282,56 @@ function AtlasPage() {
 
   const Panel = (
     <div className="space-y-5">
-      <section className="flex flex-wrap items-start gap-2">
-        <OfflineButton lang={lang} />
-        <Link
-          to="/atlas/compare"
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium hover:bg-muted"
-        >
-          <Columns3 className="h-3.5 w-3.5" /> {L(lang, "जिलों की तुलना", "Compare districts")}
-        </Link>
-        <Link
-          to="/atlas/quiz"
-          search={{ daily: 1 }}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 text-xs font-medium hover:bg-amber-100 dark:bg-amber-500/10"
-        >
-          📅 {L(lang, "दैनिक चुनौती", "Daily challenge")}
-        </Link>
-        <Link
-          to="/atlas/drills"
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium hover:bg-muted"
-        >
-          🧭 {L(lang, "मानचित्र अभ्यास", "Map drills")}
-        </Link>
-        <Link
-          to="/atlas/then-now"
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium hover:bg-muted"
-        >
-          🗂️ {L(lang, "जिले: तब और अब", "Districts then and now")}
-        </Link>
+      <section className="space-y-3" data-home-actions>
+        <div>
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {L(lang, "अभ्यास", "Practise")}
+          </p>
+          <div className="grid grid-cols-2 gap-1.5" data-practise>
+            <Link
+              to="/atlas/quiz"
+              search={{ daily: 1 }}
+              className="col-span-2 inline-flex h-10 items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 text-sm font-semibold text-amber-950 hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100"
+            >
+              📅 {L(lang, "आज की चुनौती", "Today's challenge")}
+            </Link>
+            <Link
+              to="/atlas/quiz"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted"
+            >
+              🎯 {L(lang, "क्विज़", "Quiz")}
+            </Link>
+            <Link
+              to="/atlas/drills"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted"
+            >
+              🧭 {L(lang, "मानचित्र अभ्यास", "Map drills")}
+            </Link>
+          </div>
+        </div>
+        <div>
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {L(lang, "उपकरण", "Tools")}
+          </p>
+          <div className="flex flex-wrap gap-1.5" data-tools>
+            <Link
+              to="/atlas/compare"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted"
+            >
+              <Columns3 className="h-4 w-4" /> {L(lang, "जिलों की तुलना", "Compare districts")}
+            </Link>
+            <Link
+              to="/atlas/then-now"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted"
+            >
+              🗂️ {L(lang, "जिले: तब और अब", "Then and now")}
+            </Link>
+            <OfflineButton
+              lang={lang}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"
+            />
+          </div>
+        </div>
       </section>
       <section>
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -627,6 +652,7 @@ function AtlasPage() {
                 <button
                   type="button"
                   className="ml-auto font-medium normal-case text-primary hover:underline"
+                  aria-label={L(lang, "हाल की खोजें हटाएँ", "Clear recent searches")}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     clearSearches();
@@ -673,13 +699,21 @@ function AtlasPage() {
         </button>
       </header>
       {base.isLoading || places.isLoading ? (
-        <p className="p-6 text-muted-foreground">
-          {L(lang, "मानचित्र खुल रहा है…", "Opening the map…")}
-        </p>
-      ) : base.error ? (
-        <p className="p-6 text-destructive">
-          {L(lang, "मानचित्र नहीं खुल सका।", "The map couldn't open.")}
-        </p>
+        <div className="space-y-3 p-3" data-map-loading>
+          <div className="grid h-[62dvh] animate-pulse place-items-center rounded-2xl bg-muted text-sm text-muted-foreground lg:h-[calc(100dvh-120px)]">
+            {L(lang, "मानचित्र खुल रहा है…", "Opening the map…")}
+          </div>
+        </div>
+      ) : base.error || !base.data ? (
+        <div className="p-4">
+          <LoadFailed
+            lang={lang}
+            onRetry={() => {
+              void base.refetch();
+              void places.refetch();
+            }}
+          />
+        </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[300px_1fr] xl:grid-cols-[300px_1fr_380px]">
           <aside className="hidden overflow-y-auto border-r border-border p-4 lg:block lg:max-h-[calc(100dvh-53px)]">
@@ -825,8 +859,8 @@ function PlaceCard({
   onPlace: (k: string) => void;
 }) {
   const q = useAtlasPlace(k);
-  if (q.isLoading) return <p className="text-sm text-muted-foreground">…</p>;
-  if (!q.data) return null;
+  if (q.isLoading) return <Loading lines={5} label={L(lang, "खुल रहा है", "Opening")} />;
+  if (!q.data) return <LoadFailed lang={lang} onRetry={() => q.refetch()} />;
   const { place, facts, mentions } = q.data;
   // Places within 25 km, by category (as on the notes' map).
   const near = all
@@ -1207,8 +1241,10 @@ function DistrictCard({
               onPlace={onPlace}
               open={openGroups?.[0] ?? null}
             />
+          ) : placeFacts.isError ? (
+            <LoadFailed lang={lang} onRetry={() => placeFacts.refetch()} />
           ) : (
-            <p className="text-sm text-muted-foreground">…</p>
+            <Loading lines={4} />
           )}
         </div>
       )}
@@ -1248,8 +1284,10 @@ function DistrictCard({
                 })
               }
             />
+          ) : outline.isError ? (
+            <LoadFailed lang={lang} onRetry={() => outline.refetch()} />
           ) : (
-            <p className="text-sm text-muted-foreground">…</p>
+            <Loading lines={4} />
           )}
         </div>
       )}
@@ -1476,6 +1514,7 @@ function ContinueStrip({ lang, onOpen }: { lang: AtlasLang; onOpen: (i: RecentIt
         <button
           type="button"
           className="ml-auto text-xs text-muted-foreground hover:underline"
+          aria-label={L(lang, "यह सूची हटाएँ", "Clear this list")}
           onClick={() => {
             forgetOpened();
             setList([]);

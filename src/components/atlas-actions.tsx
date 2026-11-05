@@ -82,7 +82,7 @@ export function ShareButton({
   );
 }
 
-export function OfflineButton({ lang }: { lang: AtlasLang }) {
+export function OfflineButton({ lang, className }: { lang: AtlasLang; className?: string }) {
   const save = useSaveOffline();
   const [info, setInfo] = useState<OfflineInfo>(null);
   const [busy, setBusy] = useState(false);
@@ -93,7 +93,7 @@ export function OfflineButton({ lang }: { lang: AtlasLang }) {
     <div className="space-y-1">
       <button
         type="button"
-        className={btn}
+        className={className ?? btn}
         disabled={busy}
         onClick={async () => {
           setBusy(true);
