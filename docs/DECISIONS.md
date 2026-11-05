@@ -139,3 +139,19 @@ the position checks list to correct.
 **Consequence:** the extraction project must keep the Hindi file's lines exactly parallel
 to the English one. An approximate pin can be a nearby look-alike village, so its note
 says where it was pinned.
+
+## ADR-016: Atlas link fixes are remembered as settings and replayed on every import (5 November 2026)
+
+**Decision:** When the editor merges duplicate places, or unlinks a fact from a place it
+isn't about, the change is made in the tables and also recorded in `bot_settings`
+(`atlas_place_merged`: dropped place → kept place; `atlas_unlinked`: fact key → place keys;
+`atlas_place_apart`: pairs that only look alike). Both importers (the master map and a
+subject's notes) pass every fact's links through these before saving, and a merged place
+from the notes joins the kept one instead of coming back. A merged place is hidden, not
+deleted, with "Merged into …" above its own note.
+**Reason:** the files are imported again whenever they're corrected, and the importer
+would otherwise restore every link the editor removed. Settings need no migration, and
+the lists stay small.
+**Consequence:** to undo a merge, show the hidden place again and remove its line from
+`atlas_place_merged`. The AI pre-check of "to check" facts only writes a line into the
+fact's note ("AI pre-check: …"); deciding stays with the editor.

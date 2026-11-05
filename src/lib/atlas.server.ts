@@ -188,6 +188,9 @@ export async function importMasterMap(html: string): Promise<ImportResult> {
   // Facts the same way (their Hindi kept while the English is the same).
   const oldFacts = await all<AtlasFact>(() => from("atlas_facts").select(FACT_COLS).order("key"));
   const factByKey = new Map(oldFacts.map((f) => [f.key, f]));
+  // Places the editor merged, links they removed.
+  const { linkFixes, fixEntities } = await import("@/lib/atlas-cleanup.server");
+  const fx = await linkFixes();
   const fr = { added: 0, updated: 0, kept: 0, gone: 0 };
   const factRows: Row[] = [];
   for (const f of map.facts) {
@@ -196,7 +199,7 @@ export async function importMasterMap(html: string): Promise<ImportResult> {
       fr.kept++;
       factRows.push({
         ...old,
-        entities: f.entities,
+        entities: fixEntities(f.key, f.entities, fx),
         position: f.position,
         in_file: true,
         updated_at: now(),
@@ -205,6 +208,7 @@ export async function importMasterMap(html: string): Promise<ImportResult> {
     }
     factRows.push({
       ...f,
+      entities: fixEntities(f.key, f.entities, fx),
       text_hi: old?.text_hi ?? "",
       hi_ai: old?.hi_ai ?? false,
       note: old?.note ?? "",

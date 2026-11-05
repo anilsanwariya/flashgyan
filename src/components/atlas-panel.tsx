@@ -19,6 +19,9 @@ import {
   resumeAtlasJobs,
   runAtlasStep,
   saveAtlasFact,
+  unlinkAtlasFact,
+  precheckAtlasFact,
+  atlasToCheckIds,
   saveAtlasLayer,
   saveAtlasPlace,
   type ImportResult,
@@ -427,6 +430,11 @@ function Facts() {
   const listFn = useServerFn(listAtlasFacts);
   const chFn = useServerFn(atlasChapters);
   const saveFn = useServerFn(saveAtlasFact);
+  const unlinkFn = useServerFn(unlinkAtlasFact);
+  const precheckFn = useServerFn(precheckAtlasFact);
+  const idsFn = useServerFn(atlasToCheckIds);
+  const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null);
+  const stopBulk = useRef(false);
   const chapters = useQuery({ queryKey: ["atlasChapters"], queryFn: () => chFn() });
   const [f, setF] = useState<{
     chapter: string;
@@ -483,14 +491,15 @@ function Facts() {
       <div className="flex flex-wrap gap-2">
         <select
           aria-label="Chapter"
-          className={select}
+          className={`${select} w-full max-w-md`}
           value={f.chapter}
           onChange={(e) => setF({ ...f, chapter: e.target.value, page: 0 })}
         >
           <option value="">All chapters</option>
           {(chapters.data ?? []).map((c) => (
             <option key={c.key} value={c.key}>
-              {c.subject === "pol" ? "Polity" : "Geography"} · {c.title} ({c.facts})
+              {ATLAS_SUBJECTS.find((x) => x.key === c.subject)?.name.en ?? c.subject} · {c.title} (
+              {c.facts})
             </option>
           ))}
         </select>
@@ -543,11 +552,82 @@ function Facts() {
       </div>
       <p className="text-xs text-muted-foreground">
         {q.data?.total ?? "…"} facts. Students see verified facts only; "to check" ones (marked
-        [verify] in your notes) wait for you.
+        [verify] in your notes) wait for you. A place link that's wrong: × on it (it stays unlinked
+        when you import again).
       </p>
+      <div
+        className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/50 p-2 text-sm"
+        data-precheck-all
+      >
+        <span className="flex-1">
+          AI pre-check: each "to check" fact compared with SAATHI's books; the verdict and the
+          books' version go in its note for you to decide.
+        </span>
+        {bulk ? (
+          <>
+            <span>
+              {bulk.done} / {bulk.total}
+            </span>
+            <Button size="sm" variant="outline" onClick={() => (stopBulk.current = true)}>
+              Stop
+            </Button>
+          </>
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={async () => {
+              const ids = (await idsFn()).filter((x) => !x.prechecked);
+              if (!ids.length) {
+                toast.success("Every fact to check has been pre-checked");
+                return;
+              }
+              stopBulk.current = false;
+              setBulk({ done: 0, total: ids.length });
+              try {
+                for (const [i, x] of ids.entries()) {
+                  if (stopBulk.current) break;
+                  await precheckFn({ data: { id: x.id } });
+                  setBulk({ done: i + 1, total: ids.length });
+                }
+                toast.success("Pre-checked; filter by To check to review");
+              } catch (e) {
+                toast.error(errorText(e, "Stopped"));
+              } finally {
+                setBulk(null);
+                await qc.invalidateQueries({ queryKey: ["atlasFacts"] });
+              }
+            }}
+          >
+            Pre-check all not yet checked
+          </Button>
+        )}
+      </div>
       <ul className="space-y-2">
         {(q.data?.rows ?? []).map((x) => (
-          <FactRow key={x.id} fact={x} onSave={(p) => save(x, p)} />
+          <FactRow
+            key={x.id}
+            fact={x}
+            onSave={(p) => save(x, p)}
+            onUnlink={async (place) => {
+              try {
+                await unlinkFn({ data: { id: x.id, place } });
+                await qc.invalidateQueries({ queryKey: ["atlasFacts"] });
+                toast.success("Unlinked; it stays unlinked when you import again");
+              } catch (e) {
+                toast.error(errorText(e, "Couldn't unlink"));
+              }
+            }}
+            onPrecheck={async () => {
+              try {
+                const r = await precheckFn({ data: { id: x.id } });
+                await qc.invalidateQueries({ queryKey: ["atlasFacts"] });
+                toast.success(`AI pre-check: ${r.verdict}`);
+              } catch (e) {
+                toast.error(errorText(e, "Couldn't check it"));
+              }
+            }}
+          />
         ))}
       </ul>
       <Pager page={f.page} total={q.data?.total ?? 0} onPage={(page) => setF({ ...f, page })} />
@@ -558,11 +638,16 @@ function Facts() {
 function FactRow({
   fact,
   onSave,
+  onUnlink,
+  onPrecheck,
 }: {
   fact: AtlasFact;
   onSave: (p: Partial<AtlasFact>) => Promise<void>;
+  onUnlink: (place: string) => Promise<void>;
+  onPrecheck: () => Promise<void>;
 }) {
   const [edit, setEdit] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [en, setEn] = useState(fact.text_en);
   const [hi, setHi] = useState(fact.text_hi);
   const [note, setNote] = useState(fact.note);
@@ -634,19 +719,59 @@ function FactRow({
         >
           <p>{fact.text_en}</p>
           {fact.text_hi && <p className="text-muted-foreground">{fact.text_hi}</p>}
-          {fact.note && (
-            <p className="text-xs text-amber-700 dark:text-amber-400">Note: {fact.note}</p>
-          )}
+          {fact.note &&
+            fact.note.split("\n").map((l, i) => (
+              <p
+                key={i}
+                className={`text-xs ${
+                  l.startsWith("AI pre-check:")
+                    ? "rounded bg-sky-50 px-1.5 py-1 text-sky-900 dark:bg-sky-500/10 dark:text-sky-200"
+                    : "text-amber-700 dark:text-amber-400"
+                }`}
+                data-fact-note
+              >
+                {i === 0 && !l.startsWith("AI pre-check:") ? `Note: ${l}` : l}
+              </p>
+            ))}
         </button>
       )}
       {fact.entities.length > 0 && (
         <p className="flex flex-wrap gap-1 text-[11px] text-muted-foreground">
           {fact.entities.slice(0, 12).map((e) => (
-            <span key={e} className="rounded bg-muted px-1">
+            <span key={e} className="inline-flex items-center gap-0.5 rounded bg-muted px-1">
               {e}
+              {e.startsWith("P:") && (
+                <button
+                  type="button"
+                  title="Not about this place: unlink it"
+                  aria-label={`Unlink ${e.slice(2)}`}
+                  className="rounded px-0.5 hover:bg-destructive/15 hover:text-destructive"
+                  onClick={() => void onUnlink(e.slice(2))}
+                >
+                  ×
+                </button>
+              )}
             </span>
           ))}
         </p>
+      )}
+      {fact.status === "to_check" && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7"
+          disabled={checking}
+          onClick={async () => {
+            setChecking(true);
+            try {
+              await onPrecheck();
+            } finally {
+              setChecking(false);
+            }
+          }}
+        >
+          {checking ? "Checking with SAATHI's books…" : "AI pre-check"}
+        </Button>
       )}
     </li>
   );
