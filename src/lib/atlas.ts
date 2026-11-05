@@ -28,6 +28,43 @@ export function factEntityKey(chapterKey: string, heading: string): string | nul
   const parts = heading.split(" › ");
   return parts.length >= 2 ? `${chapterKey}|${parts[0]} › ${parts[1]}` : null;
 }
+// The facts a district (or a place) shows, out of all it is linked to: one of
+// each line in a topic, and of a table under a heading (a list of separate
+// records, "Other folk deities") only the rows that name it. Shared by the
+// server (a district's topics, loaded one at a time) and the page.
+export function shownFacts<
+  F extends { chapterKey: string; heading: string; head: string; text: { en: string; hi: string } },
+>(facts: F[], mark: string[]): F[] {
+  const seen = new Set<string>();
+  const names = mark.filter((w) => w.length >= 2).map((w) => w.toLowerCase());
+  const mine = (f: F) => names.some((w) => `${f.text.en} ${f.text.hi}`.toLowerCase().includes(w));
+  return facts.filter((f) => {
+    const sig = `${f.chapterKey}|${f.text.en.trim().toLowerCase()}`;
+    if (seen.has(sig)) return false;
+    seen.add(sig);
+    return !(f.head && f.heading.split(" › ").filter(Boolean).length >= 2 && !mine(f));
+  });
+}
+// A district's topics and how many facts each shows (from shownFacts).
+export type FactsOutline = {
+  total: number;
+  topics: { key: string; title: { en: string; hi: string }; count: number }[];
+};
+export function factsOutline(
+  facts: { chapterKey: string; chapter: string; chapterHi: string }[],
+): FactsOutline {
+  const topics = new Map<string, FactsOutline["topics"][number]>();
+  for (const f of facts) {
+    const key = f.chapterKey || f.chapter;
+    const t = topics.get(key);
+    if (t) t.count++;
+    else topics.set(key, { key, title: { en: f.chapter, hi: f.chapterHi }, count: 1 });
+  }
+  return { total: facts.length, topics: [...topics.values()] };
+}
+export const factTopicKey = (f: { chapterKey: string; chapter: string }) =>
+  f.chapterKey || f.chapter;
+
 // Chapters in the syllabus's subject order (History, Art, Geography…).
 const SUBJECT_ORDER = ["his", "art", "geo", "pol", "eco"];
 export const chapterOrder = (chapterKey: string) => {

@@ -42,13 +42,16 @@ import { AtlasMap } from "@/components/atlas-map";
 import {
   useAtlasBase,
   useAtlasCards,
-  useAtlasEntityFacts,
+  useAtlasDistrictOutline,
+  useAtlasDistrictPart,
   useAtlasPlace,
   useAtlasPlaces,
 } from "@/components/atlas-data";
 import {
   DistrictPlaces,
-  DistrictTopics,
+  LazyDistrictTopics,
+  PlaceLinks,
+  type PlaceLinkSet,
   LangToggle,
   PlaceFacts,
   placeMarks,
@@ -160,6 +163,16 @@ function AtlasPage() {
     return () => clearTimeout(id);
   }, [q, results.length]);
 
+  // Place names in facts open their card here.
+  const linkNames = useMemo(
+    () => new Map((places.data ?? []).map((p) => [p[0], { en: p[1], hi: p[2] }] as const)),
+    [places.data],
+  );
+  const placeLinks = (self?: string): PlaceLinkSet => ({
+    names: linkNames,
+    open: (k) => pick("place", k),
+    self,
+  });
   const pick = (kind: "place" | "district", key: string) => {
     setSel({ kind, key });
     setQ("");
@@ -529,37 +542,39 @@ function AtlasPage() {
             className="scroll-mt-2 border-t border-border p-4 xl:max-h-[calc(100dvh-53px)] xl:overflow-y-auto xl:border-l xl:border-t-0"
             aria-live="polite"
           >
-            {sel?.kind === "place" ? (
-              <PlaceCard
-                k={sel.key}
-                lang={lang}
-                all={all}
-                onPlace={(k) => pick("place", k)}
-                onClose={() => setSel(null)}
-                onDistrict={(d) => pick("district", d)}
-              />
-            ) : sel?.kind === "district" ? (
-              <DistrictCard
-                name={sel.key}
-                base={base.data!}
-                lang={lang}
-                places={all}
-                onClose={() => setSel(null)}
-                onPlace={(k) => pick("place", k)}
-                onDistrict={(x) => pick("district", x)}
-              />
-            ) : (
-              <div className="space-y-3 text-sm text-muted-foreground">
-                <p>
-                  {L(
-                    lang,
-                    "किसी स्थान या जिले पर टैप करें — उससे जुड़े सभी परीक्षा-तथ्य यहाँ दिखेंगे।",
-                    "Tap a place or a district: all its exam facts show here.",
-                  )}
-                </p>
-                <DistrictLinks base={base.data!} lang={lang} />
-              </div>
-            )}
+            <PlaceLinks value={placeLinks(sel?.kind === "place" ? sel.key : undefined)}>
+              {sel?.kind === "place" ? (
+                <PlaceCard
+                  k={sel.key}
+                  lang={lang}
+                  all={all}
+                  onPlace={(k) => pick("place", k)}
+                  onClose={() => setSel(null)}
+                  onDistrict={(d) => pick("district", d)}
+                />
+              ) : sel?.kind === "district" ? (
+                <DistrictCard
+                  name={sel.key}
+                  base={base.data!}
+                  lang={lang}
+                  places={all}
+                  onClose={() => setSel(null)}
+                  onPlace={(k) => pick("place", k)}
+                  onDistrict={(x) => pick("district", x)}
+                />
+              ) : (
+                <div className="space-y-3 text-sm text-muted-foreground">
+                  <p>
+                    {L(
+                      lang,
+                      "किसी स्थान या जिले पर टैप करें — उससे जुड़े सभी परीक्षा-तथ्य यहाँ दिखेंगे।",
+                      "Tap a place or a district: all its exam facts show here.",
+                    )}
+                  </p>
+                  <DistrictLinks base={base.data!} lang={lang} />
+                </div>
+              )}
+            </PlaceLinks>
           </aside>
         </div>
       )}
@@ -799,8 +814,13 @@ function DistrictCard({
   onPlace: (k: string) => void;
   onDistrict: (d: string) => void;
 }) {
-  const q = useAtlasEntityFacts(`D:${name}`);
+  const dn = base.districts.find((x) => x.en === name);
+  const mark = useMemo(() => [name, dn?.hi ?? ""], [name, dn?.hi]);
   const [tab, setTab] = useState<DistrictTab>("overview");
+  // Its topics and counts first; a topic's facts when opened, the Places
+  // tab's when that is.
+  const outline = useAtlasDistrictOutline(name, mark);
+  const placeFacts = useAtlasDistrictPart(name, "places", mark, tab === "places");
   // Open place groups (and "<group>:all" for one shown in full); null: the
   // first group open.
   const [openGroups, setOpenGroups] = useState<string[] | null>(null);
@@ -821,11 +841,10 @@ function DistrictCard({
       .filter((p) => atlasCat(p[3]).group === g.key)
       .sort((a, b) => a[1].localeCompare(b[1])),
   })).filter((x) => x.list.length);
-  const facts = q.data ?? [];
   const tabs: { key: DistrictTab; label: string; n?: number }[] = [
     { key: "overview", label: L(lang, "सार", "Overview") },
     { key: "places", label: L(lang, "स्थान", "Places"), n: mine.length },
-    { key: "facts", label: L(lang, "तथ्य", "Facts"), n: q.data ? facts.length : undefined },
+    { key: "facts", label: L(lang, "तथ्य", "Facts"), n: outline.data?.total },
   ];
   const iconBtn =
     "inline-grid h-8 w-8 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-muted hover:text-foreground";
@@ -983,7 +1002,7 @@ function DistrictCard({
       )}
       {tab === "places" && (
         <div role="tabpanel">
-          {q.data ? (
+          {placeFacts.data ? (
             <DistrictPlaces
               places={mine.map((p) => ({
                 key: p[0],
@@ -991,9 +1010,9 @@ function DistrictCard({
                 title: placeShortName(lang === "hi" ? p[2] || p[1] : p[1], [d.en, d.hi]),
                 cat: p[3],
               }))}
-              facts={facts}
+              facts={placeFacts.data}
               lang={lang}
-              mark={[d.en, d.hi]}
+              mark={mark}
               onPlace={onPlace}
               open={openGroups?.[0] ?? null}
             />
@@ -1004,11 +1023,12 @@ function DistrictCard({
       )}
       {tab === "facts" && (
         <div role="tabpanel" data-district-facts>
-          {q.data ? (
-            <DistrictTopics
-              facts={facts}
+          {outline.data ? (
+            <LazyDistrictTopics
+              district={d.en}
+              outline={outline.data}
               lang={lang}
-              mark={[d.en, d.hi]}
+              mark={mark}
               placeOf={(n) => {
                 const k = n
                   .toLowerCase()

@@ -130,6 +130,11 @@ docs/                     Project documentation (this folder)
   marked as the AI's until a person checks it.
 - **App promotion and SEO:** Play Store links go through `src/lib/app-promo.ts`. Deck
   pages and `sitemap.xml` are rendered on the server for search engines.
+- **Atlas district card:** `atlasDistrictOutlineFn` returns the district's topics and counts
+  (`factsOutline(shownFacts(...))` in `src/lib/atlas.ts`), and `atlasDistrictPartFn` one
+  topic's facts or the Places tab's ("places"). The server works the district out once and
+  keeps it with the atlas's other data (5 minutes, cleared by `invalidateAtlas`); offline,
+  the same helpers run on the saved pack.
 - **PWA:** `public/sw.js` and `public/offline.html`, registered by `src/lib/pwa.ts`.
 
 ## Database changes
