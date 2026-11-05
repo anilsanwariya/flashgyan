@@ -41,6 +41,76 @@ export function useAtlasLang(): [AtlasLang, (l: AtlasLang) => void] {
   ];
 }
 
+// Reading text size on the atlas's pages (A− / A+), remembered on the
+// device. It scales the page's root size, so every rem-sized thing grows
+// with it; the map's names are sized on their own.
+const TEXT_KEY = "atlas-text";
+const TEXT_SIZES = [90, 100, 112, 125, 140];
+function useTextSize(): [number, (n: number) => void] {
+  const [pct, setPct] = useState(100);
+  useEffect(() => {
+    try {
+      const v = Number(localStorage.getItem(TEXT_KEY));
+      if (TEXT_SIZES.includes(v)) setPct(v);
+    } catch {
+      /* not remembered */
+    }
+  }, []);
+  useEffect(() => {
+    const el = document.documentElement;
+    const before = el.style.fontSize;
+    el.style.fontSize = pct === 100 ? "" : `${pct}%`;
+    return () => {
+      el.style.fontSize = before === `${pct}%` ? "" : before;
+    };
+  }, [pct]);
+  return [
+    pct,
+    (n) => {
+      setPct(n);
+      try {
+        localStorage.setItem(TEXT_KEY, String(n));
+      } catch {
+        /* not remembered */
+      }
+    },
+  ];
+}
+
+function TextSize({ lang }: { lang: AtlasLang }) {
+  const [pct, setPct] = useTextSize();
+  const i = TEXT_SIZES.indexOf(pct);
+  const btn =
+    "grid h-7 w-7 place-items-center rounded-full font-semibold text-muted-foreground hover:bg-muted disabled:opacity-40";
+  return (
+    <div
+      className="inline-flex items-center rounded-full border border-border bg-background p-0.5 text-xs"
+      role="group"
+      aria-label={lang === "hi" ? "अक्षरों का आकार" : "Text size"}
+      data-text-size={pct}
+    >
+      <button
+        type="button"
+        className={btn}
+        disabled={i <= 0}
+        onClick={() => setPct(TEXT_SIZES[i - 1])}
+        aria-label={lang === "hi" ? "अक्षर छोटे करें" : "Smaller text"}
+      >
+        A−
+      </button>
+      <button
+        type="button"
+        className={`${btn} text-sm`}
+        disabled={i >= TEXT_SIZES.length - 1}
+        onClick={() => setPct(TEXT_SIZES[i + 1])}
+        aria-label={lang === "hi" ? "अक्षर बड़े करें" : "Bigger text"}
+      >
+        A+
+      </button>
+    </div>
+  );
+}
+
 export function LangToggle({
   lang,
   onChange,
@@ -49,23 +119,80 @@ export function LangToggle({
   onChange: (l: AtlasLang) => void;
 }) {
   return (
-    <div
-      className="inline-flex rounded-full border border-border bg-background p-0.5 text-xs"
-      role="radiogroup"
-      aria-label="Language / भाषा"
-    >
-      {(["hi", "en"] as const).map((l) => (
-        <button
-          key={l}
-          type="button"
-          role="radio"
-          aria-checked={lang === l}
-          onClick={() => onChange(l)}
-          className={`rounded-full px-3 py-1 font-medium ${lang === l ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
-        >
-          {l === "hi" ? "हिंदी" : "English"}
-        </button>
+    <span className="inline-flex items-center gap-1">
+      <TextSize lang={lang} />
+      <div
+        className="inline-flex rounded-full border border-border bg-background p-0.5 text-xs"
+        role="radiogroup"
+        aria-label="Language / भाषा"
+      >
+        {(["hi", "en"] as const).map((l) => (
+          <button
+            key={l}
+            type="button"
+            role="radio"
+            aria-checked={lang === l}
+            onClick={() => onChange(l)}
+            className={`rounded-full px-3 py-1 font-medium ${lang === l ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+          >
+            {l === "hi" ? "हिंदी" : "English"}
+          </button>
+        ))}
+      </div>
+    </span>
+  );
+}
+
+// ---------- Loading, empty and failed states ----------
+
+// Grey lines while something loads.
+export function Loading({ lines = 3, label }: { lines?: number; label?: string }) {
+  const w = ["w-2/3", "w-5/6", "w-1/2", "w-3/4"];
+  return (
+    <div className="space-y-2 py-1" aria-busy="true" aria-label={label} data-loading>
+      {Array.from({ length: lines }, (_, i) => (
+        <div key={i} className={`h-4 animate-pulse rounded bg-muted ${w[i % w.length]}`} />
       ))}
+    </div>
+  );
+}
+
+// Something that couldn't load: why (offline or not) and a way to try again.
+export function LoadFailed({ lang, onRetry }: { lang: AtlasLang; onRetry?: () => void }) {
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  return (
+    <div
+      className="rounded-xl border border-dashed border-border bg-muted/40 p-3 text-sm"
+      role="status"
+      data-load-failed
+    >
+      <p className="font-medium">
+        {offline
+          ? lang === "hi"
+            ? "आप ऑफ़लाइन हैं।"
+            : "You're offline."
+          : lang === "hi"
+            ? "यह अभी नहीं खुल सका।"
+            : "This couldn't open just now."}
+      </p>
+      <p className="mt-0.5 text-xs text-muted-foreground">
+        {offline
+          ? lang === "hi"
+            ? '"ऑफ़लाइन के लिए सहेजें" से सहेजे गए स्थान और जिले फिर भी खुलते हैं।'
+            : 'Places and districts kept with "Save for offline" still open.'
+          : lang === "hi"
+            ? "कुछ देर बाद फिर कोशिश करें।"
+            : "Check your connection and try again."}
+      </p>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-2 rounded-lg border border-border bg-background px-3 py-1 text-xs font-medium hover:bg-muted"
+        >
+          {lang === "hi" ? "फिर कोशिश करें" : "Try again"}
+        </button>
+      )}
     </div>
   );
 }
@@ -727,9 +854,16 @@ export function DistrictTopics({
 }
 
 const NoFacts = ({ lang }: { lang: AtlasLang }) => (
-  <p className="text-sm text-muted-foreground">
-    {lang === "hi" ? "अभी कोई तथ्य नहीं।" : "No facts yet."}
-  </p>
+  <div className="rounded-xl border border-dashed border-border p-3 text-sm" data-no-facts>
+    <p className="font-medium">
+      {lang === "hi" ? "इसके तथ्य अभी एटलस में नहीं हैं।" : "Its facts aren't in the atlas yet."}
+    </p>
+    <p className="mt-0.5 text-xs text-muted-foreground">
+      {lang === "hi"
+        ? 'पास के स्थान और इसका जिला देखें, या "गलती बताएँ" से हमें बताएँ क्या जोड़ें।'
+        : 'Look at the places near it and its district, or use "Report a mistake" to tell us what to add.'}
+    </p>
+  </div>
 );
 
 // Told the name of a topic when it is opened (to come back to it later).
@@ -942,25 +1076,11 @@ function LazyTopic({
   onPlace?: (key: string) => void;
 }) {
   const q = useAtlasDistrictPart(district, topic, mark);
-  if (q.isError)
-    return (
-      <p className="text-sm text-muted-foreground">
-        {lang === "hi" ? "लोड नहीं हो सका।" : "Couldn't load."}{" "}
-        <button
-          type="button"
-          className="font-medium text-primary underline"
-          onClick={() => q.refetch()}
-        >
-          {lang === "hi" ? "फिर कोशिश करें" : "Try again"}
-        </button>
-      </p>
-    );
+  if (q.isError) return <LoadFailed lang={lang} onRetry={() => q.refetch()} />;
   if (!q.data)
     return (
-      <div className="space-y-2" aria-busy="true" data-topic-loading>
-        <div className="h-4 w-2/3 animate-pulse rounded bg-muted" />
-        <div className="h-4 w-5/6 animate-pulse rounded bg-muted" />
-        <div className="h-4 w-1/2 animate-pulse rounded bg-muted" />
+      <div data-topic-loading>
+        <Loading />
       </div>
     );
   const t = districtTopics(q.data, mark, lang)[0];

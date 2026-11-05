@@ -20,7 +20,7 @@ import {
 import { AtlasMap } from "@/components/atlas-map";
 import { useAtlasBase, useAtlasPlaces } from "@/components/atlas-data";
 import { withOffline } from "@/lib/atlas-device";
-import { LangToggle, useAtlasLang } from "@/components/atlas-ui";
+import { LangToggle, LoadFailed, Loading, useAtlasLang } from "@/components/atlas-ui";
 
 const L = (lang: AtlasLang, hi: string, en: string) => (lang === "hi" ? hi : en);
 type Data = Awaited<ReturnType<typeof atlasNotesThemeFn>>;
@@ -101,11 +101,9 @@ export function NotesThemeView({ theme }: { theme: NotesThemeKey }) {
         </div>
         <div className="space-y-4" data-notes-theme={theme}>
           {q.isLoading ? (
-            <p className="text-sm text-muted-foreground">…</p>
+            <Loading lines={6} />
           ) : !q.data ? (
-            <p className="text-sm text-muted-foreground">
-              {L(lang, "अभी नहीं खुल सका।", "Couldn't open it just now.")}
-            </p>
+            <LoadFailed lang={lang} onRetry={() => q.refetch()} />
           ) : q.data.key === "folk-deities" ? (
             <Deities d={q.data} {...ctx} />
           ) : q.data.key === "sakas" ? (

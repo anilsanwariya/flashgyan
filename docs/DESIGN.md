@@ -130,6 +130,19 @@ so dark mode works.
   three places and districts opened, a district with the topic last read, which reopens
   at that topic. Both are kept on the device only (`src/lib/atlas-recent.ts`).
 
+- Every atlas page has A− / A+ beside the language switch: 90–140% text, remembered on the
+  device (it sets the page's root font size while an atlas page is open; the map's names
+  keep their own size).
+- The atlas's home actions come in two groups: "Practise" (Today's challenge, highlighted;
+  Quiz; Map drills) and "Tools" (Compare districts, Then and now, Save for offline).
+- Loading shows grey placeholder lines, not "…". Something that can't load shows why
+  (offline or not; offline points to "Save for offline") and a "Try again" button. A place
+  or district with no facts says so and suggests the places near it or reporting what to
+  add.
+- Dark mode: the site doesn't switch to it today (nothing sets `.dark`). The atlas's
+  student pages were checked with it forced on and read well; the map stays light, as
+  for print.
+
 **Admin pages:** dense and practical. Tables, forms and clear status; no decoration.
 
 - Atlas data quality (admin): the Quality tab starts with "Duplicate places" (same name and
