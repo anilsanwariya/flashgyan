@@ -3768,6 +3768,24 @@ export type Database = {
           },
         ]
       }
+      practice_sessions_daily: {
+        Row: {
+          day: string
+          kind: string
+          n: number
+        }
+        Insert: {
+          day: string
+          kind: string
+          n?: number
+        }
+        Update: {
+          day?: string
+          kind?: string
+          n?: number
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -4688,6 +4706,8 @@ export type Database = {
           title: string
         }[]
       }
+      mfa_satisfied: { Args: never; Returns: boolean }
+      practice_session_count: { Args: { p_kind: string }; Returns: undefined }
       saathi_cache_get: {
         Args: { p_channel: string; p_question: string; p_subjects: string[] }
         Returns: {
