@@ -58,6 +58,7 @@ export function AtlasMap({
   selected,
   focus,
   district,
+  highlight = null,
   onPlace,
   onDistrict,
   blind = false,
@@ -77,6 +78,8 @@ export function AtlasMap({
   focus?: { lon: number; lat: number; zoom?: number } | null;
   // A district page: only this district, its outline and its places.
   district?: string;
+  // The district open beside the map: outlined, the others faded.
+  highlight?: string | null;
   onPlace?: (key: string) => void;
   onDistrict?: (name: string) => void;
   // A quiz: no names on the map (districts, places), and districts coloured
@@ -365,6 +368,29 @@ export function AtlasMap({
             vectorEffect="non-scaling-stroke"
           />
         </g>
+        {highlight && !own && base.districts.some((d) => d.en === highlight) && (
+          <g style={{ pointerEvents: "none" }} data-highlight={highlight}>
+            <path
+              d={base.districts
+                .filter((d) => d.en !== highlight)
+                .map((d) => d.rings.map(ring).join(""))
+                .join("")}
+              fill="#ffffff"
+              fillOpacity={0.45}
+              stroke="none"
+            />
+            <path
+              d={base.districts
+                .find((d) => d.en === highlight)!
+                .rings.map(ring)
+                .join("")}
+              fill="none"
+              stroke="#d97706"
+              strokeWidth={3}
+              vectorEffect="non-scaling-stroke"
+            />
+          </g>
+        )}
         <g style={{ pointerEvents: "none" }}>
           {shown.map((d) => {
             if (blind && !named.includes(d.en)) return null;
