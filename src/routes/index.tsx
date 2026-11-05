@@ -865,7 +865,7 @@ function FeaturePicker({ settings }: { settings: HomeData["settings"] }) {
       {!settings.hide_atlas && (
         <div className="md:col-span-2 lg:col-span-4">
           <FeatureCard
-            title="Rajasthan Atlas · राजस्थान एटलस"
+            title="Rajasthan Atlas"
             subtitle="Every district, fort, river, mine and pass on one map, with exam facts."
             icon={<Compass className="h-6 w-6 text-sky-700" />}
             gradient="bg-gradient-to-br from-sky-100 to-amber-50 border-sky-200"

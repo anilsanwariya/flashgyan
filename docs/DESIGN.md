@@ -143,6 +143,13 @@ so dark mode works.
   student pages were checked with it forced on and read well; the map stays light, as
   for print.
 
+- The atlas's Layers panel (beside the map, or a drawer on phones with a "Show the map"
+  button): "On the map" sums up what's shown (colouring · lines · kinds of places or the
+  filter) with Reset; then folding sections: "Colour the map by" as tiles with each
+  layer's colours as a strip, "Lines" as switches with a line sample, "Places" with All /
+  None / Default and per-group "All on/off" and counts, "Filters" (asked in exams, time,
+  month; only when there are any) and "Theme pages".
+
 **Admin pages:** dense and practical. Tables, forms and clear status; no decoration.
 
 - Atlas data quality (admin): the Quality tab starts with "Duplicate places" (same name and
