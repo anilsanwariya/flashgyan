@@ -1473,7 +1473,7 @@ export function BotWebhookPanel() {
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
 select cron.schedule('bot-broadcasts', '* * * * *',
-  $$select net.http_post(url := '${w.expected_url}?task=broadcast')$$);`
+  $$select net.http_post(url := '${w.expected_url}?task=broadcast', headers := jsonb_build_object('x-cron-secret', '${w.cron_secret}'))$$);`
     : "";
 
   async function secure() {
