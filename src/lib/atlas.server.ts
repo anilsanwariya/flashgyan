@@ -1705,6 +1705,36 @@ export async function atlasPlace(key: string) {
     facts: ((facts ?? []) as unknown as AtlasFact[]).map(publicFact),
     // Current affairs stories about it (none before their migration).
     news: await (await import("@/lib/atlas-news.server")).placeNews(key).catch(() => []),
+    // Its photo from Wikimedia Commons, with the credit to show.
+    photo: await (await import("@/lib/atlas-photos.server")).placePhoto(key),
+  };
+}
+
+// The editor's photo list: places with the most facts first, with their photo.
+export async function photoQueue(o: { search: string; missing: boolean; page: number }) {
+  const [places, { photos }] = await Promise.all([
+    atlasPublicPlaces(),
+    import("@/lib/atlas-photos.server"),
+  ]);
+  const map = await photos();
+  const s = o.search.trim().toLowerCase();
+  const list = places
+    .filter((p) => !s || p[1].toLowerCase().includes(s) || p[2].includes(o.search.trim()))
+    .filter((p) => !o.missing || !map[p[0]])
+    .sort((a, b) => b[7] - a[7] || a[1].localeCompare(b[1]));
+  const PAGE = 30;
+  return {
+    total: list.length,
+    withPhoto: Object.keys(map).length,
+    rows: list.slice(o.page * PAGE, o.page * PAGE + PAGE).map((p) => ({
+      key: p[0],
+      name: p[1],
+      nameHi: p[2],
+      cat: p[3],
+      district: p[6],
+      facts: p[7],
+      photo: map[p[0]] ?? null,
+    })),
   };
 }
 

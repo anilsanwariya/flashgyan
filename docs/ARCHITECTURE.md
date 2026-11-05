@@ -139,6 +139,10 @@ docs/                     Project documentation (this folder)
   notes (found by chapter title) into the four pages' data, from their headings and tables
   ("Sakas and Jauhars…", "Fairs month by month › Chaitra", "Mewar School › Nathdwara
   style"); `atlasNotesThemeFn` serves it, cached with the atlas's data.
+- **Atlas place photos:** `src/lib/atlas-photos.server.ts` searches the Wikimedia Commons
+  API (with a FlashGyan user agent), keeps only freely licensed files, and saves the
+  editor's choices in `bot_settings` (`atlas_photos`). `atlasPlace` returns a place's
+  photo; the picture is Commons' thumbnail on upload.wikimedia.org.
 - **PWA:** `public/sw.js` and `public/offline.html`, registered by `src/lib/pwa.ts`.
 
 ## Database changes

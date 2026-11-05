@@ -100,6 +100,10 @@ A new public endpoint needs input validation **and** a rate limit, especially if
   when the content needs a script.
 - Values that go into HTML or SVG attributes on public pages are validated (for example,
   map colours pass only if they look like a colour).
+- Atlas place photos: the admin sends only a Commons file title. The server fetches that
+  file's details from commons.wikimedia.org itself and saves a photo only if its thumbnail
+  is on upload.wikimedia.org. The author's name is stripped of HTML and shown as text,
+  and the credit links open with `rel="noreferrer noopener"`.
 
 ## Open questions (owner to resolve)
 

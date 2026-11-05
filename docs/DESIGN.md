@@ -108,6 +108,11 @@ so dark mode works.
   districts coloured by school, with each style's points. Place names in them show the
   place on the map.
 
+- A place with a photo (Wikimedia Commons, chosen by the editor) shows it at the top of its
+  card and page, 3:2, with a one-line credit beneath: "Photo: <author> · <licence> · via
+  Wikimedia Commons", the author linking to the file and the licence to its text. A photo
+  that fails to load is hidden.
+
 **Admin pages:** dense and practical. Tables, forms and clear status; no decoration.
 
 - Atlas data quality (admin): the Quality tab starts with "Duplicate places" (same name and

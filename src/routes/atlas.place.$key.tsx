@@ -21,6 +21,7 @@ import {
   LangToggle,
   PlaceFacts,
   PlaceLinks,
+  PlacePhoto,
   placeMarks,
   useAtlasLang,
 } from "@/components/atlas-ui";
@@ -173,6 +174,7 @@ function PlacePage() {
               <MapIcon className="h-3.5 w-3.5" /> {L(lang, "पूरे एटलस में", "In the full atlas")}
             </Link>
           </div>
+          <PlacePhoto photo={data.photo} alt={pickBi(p.name, lang)} lang={lang} />
           {pickBi(p.note, lang) && <p className="text-sm">{pickBi(p.note, lang)}</p>}
           <NewsList items={data.news ?? []} lang={lang} />
           <AskedInExams lang={lang} place={p.key} />

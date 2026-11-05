@@ -52,6 +52,7 @@ import {
   DistrictPlaces,
   LazyDistrictTopics,
   PlaceLinks,
+  PlacePhoto,
   type PlaceLinkSet,
   LangToggle,
   PlaceFacts,
@@ -662,6 +663,7 @@ function PlaceCard({
   const c = atlasCat(place.cat);
   return (
     <div className="space-y-3" data-place-card>
+      <PlacePhoto photo={q.data.photo} alt={pickBi(place.name, lang)} lang={lang} />
       <div className="flex items-start gap-2">
         <span
           className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-xl"

@@ -155,3 +155,16 @@ the lists stay small.
 **Consequence:** to undo a merge, show the hidden place again and remove its line from
 `atlas_place_merged`. The AI pre-check of "to check" facts only writes a line into the
 fact's note ("AI pre-check: …"); deciding stays with the editor.
+
+## ADR-017: Place photos come from Wikimedia Commons, free licences only, shown with credit (5 November 2026)
+
+**Decision:** The editor chooses each place's photo from Wikimedia Commons in the atlas's
+Photos tab. Only public-domain, CC0, CC BY and CC BY-SA files are offered (no NC or ND
+licences, no restricted files, only JPEG, PNG or WebP). The server reads the chosen file's
+details from Commons again and saves them in `bot_settings` (`atlas_photos`). Students see
+Commons' thumbnail with the author, the licence (linked) and a link to the file.
+**Reason:** a photo makes a place memorable, Commons has free photos of most of Rajasthan's
+sites, and its licences allow reuse with attribution. Linking the thumbnail costs no
+storage. Reading the details back from Commons means the credit is always Commons' own.
+**Consequence:** if a file is deleted or renamed on Commons, its photo stops loading and
+the card hides it. The editor chooses another from the Photos tab.
