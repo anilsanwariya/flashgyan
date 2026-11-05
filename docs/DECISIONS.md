@@ -125,3 +125,17 @@ sessions live in `localStorage`, so a stolen session is also short-lived without
 exists) so that a project with two-factor switched off doesn't lock the admin out; the
 sign-in page explains how to switch it on. Losing every authenticator needs one SQL line
 (see SECURITY.md); a backup authenticator avoids that.
+
+## ADR-015: Subject notes are imported as two aligned files, with approximate pins (6 November 2026)
+
+**Decision:** A subject's notes are imported from the English and the Hindi markdown files
+together, paired line by line, and refused if any line differs in shape. Places in the
+notes, which carry no positions, are pinned at their village or town from the surveyed
+place list (only within their own district) and marked approximate. When the list doesn't
+have them, they are held at the district headquarters, hidden from students until placed.
+**Reason:** the Hindi is the editor's own, not machine translation, and pairing by line
+needs no AI. Approximate pins put the places on the map at once while keeping every one on
+the position checks list to correct.
+**Consequence:** the extraction project must keep the Hindi file's lines exactly parallel
+to the English one. An approximate pin can be a nearby look-alike village, so its note
+says where it was pinned.
