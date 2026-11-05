@@ -99,9 +99,10 @@ docs/                     Project documentation (this folder)
 ## Key patterns
 
 - **Who is the user?** Students have no accounts. Study progress lives in the browser
-  (`localStorage`, `sessionStorage`). Admins sign in with Supabase Auth; admin rights
-  come from the `user_roles` table and are checked on the server by `assertAdmin()` in
-  every admin function. Telegram Mini App users are verified from Telegram's signed
+  (`localStorage`, `sessionStorage`). Admins sign in with Supabase Auth, password plus an
+  authenticator-app code; admin rights come from the `user_roles` table and are checked on
+  the server by `assertAdmin()` (which includes `requireAdminMfa()`) in every admin
+  function. Telegram Mini App users are verified from Telegram's signed
   `initData` (`telegram-init-data.server.ts`).
 - **Reading data:** public pages read through server functions using the public (anon)
   key, so Row Level Security still applies. Admin functions use the service-role client

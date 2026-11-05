@@ -165,6 +165,8 @@ export const getRandomFlashcards = createServerFn({ method: "GET" }).handler(
 // ---------- Admin ----------
 
 async function assertAdmin(userId: string) {
+  const { requireAdminMfa } = await import("@/lib/admin-mfa.server");
+  await requireAdminMfa(userId);
   const admin = await getAdmin();
   const { data, error } = await admin
     .from("user_roles")

@@ -23,6 +23,8 @@ export const listTelegramUsers = createServerFn({ method: "GET" })
       .eq("role", "admin")
       .maybeSingle();
     if (!roles) throw new Error("Forbidden");
+    const { requireAdminMfa } = await import("@/lib/admin-mfa.server");
+    await requireAdminMfa(context.userId);
 
     const { data, error } = await supabaseAdmin
       .from("profiles")

@@ -10,7 +10,7 @@
 | Visitor or student | Nobody (no account) | Read published study content; use SAATHI and public endpoints within rate limits |
 | Telegram Mini App user | Telegram's signed `initData`, checked on the server with the bot token (`telegram-init-data.server.ts`) | The same as a student; recorded in `profiles` |
 | Telegram bot user | Telegram (`chat_id`) | Bot features; admin-only bot commands check the user |
-| Admin | Supabase Auth email and password, plus an `admin` row in `user_roles` | Everything in `/admin` |
+| Admin | Supabase Auth email and password **plus a 6-digit code from an authenticator app** (TOTP), and an `admin` row in `user_roles` | Everything in `/admin` |
 
 There is no sign-up page. The project owner creates admin accounts. Sign-ups should also be
 turned off in Supabase Auth (see **Open questions**).
@@ -25,6 +25,17 @@ turned off in Supabase Auth (see **Open questions**).
   who can sign in.**
 - Admin server functions use the `requireSupabaseAuth` middleware, then `assertAdmin()`,
   then the service-role client. Never use the service-role client before that check.
+- **Two-factor sign-in.** `assertAdmin()` starts with `requireAdminMfa()`
+  (`src/lib/admin-mfa.server.ts`): once an admin has a verified authenticator, a session
+  that only passed the password (`aal1`) is refused. The database's `has_role` applies the
+  same rule (migration `20261226090000_admin_mfa.sql`), so going straight to the database
+  with a password-only token doesn't work either. The sign-in page asks for the code, and
+  makes admins without an authenticator set one up before `/admin` opens. A new admin
+  check must call `requireAdminMfa()`.
+- **Lost authenticator:** add a backup one in Admin → System → Sign-in security. If every
+  one is lost, the project owner runs in Lovable's SQL editor
+  `delete from auth.mfa_factors where user_id = (select id from auth.users where email = '…');`
+  and the admin sets up a new one at the next sign-in.
 - Never trust the browser to hide or lock a feature; check on the server.
 
 ### Database
@@ -118,8 +129,8 @@ All 20 checks on the code (not the live site or dashboards):
 | Rate limiting | Fixed: the Telegram bot's `/ask` and `/answer` had no limit |
 | Telegram signature and webhook secret | Fixed: compared in constant time |
 | Vulnerable dependencies | **Open:** `seroval` (via TanStack; server-function decoding), `pdfjs-dist` (script execution from a malicious PDF), `xlsx` 0.18.5, `@xmldom/xmldom`, `mermaid`/`dompurify`, `zod` 3. Upgrade through Lovable, since `bun.lock` points at its mirror. Build-only tools (`vite`, `shell-quote`, `postcss`…) don't run on the live site |
-| Multi-factor authentication | **Open:** admins sign in with a password only. Supabase supports authenticator-app codes |
-| Admin sessions in `localStorage` | Accepted (Supabase default); keep XSS out and add MFA and a CSP |
+| Multi-factor authentication | **Fixed 5 November 2026:** admins need an authenticator-app code (TOTP), enforced in the sign-in page, every admin server function and the database's `has_role` |
+| Admin sessions in `localStorage` | Accepted (Supabase default); keep XSS out and add a CSP |
 | Security headers | **Open:** no Content-Security-Policy, `X-Frame-Options` or HSTS |
 | Webhook | **Open until set:** the bot accepts unsigned requests until a secret is set in Admin → Telegram bot → Connection |
 | Passwords | Supabase bcrypt. **Open:** set the server-side minimum to 8 and turn on leaked-password protection in Supabase Auth |
