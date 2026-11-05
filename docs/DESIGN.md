@@ -83,6 +83,9 @@ so dark mode works.
   A place block joins the heading it is about (Karni Mata's temple into Karni Mata), the same
   fact shows once, a heading's table keeps only the district's rows, a state-wide list row
   shows only the district's part ("Copper — Anjani"), and the district's name is picked out.
+  In Hindi mode the topics, subtopics, headings and table labels show in Hindi too (the
+  `atlas_headings_hi` setting: from a subject's Hindi notes file at import, and the master
+  map's translated by the background Hindi job).
 
 **Admin pages:** dense and practical. Tables, forms and clear status; no decoration.
 

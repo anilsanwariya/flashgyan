@@ -172,7 +172,7 @@ function DistrictFact({ f, lang, mark }: { f: PublicFact; lang: AtlasLang; mark:
 function FactText({ f, lang, mark }: { f: PublicFact; lang: AtlasLang; mark?: string[] }) {
   const text = pickBi(f.text, lang);
   if (f.head) {
-    const heads = f.head.split(" · ");
+    const heads = (lang === "hi" && f.headHi ? f.headHi : f.head).split(" · ");
     const cells = text.split(" · ");
     if (heads.length > 1 && heads.length === cells.length)
       return (
@@ -188,7 +188,9 @@ function FactText({ f, lang, mark }: { f: PublicFact; lang: AtlasLang; mark?: st
       );
     return (
       <>
-        <span className="block text-[11px] text-muted-foreground">{f.head}</span>
+        <span className="block text-[11px] text-muted-foreground">
+          {lang === "hi" && f.headHi ? f.headHi : f.head}
+        </span>
         <Marked text={text} mark={mark} />
       </>
     );
@@ -232,7 +234,12 @@ export function FactsList({
         <div key={i}>
           {(g.head || !hideChapter) && (
             <p className="text-xs font-semibold text-muted-foreground">
-              {hideChapter ? g.head : [g.chapter, g.head].filter(Boolean).join(" · ")}
+              {(() => {
+                const f0 = g.facts[0];
+                const head = (lang === "hi" && f0.headingHi) || g.head;
+                const chapter = (lang === "hi" && f0.chapterHi) || g.chapter;
+                return hideChapter ? head : [chapter, head].filter(Boolean).join(" · ");
+              })()}
             </p>
           )}
           <ul className="mt-1 space-y-1.5">
@@ -324,10 +331,12 @@ export function FactsList({
 // list joins the heading it is about ("Karni Mata temple, Deshnok" → "Karni
 // Mata"), and the same fact twice is shown once.
 
-type Block = { label: string; facts: PublicFact[] };
-type Entity = { name: string; blocks: Block[]; places: string[] };
-type Subtopic = { name: string; entities: Entity[]; loose: PublicFact[] };
-type Topic = { key: string; name: string; subtopics: Subtopic[]; count: number };
+// `name` / `label`: the English heading (what groups them); `title`: what
+// is shown, in the reader's language.
+type Block = { label: string; title: string; facts: PublicFact[] };
+type Entity = { name: string; title: string; blocks: Block[]; places: string[] };
+type Subtopic = { name: string; title: string; entities: Entity[]; loose: PublicFact[] };
+type Topic = { key: string; name: string; title: string; subtopics: Subtopic[]; count: number };
 
 const KEY_FACT =
   /^(also called|other names?|where|built \/ founded \/ established|propagator|distribution|उपनाम|अन्य नाम|कहाँ|स्थान)\s*:/i;
@@ -340,7 +349,7 @@ const baseName = (s: string) =>
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 
-function districtTopics(facts: PublicFact[], mark: string[]): Topic[] {
+function districtTopics(facts: PublicFact[], mark: string[], lang: AtlasLang): Topic[] {
   const seen = new Set<string>();
   const names = mark.filter((w) => w.length >= 2).map((w) => w.toLowerCase());
   const mine = (f: PublicFact) =>
@@ -351,25 +360,43 @@ function districtTopics(facts: PublicFact[], mark: string[]): Topic[] {
     if (seen.has(sig)) continue;
     seen.add(sig);
     const parts = f.heading.split(" › ").filter(Boolean);
+    const hiParts = (f.headingHi || "").split(" › ");
+    const show = (i: number, j = i + 1) =>
+      lang === "hi" && f.headingHi
+        ? parts
+            .map((p, k) => hiParts[k] || p)
+            .slice(i, j)
+            .join(" › ")
+        : parts.slice(i, j).join(" › ");
     // A table under a heading is a list of separate records ("Other folk
     // deities"): only the district's rows.
     if (f.head && parts.length >= 2 && !mine(f)) continue;
     const key = f.chapterKey || f.chapter;
     let t = topics.get(key);
-    if (!t) topics.set(key, (t = { key, name: f.chapter, subtopics: [], count: 0 }));
+    if (!t)
+      topics.set(
+        key,
+        (t = {
+          key,
+          name: f.chapter,
+          title: (lang === "hi" && f.chapterHi) || f.chapter,
+          subtopics: [],
+          count: 0,
+        }),
+      );
     t.count++;
     const subName = parts[0] ?? "";
     let sub = t.subtopics.find((x) => x.name === subName);
-    if (!sub) t.subtopics.push((sub = { name: subName, entities: [], loose: [] }));
+    if (!sub) t.subtopics.push((sub = { name: subName, title: show(0), entities: [], loose: [] }));
     if (parts.length < 2) {
       sub.loose.push(f);
       continue;
     }
     let e = sub.entities.find((x) => x.name === parts[1]);
-    if (!e) sub.entities.push((e = { name: parts[1], blocks: [], places: [] }));
+    if (!e) sub.entities.push((e = { name: parts[1], title: show(1), blocks: [], places: [] }));
     const label = parts.slice(2).join(" › ");
     let b = e.blocks.find((x) => x.label === label);
-    if (!b) e.blocks.push((b = { label, facts: [] }));
+    if (!b) e.blocks.push((b = { label, title: show(2, parts.length), facts: [] }));
     b.facts.push(f);
   }
   // Place blocks join the heading they are about, in the same topic.
@@ -388,6 +415,7 @@ function districtTopics(facts: PublicFact[], mark: string[]): Topic[] {
       for (const b of pe.blocks)
         host.blocks.push({
           label: `📍 ${pe.name}${b.label ? ` › ${b.label}` : ""}`,
+          title: `📍 ${pe.title}${b.title ? ` › ${b.title}` : ""}`,
           facts: b.facts,
         });
       return false;
@@ -451,7 +479,7 @@ function EntityCard({
     >
       <header className="mb-1.5 flex items-start gap-2">
         <h4 className="min-w-0 flex-1 font-serif text-base font-bold leading-snug text-[#1f2a5c] dark:text-indigo-200">
-          {e.name}
+          {e.title}
         </h4>
         {placeKey && onPlace && (
           <button
@@ -486,9 +514,9 @@ function EntityCard({
           left -= shown.length;
           return (
             <div key={bi}>
-              {b.label && (
+              {b.title && (
                 <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {b.label}
+                  {b.title}
                 </p>
               )}
               <ul className="space-y-1">
@@ -533,7 +561,7 @@ export function DistrictTopics({
   placeOf?: (name: string) => string | null;
   onPlace?: (key: string) => void;
 }) {
-  const topics = districtTopics(facts, mark);
+  const topics = districtTopics(facts, mark, lang);
   const [more, setMore] = useState<string[]>([]);
   if (!topics.length)
     return (
@@ -552,7 +580,7 @@ export function DistrictTopics({
         >
           <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
             <span className="min-w-0 flex-1 text-sm font-semibold leading-snug">
-              {t.name || (lang === "hi" ? "अन्य" : "Other")}
+              {t.title || (lang === "hi" ? "अन्य" : "Other")}
             </span>
             <span className="rounded-full bg-muted px-2 text-xs font-medium text-muted-foreground">
               {t.count}
@@ -570,7 +598,7 @@ export function DistrictTopics({
                 <section key={s.name} data-fact-subtopic={s.name}>
                   {s.name && (
                     <h3 className="mb-2 border-l-4 border-[#1f2a5c] pl-2 text-xs font-bold uppercase tracking-wide text-[#1f2a5c] dark:border-indigo-300 dark:text-indigo-200">
-                      {s.name}
+                      {s.title}
                     </h3>
                   )}
                   <div className="space-y-2">

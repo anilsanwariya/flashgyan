@@ -207,6 +207,7 @@ On the admin Atlas page, **Import a subject's notes** takes the subject's Englis
 | `### Revision questions` lines | Facts marked as revision cards (MCQ practice from them is the next stage) |
 | `[verify: …]` / `[सत्यापन: …]` | The fact comes in "to check" (Facts tab), not shown to students, with the doubt as its note. The marker itself is never shown to students |
 | `(as of …)` | The fact is on the Recheck list |
+| The Hindi file's headings | The topics, headings, labels and table headers in Hindi when students read in Hindi |
 | The same subject imported again | Replaces only that subject's facts. Facts you edited or already checked stay as they are; facts no longer in the file are marked, not deleted |
 | `## Places index` | Not imported (the place blocks carry everything) |
 
