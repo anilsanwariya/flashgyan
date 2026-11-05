@@ -17,7 +17,13 @@ import { SaveButton, ShareButton } from "@/components/atlas-actions";
 import { NewsList } from "@/components/atlas-news";
 import { AskedInExams } from "@/components/atlas-exams";
 import { ReportButton } from "@/components/atlas-report";
-import { LangToggle, PlaceFacts, placeMarks, useAtlasLang } from "@/components/atlas-ui";
+import {
+  LangToggle,
+  PlaceFacts,
+  PlaceLinks,
+  placeMarks,
+  useAtlasLang,
+} from "@/components/atlas-ui";
 
 // A place's own page: what a shared link opens, with its link preview
 // (the place's name, district and a fact, and its picture on the map).
@@ -170,13 +176,20 @@ function PlacePage() {
           {pickBi(p.note, lang) && <p className="text-sm">{pickBi(p.note, lang)}</p>}
           <NewsList items={data.news ?? []} lang={lang} />
           <AskedInExams lang={lang} place={p.key} />
-          <PlaceFacts
-            facts={data.facts}
-            mentions={data.mentions}
-            lang={lang}
-            title={pickBi(p.name, lang)}
-            mark={placeMarks(p.name)}
-          />
+          <PlaceLinks
+            value={{
+              names: new Map((places.data ?? []).map((x) => [x[0], { en: x[1], hi: x[2] }])),
+              self: p.key,
+            }}
+          >
+            <PlaceFacts
+              facts={data.facts}
+              mentions={data.mentions}
+              lang={lang}
+              title={pickBi(p.name, lang)}
+              mark={placeMarks(p.name)}
+            />
+          </PlaceLinks>
         </section>
         {base.data && (
           <AtlasMap

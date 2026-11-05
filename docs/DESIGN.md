@@ -93,6 +93,12 @@ so dark mode works.
   In Hindi mode the topics, subtopics, headings and table labels show in Hindi too (the
   `atlas_headings_hi` setting: from a subject's Hindi notes file at import, and the master
   map's translated by the background Hindi job).
+- In a fact, the names of the places it is linked to are links (dotted underline, primary
+  colour): on the map page they open the place's card beside the map, elsewhere its page.
+  Only the first mention of each place in a line links, and a card doesn't link to itself.
+- A district card's Facts tab lists its topics with counts at once; a topic's facts load the
+  first time it is opened (grey placeholder lines while they come), and the Places tab's
+  when that tab is opened.
 
 **Admin pages:** dense and practical. Tables, forms and clear status; no decoration.
 

@@ -379,6 +379,19 @@ export const atlasEntityFactsFn = createServerFn({ method: "POST" })
     return (await server()).atlasEntityFacts(data.entity);
   });
 
+// A district card's facts: its topics first, then a topic's facts (or the
+// Places tab's, "places") when opened.
+export const atlasDistrictOutlineFn = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => z.object({ district }).parse(d))
+  .handler(async ({ data }) => {
+    void (await usage()).bumpUsage([{ kind: "district", ref: data.district }]);
+    return (await server()).atlasDistrictOutline(data.district);
+  });
+
+export const atlasDistrictPartFn = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => z.object({ district, part: z.string().min(1).max(200) }).parse(d))
+  .handler(async ({ data }) => (await server()).atlasDistrictPart(data.district, data.part));
+
 export const atlasDistrictFn = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ district }).parse(d))
   .handler(async ({ data }) => {

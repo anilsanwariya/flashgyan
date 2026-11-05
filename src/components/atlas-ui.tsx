@@ -1,9 +1,19 @@
 // Small pieces of the students' atlas: the language switch (remembered on
 // the device) and a list of the notes' facts, grouped under their headings.
-import { useEffect, useState } from "react";
-import { ATLAS_CATS, ATLAS_GROUPS, atlasCat, factKinds, pickBi, type AtlasLang } from "@/lib/atlas";
+import { createContext, useContext, useEffect, useState } from "react";
+import { Link } from "@tanstack/react-router";
+import {
+  ATLAS_CATS,
+  ATLAS_GROUPS,
+  atlasCat,
+  factKinds,
+  pickBi,
+  shownFacts,
+  type AtlasLang,
+  type FactsOutline,
+} from "@/lib/atlas";
 import type { PublicFact } from "@/lib/atlas.functions";
-import { useAtlasBase } from "@/components/atlas-data";
+import { useAtlasBase, useAtlasDistrictPart } from "@/components/atlas-data";
 import { ReportButton } from "@/components/atlas-report";
 
 const LANG_KEY = "atlas-lang";
@@ -60,31 +70,122 @@ export function LangToggle({
   );
 }
 
-// Words picked out in a fact (the district a list is about).
-function Marked({ text, mark }: { text: string; mark?: string[] }) {
-  const words = (mark ?? []).filter((w) => w.length >= 2);
-  if (!words.length) return <>{text}</>;
-  const re = new RegExp(
-    `(${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`,
-    "gi",
-  );
-  const parts = text.split(re);
+// ---------- Place names in facts, tappable ----------
+//
+// A page that knows the atlas's places gives their names (and how to open
+// one: the card beside the map, else the place's page); a fact names the
+// places it is linked to, and those names in its text become links.
+
+export type PlaceLinkSet = {
+  names: Map<string, { en: string; hi: string }>;
+  open?: (key: string) => void;
+  // The place being shown (not linked to itself).
+  self?: string;
+};
+const PlaceLinkCtx = createContext<PlaceLinkSet | null>(null);
+export const PlaceLinks = PlaceLinkCtx.Provider;
+const FactPlacesCtx = createContext<string[]>([]);
+
+// The names a place goes by in a fact: "Junagarh fort, Bikaner" →
+// "Junagarh fort", "Junagarh"; its Hindi name likewise.
+const TYPE_WORDS =
+  /(^|\s)(fort|temple|palace|lake|dam|sanctuary|fair|festival|mahal|mandir|dargah|baori|ji|किला|दुर्ग|मंदिर|महल|झील|बांध|मेला|दरगाह|बावड़ी|जी)(?=\s|$)/giu;
+export function placeLinkWords(name: { en: string; hi: string }): string[] {
+  const out = new Set<string>();
+  for (const x of [name.en, name.hi]) {
+    const first = (x.split(",")[0] ?? "")
+      .replace(/\([^)]*\)/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (first.length >= 3) out.add(first);
+    const bare = first.replace(TYPE_WORDS, " ").replace(/\s+/g, " ").trim();
+    if (bare.length >= 4) out.add(bare);
+  }
+  return [...out];
+}
+
+function PlaceLink({ k, children }: { k: string; children: React.ReactNode }) {
+  const ctx = useContext(PlaceLinkCtx);
+  const cls =
+    "rounded-sm font-medium text-primary underline decoration-dotted decoration-1 underline-offset-2 hover:decoration-solid";
+  if (ctx?.open)
+    return (
+      <button
+        type="button"
+        className={cls}
+        data-place-link={k}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          ctx.open!(k);
+        }}
+      >
+        {children}
+      </button>
+    );
   return (
-    <>
-      {parts.map((x, i) =>
-        i % 2 ? (
-          <mark
-            key={i}
-            className="rounded bg-amber-200/70 px-0.5 font-medium text-inherit dark:bg-amber-500/30"
-          >
-            {x}
-          </mark>
-        ) : (
-          x
-        ),
-      )}
-    </>
+    <Link to="/atlas/place/$key" params={{ key: k }} className={cls} data-place-link={k}>
+      {children}
+    </Link>
   );
+}
+
+const esc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const NOT_LETTER = "[\\p{L}\\p{M}\\p{N}]";
+
+// Words picked out in a fact (the district a list is about), and the names
+// of the places it is linked to as links.
+function Marked({ text, mark }: { text: string; mark?: string[] }) {
+  const links = useContext(PlaceLinkCtx);
+  const factPlaces = useContext(FactPlacesCtx);
+  const words = (mark ?? []).filter((w) => w.length >= 2);
+  const terms = new Map<string, string>();
+  if (links)
+    for (const k of factPlaces) {
+      if (k === links.self) continue;
+      const n = links.names.get(k);
+      if (n) for (const w of placeLinkWords(n)) terms.set(w.toLowerCase(), k);
+    }
+  if (!words.length && !terms.size) return <>{text}</>;
+  const longFirst = (a: string[]) => [...a].sort((x, y) => y.length - x.length).map(esc);
+  // Links match whole words only; marks anywhere (as before).
+  const parts = [
+    terms.size
+      ? `(?<!${NOT_LETTER})(${longFirst([...terms.keys()]).join("|")})(?!${NOT_LETTER})`
+      : "",
+    words.length ? `(${longFirst(words).join("|")})` : "",
+  ].filter(Boolean);
+  const re = new RegExp(parts.join("|"), "giu");
+  const linkGroup = terms.size ? 1 : 0;
+  const out: React.ReactNode[] = [];
+  const used = new Set<string>();
+  let last = 0;
+  for (const m of text.matchAll(re)) {
+    const at = m.index ?? 0;
+    if (at > last) out.push(text.slice(last, at));
+    const hit = m[0];
+    const key = linkGroup && m[1] ? terms.get(m[1].toLowerCase()) : undefined;
+    if (key && !used.has(key)) {
+      used.add(key);
+      out.push(
+        <PlaceLink key={at} k={key}>
+          {hit}
+        </PlaceLink>,
+      );
+    } else if (words.some((w) => w.toLowerCase() === hit.toLowerCase()) || !key)
+      out.push(
+        <mark
+          key={at}
+          className="rounded bg-amber-200/70 px-0.5 font-medium text-inherit dark:bg-amber-500/30"
+        >
+          {hit}
+        </mark>,
+      );
+    else out.push(hit);
+    last = at + hit.length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return <>{out}</>;
 }
 
 // A fact's text. A table row ("III · Sanyukt Rajasthan · 18 Apr 1948" under
@@ -117,7 +218,14 @@ function focusRow(text: string, names: string[]): { subject: string; parts: stri
 
 // In a district's facts: a state-wide list row shown for this district only
 // (the whole row a tap away), and a long paragraph folded to three lines.
-function DistrictFact({ f, lang, mark }: { f: PublicFact; lang: AtlasLang; mark: string[] }) {
+function DistrictFact(props: { f: PublicFact; lang: AtlasLang; mark: string[] }) {
+  return (
+    <FactPlacesCtx.Provider value={props.f.places}>
+      <DistrictFactText {...props} />
+    </FactPlacesCtx.Provider>
+  );
+}
+function DistrictFactText({ f, lang, mark }: { f: PublicFact; lang: AtlasLang; mark: string[] }) {
   const [open, setOpen] = useState(false);
   const text = pickBi(f.text, lang);
   // Only table rows: a mnemonic or answer with "·" in it isn't a list.
@@ -169,7 +277,14 @@ function DistrictFact({ f, lang, mark }: { f: PublicFact; lang: AtlasLang; mark:
   return <FactText f={f} lang={lang} mark={mark} />;
 }
 
-function FactText({ f, lang, mark }: { f: PublicFact; lang: AtlasLang; mark?: string[] }) {
+function FactText(props: { f: PublicFact; lang: AtlasLang; mark?: string[] }) {
+  return (
+    <FactPlacesCtx.Provider value={props.f.places}>
+      <FactTextInner {...props} />
+    </FactPlacesCtx.Provider>
+  );
+}
+function FactTextInner({ f, lang, mark }: { f: PublicFact; lang: AtlasLang; mark?: string[] }) {
   const text = pickBi(f.text, lang);
   if (f.head) {
     const heads = (lang === "hi" && f.headHi ? f.headHi : f.head).split(" · ");
@@ -350,15 +465,8 @@ const baseName = (s: string) =>
     .trim();
 
 function districtTopics(facts: PublicFact[], mark: string[], lang: AtlasLang): Topic[] {
-  const seen = new Set<string>();
-  const names = mark.filter((w) => w.length >= 2).map((w) => w.toLowerCase());
-  const mine = (f: PublicFact) =>
-    names.some((w) => `${f.text.en} ${f.text.hi}`.toLowerCase().includes(w));
   const topics = new Map<string, Topic>();
-  for (const f of facts) {
-    const sig = `${f.chapterKey}|${f.text.en.trim().toLowerCase()}`;
-    if (seen.has(sig)) continue;
-    seen.add(sig);
+  for (const f of shownFacts(facts, mark)) {
     const parts = f.heading.split(" › ").filter(Boolean);
     const hiParts = (f.headingHi || "").split(" › ");
     const show = (i: number, j = i + 1) =>
@@ -368,9 +476,6 @@ function districtTopics(facts: PublicFact[], mark: string[], lang: AtlasLang): T
             .slice(i, j)
             .join(" › ")
         : parts.slice(i, j).join(" › ");
-    // A table under a heading is a list of separate records ("Other folk
-    // deities"): only the district's rows.
-    if (f.head && parts.length >= 2 && !mine(f)) continue;
     const key = f.chapterKey || f.chapter;
     let t = topics.get(key);
     if (!t)
@@ -478,7 +583,9 @@ function EntityCard({
     .filter((b) => b.facts.length);
   const total = rest.reduce((n, b) => n + b.facts.length, 0);
   let left = all ? Infinity : limit;
-  return (
+  const links = useContext(PlaceLinkCtx);
+  // Its own name isn't a link inside its own card.
+  const article = (
     <article
       className="rounded-xl border border-border bg-card p-3 shadow-sm"
       data-fact-entity={e.name}
@@ -510,7 +617,9 @@ function EntityCard({
               <div key={f.id} className="flex gap-2">
                 <dt className="w-24 shrink-0 text-xs text-muted-foreground">{t.slice(0, i)}</dt>
                 <dd className="min-w-0">
-                  <Marked text={t.slice(i + 1).trim()} mark={mark} />
+                  <FactPlacesCtx.Provider value={f.places}>
+                    <Marked text={t.slice(i + 1).trim()} mark={mark} />
+                  </FactPlacesCtx.Provider>
                 </dd>
               </div>
             );
@@ -555,6 +664,11 @@ function EntityCard({
       )}
     </article>
   );
+  return links && placeKey ? (
+    <PlaceLinks value={{ ...links, self: placeKey }}>{article}</PlaceLinks>
+  ) : (
+    article
+  );
 }
 
 export function DistrictTopics({
@@ -575,82 +689,219 @@ export function DistrictTopics({
   openFirst?: boolean;
 }) {
   const topics = districtTopics(facts, mark, lang);
-  const [more, setMore] = useState<string[]>([]);
-  if (!topics.length)
-    return (
-      <p className="text-sm text-muted-foreground">
-        {lang === "hi" ? "अभी कोई तथ्य नहीं।" : "No facts yet."}
-      </p>
-    );
+  if (!topics.length) return <NoFacts lang={lang} />;
   return (
     <div className="space-y-2" data-fact-sections>
       {topics.map((t, i) => (
-        <details
+        <TopicSection
           key={t.key}
+          name={t.name}
+          title={t.title}
+          count={t.count}
+          lang={lang}
           open={openFirst && i === 0}
-          className="group/s rounded-xl border border-border bg-background"
-          data-fact-section={t.name}
         >
-          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
-            <span className="min-w-0 flex-1 text-sm font-semibold leading-snug">
-              {t.title || (lang === "hi" ? "अन्य" : "Other")}
-            </span>
-            <span className="rounded-full bg-muted px-2 text-xs font-medium text-muted-foreground">
-              {t.count}
-            </span>
-            <span className="text-muted-foreground transition-transform group-open/s:rotate-90">
-              ›
-            </span>
-          </summary>
-          <div className="space-y-4 border-t border-border p-2.5">
-            {t.subtopics.map((s) => {
-              const id = `${t.key}|${s.name}`;
-              const open = more.includes(id);
-              const ents = open ? s.entities : s.entities.slice(0, 5);
-              return (
-                <section key={s.name} data-fact-subtopic={s.name}>
-                  {s.name && (
-                    <h3 className="mb-2 border-l-4 border-[#1f2a5c] pl-2 text-xs font-bold uppercase tracking-wide text-[#1f2a5c] dark:border-indigo-300 dark:text-indigo-200">
-                      {s.title}
-                    </h3>
-                  )}
-                  <div className="space-y-2">
-                    {ents.map((e) => (
-                      <EntityCard
-                        key={e.name}
-                        e={e}
-                        lang={lang}
-                        mark={mark}
-                        placeOf={placeOf}
-                        onPlace={onPlace}
-                      />
-                    ))}
-                  </div>
-                  {s.entities.length > ents.length && (
-                    <button
-                      type="button"
-                      onClick={() => setMore([...more, id])}
-                      className="mt-1.5 text-xs font-medium text-primary hover:underline"
-                    >
-                      {lang === "hi"
-                        ? `${s.entities.length - ents.length} और`
-                        : `${s.entities.length - ents.length} more`}
-                    </button>
-                  )}
-                  {s.loose.length > 0 && (
-                    <ul className="mt-1 space-y-1.5 text-sm leading-relaxed">
-                      {s.loose.map((f) => (
-                        <Bullet key={f.id} f={f} lang={lang} mark={mark} />
-                      ))}
-                    </ul>
-                  )}
-                </section>
-              );
-            })}
-          </div>
-        </details>
+          <TopicBody t={t} lang={lang} mark={mark} placeOf={placeOf} onPlace={onPlace} />
+        </TopicSection>
       ))}
     </div>
+  );
+}
+
+const NoFacts = ({ lang }: { lang: AtlasLang }) => (
+  <p className="text-sm text-muted-foreground">
+    {lang === "hi" ? "अभी कोई तथ्य नहीं।" : "No facts yet."}
+  </p>
+);
+
+// A topic, folded; its body is drawn only once it has been opened.
+function TopicSection({
+  name,
+  title,
+  count,
+  lang,
+  open: openAtFirst,
+  children,
+}: {
+  name: string;
+  title: string;
+  count: number;
+  lang: AtlasLang;
+  open: boolean;
+  children: React.ReactNode;
+}) {
+  const [opened, setOpened] = useState(openAtFirst);
+  return (
+    <details
+      open={openAtFirst}
+      onToggle={(e) => {
+        if ((e.currentTarget as HTMLDetailsElement).open) setOpened(true);
+      }}
+      className="group/s rounded-xl border border-border bg-background"
+      data-fact-section={name}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+        <span className="min-w-0 flex-1 text-sm font-semibold leading-snug">
+          {title || (lang === "hi" ? "अन्य" : "Other")}
+        </span>
+        <span className="rounded-full bg-muted px-2 text-xs font-medium text-muted-foreground">
+          {count}
+        </span>
+        <span className="text-muted-foreground transition-transform group-open/s:rotate-90">›</span>
+      </summary>
+      {opened && <div className="space-y-4 border-t border-border p-2.5">{children}</div>}
+    </details>
+  );
+}
+
+function TopicBody({
+  t,
+  lang,
+  mark,
+  placeOf,
+  onPlace,
+}: {
+  t: Topic;
+  lang: AtlasLang;
+  mark: string[];
+  placeOf?: (name: string) => string | null;
+  onPlace?: (key: string) => void;
+}) {
+  const [more, setMore] = useState<string[]>([]);
+  return (
+    <>
+      {t.subtopics.map((s) => {
+        const open = more.includes(s.name);
+        const ents = open ? s.entities : s.entities.slice(0, 5);
+        return (
+          <section key={s.name} data-fact-subtopic={s.name}>
+            {s.name && (
+              <h3 className="mb-2 border-l-4 border-[#1f2a5c] pl-2 text-xs font-bold uppercase tracking-wide text-[#1f2a5c] dark:border-indigo-300 dark:text-indigo-200">
+                {s.title}
+              </h3>
+            )}
+            <div className="space-y-2">
+              {ents.map((e) => (
+                <EntityCard
+                  key={e.name}
+                  e={e}
+                  lang={lang}
+                  mark={mark}
+                  placeOf={placeOf}
+                  onPlace={onPlace}
+                />
+              ))}
+            </div>
+            {s.entities.length > ents.length && (
+              <button
+                type="button"
+                onClick={() => setMore([...more, s.name])}
+                className="mt-1.5 text-xs font-medium text-primary hover:underline"
+              >
+                {lang === "hi"
+                  ? `${s.entities.length - ents.length} और`
+                  : `${s.entities.length - ents.length} more`}
+              </button>
+            )}
+            {s.loose.length > 0 && (
+              <ul className="mt-1 space-y-1.5 text-sm leading-relaxed">
+                {s.loose.map((f) => (
+                  <Bullet key={f.id} f={f} lang={lang} mark={mark} />
+                ))}
+              </ul>
+            )}
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
+// A district's topics as on DistrictTopics, from its outline: a topic's facts
+// are fetched when it is first opened.
+export function LazyDistrictTopics({
+  district,
+  outline,
+  lang,
+  mark,
+  placeOf,
+  onPlace,
+}: {
+  district: string;
+  outline: FactsOutline;
+  lang: AtlasLang;
+  mark: string[];
+  placeOf?: (name: string) => string | null;
+  onPlace?: (key: string) => void;
+}) {
+  if (!outline.topics.length) return <NoFacts lang={lang} />;
+  return (
+    <div className="space-y-2" data-fact-sections>
+      {outline.topics.map((t, i) => (
+        <TopicSection
+          key={t.key}
+          name={t.title.en}
+          title={(lang === "hi" && t.title.hi) || t.title.en}
+          count={t.count}
+          lang={lang}
+          open={i === 0}
+        >
+          <LazyTopic
+            district={district}
+            topic={t.key}
+            lang={lang}
+            mark={mark}
+            placeOf={placeOf}
+            onPlace={onPlace}
+          />
+        </TopicSection>
+      ))}
+    </div>
+  );
+}
+
+function LazyTopic({
+  district,
+  topic,
+  lang,
+  mark,
+  placeOf,
+  onPlace,
+}: {
+  district: string;
+  topic: string;
+  lang: AtlasLang;
+  mark: string[];
+  placeOf?: (name: string) => string | null;
+  onPlace?: (key: string) => void;
+}) {
+  const q = useAtlasDistrictPart(district, topic, mark);
+  if (q.isError)
+    return (
+      <p className="text-sm text-muted-foreground">
+        {lang === "hi" ? "लोड नहीं हो सका।" : "Couldn't load."}{" "}
+        <button
+          type="button"
+          className="font-medium text-primary underline"
+          onClick={() => q.refetch()}
+        >
+          {lang === "hi" ? "फिर कोशिश करें" : "Try again"}
+        </button>
+      </p>
+    );
+  if (!q.data)
+    return (
+      <div className="space-y-2" aria-busy="true" data-topic-loading>
+        <div className="h-4 w-2/3 animate-pulse rounded bg-muted" />
+        <div className="h-4 w-5/6 animate-pulse rounded bg-muted" />
+        <div className="h-4 w-1/2 animate-pulse rounded bg-muted" />
+      </div>
+    );
+  const t = districtTopics(q.data, mark, lang)[0];
+  return t ? (
+    <TopicBody t={t} lang={lang} mark={mark} placeOf={placeOf} onPlace={onPlace} />
+  ) : (
+    <NoFacts lang={lang} />
   );
 }
 

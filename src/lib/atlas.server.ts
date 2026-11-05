@@ -34,6 +34,10 @@ import {
   chapterOrder,
   factEntityKey,
   APPROX_NOTE,
+  shownFacts,
+  factsOutline,
+  factTopicKey,
+  type FactsOutline,
 } from "@/lib/atlas";
 import { parseMasterMap, slug, districtAt } from "@/lib/atlas-import.server";
 import { practiceStep } from "@/lib/atlas-practice.server";
@@ -1404,7 +1408,12 @@ export async function publishDistrict(district: string, on: boolean) {
 
 // ---------- Students: public reads (verified and published only) ----------
 
-let cache: { at: number; base?: unknown; places?: unknown } = { at: 0 };
+let cache: {
+  at: number;
+  base?: unknown;
+  places?: unknown;
+  districts?: Map<string, Promise<PublicFact[]>>;
+} = { at: 0 };
 const invalidate = () => {
   cache = { at: 0 };
 };
@@ -1752,6 +1761,43 @@ export async function atlasEntityFacts(entity: string): Promise<PublicFact[]> {
         a.position - b.position,
     )
     .map(publicFact);
+}
+
+// ---------- A district's facts, a topic at a time ----------
+//
+// The district card first gets its topics and their counts; a topic's facts
+// come when it is opened, and the Places tab's when that is. The district's
+// facts are worked out once and kept with the atlas's other data.
+
+function districtPublicFacts(district: string): Promise<PublicFact[]> {
+  const c = fresh();
+  c.districts ??= new Map();
+  let p = c.districts.get(district);
+  if (!p) {
+    p = atlasEntityFacts(`D:${district}`);
+    p.catch(() => c.districts?.delete(district));
+    c.districts.set(district, p);
+  }
+  return p;
+}
+async function districtShown(district: string): Promise<PublicFact[]> {
+  const d = RAJ_DISTRICTS.find((x) => x.en === district);
+  return shownFacts(await districtPublicFacts(district), d ? [d.en, d.hi] : []);
+}
+
+export async function atlasDistrictOutline(district: string): Promise<FactsOutline> {
+  return factsOutline(await districtShown(district));
+}
+
+// One topic's facts (its key), or "places": the facts on the district's places.
+export async function atlasDistrictPart(district: string, part: string): Promise<PublicFact[]> {
+  if (part !== "places")
+    return (await districtShown(district)).filter((f) => factTopicKey(f) === part);
+  const all = await districtPublicFacts(district);
+  const keys = new Set(
+    (await atlasPublicPlaces()).filter((p) => p[6] === district).map((p) => p[0]),
+  );
+  return all.filter((f) => f.places.some((k) => keys.has(k)));
 }
 
 // A district's page: its published overview, details and places.
