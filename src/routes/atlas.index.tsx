@@ -47,7 +47,13 @@ import {
   useAtlasPlace,
   useAtlasPlaces,
 } from "@/components/atlas-data";
-import { DistrictTopics, FactsList, LangToggle, useAtlasLang } from "@/components/atlas-ui";
+import {
+  DistrictPlaces,
+  DistrictTopics,
+  FactsList,
+  LangToggle,
+  useAtlasLang,
+} from "@/components/atlas-ui";
 
 export const Route = createFileRoute("/atlas/")({
   ssr: false,
@@ -983,80 +989,24 @@ function DistrictCard({
         </div>
       )}
       {tab === "places" && (
-        <div className="space-y-2" role="tabpanel" data-district-places>
-          {!groups.length && (
-            <p className="text-sm text-muted-foreground">
-              {L(lang, "अभी कोई स्थान नहीं।", "No places yet.")}
-            </p>
+        <div role="tabpanel">
+          {q.data ? (
+            <DistrictPlaces
+              places={mine.map((p) => ({
+                key: p[0],
+                name: p[1],
+                title: placeShortName(lang === "hi" ? p[2] || p[1] : p[1], [d.en, d.hi]),
+                cat: p[3],
+              }))}
+              facts={facts}
+              lang={lang}
+              mark={[d.en, d.hi]}
+              onPlace={onPlace}
+              open={openGroups?.[0] ?? null}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">…</p>
           )}
-          {groups.map(({ g, list }) => {
-            const current = openGroups ?? [groups[0].g.key];
-            const open = current.includes(g.key);
-            const all = current.includes(`${g.key}:all`);
-            const shownList = all ? list : list.slice(0, 8);
-            return (
-              <section
-                key={g.key}
-                className="rounded-xl border border-border"
-                data-place-group={g.key}
-              >
-                <button
-                  type="button"
-                  aria-expanded={open}
-                  onClick={() =>
-                    setOpenGroups(open ? current.filter((k) => k !== g.key) : [...current, g.key])
-                  }
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold"
-                >
-                  <i
-                    className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ background: g.color }}
-                  />
-                  <span className="min-w-0 flex-1">{pickBi(g.name, lang)}</span>
-                  <span className="rounded-full bg-muted px-2 text-xs font-medium text-muted-foreground">
-                    {list.length}
-                  </span>
-                  <span
-                    className={`text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
-                  >
-                    ›
-                  </span>
-                </button>
-                {open && (
-                  <ul className="divide-y divide-border border-t border-border">
-                    {shownList.map((p) => (
-                      <li key={p[0]}>
-                        <button
-                          type="button"
-                          onClick={() => onPlace(p[0])}
-                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted"
-                        >
-                          <span className="w-5 shrink-0 text-center">{atlasCat(p[3]).icon}</span>
-                          <span className="min-w-0 flex-1">
-                            {placeShortName(lang === "hi" ? p[2] || p[1] : p[1], [d.en, d.hi])}
-                          </span>
-                          <span className="shrink-0 text-[11px] text-muted-foreground">
-                            {pickBi(atlasCat(p[3]).name, lang).split(/\s*[/(]/)[0]}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                    {list.length > shownList.length && (
-                      <li>
-                        <button
-                          type="button"
-                          onClick={() => setOpenGroups([...current, `${g.key}:all`])}
-                          className="w-full px-3 py-1.5 text-left text-sm font-medium text-primary"
-                        >
-                          {L(lang, `सभी ${list.length} दिखाएँ`, `Show all ${list.length}`)}
-                        </button>
-                      </li>
-                    )}
-                  </ul>
-                )}
-              </section>
-            );
-          })}
         </div>
       )}
       {tab === "facts" && (

@@ -1,7 +1,7 @@
 // Small pieces of the students' atlas: the language switch (remembered on
 // the device) and a list of the notes' facts, grouped under their headings.
 import { useEffect, useState } from "react";
-import { factKinds, pickBi, type AtlasLang } from "@/lib/atlas";
+import { ATLAS_CATS, ATLAS_GROUPS, atlasCat, factKinds, pickBi, type AtlasLang } from "@/lib/atlas";
 import type { PublicFact } from "@/lib/atlas.functions";
 import { useAtlasBase } from "@/components/atlas-data";
 import { ReportButton } from "@/components/atlas-report";
@@ -456,12 +456,18 @@ function EntityCard({
   mark,
   placeOf,
   onPlace,
+  icon,
+  subtitle,
+  limit = 6,
 }: {
   e: Entity;
   lang: AtlasLang;
   mark: string[];
   placeOf?: (name: string) => string | null;
   onPlace?: (key: string) => void;
+  icon?: string;
+  subtitle?: string;
+  limit?: number;
 }) {
   const placeKey = [e.name, ...e.places].map((n) => placeOf?.(n) ?? null).find(Boolean) ?? null;
   const [all, setAll] = useState(false);
@@ -471,16 +477,20 @@ function EntityCard({
     .map((b) => ({ ...b, facts: b.facts.filter((f) => !keyFacts.includes(f)) }))
     .filter((b) => b.facts.length);
   const total = rest.reduce((n, b) => n + b.facts.length, 0);
-  let left = all ? Infinity : 6;
+  let left = all ? Infinity : limit;
   return (
     <article
       className="rounded-xl border border-border bg-card p-3 shadow-sm"
       data-fact-entity={e.name}
     >
       <header className="mb-1.5 flex items-start gap-2">
-        <h4 className="min-w-0 flex-1 font-serif text-base font-bold leading-snug text-[#1f2a5c] dark:text-indigo-200">
-          {e.title}
-        </h4>
+        {icon && <span className="mt-0.5 text-lg leading-none">{icon}</span>}
+        <div className="min-w-0 flex-1">
+          <h4 className="font-serif text-base font-bold leading-snug text-[#1f2a5c] dark:text-indigo-200">
+            {e.title}
+          </h4>
+          {subtitle && <p className="text-[11px] text-muted-foreground">{subtitle}</p>}
+        </div>
         {placeKey && onPlace && (
           <button
             type="button"
@@ -528,7 +538,7 @@ function EntityCard({
           );
         })}
       </div>
-      {total > 6 && (
+      {total > limit && (
         <button
           type="button"
           onClick={() => setAll(!all)}
@@ -630,6 +640,191 @@ export function DistrictTopics({
                         <Bullet key={f.id} f={f} lang={lang} mark={mark} />
                       ))}
                     </ul>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        </details>
+      ))}
+    </div>
+  );
+}
+
+// ====================== A district's places ======================
+//
+// Kind (the map's groups) → category (forts, temples, lakes…) → a card per
+// place with its facts (key facts, its main points, on the map); places
+// with no facts yet as compact chips.
+
+export type DistrictPlace = { key: string; name: string; title: string; cat: string };
+
+function placeEntity(p: DistrictPlace, facts: PublicFact[], lang: AtlasLang): Entity {
+  const seen = new Set<string>();
+  const blocks: Block[] = [];
+  for (const f of facts) {
+    if (!f.places.includes(p.key)) continue;
+    const sig = f.text.en.trim().toLowerCase();
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    const parts = f.heading.split(" › ").filter(Boolean);
+    const hiParts = (f.headingHi || "").split(" › ");
+    const pick = (from: number) =>
+      (lang === "hi" && f.headingHi ? parts.map((x, k) => hiParts[k] || x) : parts)
+        .slice(from)
+        .join(" › ");
+    // The notes' place block: its own labels ("About", "Architecture");
+    // elsewhere the heading it sits under.
+    const own = /^(places|स्थान)$/i.test(parts[0] ?? "") && parts.length >= 2;
+    const label = own ? parts.slice(2).join(" › ") : f.heading;
+    let b = blocks.find((x) => x.label === label);
+    if (!b) blocks.push((b = { label, title: own ? pick(2) : pick(0), facts: [] }));
+    b.facts.push(f);
+  }
+  // Its own block first.
+  blocks.sort((a, b) => Number(b.label === "") - Number(a.label === ""));
+  return { name: p.name, title: p.title, blocks, places: [] };
+}
+
+export function DistrictPlaces({
+  places,
+  facts,
+  lang,
+  mark,
+  onPlace,
+  open: openFirst,
+}: {
+  places: DistrictPlace[];
+  facts: PublicFact[];
+  lang: AtlasLang;
+  mark: string[];
+  onPlace: (key: string) => void;
+  // The kind to open first (from the Overview's "What's here").
+  open?: string | null;
+}) {
+  const [more, setMore] = useState<string[]>([]);
+  const groups = ATLAS_GROUPS.map((g) => {
+    const mine = places.filter((p) => atlasCat(p.cat).group === g.key);
+    const cats = ATLAS_CATS.filter((c) => c.group === g.key)
+      .map((c) => {
+        const all = mine
+          .filter((p) => p.cat === c.key)
+          .map((p) => ({ p, e: placeEntity(p, facts, lang) }))
+          .map((x) => ({ ...x, n: x.e.blocks.reduce((k, b) => k + b.facts.length, 0) }))
+          .sort((a, b) => b.n - a.n || a.p.title.localeCompare(b.p.title));
+        // The same place twice (the master map's "Karni Mata, Deshnok" and
+        // the notes' "Karni Mata temple, Deshnok"): one card, the facts of
+        // both, the fuller one's pin.
+        const list: typeof all = [];
+        for (const x of all) {
+          const k = baseName(x.p.name);
+          const host = k.length >= 3 ? list.find((y) => baseName(y.p.name) === k) : undefined;
+          if (!host) {
+            list.push(x);
+            continue;
+          }
+          const seen = new Set(
+            host.e.blocks.flatMap((b) => b.facts.map((f) => f.text.en.trim().toLowerCase())),
+          );
+          for (const b of x.e.blocks) {
+            const fs = b.facts.filter((f) => !seen.has(f.text.en.trim().toLowerCase()));
+            if (!fs.length) continue;
+            const into = host.e.blocks.find((y) => y.label === b.label);
+            if (into) into.facts.push(...fs);
+            else host.e.blocks.push({ ...b, facts: fs });
+          }
+          host.n = host.e.blocks.reduce((k2, b) => k2 + b.facts.length, 0);
+        }
+        return { c, list };
+      })
+      .filter((x) => x.list.length);
+    // Places whose category isn't in the list (old ones): under "other".
+    return { g, cats, count: mine.length };
+  }).filter((x) => x.count);
+  if (!groups.length)
+    return (
+      <p className="text-sm text-muted-foreground">
+        {lang === "hi" ? "अभी कोई स्थान नहीं।" : "No places yet."}
+      </p>
+    );
+  const first =
+    openFirst && groups.some((x) => x.g.key === openFirst) ? openFirst : groups[0].g.key;
+  return (
+    <div className="space-y-2" data-district-places>
+      {groups.map(({ g, cats, count }) => (
+        <details
+          key={g.key}
+          open={g.key === first}
+          className="group/s rounded-xl border border-border bg-background"
+          data-place-group={g.key}
+        >
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+            <i
+              className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+              style={{ background: g.color }}
+            />
+            <span className="min-w-0 flex-1 text-sm font-semibold">{pickBi(g.name, lang)}</span>
+            <span className="rounded-full bg-muted px-2 text-xs font-medium text-muted-foreground">
+              {count}
+            </span>
+            <span className="text-muted-foreground transition-transform group-open/s:rotate-90">
+              ›
+            </span>
+          </summary>
+          <div className="space-y-4 border-t border-border p-2.5">
+            {cats.map(({ c, list }) => {
+              const rich = list.filter((x) => x.n > 0);
+              const bare = list.filter((x) => x.n === 0);
+              const id = `${g.key}|${c.key}`;
+              const shown = more.includes(id) ? rich : rich.slice(0, 4);
+              return (
+                <section key={c.key} data-place-cat={c.key}>
+                  <h3
+                    className="mb-2 flex items-center gap-1.5 border-l-4 pl-2 text-xs font-bold uppercase tracking-wide"
+                    style={{ borderColor: c.color, color: c.color }}
+                  >
+                    <span className="text-sm normal-case">{c.icon}</span>
+                    {pickBi(c.name, lang)}
+                    <span className="font-medium text-muted-foreground">· {list.length}</span>
+                  </h3>
+                  <div className="space-y-2">
+                    {shown.map(({ p, e }) => (
+                      <EntityCard
+                        key={p.key}
+                        e={e}
+                        lang={lang}
+                        mark={mark}
+                        placeOf={() => p.key}
+                        onPlace={onPlace}
+                        limit={3}
+                      />
+                    ))}
+                  </div>
+                  {rich.length > shown.length && (
+                    <button
+                      type="button"
+                      onClick={() => setMore([...more, id])}
+                      className="mt-1.5 text-xs font-medium text-primary hover:underline"
+                    >
+                      {lang === "hi"
+                        ? `${rich.length - shown.length} और`
+                        : `${rich.length - shown.length} more`}
+                    </button>
+                  )}
+                  {bare.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5" data-place-chips>
+                      {bare.map(({ p }) => (
+                        <button
+                          key={p.key}
+                          type="button"
+                          onClick={() => onPlace(p.key)}
+                          className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-xs hover:bg-muted"
+                        >
+                          <span>{c.icon}</span>
+                          {p.title}
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </section>
               );

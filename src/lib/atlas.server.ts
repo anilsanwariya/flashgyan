@@ -1539,6 +1539,8 @@ export type PublicFact = {
   hiAi: boolean;
   // The notes' source codes it cites (its heading's too), out of its text.
   sources: string[];
+  // The places it is about (their keys).
+  places: string[];
 };
 // The source codes known (the notes' and the editor's own), kept a while.
 let codes: { at: number; list: string[]; names: SourceNames } = {
@@ -1575,6 +1577,7 @@ const publicFact = (f: AtlasFact): PublicFact => {
     flags: f.flags,
     hiAi: f.hi_ai,
     sources: [...new Set([...en.sources, ...hi.sources, ...h.sources])],
+    places: (f.entities ?? []).filter((e) => e.startsWith("P:")).map((e) => e.slice(2)),
   };
 };
 
@@ -1652,8 +1655,30 @@ export async function atlasEntityFacts(entity: string): Promise<PublicFact[]> {
   fail(error);
   const seed = (data ?? []) as unknown as AtlasFact[];
   if (!entity.startsWith("D:")) return seed.map(publicFact);
-  // A district: every fact under a heading one of its facts is under
-  // (Biggaji's whole block, not only the line naming Bikaner).
+  // A district: the facts on its places too (a fort's own facts, even when
+  // they don't name the district), for its Places tab.
+  const { data: pl } = await from("atlas_places")
+    .select("key")
+    .eq("district", entity.slice(2))
+    .eq("status", "verified");
+  const placeEntities = ((pl ?? []) as Row[]).map((r) => `P:${String(r.key)}`);
+  const known = new Set(seed.map((f) => f.id));
+  for (let i = 0; i < placeEntities.length; i += 100) {
+    const { data: pf, error: pe } = await from("atlas_facts")
+      .select(FACT_COLS)
+      .overlaps("entities", placeEntities.slice(i, i + 100))
+      .eq("status", "verified")
+      .order("position")
+      .limit(1000);
+    fail(pe);
+    for (const f of (pf ?? []) as unknown as AtlasFact[])
+      if (!known.has(f.id)) {
+        known.add(f.id);
+        seed.push(f);
+      }
+  }
+  // Every fact under a heading one of its facts is under (Biggaji's whole
+  // block, not only the line naming Bikaner).
   const keys = new Set(
     seed.map((f) => factEntityKey(f.chapter_key, f.heading)).filter((k): k is string => !!k),
   );
