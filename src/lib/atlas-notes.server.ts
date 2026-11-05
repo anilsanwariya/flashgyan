@@ -112,6 +112,9 @@ export type NotesPlace = {
 export type SubjectNotes = {
   subject: string;
   title: string;
+  // Each heading, label and table header in English → its Hindi (from the
+  // Hindi file, line for line), for showing the facts' headings in Hindi.
+  headingsHi: Record<string, string>;
   chapters: { key: string; title: string; title_hi: string; facts: number }[];
   facts: NotesFact[];
   places: NotesPlace[];
@@ -169,6 +172,12 @@ export function parseSubjectNotes(en: string, hi: string): SubjectNotes {
   let label = ""; // a "- About:" style label the next indented points sit under
   let table: { head: string; headHi: string } | null = null;
   let revision = false;
+  const headingsHi: Record<string, string> = {};
+  const pair = (en: string, hi: string) => {
+    const e = en.trim();
+    const h = hi.trim();
+    if (e && h && h !== e && !headingsHi[e]) headingsHi[e] = h;
+  };
   const title = (E.find((l) => /^#\s/.test(l)) ?? "").replace(/^#\s+/, "").trim();
   const subject = subjectOf(title);
   if (!subject)
@@ -243,6 +252,7 @@ export function parseSubjectNotes(en: string, hi: string): SubjectNotes {
           facts: 0,
         };
         chapters.push(chapter);
+        pair(chapter.title, chapter.title_hi);
         heads.length = 0;
         place = null;
         revision = false;
@@ -269,10 +279,12 @@ export function parseSubjectNotes(en: string, hi: string): SubjectNotes {
           where: "",
         };
         places.set(key, place);
+        pair(name, nameHi);
         heads.push(name);
         continue;
       }
       heads.push(hm[2].trim());
+      pair(hm[2], textHi);
       revision = level === 3 && /^Revision questions$/i.test(hm[2].trim());
       continue;
     }
@@ -282,6 +294,7 @@ export function parseSubjectNotes(en: string, hi: string): SubjectNotes {
       if (/^\|[\s:|-]+\|?$/.test(e.trim())) continue;
       if (!table) {
         table = { head: cells(e).join(" · "), headHi: cells(h).join(" · ") };
+        cells(e).forEach((c, k) => pair(c, cells(h)[k] ?? ""));
         continue;
       }
       add(cells(e).join(" · "), cells(h).join(" · "), i, {
@@ -300,6 +313,7 @@ export function parseSubjectNotes(en: string, hi: string): SubjectNotes {
     const lm = /^([^:]{2,40}):\s*$/.exec(textEn);
     if (lm && indent === 0) {
       label = lm[1].trim();
+      pair(label, textHi.replace(/:\s*$/, ""));
       continue;
     }
     if (place && indent === 0) {
@@ -316,7 +330,7 @@ export function parseSubjectNotes(en: string, hi: string): SubjectNotes {
     }
     add(textEn, textHi, i);
   }
-  return { subject, title, chapters, facts, places: [...places.values()] };
+  return { subject, title, headingsHi, chapters, facts, places: [...places.values()] };
 }
 
 // ---------- Import ----------
@@ -582,8 +596,10 @@ export async function importSubjectNotes(en: string, hi: string): Promise<NotesI
     );
   fr.gone = goneFacts.length;
 
-  // The chapters' knowledge base documents follow in the background.
-  const { queueKb, invalidateAtlas } = await import("@/lib/atlas.server");
+  // The headings' Hindi, kept with the others (the master map's come from
+  // the background translation).
+  const { queueKb, invalidateAtlas, saveHeadingsHi } = await import("@/lib/atlas.server");
+  await saveHeadingsHi(notes.headingsHi);
   await queueKb(notes.chapters.map((c) => c.key));
   invalidateAtlas();
   return { subject: notes.subject, chapters: notes.chapters.length, facts: fr, places: pr };

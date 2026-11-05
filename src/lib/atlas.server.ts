@@ -407,8 +407,70 @@ async function translateStep(): Promise<number | null> {
       .eq("key", String(l.key));
     return hi.filter(Boolean).length;
   }
+  // Last, the facts' headings, chapters and table headers (those the
+  // notes' Hindi file didn't give), 40 a call.
+  const missing = await headingsToTranslate();
+  if (missing.length) {
+    const batch = missing.slice(0, 40);
+    const hi = await translateBatch(batch);
+    // One the AI left out keeps its English, so it isn't asked again.
+    await saveHeadingsHi(Object.fromEntries(batch.map((t, i) => [t, hi[i] || t])), false);
+    return hi.filter(Boolean).length;
+  }
   return null;
 }
+
+// ---------- Headings in Hindi ----------
+//
+// The facts' headings, chapter titles and table headers in Hindi, kept in
+// one setting (English text → Hindi): from a subject's Hindi notes file at
+// import, and the rest (the master map's) translated in the background.
+
+export const HEADINGS_KEY = "atlas_headings_hi";
+let headingsCache: { at: number; map: Record<string, string> } = { at: 0, map: {} };
+async function headingsHi(): Promise<Record<string, string>> {
+  if (Date.now() - headingsCache.at > 5 * 60_000)
+    headingsCache = {
+      at: Date.now(),
+      map: await setting<Record<string, string>>(HEADINGS_KEY, {}),
+    };
+  return headingsCache.map;
+}
+// New ones added; with `replace` (the notes' own Hindi) they win over
+// earlier ones.
+export async function saveHeadingsHi(add: Record<string, string>, replace = true) {
+  const old = await setting<Record<string, string>>(HEADINGS_KEY, {});
+  const next = replace ? { ...old, ...add } : { ...add, ...old };
+  await saveSetting(HEADINGS_KEY, next);
+  headingsCache = { at: Date.now(), map: next };
+}
+// The strings students see as headings that have no Hindi yet.
+async function headingsToTranslate(): Promise<string[]> {
+  const map = await headingsHi();
+  const { list } = await sourceCodes();
+  const rows = await all<Row>(() =>
+    from("atlas_facts").select("chapter,heading,table_head").eq("status", "verified").order("id"),
+  );
+  const want = new Set<string>();
+  for (const r of rows) {
+    want.add(String(r.chapter ?? ""));
+    for (const part of headingSources(String(r.heading ?? ""), list).heading.split(" › "))
+      want.add(part);
+    for (const c of String(r.table_head ?? "").split(" · ")) want.add(c);
+  }
+  return (
+    [...want]
+      .map((t) => t.trim())
+      // Only text with letters; not Hindi already.
+      .filter((t) => t && /[A-Za-z]{2}/.test(t) && !/[\u0900-\u097F]/.test(t) && !(t in map))
+  );
+}
+const hiOf = (map: Record<string, string>, text: string, sep: string) => {
+  if (!text) return "";
+  const parts = text.split(sep);
+  const out = parts.map((p) => map[p.trim()] ?? "");
+  return out.some(Boolean) ? parts.map((p, i) => out[i] || p).join(sep) : "";
+};
 
 // ---------- The knowledge base (a chapter a step) ----------
 
@@ -1467,6 +1529,10 @@ export type PublicFact = {
   chapter: string;
   chapterKey: string;
   heading: string;
+  // The heading, chapter and table header in Hindi ("" when not yet).
+  headingHi: string;
+  chapterHi: string;
+  headHi: string;
   text: Bi;
   head: string;
   flags: number;
@@ -1485,6 +1551,7 @@ export async function sourceCodes() {
     const names = await setting<SourceNames>(SOURCES_KEY, {});
     codes = { at: Date.now(), list: [...new Set([...SOURCE_CODES, ...Object.keys(names)])], names };
   }
+  await headingsHi();
   return codes;
 }
 export const SOURCES_KEY = "atlas_sources";
@@ -1500,6 +1567,9 @@ const publicFact = (f: AtlasFact): PublicFact => {
     chapter: f.chapter,
     chapterKey: f.chapter_key,
     heading: h.heading,
+    headingHi: hiOf(headingsCache.map, h.heading, " › "),
+    chapterHi: headingsCache.map[f.chapter] ?? "",
+    headHi: hiOf(headingsCache.map, f.table_head, " · "),
     text: { en: en.text, hi: hi.text },
     head: f.table_head,
     flags: f.flags,
