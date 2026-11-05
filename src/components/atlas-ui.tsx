@@ -90,6 +90,85 @@ function Marked({ text, mark }: { text: string; mark?: string[] }) {
 // A fact's text. A table row ("III · Sanyukt Rajasthan · 18 Apr 1948" under
 // "Phase · Union · Date") reads as its header's pairs; when the cells don't
 // line up, the header sits above the row.
+// A long state-wide list seen from one district: "Copper · Jhunjhunu: Khetri
+// · … · Udaipur: Anjani · Sirohi: …" → "Copper" and "Anjani". Null when the
+// row isn't a list of districts with this one inside it.
+function focusRow(text: string, names: string[]): { subject: string; parts: string[] } | null {
+  const words = names.filter((w) => w.length >= 2).map((w) => w.toLowerCase());
+  if (!words.length) return null;
+  const cells = text.split(" · ");
+  if (cells.length < 4) return null;
+  const hits = cells
+    .map((c, i) => [c, i] as const)
+    .filter(([c]) => words.some((w) => c.toLowerCase().includes(w)));
+  if (!hits.length || hits.some(([, i]) => i === 0) || hits.length >= cells.length - 1) return null;
+  const esc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const parts = hits
+    .map(([c]) => {
+      for (const w of names) {
+        const m = new RegExp(`^${esc(w)}\\s*[:–-]\\s*`, "i").exec(c);
+        if (m) return c.slice(m[0].length).trim();
+      }
+      return words.includes(c.trim().toLowerCase()) ? "" : c.trim();
+    })
+    .filter(Boolean);
+  return { subject: cells[0].trim(), parts };
+}
+
+// In a district's facts: a state-wide list row shown for this district only
+// (the whole row a tap away), and a long paragraph folded to three lines.
+function DistrictFact({ f, lang, mark }: { f: PublicFact; lang: AtlasLang; mark: string[] }) {
+  const [open, setOpen] = useState(false);
+  const text = pickBi(f.text, lang);
+  // Only table rows: a mnemonic or answer with "·" in it isn't a list.
+  const focus = f.head ? focusRow(text, mark) : null;
+  const toggle = (label: string) => (
+    <button
+      type="button"
+      onClick={() => setOpen(!open)}
+      className="ml-1.5 text-xs font-medium text-primary hover:underline"
+      aria-expanded={open}
+    >
+      {open ? (lang === "hi" ? "कम" : "Less") : label}
+    </button>
+  );
+  if (focus && !open)
+    return (
+      <span data-fact-focus>
+        <span className="font-semibold">{focus.subject}</span>
+        <span className="text-muted-foreground"> — </span>
+        {focus.parts.length ? (
+          focus.parts.map((p, i) => (
+            <span key={i}>
+              {i > 0 && "; "}
+              <Marked text={p} mark={mark} />
+            </span>
+          ))
+        ) : (
+          <Marked text={mark[0]} mark={mark} />
+        )}
+        {toggle(lang === "hi" ? "सभी जिले" : "All districts")}
+      </span>
+    );
+  if (focus)
+    return (
+      <>
+        <FactText f={f} lang={lang} mark={mark} />
+        {toggle("")}
+      </>
+    );
+  if (text.length > 260 && !f.head)
+    return (
+      <span>
+        <span className={open ? "" : "line-clamp-3"}>
+          <Marked text={text} mark={mark} />
+        </span>
+        {toggle(lang === "hi" ? "पूरा पढ़ें" : "Read more")}
+      </span>
+    );
+  return <FactText f={f} lang={lang} mark={mark} />;
+}
+
 function FactText({ f, lang, mark }: { f: PublicFact; lang: AtlasLang; mark?: string[] }) {
   const text = pickBi(f.text, lang);
   if (f.head) {
@@ -175,7 +254,11 @@ export function FactsList({
                     ))}
                   </span>
                 )}
-                <FactText f={f} lang={lang} mark={mark} />
+                {mark?.length ? (
+                  <DistrictFact f={f} lang={lang} mark={mark} />
+                ) : (
+                  <FactText f={f} lang={lang} />
+                )}
                 {lang === "hi" && f.hiAi && f.text.hi && (
                   <span className="ml-1 text-[10px] text-muted-foreground" title="AI translation">
                     · AI अनुवाद
