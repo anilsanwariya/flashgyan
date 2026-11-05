@@ -206,7 +206,8 @@ export async function importMasterMap(html: string): Promise<ImportResult> {
   const fx = await linkFixes();
   const fr = { added: 0, updated: 0, kept: 0, gone: 0 };
   const factRows: Row[] = [];
-  for (const f of map.facts) {
+  // Facts the editor deleted stay deleted.
+  for (const f of map.facts.filter((x) => !fx.deleted.has(x.key))) {
     const old = factByKey.get(f.key);
     if (old?.edited) {
       fr.kept++;
