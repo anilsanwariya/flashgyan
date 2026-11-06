@@ -146,11 +146,15 @@ function DayView() {
   const q = useQuery({ queryKey: ["igDay", date], queryFn: () => getFn({ data: { date } }) });
   const refresh = () => qc.invalidateQueries({ queryKey: ["igDay", date] });
   const status = q.data?.day?.status;
+  // In review, the images of the cards already checked are made meanwhile.
+  const imagesDue =
+    status === "review" &&
+    (q.data?.cards ?? []).some((c) => c.checked && !c.image_path && c.status === "picked");
   // While the page is open it moves the day's work along itself, a step
   // at a time (the minute tick does the same when it is closed).
   const busy = useRef(false);
   useEffect(() => {
-    if (!status || !(status in WORKING)) return;
+    if (!status || !(status in WORKING || imagesDue)) return;
     let stop = false;
     const run = async () => {
       if (busy.current || stop) return;
@@ -172,7 +176,7 @@ function DayView() {
       clearInterval(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, date]);
+  }, [status, date, imagesDue]);
   const start = async () => {
     try {
       await startFn({ data: { date } });
@@ -594,6 +598,7 @@ function Review({
   const atBad = !at || at.getTime() < Date.now() - 60_000;
   const design = (view.day?.design ?? "paper") as IgDesign;
   const unticked = view.cards.filter((c) => !c.checked);
+  const made = view.cards.filter((c) => c.image_path).length;
   const writing = view.day?.status === "writing";
   const approve = async (now: boolean) => {
     setBusy(true);
@@ -799,7 +804,14 @@ function Review({
         ) : !channels.length ? (
           <span className="text-sm text-destructive">Add a channel in Settings.</span>
         ) : (
-          <span className="text-sm">All cards checked.</span>
+          <span className="text-sm">
+            All cards checked.{" "}
+            <span className="text-muted-foreground" data-images-made>
+              {made === view.cards.length
+                ? "The images are ready."
+                : `Images made: ${made} of ${view.cards.length} (the rest are made after you approve; you can close the tab).`}
+            </span>
+          </span>
         )}
         <div className="grid w-full grid-cols-2 gap-2 sm:ml-auto sm:flex sm:w-auto">
           <Button
@@ -863,7 +875,16 @@ function Scheduled({
         ) : d.status === "failed" ? (
           <span className="text-destructive">Posting failed: {d.error}</span>
         ) : (
-          <span>Posts {d.scheduled_for ? timeIst(d.scheduled_for) : "soon"}.</span>
+          <span data-close-note>
+            Posts {d.scheduled_for ? timeIst(d.scheduled_for) : "soon"}.{" "}
+            <span className="text-muted-foreground">
+              {d.status === "rendering"
+                ? `Images made: ${view.cards.filter((c) => c.image_path).length} of ${view.cards.length}. `
+                : ""}
+              You can close this tab: the images are made and the cards posted in the background,
+              and you get a Telegram message when they&apos;re posted (or if posting fails).
+            </span>
+          </span>
         )}
         <div className="ml-auto flex flex-wrap justify-end gap-2">
           <Button
@@ -1703,8 +1724,8 @@ function Settings() {
             onCheckedChange={(v) => set({ notify: v })}
             aria-label="Telegram messages"
           />
-          Message me on Telegram when words are suggested and when cards are ready (the admin chat
-          in Magazine settings)
+          Message me on Telegram when words are suggested, when cards are ready, when they&apos;re
+          posted and if posting fails (the admin chat in Magazine settings)
         </label>
       </section>
 
