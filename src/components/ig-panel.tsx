@@ -44,9 +44,16 @@ import {
   CAPTION_MAX,
   captionHtml,
   captionText,
+  channelCaption,
   channelChatId,
   channelLabel,
+  channelLink,
   fillCaption,
+  footerChannel,
+  igAlbums,
+  igChannels,
+  igChannelsOn,
+  type IgChannel,
   fillWeeklyCaption,
   PICK_RULES_MAX,
   WEEKDAYS,
@@ -475,16 +482,61 @@ function OwnWord({
 
 // ---------- Review ----------
 
-function captionFor(view: IgDayView, date: string) {
-  return fillCaption(view.settings.caption, {
+// A channel's caption from the template, with only the words it gets.
+function captionFor(view: IgDayView, date: string, ch: IgChannel | undefined) {
+  const parts = {
     date: igDate(date, "long"),
     english: view.cards.filter((c) => c.lang === "en").map((c) => c.card?.word || c.word),
     hindi: view.cards.filter((c) => c.lang === "hi").map((c) => c.card?.word || c.word),
     appLink: playStoreUrl("words_in_news", "telegram_channel"),
-    channel: channelLabel(view.settings.channel)
-      ? `https://${channelLabel(view.settings.channel)}`
-      : "",
-  });
+  };
+  return ch
+    ? channelCaption(ch, view.settings, parts)
+    : fillCaption(view.settings.caption, { ...parts, channel: "" });
+}
+
+// Where a channel's cards go: "English 5 · 1 album".
+function channelPlan(view: IgDayView, ch: IgChannel) {
+  const albums = igAlbums(view.cards, ch.langs);
+  const n = albums.reduce((a, b) => a + b.length, 0);
+  if (!n) return "no cards today";
+  return `${ch.langs.map((l) => `${LANG_NAME[l]} ${view.cards.filter((c) => c.lang === l).length}`).join(" + ")} · ${albums.length} album${albums.length > 1 ? "s" : ""}`;
+}
+
+function CaptionBox({
+  id,
+  label,
+  value,
+  onChange,
+  onReset,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  onReset: () => void;
+}) {
+  const n = captionText(value).length;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <Label htmlFor={id} className="min-w-0 truncate">
+          {label}
+        </Label>
+        <span
+          className={`shrink-0 text-xs ${n > CAPTION_MAX ? "text-destructive" : "text-muted-foreground"}`}
+          data-caption-count
+        >
+          {n}/{CAPTION_MAX}
+        </span>
+      </div>
+      <Textarea id={id} rows={9} value={value} onChange={(e) => onChange(e.target.value)} />
+      <CaptionPreview caption={value} />
+      <Button variant="ghost" size="sm" onClick={onReset}>
+        Fill from the template again
+      </Button>
+    </div>
+  );
 }
 
 function Review({
@@ -521,7 +573,20 @@ function Review({
       setDesignBusy(false);
     }
   };
-  const [caption, setCaption] = useState(() => view.day?.caption || captionFor(view, date));
+  const channels = igChannelsOn(view.settings);
+  const [caption, setCaption] = useState(
+    () => view.day?.caption || captionFor(view, date, channels[0]),
+  );
+  // Several channels: a caption each (what was approved before, or its template).
+  const [captions, setCaptions] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      channels.map((ch) => [ch.id, view.posts?.captions?.[ch.id] || captionFor(view, date, ch)]),
+    ),
+  );
+  const many = channels.length > 1;
+  const capsLong = many
+    ? channels.some((ch) => captionText(captions[ch.id] ?? "").length > CAPTION_MAX)
+    : captionText(caption).length > CAPTION_MAX;
   const [busy, setBusy] = useState(false);
   // When it posts: the posting time today, or soon once that has passed.
   const [postAt, setPostAt] = useState(() => istInput(igPostDefault(view.settings.post_time)));
@@ -534,7 +599,13 @@ function Review({
     setBusy(true);
     try {
       await approveFn({
-        data: { date, caption, now, ...(!now && at ? { at: at.toISOString() } : {}) },
+        data: {
+          date,
+          caption: many ? (captions[channels[0].id] ?? "") : caption,
+          ...(many ? { captions } : {}),
+          now,
+          ...(!now && at ? { at: at.toISOString() } : {}),
+        },
       });
       toast.success(
         now
@@ -571,27 +642,51 @@ function Review({
             New days use the design from Settings; change it here for this day only.
           </p>
         </div>
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="ig-caption">Caption</Label>
-            <span
-              className={`text-xs ${captionText(caption).length > CAPTION_MAX ? "text-destructive" : "text-muted-foreground"}`}
-              data-caption-count
-            >
-              {captionText(caption).length}/{CAPTION_MAX}
-            </span>
-          </div>
-          <Textarea
-            id="ig-caption"
-            rows={9}
-            value={caption}
-            onChange={(e) => setCaption(e.target.value)}
-          />
-          <p className="text-xs text-muted-foreground">{LINK_HINT}</p>
-          <CaptionPreview caption={caption} />
-          <Button variant="ghost" size="sm" onClick={() => setCaption(captionFor(view, date))}>
-            Fill from the template again
-          </Button>
+        <div className="space-y-3">
+          {many ? (
+            <>
+              <p className="text-sm font-medium">Captions, one for each channel</p>
+              <p className="text-xs text-muted-foreground">{LINK_HINT}</p>
+              {channels.map((ch, i) => (
+                <section
+                  key={ch.id}
+                  aria-label={`Channel ${channelLabel(ch.chat) || ch.chat}`}
+                  className="space-y-2 rounded-lg border border-border p-3"
+                  data-channel-plan
+                >
+                  <p className="text-xs text-muted-foreground">
+                    {channelLabel(ch.chat) || ch.chat}: {channelPlan(view, ch)}
+                  </p>
+                  <CaptionBox
+                    id={`ig-caption-${i}`}
+                    label={`Caption for ${channelLabel(ch.chat) || ch.chat}`}
+                    value={captions[ch.id] ?? ""}
+                    onChange={(v) => setCaptions({ ...captions, [ch.id]: v })}
+                    onReset={() =>
+                      setCaptions({ ...captions, [ch.id]: captionFor(view, date, ch) })
+                    }
+                  />
+                </section>
+              ))}
+            </>
+          ) : (
+            <>
+              <CaptionBox
+                id="ig-caption"
+                label="Caption"
+                value={caption}
+                onChange={setCaption}
+                onReset={() => setCaption(captionFor(view, date, channels[0]))}
+              />
+              <p className="text-xs text-muted-foreground">{LINK_HINT}</p>
+              {channels[0] && (
+                <p className="text-xs text-muted-foreground" data-channel-plan>
+                  {channelLabel(channels[0].chat) || channels[0].chat}:{" "}
+                  {channelPlan(view, channels[0])}
+                </p>
+              )}
+            </>
+          )}
         </div>
       </div>
       <section aria-label="Cards" className="space-y-2">
@@ -701,17 +796,15 @@ function Review({
           <span className="text-sm text-muted-foreground">
             Tick every card as checked to approve ({unticked.length} left).
           </span>
-        ) : !channelChatId(view.settings.channel) ? (
-          <span className="text-sm text-destructive">Add the channel link in Settings.</span>
+        ) : !channels.length ? (
+          <span className="text-sm text-destructive">Add a channel in Settings.</span>
         ) : (
           <span className="text-sm">All cards checked.</span>
         )}
         <div className="grid w-full grid-cols-2 gap-2 sm:ml-auto sm:flex sm:w-auto">
           <Button
             variant="outline"
-            disabled={
-              busy || writing || unticked.length > 0 || captionText(caption).length > CAPTION_MAX
-            }
+            disabled={busy || writing || unticked.length > 0 || capsLong}
             onClick={() => void approve(true)}
           >
             Approve & post now
@@ -726,13 +819,7 @@ function Review({
             className={`order-first col-span-2 sm:order-none sm:w-52 ${atBad ? "border-destructive" : ""}`}
           />
           <Button
-            disabled={
-              busy ||
-              writing ||
-              atBad ||
-              unticked.length > 0 ||
-              captionText(caption).length > CAPTION_MAX
-            }
+            disabled={busy || writing || atBad || unticked.length > 0 || capsLong}
             onClick={() => void approve(false)}
           >
             Approve & schedule
@@ -811,7 +898,16 @@ function Scheduled({
             <Button
               size="sm"
               onClick={() =>
-                void act(() => approveFn({ data: { date, caption: d.caption, now: true } }))
+                void act(() =>
+                  approveFn({
+                    data: {
+                      date,
+                      caption: d.caption,
+                      captions: view.posts?.captions ?? {},
+                      now: true,
+                    },
+                  }),
+                )
               }
             >
               Try again
@@ -828,6 +924,7 @@ function Scheduled({
           )}
         </div>
       </div>
+      <ChannelResults view={view} />
       <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:gap-4">
         {view.cards.map((c, i) =>
           c.image_url ? (
@@ -857,6 +954,46 @@ function Scheduled({
       </div>
       {d.caption && <CaptionPreview caption={d.caption} />}
     </div>
+  );
+}
+
+// Each channel's posting, when there are several: where it went, or why it
+// didn't. A failed one is posted again by "Try again"; the
+// ones already posted aren't.
+function ChannelResults({ view }: { view: IgDayView }) {
+  const channels = igChannelsOn(view.settings);
+  const posts = view.posts?.posts ?? {};
+  if (channels.length < 2) return null;
+  return (
+    <ul
+      aria-label="Channels"
+      className="divide-y divide-border rounded-xl border border-border text-sm"
+    >
+      {channels.map((ch) => {
+        const r = posts[ch.id];
+        return (
+          <li
+            key={ch.id}
+            className="flex flex-wrap items-center gap-2 px-3 py-2"
+            data-channel-result
+          >
+            <span className="min-w-0 truncate font-medium">{channelLabel(ch.chat) || ch.chat}</span>
+            <span className="text-xs text-muted-foreground">{channelPlan(view, ch)}</span>
+            <span className="ml-auto text-xs">
+              {!r ? (
+                <span className="text-muted-foreground">Not posted yet</span>
+              ) : r.ok ? (
+                <span className="text-emerald-700 dark:text-emerald-400">
+                  Posted {timeIst(r.at)}
+                </span>
+              ) : (
+                <span className="text-destructive">Failed: {r.error}</span>
+              )}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -927,7 +1064,7 @@ function Roundups() {
   );
   const [busy, setBusy] = useState<string | null>(null);
   const post = async (to: string) => {
-    if (!confirm("Post this week's round-up PDF to the channel now?")) return;
+    if (!confirm("Post this week's round-up PDF to the channels now?")) return;
     setBusy(to);
     try {
       await postFn({ data: { to } });
@@ -943,9 +1080,9 @@ function Roundups() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Every week the posted words go to the channel as one PDF to save and revise, on the day and
-        at the time set in Settings. The monthly magazine has a “Words of the month” page with all
-        of the month&apos;s words.
+        Every week the posted words go to each channel as a PDF to save and revise (only the words
+        in the channel&apos;s languages), on the day and at the time set in Settings. The monthly
+        magazine has a “Words of the month” page with all of the month&apos;s words.
       </p>
       {q.isLoading ? (
         <p className="text-muted-foreground">Loading…</p>
@@ -1109,13 +1246,135 @@ function History() {
 
 // ====================== Settings ======================
 
+let channelSeq = 0;
+const newChannelId = () => `ch${Date.now().toString(36)}${(channelSeq++).toString(36)}`;
+
+// The channels the cards go to, each with its languages and, if wanted,
+// its own caption template. One posting time for all.
+function ChannelList({ s, set }: { s: IgSettings; set: (p: Partial<IgSettings>) => void }) {
+  const list = igChannels(s);
+  const put = (next: IgChannel[]) =>
+    set({ channels: next, channel: next.find((c) => c.on)?.chat ?? next[0]?.chat ?? "" });
+  const edit = (id: string, patch: Partial<IgChannel>) =>
+    put(list.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  const footer = footerChannel(s);
+  return (
+    <div className="space-y-2" aria-label="Telegram channels" role="group">
+      <p className="text-sm font-medium">Telegram channels</p>
+      {!list.length && (
+        <p className="text-sm text-muted-foreground">No channel yet: add one to post the cards.</p>
+      )}
+      <ul className="space-y-2">
+        {list.map((c, i) => {
+          const badLink = !!c.chat && !channelChatId(c.chat);
+          return (
+            <li
+              key={c.id}
+              className="space-y-2 rounded-lg border border-border p-3"
+              data-channel-row={i}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  placeholder="https://t.me/yourchannel or @yourchannel"
+                  aria-label={`Channel ${i + 1} link`}
+                  value={c.chat}
+                  onChange={(e) => edit(c.id, { chat: e.target.value })}
+                  className={`min-w-0 flex-1 basis-60 ${badLink ? "border-destructive" : ""}`}
+                />
+                {(["en", "hi"] as IgLang[]).map((l) => (
+                  <label key={l} className="flex items-center gap-1.5 text-sm">
+                    <Checkbox
+                      aria-label={`Channel ${i + 1}: ${LANG_NAME[l]} words`}
+                      checked={c.langs.includes(l)}
+                      onCheckedChange={(v) =>
+                        edit(c.id, {
+                          langs: (["en", "hi"] as IgLang[]).filter((x) =>
+                            x === l ? !!v : c.langs.includes(x),
+                          ),
+                        })
+                      }
+                    />
+                    {LANG_NAME[l]}
+                  </label>
+                ))}
+                <label className="flex items-center gap-1.5 text-sm">
+                  <Switch
+                    aria-label={`Channel ${i + 1} on`}
+                    checked={c.on}
+                    onCheckedChange={(v) => edit(c.id, { on: v })}
+                  />
+                  On
+                </label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label={`Remove channel ${i + 1}`}
+                  onClick={() => put(list.filter((x) => x.id !== c.id))}
+                >
+                  Remove
+                </Button>
+              </div>
+              {(badLink || !c.langs.length) && (
+                <p className="text-xs text-destructive">
+                  {badLink
+                    ? "That doesn't look like a channel link."
+                    : "Tick English, Hindi or both."}
+                </p>
+              )}
+              <details open={!!c.caption}>
+                <summary className="cursor-pointer text-xs text-muted-foreground">
+                  Own caption for this channel {c.caption ? "" : "(uses the main caption)"}
+                </summary>
+                <Textarea
+                  rows={5}
+                  aria-label={`Channel ${i + 1} caption`}
+                  placeholder="Leave empty to use the main caption below"
+                  value={c.caption}
+                  onChange={(e) => edit(c.id, { caption: e.target.value })}
+                  className="mt-2"
+                />
+              </details>
+            </li>
+          );
+        })}
+      </ul>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={list.length >= 10}
+        onClick={() =>
+          put([
+            ...list,
+            {
+              id: newChannelId(),
+              chat: "",
+              langs: list.length ? [] : ["en", "hi"],
+              caption: "",
+              on: true,
+            },
+          ])
+        }
+      >
+        Add channel
+      </Button>
+      <p className="text-xs text-muted-foreground">
+        The bot must be an admin of every channel. Each channel gets only the words in its
+        languages, with its caption; the weekly PDF follows the same languages.{" "}
+        {footer
+          ? `The card footer shows ${footer}.`
+          : "With more than one channel, the card footer shows the FlashGyan app, not a channel."}
+      </p>
+    </div>
+  );
+}
+
 function RoundupSettings({ s, set }: { s: IgSettings; set: (p: Partial<IgSettings>) => void }) {
   const sample = fillWeeklyCaption(s.weekly_caption, {
     from: igDate(shiftDate(istDate(), -6), "long"),
     to: igDate(istDate(), "long"),
     count: 7 * (s.pick_en + s.pick_hi),
     appLink: playStoreUrl("words_in_news_weekly", "telegram_channel"),
-    channel: channelLabel(s.channel) ? `https://${channelLabel(s.channel)}` : "",
+    channel: channelLink(igChannels(s)[0]?.chat ?? ""),
   });
   return (
     <section className="space-y-3 rounded-xl border border-border p-4" aria-label="Round-ups">
@@ -1342,11 +1601,16 @@ function Settings() {
     s.pick_en + s.pick_hi < 1 ||
     s.pick_en + s.pick_hi > 10 ||
     (s.pick_en > 0 && s.suggest_en === 0) ||
-    (s.pick_hi > 0 && s.suggest_hi === 0);
+    (s.pick_hi > 0 && s.suggest_hi === 0) ||
+    igChannels(s).some((c) => !channelChatId(c.chat) || !c.langs.length);
   const save = async () => {
     try {
       const next = await saveFn({
-        data: { ...s, weekly_app_link: playStoreUrl("words_in_news_weekly", "telegram_channel") },
+        data: {
+          ...s,
+          weekly_app_link: playStoreUrl("words_in_news_weekly", "telegram_channel"),
+          daily_app_link: playStoreUrl("words_in_news", "telegram_channel"),
+        },
       });
       qc.setQueryData(["igSettings"], next);
       setS(next);
@@ -1363,7 +1627,7 @@ function Settings() {
     ),
     hindi: ["अतिक्रमण", "आत्मनिर्भर", "प्रत्यर्पण", "संकल्प", "उन्मूलन"].slice(0, s.pick_hi),
     appLink: playStoreUrl("words_in_news", "telegram_channel"),
-    channel: channelLabel(s.channel) ? `https://${channelLabel(s.channel)}` : "",
+    channel: channelLink(igChannels(s)[0]?.chat ?? ""),
   });
   const num = (label: string, key: keyof IgSettings, min: number, max: number) => (
     <label className="block space-y-1 text-sm">
@@ -1389,22 +1653,7 @@ function Settings() {
         aria-label="Channel and timing"
       >
         <h2 className="font-semibold">Channel and timing</h2>
-        <label className="block max-w-md space-y-1 text-sm">
-          <span className="font-medium">Telegram channel link</span>
-          <Input
-            placeholder="https://t.me/yourchannel or @yourchannel"
-            aria-label="Channel link"
-            value={s.channel}
-            onChange={(e) => set({ channel: e.target.value })}
-          />
-          <span
-            className={`text-xs ${s.channel && !channelChatId(s.channel) ? "text-destructive" : "text-muted-foreground"}`}
-          >
-            {s.channel && !channelChatId(s.channel)
-              ? "That doesn't look like a channel link."
-              : "The bot must be an admin of the channel. The card footer shows this link."}
-          </span>
-        </label>
+        <ChannelList s={s} set={set} />
         <label className="block space-y-1 text-sm">
           <span className="font-medium">Posting time (India)</span>
           <Input

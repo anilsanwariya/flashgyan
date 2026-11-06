@@ -1,7 +1,7 @@
 // A card's picture: its page in a small frame, as the channel will see it.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { igCardHtml, type IgCard, type IgDesign } from "@/lib/ig-cards";
-import { channelLabel, type IgSettings } from "@/lib/ig-words";
+import { footerChannel, type IgSettings } from "@/lib/ig-words";
 
 const site = () => (typeof window === "undefined" ? "" : window.location.origin);
 
@@ -19,7 +19,7 @@ export function CardPreview({
   n: number;
   total: number;
   date: string;
-  settings: Pick<IgSettings, "channel" | "watermark">;
+  settings: Pick<IgSettings, "channel" | "channels" | "watermark">;
   /** Pixels, or "fill" for the width of its box (a grid cell on a phone). */
   width?: number | "fill";
 }) {
@@ -32,6 +32,7 @@ export function CardPreview({
     ro.observe(el);
     return () => ro.disconnect();
   }, [width]);
+  const footer = footerChannel(settings);
   const html = useMemo(
     () =>
       igCardHtml(card, {
@@ -39,11 +40,11 @@ export function CardPreview({
         n,
         total,
         date,
-        channel: channelLabel(settings.channel),
+        channel: footer,
         assetBase: site(),
         watermark: settings.watermark,
       }),
-    [card, design, n, total, date, settings.channel, settings.watermark],
+    [card, design, n, total, date, footer, settings.watermark],
   );
   const fill = width === "fill";
   const scale = (fill ? boxWidth : width) / 1080;

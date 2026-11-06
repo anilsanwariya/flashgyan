@@ -20,8 +20,11 @@ import type { ChatMessage } from "../../supabase/functions/_shared/saathi-core.t
 export type IgSettings = {
   // Suggest words on their own after the evening collection.
   auto_suggest: boolean;
-  // The channel: "@flashgyan", "-100…" or a t.me link.
+  // The first channel, kept for older settings (the list below rules).
   channel: string;
+  // The channels the cards go to, each with its languages and, if it
+  // wants one, its own caption template.
+  channels: IgChannel[];
   // When the album is posted (IST), the day after the news.
   post_time: string;
   // Suggestions per language, and how many of each go in the album.
@@ -53,6 +56,9 @@ export type IgSettings = {
   // The Play Store link for the round-up's caption, made by the settings
   // page with app-promo's playStoreUrl (the server can't).
   weekly_app_link: string;
+  // The same for the daily caption (a channel's caption filled on the
+  // server, when it wasn't approved with one).
+  daily_app_link: string;
   // A "Words of the month" page in the monthly magazine.
   monthly_page: boolean;
 };
@@ -103,6 +109,7 @@ export const DEFAULT_IG_CAPTION = `📰 Words in the News | {date}
 export const DEFAULT_IG_SETTINGS: IgSettings = {
   auto_suggest: true,
   channel: "",
+  channels: [],
   post_time: "09:00",
   suggest_en: 10,
   suggest_hi: 10,
@@ -120,8 +127,81 @@ export const DEFAULT_IG_SETTINGS: IgSettings = {
   weekly_time: "18:00",
   weekly_caption: DEFAULT_IG_WEEKLY_CAPTION,
   weekly_app_link: "",
+  daily_app_link: "",
   monthly_page: true,
 };
+
+// A channel the day's cards are posted to.
+export type IgChannel = {
+  id: string;
+  // "@flashgyan", "-100…" or a t.me link.
+  chat: string;
+  // Which words it gets: English, Hindi or both.
+  langs: IgLang[];
+  // Its own caption template ("" = the main one).
+  caption: string;
+  on: boolean;
+};
+
+// The channels as saved (older settings' single channel becomes the first).
+export function igChannels(s: Pick<IgSettings, "channel" | "channels">): IgChannel[] {
+  const list = (Array.isArray(s.channels) ? s.channels : [])
+    .filter((c) => c && typeof c.chat === "string")
+    .map((c, i) => ({
+      id: typeof c.id === "string" && c.id ? c.id.slice(0, 40) : `ch${i + 1}`,
+      chat: c.chat.trim().slice(0, 200),
+      langs: (["en", "hi"] as IgLang[]).filter((l) => (c.langs ?? []).includes(l)),
+      caption: typeof c.caption === "string" ? c.caption.slice(0, 3000) : "",
+      on: c.on !== false,
+    }));
+  if (list.length) return list.slice(0, 10);
+  return s.channel?.trim()
+    ? [{ id: "main", chat: s.channel.trim(), langs: ["en", "hi"], caption: "", on: true }]
+    : [];
+}
+
+// The channels that will get posts: on, with a link and a language.
+export const igChannelsOn = (s: Pick<IgSettings, "channel" | "channels">) =>
+  igChannels(s).filter((c) => c.on && channelChatId(c.chat) && c.langs.length);
+
+// The channel named in the card's footer: the one channel, or none (a
+// neutral "FlashGyan app") when cards go to several.
+export function footerChannel(s: Pick<IgSettings, "channel" | "channels">): string {
+  const on = igChannelsOn(s);
+  return on.length === 1 ? channelLabel(on[0].chat) : "";
+}
+
+// A channel's link for captions: "https://t.me/flashgyan".
+export const channelLink = (chat: string) =>
+  channelLabel(chat) ? `https://${channelLabel(chat)}` : "";
+
+// A channel's caption: its template (or the main one) with only the words
+// in its languages.
+export function channelCaption(
+  ch: IgChannel,
+  s: Pick<IgSettings, "caption">,
+  p: Omit<CaptionParts, "channel">,
+): string {
+  return fillCaption(ch.caption.trim() || s.caption, {
+    ...p,
+    english: ch.langs.includes("en") ? p.english : [],
+    hindi: ch.langs.includes("hi") ? p.hindi : [],
+    channel: channelLink(ch.chat),
+  });
+}
+
+// A channel's cards as Telegram albums (10 photos at most each): one album,
+// or English then Hindi when together they are more than 10.
+export function igAlbums<T extends { lang: IgLang }>(cards: T[], langs: IgLang[]): T[][] {
+  const mine = cards.filter((c) => langs.includes(c.lang));
+  const chunks = (xs: T[]) => {
+    const out: T[][] = [];
+    for (let i = 0; i < xs.length; i += 10) out.push(xs.slice(i, i + 10));
+    return out;
+  };
+  if (mine.length <= 10) return mine.length ? [mine] : [];
+  return (["en", "hi"] as IgLang[]).flatMap((l) => chunks(mine.filter((c) => c.lang === l)));
+}
 
 // The languages with cards each day (a count of 0 turns one off).
 export function igLangsOn(s: Pick<IgSettings, "pick_en" | "pick_hi">): IgLang[] {
@@ -140,8 +220,11 @@ export function igSettingsOf(value: unknown): IgSettings {
       .map((r) => r.trim().slice(0, 240))
       .slice(0, PICK_RULES_MAX);
   const pr = (s.pick_rules ?? {}) as Partial<IgSettings["pick_rules"]>;
+  const channels = igChannels(s);
   return {
     ...s,
+    channels,
+    channel: channels[0]?.chat ?? "",
     caption: s.caption === OLD_DAILY_CAPTION ? DEFAULT_IG_CAPTION : s.caption,
     weekly_caption:
       s.weekly_caption === OLD_WEEKLY_CAPTION ? DEFAULT_IG_WEEKLY_CAPTION : s.weekly_caption,
@@ -495,15 +578,16 @@ export function writeMessages(
 ): ChatMessage[] {
   const en = lang === "en";
   const system = en
-    ? `You write vocabulary cards for Hindi-medium students preparing for ${EXAMS}. Each card explains an English word from today's news so a student understands and remembers it. Use British spelling. Be exact: meanings, synonyms and antonyms must be ones a dictionary and exam books give; give the meaning in the sense the news sentence uses first. Hindi must be correct, standard and simple.`
-    : `You write Hindi vocabulary cards for students preparing for ${EXAMS}. Each card explains a Hindi word from today's news so a student understands and remembers it. Be exact: अर्थ, पर्यायवाची and विलोम must be the standard ones from exam books and dictionaries; spelling must be शुद्ध; give the meaning in the sense the news sentence uses first.${hindiGuide(glossary)}`;
+    ? `You write vocabulary cards for Hindi-medium students preparing for ${EXAMS}. Each card explains an English word from today's news so a student understands and remembers it; its example sentence is written the way exam papers use words, not copied from the news. Use British spelling. Be exact: meanings, synonyms and antonyms must be ones a dictionary and exam books give; give the meaning in the sense the news sentence uses first. Hindi must be correct, standard and simple.`
+    : `You write Hindi vocabulary cards for students preparing for ${EXAMS}. Each card explains a Hindi word from today's news so a student understands and remembers it; its example sentence is written the way exam papers use words, not copied from the news. Be exact: अर्थ, पर्यायवाची and विलोम must be the standard ones from exam books and dictionaries; spelling must be शुद्ध; give the meaning in the sense the news sentence uses first.${hindiGuide(glossary)}`;
   const fields = en
     ? `"pos": part of speech in English and Hindi, as "Adjective · विशेषण";
 "say": how to say it in Devanagari, syllables joined by hyphens ("बि-लि-जरेंट");
 "ipa": British IPA between slashes;
 "main": its Hindi meaning, 1-3 short meanings joined by "; " (the news sense first);
 "sub": its English meaning in at most 12 words;
-"newsHi": the news sentence in natural Hindi;
+"news": one exam-style English sentence of 10-20 words using the word in the same sense as the news sentence, the kind RPSC, RSSB and SSC papers use in vocabulary and sentence-usage questions: general and timeless, with no names of people, places or organisations and no dates or numbers from the news;
+"newsHi": your "news" sentence in natural Hindi;
 "synonyms": 3 English synonyms in this sense (single words or short phrases), capitalised;
 "antonyms": 2 English antonyms in this sense, capitalised, or [] if none is natural;
 "forms": up to 3 other forms of the word in other parts of speech that dictionaries give, each {"word","pos"} with pos one of noun, verb, adjective, adverb (e.g. [{"word":"belligerence","pos":"noun"},{"word":"belligerently","pos":"adverb"}]), [] if none; no plurals or verb tenses;
@@ -514,13 +598,14 @@ export function writeMessages(
 "ipa": "";
 "main": its Hindi meaning in at most 14 words (the news sense first);
 "sub": its English equivalent in 1-3 words;
+"news": one exam-style Hindi sentence of 8-18 words using the word in the same sense as the news sentence, the kind RPSC and RSSB papers use: शुद्ध, standard and simple, general and timeless, with no names of people, places or organisations and no dates or numbers from the news;
 "newsHi": "";
 "synonyms": 2 or 3 standard पर्यायवाची, or [] if none;
 "antonyms": 1 or 2 standard विलोम, or [] if none is standard;
 "forms": up to 3 other forms of the word in other शब्द-भेद, each {"word","pos"} with pos one of संज्ञा, विशेषण, क्रिया, क्रिया-विशेषण (e.g. [{"word":"आत्मनिर्भरता","pos":"संज्ञा"}]), [] if none;
 "phrases": 2 or 3 common phrases (प्रयोग) with the word, at most 4 words each (e.g. ["अतिक्रमण हटाना","अवैध अतिक्रमण"]);
 "extras": 1 or 2 tips that best help, each {"title","text"}; titles from: "शब्द-रचना" (उपसर्ग/मूल/प्रत्यय), "संधि-विच्छेद", "समास", "वर्तनी सावधान" (a common wrong spelling struck as ~~wrong~~ ✗ beside the right one ✓); text at most 90 characters, key parts in **bold**; don't repeat the forms.`;
-  const user = `Words, each with its sentence from today's news:
+  const user = `Words, each with its sentence from today's news (it shows the sense; don't copy it):
 
 ${words.map((w) => `${w.n}. ${w.word} — "${w.sentence}" (${w.paper || "newspaper"})`).join("\n")}
 
@@ -534,7 +619,7 @@ Reply with JSON only: {"cards":[{"n":<number>,"word":"the word in its dictionary
   ];
 }
 
-export type IgWritten = Omit<IgCard, "lang" | "news" | "paper"> & { n: number };
+export type IgWritten = Omit<IgCard, "lang" | "paper"> & { n: number };
 
 // Forms as the AI writes them: {"word","pos"} or "word (pos)".
 export function parseForms(v: unknown): IgForm[] {
@@ -575,6 +660,7 @@ export function parseCards(raw: string): IgWritten[] | null {
         ipa: str(c.ipa, 60),
         main: str(c.main, 200),
         sub: str(c.sub, 160),
+        news: str(c.news, 400),
         newsHi: str(c.newsHi, 500),
         synonyms: strs(c.synonyms, 4),
         antonyms: strs(c.antonyms, 3),
@@ -777,7 +863,7 @@ export function partMessages(
     meaning: en
       ? `{"main":"its Hindi meaning, 1-3 short meanings joined by '; ' (the card's sense first)","sub":"its English meaning in at most 12 words"}`
       : `{"main":"its Hindi meaning in at most 14 words (the card's sense first)","sub":"its English equivalent in 1-3 words"}`,
-    sentence: `{"options":[{"news":"a sentence using the word","newsHi":"${en ? "the sentence in natural Hindi" : ""}"}, …3 options]}. Each sentence uses the word "${card.word}" (or a form of it) in the card's sense, says only what the article says (no names, numbers or claims it doesn't have), is at most 22 words and is clear to a student; the three differ`,
+    sentence: `{"options":[{"news":"an exam-style sentence using the word","newsHi":"${en ? "the sentence in natural Hindi" : ""}"}, …3 options]}. Each sentence uses the word "${card.word}" (or a form of it) in the card's sense, the way RPSC, RSSB and SSC papers use words: general and timeless (no names of people, places or organisations, no dates or numbers from the news), at most 22 words and clear to a student; the three differ`,
     words: en
       ? `{"synonyms":[3 English synonyms in the card's sense, capitalised],"antonyms":[2 English antonyms in the card's sense, capitalised, or [] if none is natural]}`
       : `{"synonyms":[2 or 3 standard पर्यायवाची],"antonyms":[1 or 2 standard विलोम, or []]}`,
@@ -957,9 +1043,12 @@ export function cardFrom(
     ipa: lang === "en" ? (w?.ipa ?? "") : "",
     main: w?.main ?? "",
     sub: w?.sub ?? "",
-    news: sentence,
+    // The AI's exam-style sentence; the paper's line if it wrote none.
+    news: w?.news || sentence,
     newsHi: lang === "en" ? (w?.newsHi ?? "") : "",
     paper,
+    rewritten: !!w?.news,
+    exam: !!w?.news,
     synonyms: w?.synonyms ?? [],
     antonyms: w?.antonyms ?? [],
     forms: w?.forms ?? [],

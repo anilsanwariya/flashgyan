@@ -172,3 +172,28 @@ sites, and its licences allow reuse with attribution. Linking the thumbnail cost
 storage. Reading the details back from Commons means the credit is always Commons' own.
 **Consequence:** if a file is deleted or renamed on Commons, its photo stops loading and
 the card hides it. The editor chooses another from the Photos tab.
+
+## ADR-018: Words in the News cards use exam-style sentences and post to several channels by language (6 November 2026)
+
+**Decision:** The AI writing a Words in the News card also writes its example sentence: one
+general, timeless sentence in the way RPSC, RSSB and SSC papers use the word, with no
+names, places, organisations, dates or numbers from the news, and its Hindi. The card
+labels it "Exam-style sentence" with a small "Spotted in <paper>" line. The paper's own
+line is still offered in the card editor ("Use the paper's line instead"), and a card
+whose AI gave no sentence keeps the paper's line as before. Settings hold a list of
+Telegram channels, each with its languages (English, Hindi or both), its own caption
+template if wanted, and an on/off switch; one posting time serves them all. Each channel
+gets an album (or two, English then Hindi, when it takes more than 10 cards) of only its
+languages' cards, with its own caption, and the weekly PDF is made once per language set
+and sent to each channel. With one channel the card footer shows its link; with several,
+a neutral "FlashGyan app".
+**Reason:** a line copied from the news teaches the news, not how the word appears in an
+exam, and goes stale. Separate Hindi and English channels let each audience get only the
+words it reads.
+**Consequence:** no migration. The channels live in the `ig_settings` value (the old single
+`channel` is read as one channel taking both languages, and kept equal to the first one
+for older code). Each day's per-channel captions and results are kept in `bot_settings`
+under `ig_posts:<day>`, and each week's in its `ig_week:<date>` mark, so trying a failed
+post again sends only to the channels that failed. The settings page saves the daily and
+weekly Play Store links (`daily_app_link`, `weekly_app_link`) through `app-promo.ts`,
+because the server can't import it.
