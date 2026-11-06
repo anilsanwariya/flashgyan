@@ -8,7 +8,7 @@
 // and earlier versions are kept.
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   BookA,
@@ -176,13 +176,17 @@ export function IgCardEditor({
     if (card) await push(card);
     await chain.current;
   };
-  const go = (to: string) =>
-    void flush().then(() => {
-      sent.current = "";
-      setCard(null);
-      setId(to);
-    });
-  const leave = () => void flush().then(onClose);
+  // Another card at once: an edit not yet saved is saved behind it.
+  const go = (to: string) => {
+    if (card) void push(card);
+    sent.current = "";
+    setCard(null);
+    setId(to);
+  };
+  const leave = () => {
+    if (card) void push(card);
+    onClose();
+  };
   const set = (patch: Partial<IgCard>) => card && setCard({ ...card, ...patch });
   // A change from the AI or a restore: saved at once, the card before kept.
   const keep = async (patch: Partial<IgCard>, label: string) => {
@@ -198,13 +202,15 @@ export function IgCardEditor({
     sent.current = JSON.stringify(c);
   };
 
-  // Alt+N / Alt+P: next or previous card; Alt+1…7: a tab.
+  // Alt+N / Alt+P: next or previous card; Alt+C: checked and the next
+  // unchecked card; Alt+1…7: a tab.
   const keys = useRef<(e: KeyboardEvent) => void>(() => undefined);
   keys.current = (e) => {
     if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     const digit = /^Digit(\d)$/.exec(e.code)?.[1];
     const t = digit ? TABS[Number(digit) - 1] : undefined;
     if (e.code === "KeyN" && next) go(next.id);
+    else if (e.code === "KeyC") checkAndNext();
     else if (e.code === "KeyP" && prev) go(prev.id);
     else if (t) setTab(t.id);
     else return;
@@ -217,6 +223,49 @@ export function IgCardEditor({
   }, []);
 
   const openChecks = (w?.checks ?? []).filter((c) => c.state === "open");
+
+  // The tick shows at once and is saved behind any edit still saving (an
+  // edit saved after it would untick the card). If saving fails it goes
+  // back. Its image is then made in the background.
+  const qc = useQueryClient();
+  const [ticks, setTicks] = useState<Record<string, boolean>>({});
+  const isChecked = (c: { id: string; checked: boolean }) => ticks[c.id] ?? c.checked;
+  const canTick = !!w?.proofed && openChecks.length === 0;
+  const tick = (cardId: string, v: boolean) => {
+    setTicks((t) => ({ ...t, [cardId]: v }));
+    qc.setQueryData<IgDayView>(["igDay", date], (old) =>
+      old
+        ? { ...old, cards: old.cards.map((c) => (c.id === cardId ? { ...c, checked: v } : c)) }
+        : old,
+    );
+    if (cardId === id && card) void push(card);
+    chain.current = chain.current.then(async () => {
+      try {
+        await tickFn({ data: { id: cardId, checked: v } });
+      } catch (e) {
+        toast.error(errorText(e, "Couldn't tick it"));
+      }
+      await onChange();
+      setTicks((t) => {
+        const { [cardId]: _gone, ...rest } = t;
+        return rest;
+      });
+    });
+  };
+  // Checked, and on to the next card not yet checked (after this one,
+  // then from the start); the editor closes when all are checked.
+  const checkAndNext = () => {
+    if (!canTick) return;
+    const to = [...cards.slice(at + 1), ...cards.slice(0, Math.max(at, 0))].find(
+      (c) => !isChecked(c),
+    );
+    tick(id, true);
+    if (to) go(to.id);
+    else {
+      toast.success("All cards checked");
+      leave();
+    }
+  };
   const notesIn = (part: TabId) =>
     part === "notes"
       ? openChecks.length
@@ -273,7 +322,7 @@ export function IgCardEditor({
             </DropdownMenu>
           </div>
           <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2 sm:px-4">
-            {w?.checked ? (
+            {w && isChecked(w) ? (
               <Badge tone="good">Checked</Badge>
             ) : (
               <Badge tone="primary">To check</Badge>
@@ -440,25 +489,25 @@ export function IgCardEditor({
 
         <footer className="flex items-center gap-2 border-t border-border bg-background px-2 py-2 sm:px-4">
           <label
-            className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm ${w?.checked ? "border-current bg-muted/60 font-medium text-emerald-700 dark:text-emerald-400" : "border-border text-muted-foreground"}`}
+            className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm ${w && isChecked(w) ? "border-current bg-muted/60 font-medium text-emerald-700 dark:text-emerald-400" : "border-border text-muted-foreground"}`}
             title={openChecks.length ? "Decide the notes first" : undefined}
           >
             <Checkbox
-              checked={!!w?.checked}
-              disabled={!w?.proofed || openChecks.length > 0 || saving > 0}
+              checked={!!w && isChecked(w)}
+              disabled={!canTick}
               aria-label="Checked"
-              onCheckedChange={async (v) => {
-                try {
-                  await flush();
-                  await tickFn({ data: { id, checked: v === true } });
-                  await onChange();
-                } catch (e) {
-                  toast.error(errorText(e, "Couldn't tick it"));
-                }
-              }}
+              onCheckedChange={(v) => tick(id, v === true)}
             />
             <Check className="hidden h-3.5 w-3.5 sm:block" /> Checked
           </label>
+          <Button
+            size="sm"
+            disabled={!canTick}
+            title="Tick it and open the next card to check (Alt+C)"
+            onClick={checkAndNext}
+          >
+            Check &amp; next
+          </Button>
           {openChecks.length > 0 && (
             <span className="hidden text-xs text-muted-foreground sm:inline">
               Decide the {openChecks.length} note{openChecks.length === 1 ? "" : "s"} first

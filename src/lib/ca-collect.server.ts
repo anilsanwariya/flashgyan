@@ -183,6 +183,14 @@ export async function tick(origin?: string): Promise<TickResult> {
     if (!existing && (await getSites()).some((s) => s.enabled)) await startRun(today, "schedule");
   }
 
+  // Words in the News first (its posts are due at a set time):
+  // suggestions after the evening collection, cards
+  // cards written and proofread, images made, the album posted when due.
+  try {
+    await (await import("@/lib/ig.server")).igStep(origin);
+  } catch (e) {
+    console.error("infographics:", e);
+  }
   try {
     await advanceBackfill();
   } catch (e) {
@@ -236,13 +244,6 @@ export async function tick(origin?: string): Promise<TickResult> {
     }
   } catch (e) {
     console.error("exam paper queue:", e);
-  }
-  // Words in the News: suggestions after the evening collection, cards
-  // written and proofread, images made, the album posted when due.
-  try {
-    await (await import("@/lib/ig.server")).igStep(origin);
-  } catch (e) {
-    console.error("infographics:", e);
   }
   // GK infographics: the day's cards planned, written, made and posted.
   try {

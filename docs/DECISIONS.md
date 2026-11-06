@@ -197,3 +197,20 @@ under `ig_posts:<day>`, and each week's in its `ig_week:<date>` mark, so trying 
 post again sends only to the channels that failed. The settings page saves the daily and
 weekly Play Store links (`daily_app_link`, `weekly_app_link`) through `app-promo.ts`,
 because the server can't import it.
+
+## ADR-019: Words in the News images are made as cards are checked, and posting runs without the page (6 November 2026)
+
+**Decision:** Ticking a card "Checked" shows at once and is saved behind any edit still
+saving; "Check & next" (Alt+C) ticks it and opens the next unchecked card. A checked
+card's image is made in the background while the rest are checked: by the open page,
+or by the minute tick when it is closed. An image is kept only if its card wasn't
+changed while it was made, and an edit unticks the card and drops its image. After
+approving, the editor can close the tab: the minute tick makes the images left, a
+few at once, and posts when due, in the same tick if it is already due. Words in the
+News runs first in the tick. The admin chat gets a Telegram message when the cards are
+posted and each time posting fails. Changing the footer (the channels) or the
+watermark in Settings makes the images of days not yet posted again.
+**Reason:** waiting for each tick to save, and for every image after approving, made
+reviewing slow and kept the editor on the page until the album was posted.
+**Consequence:** a card edited after checking is made twice (a little more Cloudflare
+use). Approving no longer remakes images; the settings change above does that instead.

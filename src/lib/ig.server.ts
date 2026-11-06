@@ -165,7 +165,8 @@ export async function getIgSettings(): Promise<IgSettings> {
 }
 
 export async function saveIgSettings(patch: Partial<IgSettings>): Promise<IgSettings> {
-  const value = igSettingsOf({ ...(await getIgSettings()), ...patch });
+  const before = await getIgSettings();
+  const value = igSettingsOf({ ...before, ...patch });
   fail(
     (
       await from("bot_settings").upsert({ key: SETTINGS_KEY, value, updated_at: now() } as never, {
@@ -173,6 +174,22 @@ export async function saveIgSettings(patch: Partial<IgSettings>): Promise<IgSett
       })
     ).error,
   );
+  // The footer or watermark changed: images not yet posted are made again.
+  if (footerChannel(before) !== footerChannel(value) || before.watermark !== value.watermark) {
+    const { data } = await from("ig_days")
+      .select("day")
+      .in("status", ["review", "rendering", "scheduled", "failed", "cancelled"]);
+    const days = ((data ?? []) as Row[]).map((r) => String(r.day));
+    if (days.length)
+      fail(
+        (
+          await from("ig_words")
+            .update({ image_path: null, updated_at: now() } as never)
+            .in("for_day", days)
+            .eq("status", "picked")
+        ).error,
+      );
+  }
   return value;
 }
 
@@ -689,16 +706,40 @@ const slug = (s: string) =>
     .slice(0, 30) || "word";
 
 // Up to `max` of the day's cards made into images; true when all are done.
+// The images still to make (in review: only the cards already checked).
+async function imagesToMake(day: string, onlyChecked: boolean): Promise<IgWord[]> {
+  return (await cardsOf(day)).filter(
+    (c) => c.status === "picked" && !c.image_path && c.card && (!onlyChecked || c.checked),
+  );
+}
+
+// A few images at once. In review only checked cards are made (so the
+// images are ready by the time the editor approves); an image is kept
+// only if its card wasn't changed while it was being made. True when
+// none are left.
 async function renderSome(
   day: string,
   origin: string,
   settings: IgSettings,
   max = 3,
+  onlyChecked = false,
 ): Promise<boolean> {
   const row = await readDay(day);
   const cards = await cardsOf(day);
-  const todo = cards.filter((c) => !c.image_path);
-  for (const c of todo.slice(0, max)) {
+  const todo = cards.filter(
+    (c) => c.status === "picked" && !c.image_path && c.card && (!onlyChecked || c.checked),
+  );
+  const stamps = new Map<string, string>();
+  if (todo.length) {
+    const { data } = await from("ig_words")
+      .select("id,updated_at")
+      .in(
+        "id",
+        todo.map((c) => c.id),
+      );
+    for (const r of (data ?? []) as Row[]) stamps.set(String(r.id), String(r.updated_at));
+  }
+  const one = async (c: IgWord) => {
     const n = cards.indexOf(c) + 1;
     const html = igCardHtml(c.card as IgCard, {
       design: (row?.design ?? "paper") as IgDesign,
@@ -719,8 +760,16 @@ async function renderSome(
           .upload(path, png, { contentType: "image/png", upsert: true })
       ).error,
     );
-    await patchWord(c.id, { image_path: path });
-  }
+    let q = from("ig_words")
+      .update({ image_path: path, updated_at: now() } as never)
+      .eq("id", c.id)
+      .is("image_path", null);
+    if (onlyChecked) q = q.eq("checked", true);
+    const stamp = stamps.get(c.id);
+    if (stamp) q = q.eq("updated_at", stamp);
+    fail((await q).error);
+  };
+  await Promise.all(todo.slice(0, max).map(one));
   return todo.length <= max;
 }
 
@@ -853,13 +902,19 @@ async function postAlbum(day: string, settings: IgSettings) {
 
 // ---------- Telegram notes to the admin ----------
 
-async function notify(day: string, kind: "suggested" | "review", origin: string | undefined) {
+async function notify(
+  day: string,
+  kind: "suggested" | "review" | "posted" | "failed",
+  origin: string | undefined,
+  error = "",
+) {
   const settings = await getIgSettings();
   const row = await readDay(day);
-  if (!settings.notify || !row || row.notified.includes(kind)) return;
+  // A failure is told every time; the rest once a day.
+  if (!settings.notify || !row || (kind !== "failed" && row.notified.includes(kind))) return;
   const admin = (await CA.getMagazineSettings()).test_chat_id;
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  await patchDay(day, { notified: [...row.notified, kind] });
+  if (kind !== "failed") await patchDay(day, { notified: [...row.notified, kind] });
   if (!admin || !token) return;
   const link = origin ? `${origin}/admin?section=ca.infographics&date=${day}` : "";
   let text = "";
@@ -876,6 +931,19 @@ async function notify(day: string, kind: "suggested" | "review", origin: string 
         : `${l === "en" ? settings.pick_en : settings.pick_hi} ${l === "en" ? "English" : "Hindi"}`,
     );
     text = `📝 Words in the News, ${formatDate(day, "en")}: ${got.join(" and ")} words suggested. Pick ${want.join(" + ")} for tomorrow's cards.`;
+  } else if (kind === "posted" || kind === "failed") {
+    const cards = await cardsOf(day);
+    const posts = (await dayPosts(day)).posts;
+    const where = igChannelsOn(settings)
+      .filter((ch) => posts[ch.id]?.ok)
+      .map((ch) => {
+        const n = cards.filter((c) => ch.langs.includes(c.lang)).length;
+        return `${channelLabel(ch.chat) || ch.chat} (${n} card${n === 1 ? "" : "s"})`;
+      });
+    text =
+      kind === "posted"
+        ? `✅ Words in the News, ${formatDate(day, "en")}: posted to ${where.join(", ") || "the channel"}.`
+        : `⚠️ Words in the News, ${formatDate(day, "en")}: ${error.slice(0, 600)}\n\nOpen the day and press "Try again": only the channels that failed are posted to.`;
   } else {
     const cards = await cardsOf(day);
     const open = cards.reduce((n, c) => n + c.checks.filter((x) => x.state === "open").length, 0);
@@ -949,6 +1017,9 @@ export async function advanceDay(day: string, origin?: string): Promise<IgStatus
         await patchDay(day, { status: "review", error: null });
         await notify(day, "review", origin);
       } else await patchDay(day, { error: null });
+    } else if (row.status === "review") {
+      // Checked cards' images made while the rest are checked.
+      if (origin) await renderSome(day, origin, settings, 3, true);
     } else if (row.status === "rendering") {
       if (!origin) return row.status;
       if (await renderSome(day, origin, settings))
@@ -958,11 +1029,11 @@ export async function advanceDay(day: string, origin?: string): Promise<IgStatus
         await patchDay(day, { status: "posting" });
         try {
           await postAlbum(day, settings);
+          await notify(day, "posted", origin);
         } catch (e) {
-          await patchDay(day, {
-            status: "failed",
-            error: e instanceof Error ? e.message : String(e),
-          });
+          const msg = e instanceof Error ? e.message : String(e);
+          await patchDay(day, { status: "failed", error: msg });
+          await notify(day, "failed", origin, msg);
         }
       }
     }
@@ -994,15 +1065,38 @@ export async function igStep(origin?: string): Promise<void> {
   }
   const { data, error } = await from("ig_days")
     .select("day,status,scheduled_for")
-    .in("status", ["suggesting", "writing", "rendering", "scheduled"])
+    .in("status", ["suggesting", "writing", "review", "rendering", "scheduled"])
     .order("day", { ascending: true })
     .limit(5);
   fail(error);
+  const t0 = Date.now();
   for (const d of (data ?? []) as Row[]) {
+    const day = String(d.day);
     if (d.status === "scheduled" && new Date(String(d.scheduled_for)).getTime() > Date.now())
       continue;
+    // Images are made a few at a time until none are left (or the tick's
+    // time is up), then the album is posted at once when it is due.
     try {
-      await advanceDay(String(d.day), origin);
+      let left = -1;
+      for (let i = 0; i < 12 && Date.now() - t0 < 40_000; i++) {
+        const st = await advanceDay(day, origin);
+        if (st === "review" || st === "rendering") {
+          // Stop when nothing is left, or nothing moved (another worker
+          // has the day, or rendering fails).
+          const n = origin ? (await imagesToMake(day, st === "review")).length : 0;
+          if (!n || n === left) break;
+          left = n;
+          continue;
+        }
+        const now2 = await readDay(day);
+        if (
+          now2?.status === "scheduled" &&
+          now2.scheduled_for &&
+          new Date(now2.scheduled_for).getTime() <= Date.now()
+        )
+          continue;
+        break;
+      }
     } catch (e) {
       console.error("infographics:", saathiErrorDetail(e));
     }
@@ -1736,16 +1830,6 @@ export async function approveIgDay(
       );
   }
   await saveDayPosts(day, { captions: caps, posts: prev.posts });
-  // Approved from review: the images made again (the footer follows the
-  // channels as they are now). Trying a failed post again keeps them.
-  if (row.status !== "failed")
-    fail(
-      (
-        await from("ig_words")
-          .update({ image_path: null, updated_at: now() } as never)
-          .eq("for_day", day)
-      ).error,
-    );
   let when = postNow ? new Date() : igPostDefault(settings.post_time);
   if (!postNow && at) {
     const t = new Date(at);
