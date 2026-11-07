@@ -6,7 +6,18 @@
 // translated, drafted from the facts and fact-checked, a section a step.
 // Students read only verified places and facts and published overviews.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { saathiComplete, saathiErrorDetail } from "../../supabase/functions/_shared/saathi-core.ts";
+import {
+  saathiBatchCreate,
+  saathiBatchGet,
+  saathiBatchResults,
+  saathiComplete,
+  saathiErrorDetail,
+  usageLabel,
+  type ChatMessage,
+  type SaathiUsage,
+} from "../../supabase/functions/_shared/saathi-core.ts";
+import { aiJobOf, aiJobOptions, type AiJobSetting } from "@/lib/ai-jobs";
+import { priceOf } from "@/lib/ai-usage";
 import { hindiGuide } from "../../supabase/functions/_shared/ca-hindi.ts";
 import * as CA from "@/lib/current-affairs.server";
 import { RAJ_DISTRICTS } from "@/lib/geo-admin";
@@ -107,7 +118,9 @@ async function all<T>(q: () => Rangeable): Promise<T[]> {
 // stuck: translation steps in a row that translated nothing; at
 // TRANSLATE_GIVE_UP the job stops with an error instead of calling the AI
 // every minute for nothing.
-type Jobs = { translate: boolean; kb: string[]; stuck?: number; error?: string };
+// batch: false translates a chunk at once each step (full price) instead
+// of sending Message Batches.
+type Jobs = { translate: boolean; kb: string[]; stuck?: number; error?: string; batch?: boolean };
 const TRANSLATE_GIVE_UP = 3;
 const JOBS_KEY = "atlas_jobs";
 const KB_KEY = "atlas_kb_docs";
@@ -308,17 +321,42 @@ export async function importMasterMap(html: string): Promise<ImportResult> {
   };
 }
 
-// ---------- Translation (a batch a step) ----------
+// ---------- Translation ----------
+//
+// Places, facts, layer names and headings without Hindi are translated in
+// chunks (15 places, 10 facts, 30 names, 40 headings a call). By default
+// the chunks go as one Message Batch (half price; the replies come within
+// hours) and the minute tick collects them; with batches off, one chunk is
+// translated each step. The model and effort are the admin's (ai_jobs).
 
 const TRANSLATE_SYSTEM = (g: Awaited<ReturnType<typeof glossary>>) =>
   `You translate the items of a Rajasthan GK atlas for Rajasthan competitive exam aspirants (RPSC, RSSB) from English into standard exam-book Hindi (Devanagari). Place names: their standard Hindi spelling as Rajasthan's exam books write them (e.g. "Kumbhalgarh" → "कुम्भलगढ़", "Sambhar" → "सांभर"). Keep numbers, dates, units and abbreviations (RPSC, IGNP, km) as they are. Keep **bold** marks. Translate every item fully; never summarise, add or drop a fact.${hindiGuide(g)}
 Reply with JSON only: {"items": [{"n": item number, "hi": "Hindi"}]}`;
 
-async function translateBatch(items: string[]): Promise<string[]> {
-  const raw = await saathiComplete(apiKey(), [
-    { role: "system", content: TRANSLATE_SYSTEM(await glossary()) },
-    { role: "user", content: items.map((t, i) => `${i + 1}. ${t}`).join("\n") },
-  ]);
+// Hindi takes many tokens: room for a whole chunk's reply.
+const TRANSLATE_MAX_TOKENS = 16000;
+export const AI_JOBS_KEY = "ai_jobs";
+export async function translateSetting(): Promise<AiJobSetting> {
+  return aiJobOf((await setting<Record<string, unknown>>(AI_JOBS_KEY, {})).atlas_translate);
+}
+export async function saveTranslateSetting(v: AiJobSetting) {
+  const all = await setting<Record<string, unknown>>(AI_JOBS_KEY, {});
+  await saveSetting(AI_JOBS_KEY, { ...all, atlas_translate: aiJobOf(v) });
+}
+
+const translateMessages = async (items: string[]): Promise<ChatMessage[]> => [
+  { role: "system", content: TRANSLATE_SYSTEM(await glossary()) },
+  { role: "user", content: items.map((t, i) => `${i + 1}. ${t}`).join("\n") },
+];
+
+async function translateBatch(items: string[], s?: AiJobSetting): Promise<string[]> {
+  const raw = await saathiComplete(
+    apiKey(),
+    await translateMessages(items),
+    undefined,
+    undefined,
+    aiJobOptions(s ?? (await translateSetting()), TRANSLATE_MAX_TOKENS),
+  );
   return parseTranslations(raw, items.length);
 }
 
@@ -353,21 +391,80 @@ export function parseTranslations(raw: string, count: number): string[] {
   return out;
 }
 
-// Translates the next small batch. Returns how many items it translated,
-// or null when nothing is left. Batches stay small so a reply (Hindi takes
-// many tokens) fits well inside the length limit.
-async function translateStep(): Promise<number | null> {
-  // Place names first (short), then facts, then the layers' legends.
+// A chunk of work: what is translated, and where its Hindi goes.
+type Chunk =
+  | { cid: string; kind: "places"; ids: string[]; texts: string[] }
+  | { cid: string; kind: "facts"; ids: string[]; texts: string[] }
+  | { cid: string; kind: "layer"; key: string; texts: string[] }
+  | { cid: string; kind: "headings"; texts: string[] };
+
+// Chunks of what has no Hindi yet, up to `max` of them (places first, then
+// facts, layer names and headings).
+async function chunksToTranslate(max: number): Promise<Chunk[]> {
+  const out: Chunk[] = [];
+  const room = () => max - out.length;
   const { data: places } = await from("atlas_places")
     .select("id,name_en,label_en,name_hi,label_hi")
     .or("name_hi.eq.,label_hi.eq.")
     .neq("status", "hidden")
-    .limit(15);
+    .limit(15 * room());
   const ps = (places ?? []) as Row[];
-  if (ps.length) {
-    const items = ps.flatMap((p) => [String(p.name_en), String(p.label_en || p.name_en)]);
-    const hi = await translateBatch(items);
-    for (const [i, p] of ps.entries()) {
+  for (let i = 0; i < ps.length && room(); i += 15) {
+    const part = ps.slice(i, i + 15);
+    out.push({
+      cid: `p${out.length}`,
+      kind: "places",
+      ids: part.map((p) => String(p.id)),
+      texts: part.flatMap((p) => [String(p.name_en), String(p.label_en || p.name_en)]),
+    });
+  }
+  if (!room()) return out;
+  const { data: facts } = await from("atlas_facts")
+    .select("id,text_en")
+    .eq("text_hi", "")
+    .neq("status", "hidden")
+    .order("position")
+    .limit(10 * room());
+  const fs = (facts ?? []) as Row[];
+  for (let i = 0; i < fs.length && room(); i += 10) {
+    const part = fs.slice(i, i + 10);
+    out.push({
+      cid: `f${out.length}`,
+      kind: "facts",
+      ids: part.map((f) => String(f.id)),
+      texts: part.map((f) => String(f.text_en)),
+    });
+  }
+  if (!room()) return out;
+  const { data: layers } = await from("atlas_layers").select("key,items");
+  for (const l of (layers ?? []) as Row[]) {
+    const items = (l.items as AtlasLayer["items"]) ?? [];
+    const names = [...new Set(items.filter((f) => f.name.en && !f.name.hi).map((f) => f.name.en))];
+    for (let i = 0; i < names.length && room(); i += 30)
+      out.push({
+        cid: `l${out.length}`,
+        kind: "layer",
+        key: String(l.key),
+        texts: names.slice(i, i + 30),
+      });
+    if (!room()) return out;
+  }
+  const missing = await headingsToTranslate();
+  for (let i = 0; i < missing.length && room(); i += 40)
+    out.push({ cid: `h${out.length}`, kind: "headings", texts: missing.slice(i, i + 40) });
+  return out;
+}
+
+// A chunk's Hindi saved. Returns how many items got Hindi.
+async function applyChunk(c: Chunk, hi: string[]): Promise<number> {
+  if (c.kind === "places") {
+    const { data } = await from("atlas_places")
+      .select("id,name_en,label_en,name_hi,label_hi")
+      .in("id", c.ids);
+    const byId = new Map(((data ?? []) as Row[]).map((p) => [String(p.id), p]));
+    for (const [i, id] of c.ids.entries()) {
+      const p = byId.get(id);
+      if (!p) continue;
       const patch = {
         name_hi: String(p.name_hi) || hi[i * 2] || String(p.name_en),
         label_hi: String(p.label_hi) || hi[i * 2 + 1] || hi[i * 2] || String(p.label_en),
@@ -375,46 +472,32 @@ async function translateStep(): Promise<number | null> {
       // Marked as the AI's for the Hindi review (once its migration is in).
       const { error } = await from("atlas_places")
         .update({ ...patch, hi_ai: true } as never)
-        .eq("id", String(p.id));
+        .eq("id", id);
       if (error && /hi_ai/.test(error.message))
         await from("atlas_places")
           .update(patch as never)
-          .eq("id", String(p.id));
+          .eq("id", id);
       else fail(error);
     }
-    return hi.filter(Boolean).length;
-  }
-  const { data: facts } = await from("atlas_facts")
-    .select("id,text_en")
-    .eq("text_hi", "")
-    .neq("status", "hidden")
-    .order("position")
-    .limit(10);
-  const fs = (facts ?? []) as Row[];
-  if (fs.length) {
-    const hi = await translateBatch(fs.map((f) => String(f.text_en)));
-    for (const [i, f] of fs.entries())
+  } else if (c.kind === "facts") {
+    for (const [i, id] of c.ids.entries())
       if (hi[i])
         await from("atlas_facts")
           .update({ text_hi: hi[i], hi_ai: true } as never)
-          .eq("id", String(f.id));
-    // A fact the AI left out is tried again next time; one it keeps
+          .eq("id", id)
+          .eq("text_hi", "");
+    // A fact the AI left out is tried again next time; a chunk it keeps
     // leaving out gets its English, marked to check.
     if (hi.every((x) => !x))
-      for (const f of fs)
+      for (const [i, id] of c.ids.entries())
         await from("atlas_facts")
-          .update({ text_hi: String(f.text_en), hi_ai: true } as never)
-          .eq("id", String(f.id));
-    return hi.filter(Boolean).length;
-  }
-  const { data: layers } = await from("atlas_layers").select("key,items");
-  for (const l of (layers ?? []) as Row[]) {
-    const items = (l.items as AtlasLayer["items"]) ?? [];
-    const names = [...new Set(items.filter((f) => f.name.en && !f.name.hi).map((f) => f.name.en))];
-    if (!names.length) continue;
-    const batch = names.slice(0, 30);
-    const hi = await translateBatch(batch);
-    const map = new Map(batch.map((n, i) => [n, hi[i] || n]));
+          .update({ text_hi: c.texts[i], hi_ai: true } as never)
+          .eq("id", id)
+          .eq("text_hi", "");
+  } else if (c.kind === "layer") {
+    const { data } = await from("atlas_layers").select("key,items").eq("key", c.key).maybeSingle();
+    const items = ((data as Row | null)?.items as AtlasLayer["items"]) ?? [];
+    const map = new Map(c.texts.map((n, i) => [n, hi[i] || n]));
     await from("atlas_layers")
       .update({
         items: items.map((f) =>
@@ -423,20 +506,83 @@ async function translateStep(): Promise<number | null> {
             : f,
         ),
       } as never)
-      .eq("key", String(l.key));
-    return hi.filter(Boolean).length;
-  }
-  // Last, the facts' headings, chapters and table headers (those the
-  // notes' Hindi file didn't give), 40 a call.
-  const missing = await headingsToTranslate();
-  if (missing.length) {
-    const batch = missing.slice(0, 40);
-    const hi = await translateBatch(batch);
+      .eq("key", c.key);
+  } else {
     // One the AI left out keeps its English, so it isn't asked again.
-    await saveHeadingsHi(Object.fromEntries(batch.map((t, i) => [t, hi[i] || t])), false);
-    return hi.filter(Boolean).length;
+    await saveHeadingsHi(Object.fromEntries(c.texts.map((t, i) => [t, hi[i] || t])), false);
   }
-  return null;
+  return hi.filter(Boolean).length;
+}
+
+// Translates the next chunk at once (batches off). Returns how many items
+// it translated, or null when nothing is left.
+async function translateStep(): Promise<number | null> {
+  const [c] = await chunksToTranslate(1);
+  if (!c) return null;
+  return applyChunk(c, await translateBatch(c.texts));
+}
+
+// ---------- Translation by Message Batch ----------
+
+const TRANSLATE_BATCH_KEY = "atlas_translate_batch";
+// Chunks in one batch (600 facts at most).
+const BATCH_CHUNKS = 60;
+type PendingBatch = { id: string; at: string; model: string; chunks: Chunk[] };
+
+export type BatchStep =
+  | { kind: "done" }
+  | { kind: "sent"; chunks: number; items: number }
+  | { kind: "waiting"; since: string }
+  | { kind: "applied"; translated: number; failed: number };
+
+export async function translateBatchStep(): Promise<BatchStep> {
+  const pending = await setting<PendingBatch | null>(TRANSLATE_BATCH_KEY, null);
+  if (pending) {
+    const b = await saathiBatchGet(pending.id);
+    if (b.status !== "ended") return { kind: "waiting", since: pending.at };
+    const results = await saathiBatchResults(
+      pending.id,
+      usageLabel(await translateMessages([])),
+      pending.model,
+    );
+    let translated = 0;
+    let failed = 0;
+    for (const c of pending.chunks) {
+      const r = results.get(c.cid);
+      if (!r || "error" in r) {
+        failed++;
+        continue;
+      }
+      translated += await applyChunk(c, parseTranslations(r.text, c.texts.length));
+    }
+    fail((await from("bot_settings").delete().eq("key", TRANSLATE_BATCH_KEY)).error);
+    return { kind: "applied", translated, failed };
+  }
+  const chunks = await chunksToTranslate(BATCH_CHUNKS);
+  if (!chunks.length) return { kind: "done" };
+  const s = await translateSetting();
+  const id = await saathiBatchCreate(
+    await Promise.all(
+      chunks.map(async (c) => ({ id: c.cid, messages: await translateMessages(c.texts) })),
+    ),
+    aiJobOptions(s, TRANSLATE_MAX_TOKENS),
+  );
+  await saveSetting(TRANSLATE_BATCH_KEY, {
+    id,
+    at: new Date().toISOString(),
+    model: s.model,
+    chunks,
+  } satisfies PendingBatch);
+  return {
+    kind: "sent",
+    chunks: chunks.length,
+    items: chunks.reduce((n, c) => n + c.texts.length, 0),
+  };
+}
+
+export async function translateBatchPending(): Promise<{ at: string; items: number } | null> {
+  const p = await setting<PendingBatch | null>(TRANSLATE_BATCH_KEY, null);
+  return p ? { at: p.at, items: p.chunks.reduce((n, c) => n + c.texts.length, 0) } : null;
 }
 
 // ---------- Headings in Hindi ----------
@@ -1040,14 +1186,24 @@ export async function atlasStep(): Promise<{ did: string | null }> {
   if (j.translate) {
     let done: number | null = 0;
     let error = "the AI's replies had no Hindi in them";
+    let waiting = false;
     try {
-      done = await translateStep();
+      if (j.batch === false) done = await translateStep();
+      else {
+        const r = await translateBatchStep();
+        if (r.kind === "done") done = null;
+        else if (r.kind === "applied") {
+          done = r.translated;
+          if (r.failed) error = `${r.failed} of the batch's calls failed`;
+        } else waiting = true;
+        if (r.kind === "sent") return { did: "translate" };
+      }
     } catch (e) {
       error = saathiErrorDetail(e);
       console.error("atlas translate:", error);
     }
     if (done === null) await saveSetting(JOBS_KEY, { ...j, translate: false, stuck: 0 });
-    else {
+    else if (!waiting) {
       // Nothing translated: counted, and after a few in a row the job stops
       // (Redo all starts it again) rather than paying for the same failing
       // call every minute.
@@ -1066,6 +1222,7 @@ export async function atlasStep(): Promise<{ did: string | null }> {
         });
       if (done > 0 || !stop) return { did: done > 0 ? "translate" : null };
     }
+    // Waiting for the batch: the rest of the work goes on meanwhile.
   }
   if (j.kb.length) {
     const [ch, ...rest] = j.kb;
@@ -1111,6 +1268,8 @@ export async function atlasStatus() {
     overviews: await n(head("atlas_districts").not("overview", "is", null)),
     published: await n(head("atlas_districts").eq("status", "published")),
     jobs: j,
+    translateBatch: await translateBatchPending(),
+    translateSetting: await translateSetting(),
     kbDocs: Object.keys(await setting<Record<string, string>>(KB_KEY, {})).length,
   } as const;
 }
@@ -1125,7 +1284,109 @@ export async function resumeAtlasJobs(what: { translate?: boolean; kb?: boolean 
     translate: what.translate ? true : j.translate,
     kb: what.kb ? chapters : j.kb,
     ...(what.translate ? { stuck: 0 } : { stuck: j.stuck, error: j.error }),
+    ...(j.batch === false ? { batch: false } : {}),
   } satisfies Jobs);
+}
+
+// Message Batches on or off for the translation (on: half price, the
+// Hindi within hours; off: a chunk each minute at full price).
+export async function setTranslateBatch(on: boolean) {
+  const j = await jobs();
+  await saveSetting(JOBS_KEY, { ...j, batch: on });
+}
+
+// ---------- Choosing the translation's model and effort ----------
+//
+// Facts whose Hindi a person wrote or checked are translated again with
+// each choice, side by side with that Hindi and what each cost, so the
+// admin can pick the cheapest that still reads right. One run is a few
+// calls (well under a dollar).
+
+export type TranslateTestRun = {
+  setting: AiJobSetting;
+  hi: string[];
+  cost: number;
+  // What 1,000 facts would cost this way through a batch (half price).
+  per1000: number;
+  outputTokens: number;
+  seconds: number;
+  error?: string;
+};
+
+export async function translateTest(n = 10): Promise<{
+  facts: { en: string; hi: string }[];
+  runs: TranslateTestRun[];
+}> {
+  const { data, error } = await from("atlas_facts")
+    .select("text_en,text_hi,status,hi_ai")
+    .neq("text_hi", "")
+    .eq("hi_ai", false)
+    .neq("status", "hidden")
+    .order("status", { ascending: false })
+    .limit(n * 3);
+  fail(error);
+  const pool = ((data ?? []) as Row[]).filter((r) => String(r.text_en).trim());
+  // Verified first, then the rest; spread over the list.
+  const pick = [
+    ...pool.filter((r) => r.status === "verified"),
+    ...pool.filter((r) => r.status !== "verified"),
+  ].slice(0, n);
+  if (pick.length < 3)
+    throw new Error("Write or check the Hindi of at least 3 facts first (Facts tab).");
+  const facts = pick.map((r) => ({ en: String(r.text_en), hi: String(r.text_hi) }));
+  const current = await translateSetting();
+  const all: AiJobSetting[] = [
+    current,
+    { model: "claude-sonnet-5", effort: "default" },
+    { model: "claude-sonnet-5", effort: "low" },
+    { model: "claude-haiku-5-5", effort: "default" },
+  ];
+  const choices = all.filter(
+    (c, i, all) => all.findIndex((x) => x.model === c.model && x.effort === c.effort) === i,
+  );
+  const runs = await Promise.all(
+    choices.map(async (c): Promise<TranslateTestRun> => {
+      const t0 = Date.now();
+      let usage: SaathiUsage | null = null;
+      try {
+        const raw = await saathiComplete(
+          apiKey(),
+          await translateMessages(facts.map((f) => f.en)),
+          undefined,
+          undefined,
+          { ...aiJobOptions(c, TRANSLATE_MAX_TOKENS), onUsage: (u) => (usage = u) },
+        );
+        const u = usage as SaathiUsage | null;
+        const p = priceOf(c.model);
+        const cost = u
+          ? (u.input_tokens * p.input +
+              u.cache_creation_input_tokens * p.write +
+              u.cache_read_input_tokens * p.read +
+              u.output_tokens * p.output) /
+            1e6
+          : 0;
+        return {
+          setting: c,
+          hi: parseTranslations(raw, facts.length),
+          cost,
+          per1000: (cost / facts.length) * 1000 * 0.5,
+          outputTokens: u?.output_tokens ?? 0,
+          seconds: Math.round((Date.now() - t0) / 1000),
+        };
+      } catch (e) {
+        return {
+          setting: c,
+          hi: [],
+          cost: 0,
+          per1000: 0,
+          outputTokens: 0,
+          seconds: Math.round((Date.now() - t0) / 1000),
+          error: saathiErrorDetail(e),
+        };
+      }
+    }),
+  );
+  return { facts, runs };
 }
 
 export async function listPlaces(f: {

@@ -138,6 +138,40 @@ export const resumeAtlasJobs = createServerFn({ method: "POST" })
     await (await server()).resumeAtlasJobs(data);
   });
 
+// The translation's model and effort, and batches on or off.
+export const setAtlasTranslate = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        batch: z.boolean().optional(),
+        model: z.enum(["claude-sonnet-5", "claude-haiku-5-5"]).optional(),
+        effort: z.enum(["default", "high", "medium", "low"]).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    const s = await server();
+    if (data.batch !== undefined) await s.setTranslateBatch(data.batch);
+    if (data.model || data.effort) {
+      const cur = await s.translateSetting();
+      await s.saveTranslateSetting({
+        model: data.model ?? cur.model,
+        effort: data.effort ?? cur.effort,
+      });
+    }
+    return { ok: true };
+  });
+
+// Checked facts translated again with each model and effort, side by side.
+export const atlasTranslateTest = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).translateTest();
+  });
+
 export const listAtlasPlaces = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
