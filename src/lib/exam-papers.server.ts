@@ -1,6 +1,7 @@
 // Exam papers (server): saving papers exam by exam, reading a question
 // paper's pages with the AI, applying answer keys, importing from Excel, and
 // checking a paper against the current affairs magazine.
+import { liveCall, type Completer } from "@/lib/ai-batch.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   matchLabel,
@@ -261,7 +262,7 @@ const missingMains = (e: { message: string } | null) =>
   /unit|part|marks|word_limit|model_answer|model_source|master_topic_id|kind/.test(e.message);
 export const MAINS_NOT_READY =
   "Mains papers and topic links need a database update: run the latest migration (mains_papers) in Lovable or the SQL editor.";
-const isWritten = (p: { kind?: string }) => p.kind === "subjective";
+export const isWritten = (p: { kind?: string }) => p.kind === "subjective";
 
 function readQuestion(r: unknown): ExamQuestion {
   const q = r as ExamQuestion;
@@ -655,11 +656,15 @@ export async function readPaperPage(
   page: number,
   pages: number,
   image: SaathiImage,
+  // How the AI is called for an objective paper's page (a batch's capture
+  // or reply); now by default. A written paper's page is always read now
+  // (it carries on from the page before).
+  complete?: Completer,
 ): Promise<{ questions: number[]; paper: boolean }> {
   const { data: kindRow } = await from("exam_papers").select("*").eq("id", paperId).single();
   const read = isWritten((kindRow ?? {}) as { kind?: string })
     ? await readWrittenPage(paperId, page, pages, image)
-    : parsePage(await saathiComplete(apiKey(), pageMessages(page, pages), undefined, [image]));
+    : parsePage(await (complete ?? liveCall())(pageMessages(page, pages), [image]));
   await saveQuestions(paperId, read.questions);
   const { data } = await from("exam_papers")
     .select("pages_done,paper_code,questions_total,series")

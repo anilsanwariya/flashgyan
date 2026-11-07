@@ -238,3 +238,24 @@ Telegram bot and the editors call the API as before. Translated Hindi now arrive
 batches rather than a chunk a minute. Other background jobs (exam-paper reading, card
 studio checks) can move to batches the same way.
 
+## ADR-021: Card studio server jobs and the exam upload queue use Message Batches, with the step run twice (7 November 2026)
+
+**Decision:** An existing AI step (check these cards, fill these explanations, read this
+page) takes an optional way of calling the AI (`src/lib/ai-batch.server.ts`). To batch it,
+the step runs once with `captureCall`, which catches the request it would send so it goes
+into a Message Batch, and once more after the batch has ended, with `replayReply`, which
+hands back the batch's reply. The reply is used only if the request's last user message
+(the cards or page it is about) is unchanged; otherwise the step throws `StaleReply` and
+those cards go in the next batch. Card studio server jobs send 25 parts (500 cards to check,
+or 250 to fill) as one batch. The exam upload queue sends an objective paper's next 30
+pages; written (Mains) papers are still read page by page, because each page carries on
+from the one before. While a batch is out, the job or paper is left alone for a few
+minutes so other work goes on. Admin → AI usage has a switch for each (on by default).
+**Reason:** these jobs run with nobody waiting, and a batch costs half on every token. Running
+the step twice keeps each job's own request-building and saving code as the only copy, so
+batched and direct runs can't drift apart.
+**Consequence:** no migration. Results arrive within hours instead of minutes; the switch
+turns batching off for a job when results are needed sooner. Pending batches are kept in
+`bot_settings` (`flash_job_batch:<job>`, `exam_queue_batch:<item>`); stopping a job,
+removing a queued paper or trying it again drops its batch.
+

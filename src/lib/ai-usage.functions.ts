@@ -24,3 +24,23 @@ export const getAiUsage = createServerFn({ method: "POST" })
     await assertAdmin(context.userId);
     return (await import("@/lib/ai-usage.server")).getAiUsage(data.days);
   });
+
+// Background jobs through Message Batches (half price): on or off each.
+export const getAiBatchSettings = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    const B = await import("@/lib/ai-batch.server");
+    return { on: await B.batchSettings(), names: B.BATCH_JOBS };
+  });
+
+export const setAiBatchSetting = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ job: z.enum(["studio_jobs", "exam_read"]), on: z.boolean() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    await (await import("@/lib/ai-batch.server")).setBatchOn(data.job, data.on);
+    return { ok: true };
+  });

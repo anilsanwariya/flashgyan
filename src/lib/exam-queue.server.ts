@@ -6,7 +6,24 @@
 // the paper (try again from the queue).
 import { PDFDocument } from "pdf-lib";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { createPaper, readPaperPage, type PaperMeta } from "@/lib/exam-papers.server";
+import { createPaper, isWritten, readPaperPage, type PaperMeta } from "@/lib/exam-papers.server";
+import {
+  batchOn,
+  CapturedCall,
+  captureCall,
+  clearPendingBatch,
+  fingerprint,
+  pendingBatch,
+  replayReply,
+  savePendingBatch,
+  StaleReply,
+} from "@/lib/ai-batch.server";
+import {
+  saathiBatchCreate,
+  saathiBatchGet,
+  saathiBatchResults,
+  usageLabel,
+} from "../../supabase/functions/_shared/saathi-core.ts";
 import type { PaperKind } from "@/lib/exam-papers";
 
 const BUCKET = "exam-papers";
@@ -84,7 +101,7 @@ export async function markUploaded(id: string) {
 
 export async function listQueue(): Promise<{
   ready: boolean;
-  items: (QueueItem & { exam: string })[];
+  items: (QueueItem & { exam: string; batch: { at: string; pages: number } | null })[];
 }> {
   const { data, error } = await from("exam_paper_queue")
     .select("*, paper:exam_papers(exam)")
@@ -92,15 +109,30 @@ export async function listQueue(): Promise<{
     .limit(200);
   if (missing(error)) return { ready: false, items: [] };
   fail(error);
+  // Batches out (half price): when sent and how many pages.
+  const { data: out } = await from("bot_settings")
+    .select("key,value")
+    .like("key", "exam_queue_batch:%");
+  const batches = new Map(
+    ((out ?? []) as { key: string; value: QueueBatch }[]).map((r) => [
+      r.key.slice("exam_queue_batch:".length),
+      { at: r.value.at, pages: r.value.pages.length },
+    ]),
+  );
   return {
     ready: true,
     items: ((data ?? []) as unknown as (QueueItem & { paper: { exam: string } | null })[]).map(
-      ({ paper, ...q }) => ({ ...q, exam: paper?.exam ?? q.file_name }),
+      ({ paper, ...q }) => ({
+        ...q,
+        exam: paper?.exam ?? q.file_name,
+        batch: batches.get(q.id) ?? null,
+      }),
     ),
   };
 }
 
 export async function retryQueued(id: string) {
+  await clearPendingBatch(queueBatchKey(id));
   fail(
     (
       await from("exam_paper_queue")
@@ -118,6 +150,7 @@ export async function retryQueued(id: string) {
 
 // Off the queue (the paper and what was read stay).
 export async function removeQueued(id: string) {
+  await clearPendingBatch(queueBatchKey(id));
   const { data } = await from("exam_paper_queue").select("file_path").eq("id", id).maybeSingle();
   const path = (data as { file_path?: string } | null)?.file_path;
   if (path) await store().remove([path]);
@@ -185,6 +218,13 @@ export async function queueStep(id?: string): Promise<string | null> {
     return "bad pdf";
   }
   const pages = doc.getPageCount();
+  // An objective paper's pages go as Message Batches (half price).
+  const { data: paperRow } = await from("exam_papers")
+    .select("kind")
+    .eq("id", item.paper_id)
+    .maybeSingle();
+  if (!isWritten((paperRow ?? {}) as { kind?: string }) && (await batchOn("exam_read")))
+    return batchQueueStep(item, doc, pages);
   let done = item.pages_done;
   let attempts = item.attempts;
   const t0 = Date.now();
@@ -219,4 +259,126 @@ export async function queueStep(id?: string): Promise<string | null> {
   }
   await release({ pages, pages_done: done, status: "waiting", attempts });
   return `read ${item.file_name} to page ${done}`;
+}
+
+// ---------- Objective papers through Message Batches ----------
+//
+// The next pages (30 at most) are sent as one batch, each built as the page
+// reader would send it. Later steps ask after the batch (the paper is left
+// alone for a few minutes in between, so other papers go on); once it has
+// ended, its pages are saved in order up to the first that failed, which is
+// sent again (three failures stop the paper, as before).
+
+const queueBatchKey = (id: string) => `exam_queue_batch:${id}`;
+const BATCH_PAGES = 30;
+const BATCH_WAIT_MS = 5 * 60_000;
+type QueueBatch = {
+  id: string;
+  at: string;
+  label: string;
+  pages: { page: number; cid: string; fp: string }[];
+};
+
+async function batchQueueStep(item: QueueItem, doc: PDFDocument, pages: number): Promise<string> {
+  const key = queueBatchKey(item.id);
+  const paperId = item.paper_id!;
+  const save = async (patch: Record<string, unknown>, waitMs = 0) =>
+    fail(
+      (
+        await from("exam_paper_queue")
+          .update({
+            pages,
+            ...patch,
+            locked_until: waitMs ? new Date(Date.now() + waitMs).toISOString() : null,
+            updated_at: now(),
+          } as never)
+          .eq("id", item.id)
+      ).error,
+    );
+  const pending = await pendingBatch<QueueBatch>(key);
+  if (pending) {
+    const b = await saathiBatchGet(pending.id);
+    if (b.status !== "ended") {
+      await save({ status: "waiting" }, BATCH_WAIT_MS);
+      return `waiting for the batch of ${item.file_name}`;
+    }
+    const replies = await saathiBatchResults(pending.id, pending.label);
+    let done = item.pages_done;
+    let error: string | null = null;
+    for (const p of pending.pages) {
+      if (p.page !== done + 1) continue;
+      const r = replies.get(p.cid);
+      try {
+        if (!r || "error" in r)
+          throw new Error(r && "error" in r ? r.error : "no reply in the batch");
+        await readPaperPage(
+          paperId,
+          p.page,
+          pages,
+          { media_type: "application/pdf", data: "" },
+          replayReply(r.text, p.fp),
+        );
+        done = p.page;
+      } catch (e) {
+        if (!(e instanceof StaleReply))
+          error = `Page ${p.page}: ${e instanceof Error ? e.message : String(e)}`.slice(0, 500);
+        break;
+      }
+    }
+    await clearPendingBatch(key);
+    if (done >= pages) {
+      await save({ pages_done: done, status: "done", error: null, attempts: 0 });
+      await store().remove([item.file_path]);
+      return `read ${item.file_name}`;
+    }
+    const attempts = error && done === item.pages_done ? item.attempts + 1 : 0;
+    await save({
+      pages_done: done,
+      attempts,
+      error,
+      status: attempts >= MAX_TRIES ? "failed" : "waiting",
+    });
+    return `read ${item.file_name} to page ${done}`;
+  }
+  // The next pages, caught as they would be sent.
+  const items: {
+    id: string;
+    messages: Parameters<typeof fingerprint>[0];
+    images?: { media_type: "application/pdf"; data: string }[];
+  }[] = [];
+  const sent: QueueBatch["pages"] = [];
+  for (let page = item.pages_done + 1; page <= pages && sent.length < BATCH_PAGES; page++) {
+    const image = { media_type: "application/pdf" as const, data: await pdfPage(doc, page - 1) };
+    try {
+      await readPaperPage(paperId, page, pages, image, captureCall);
+    } catch (e) {
+      if (!(e instanceof CapturedCall)) throw e;
+      const cid = `page${page}`;
+      items.push({ id: cid, messages: e.messages, images: [image] });
+      sent.push({ page, cid, fp: fingerprint(e.messages) });
+    }
+  }
+  if (!items.length) {
+    await save({ status: "done", pages_done: pages, error: null });
+    return `read ${item.file_name}`;
+  }
+  try {
+    const id = await saathiBatchCreate(items);
+    await savePendingBatch(key, {
+      id,
+      at: now(),
+      label: usageLabel(items[0].messages),
+      pages: sent,
+    } satisfies QueueBatch);
+  } catch (e) {
+    const attempts = item.attempts + 1;
+    await save({
+      attempts,
+      error: `Sending the pages: ${e instanceof Error ? e.message : String(e)}`.slice(0, 500),
+      status: attempts >= MAX_TRIES ? "failed" : "waiting",
+    });
+    return "batch failed";
+  }
+  await save({ status: "waiting", error: null }, BATCH_WAIT_MS);
+  return `sent ${sent.length} pages of ${item.file_name}`;
 }

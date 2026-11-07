@@ -116,7 +116,9 @@ docs/                     Project documentation (this folder)
   Background jobs nobody waits on can send their calls as a Message Batch
   (`saathiBatchCreate` / `saathiBatchGet` / `saathiBatchResults`, half price); a job's
   model and effort are set per job (`ai-jobs.ts`, `bot_settings` key `ai_jobs`). The atlas
-  translation does both (ADR-020).
+  translation does both (ADR-020). Card studio server jobs and the exam upload queue
+  batch their existing steps by running each step twice (`ai-batch.server.ts`: capture the
+  request, then replay the batch's reply if what it was about is unchanged; ADR-021).
 - **SAATHI search:** hybrid search (`match_saathi_hybrid`): embedding similarity plus
   keyword rank, then the model picks the best passages. SAATHI answers only from
   `saathi_knowledge`.

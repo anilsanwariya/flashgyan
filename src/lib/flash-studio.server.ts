@@ -4,11 +4,29 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   matchLabel,
   relevantMatches,
+  saathiBatchCreate,
+  saathiBatchGet,
+  saathiBatchResults,
   saathiComplete,
   saathiSearchQuery,
+  usageLabel,
+  type ChatMessage,
   type SaathiImage,
   type SaathiRpc,
 } from "../../supabase/functions/_shared/saathi-core.ts";
+import {
+  batchOn,
+  CapturedCall,
+  captureCall,
+  clearPendingBatch,
+  fingerprint,
+  liveCall,
+  pendingBatch,
+  replayReply,
+  savePendingBatch,
+  StaleReply,
+  type Completer,
+} from "@/lib/ai-batch.server";
 import { parseReply, readMessages, type ReadResult, type Todo } from "@/lib/flash-read";
 import * as M from "@/lib/flash-merge";
 import * as L from "@/lib/flash-lint";
@@ -1152,6 +1170,8 @@ async function deckOf(topic: FlashTopic) {
 export async function fillExplanations(
   topicId: string,
   ids: string[],
+  // How the AI is called (a batch's capture or reply); now by default.
+  complete: Completer = liveCall(),
 ): Promise<{ filled: number; own: number; cards: FlashCard[] }> {
   const { topic, cards } = await getTopic(topicId);
   const want = cards.filter((c) => ids.includes(c.id) && !c.removed);
@@ -1222,8 +1242,7 @@ export async function fillExplanations(
   let own = 0;
   if (items.length) {
     const got = M.parseFill(
-      await saathiComplete(
-        apiKey(),
+      await complete(
         M.fillMessages(
           deck,
           items,
@@ -1277,6 +1296,8 @@ export async function checkCards(
   // Read again even if unchanged since the last check (its suggestions
   // replaced by the new ones).
   force = false,
+  // How the AI is called (a batch's capture or reply); now by default.
+  complete: Completer = liveCall(),
 ): Promise<{ checked: number; flagged: number; cards: FlashCard[] }> {
   const { topic, cards } = await getTopic(topicId);
   // Only cards not read as they are now (unless asked again).
@@ -1298,8 +1319,7 @@ export async function checkCards(
     ),
   }));
   const flags = M.parseCheck(
-    await saathiComplete(
-      apiKey(),
+    await complete(
       M.checkMessages(
         deck,
         items,
@@ -2170,6 +2190,8 @@ export async function listServerJobs(topicId: string): Promise<FlashJob[]> {
 }
 
 export async function stopServerJob(id: string): Promise<FlashJob> {
+  // A batch out for it isn't collected (what it read is dropped).
+  await clearPendingBatch(jobBatchKey(id));
   const { data, error } = await from("flash_jobs")
     .update({ status: "stopped", locked_until: null, updated_at: now() } as never)
     .eq("id", id)
@@ -2213,42 +2235,61 @@ export async function jobStep(batches = 3): Promise<FlashJob | null> {
   const job = claimed as unknown as Row;
   const ids = (Array.isArray(job.ids) ? job.ids : []).map(String);
   const size = job.kind === "fill" ? 10 : 20;
+  if (await batchOn("studio_jobs")) return batchJobStep(job, ids, size);
   const parts: string[][] = [];
   for (let i = 0; i < Math.min(ids.length, size * batches); i += size)
     parts.push(ids.slice(i, i + size));
   const topicId = String(job.topic_id);
-  const results = await Promise.allSettled(
-    parts.map((p) =>
-      job.kind === "fill"
-        ? fillExplanations(topicId, p).then((r) => r.filled)
-        : // Its cards were chosen when it started (verified ones only when asked).
-          checkCards(topicId, p, true).then((r) => r.flagged),
-    ),
-  );
+  const results = await Promise.allSettled(parts.map((p) => runJobPart(job, topicId, p)));
   const ok = results
-    .map((r, i) => ({ r, ids: parts[i] }))
+    .map((r, i) => ({ value: r.status === "fulfilled" ? r.value : 0, ids: parts[i], r }))
     .filter((x) => x.r.status === "fulfilled");
   const failed = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+  return settleJob(job, ids, ok, failed?.reason);
+}
+
+// A part of a job (its cards checked or filled), with the AI called the
+// way given. Returns what it found (cards to recheck, or cards filled).
+async function runJobPart(
+  job: Row,
+  topicId: string,
+  ids: string[],
+  complete: Completer = liveCall(),
+): Promise<number> {
+  return job.kind === "fill"
+    ? (await fillExplanations(topicId, ids, complete)).filled
+    : // Its cards were chosen when it started (verified ones only when asked).
+      (await checkCards(topicId, ids, true, false, complete)).flagged;
+}
+
+// The job's progress saved: the parts done leave its list, a step where
+// every part failed counts towards three (then the job stops). lockMs keeps
+// it from being taken again for a while (a batch out).
+async function settleJob(
+  job: Row,
+  ids: string[],
+  ok: { ids: string[]; value: number }[],
+  failed: unknown,
+  lockMs = 0,
+): Promise<FlashJob | null> {
   const doneIds = new Set(ok.flatMap((x) => x.ids));
   const left = ids.filter((id) => !doneIds.has(id));
-  const fails = failed && !ok.length ? (Number(job.fails) || 0) + 1 : 0;
+  // A step that only waited (no parts done, none failed) keeps the count.
+  const before = Number(job.fails) || 0;
+  const fails = failed && !ok.length ? before + 1 : ok.length ? 0 : before;
   const status = !left.length ? "done" : fails >= 3 ? "failed" : "running";
   const { data: saved, error: e3 } = await from("flash_jobs")
     .update({
       ids: left,
       done: (Number(job.done) || 0) + doneIds.size,
-      found:
-        (Number(job.found) || 0) +
-        ok.reduce((n, x) => n + ((x.r as PromiseFulfilledResult<number>).value || 0), 0),
+      found: (Number(job.found) || 0) + ok.reduce((n, x) => n + (x.value || 0), 0),
       fails,
       status,
       error: failed
-        ? String(failed.reason instanceof Error ? failed.reason.message : failed.reason).slice(
-            0,
-            500,
-          )
+        ? String(failed instanceof Error ? failed.message : failed).slice(0, 500)
         : null,
-      locked_until: null,
+      locked_until:
+        lockMs && status === "running" ? new Date(Date.now() + lockMs).toISOString() : null,
       updated_at: now(),
     } as never)
     .eq("id", String(job.id))
@@ -2257,12 +2298,100 @@ export async function jobStep(batches = 3): Promise<FlashJob | null> {
     .select(JOB_COLS)
     .maybeSingle();
   fail(e3);
+  if (status !== "running") await clearPendingBatch(jobBatchKey(String(job.id)));
   const result = saved ? readJob(saved as unknown as Row) : null;
   if (result && (result.status === "done" || result.status === "failed"))
     await notifyJob(result).catch((e) =>
       console.error("job message:", e instanceof Error ? e.message : e),
     );
   return result;
+}
+
+// ---------- A job through Message Batches (half price) ----------
+//
+// A step sends many parts as one batch (25 parts: 500 cards to check or
+// 250 to fill) and later steps ask after it; once it has ended its replies
+// are used for the cards still as they were sent (cards edited meanwhile
+// are sent again). While the batch is out the job isn't taken again for a
+// few minutes.
+
+const jobBatchKey = (id: string) => `flash_job_batch:${id}`;
+const BATCH_PARTS = 25;
+const BATCH_WAIT_MS = 3 * 60_000;
+type JobBatch = {
+  id: string;
+  at: string;
+  label: string;
+  parts: { cid: string; ids: string[]; fp: string }[];
+};
+
+async function batchJobStep(job: Row, ids: string[], size: number): Promise<FlashJob | null> {
+  const topicId = String(job.topic_id);
+  const key = jobBatchKey(String(job.id));
+  const pending = await pendingBatch<JobBatch>(key);
+  if (pending) {
+    const b = await saathiBatchGet(pending.id);
+    if (b.status !== "ended") return settleJob(job, ids, [], null, BATCH_WAIT_MS);
+    const replies = await saathiBatchResults(pending.id, pending.label);
+    const ok: { ids: string[]; value: number }[] = [];
+    let failed: unknown = null;
+    for (const part of pending.parts) {
+      const r = replies.get(part.cid);
+      if (!r || "error" in r) {
+        failed = new Error(r && "error" in r ? r.error : "no reply in the batch");
+        continue;
+      }
+      try {
+        ok.push({
+          ids: part.ids,
+          value: await runJobPart(job, topicId, part.ids, replayReply(r.text, part.fp)),
+        });
+      } catch (e) {
+        // Edited meanwhile: sent again in the next batch (not a failure).
+        if (!(e instanceof StaleReply)) failed = e;
+      }
+    }
+    await clearPendingBatch(key);
+    return settleJob(job, ids, ok, ok.length ? null : failed);
+  }
+  // The next parts: each built as it would be sent, and caught.
+  const ok: { ids: string[]; value: number }[] = [];
+  const items: { id: string; messages: ChatMessage[] }[] = [];
+  const parts: JobBatch["parts"] = [];
+  let failed: unknown = null;
+  for (let i = 0; i < ids.length && parts.length < BATCH_PARTS; i += size) {
+    const p = ids.slice(i, i + size);
+    try {
+      // Nothing to ask the AI (done meanwhile, or filled from siblings).
+      ok.push({ ids: p, value: await runJobPart(job, topicId, p, captureCall) });
+    } catch (e) {
+      if (e instanceof CapturedCall) {
+        const cid = `part${parts.length}`;
+        items.push({ id: cid, messages: e.messages });
+        parts.push({ cid, ids: p, fp: fingerprint(e.messages) });
+      } else failed = e;
+    }
+  }
+  if (items.length) {
+    try {
+      const id = await saathiBatchCreate(items);
+      await savePendingBatch(key, {
+        id,
+        at: now(),
+        label: usageLabel(items[0].messages),
+        parts,
+      } satisfies JobBatch);
+    } catch (e) {
+      return settleJob(job, ids, ok, e);
+    }
+  }
+  return settleJob(
+    job,
+    ids,
+    ok,
+    ok.length || items.length ? null : failed,
+    items.length ? BATCH_WAIT_MS : 0,
+  );
 }
 
 // A server job done (or given up): a message to the editor's test chat on

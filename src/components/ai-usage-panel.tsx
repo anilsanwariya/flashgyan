@@ -2,9 +2,11 @@
 // input written to and read from the prompt cache, output); this page adds
 // them up by kind of call and by day, with what prompt caching saved.
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { getAiUsage } from "@/lib/ai-usage.functions";
+import { toast } from "sonner";
+import { getAiBatchSettings, getAiUsage, setAiBatchSetting } from "@/lib/ai-usage.functions";
+import { Switch } from "@/components/ui/switch";
 import { cachedShare, costOf, groupCost, type AiCost } from "@/lib/ai-usage";
 import { errorText } from "@/components/ca-ui";
 import { Button } from "@/components/ui/button";
@@ -35,6 +37,7 @@ export function AiUsagePanel() {
   const byDay = groupCost(rows, (r) => r.day).sort((a, b) => b.key.localeCompare(a.key));
   return (
     <div className="space-y-5">
+      <HalfPrice />
       <div className="flex flex-wrap items-center gap-2">
         <p className="mr-auto text-sm text-muted-foreground">
           Every AI call&apos;s tokens, added up. Costs are estimates from Claude&apos;s list prices.
@@ -155,5 +158,49 @@ function Row({ name, c }: { name: string; c: AiCost }) {
       <td className="p-2 text-right tabular-nums">{usd(c.cost)}</td>
       <td className="p-2 text-right tabular-nums">{usd(Math.max(0, c.without - c.cost))}</td>
     </tr>
+  );
+}
+
+// Background jobs nobody waits on, sent as Message Batches: half price on
+// every token, the results within hours. On by default.
+function HalfPrice() {
+  const getFn = useServerFn(getAiBatchSettings);
+  const setFn = useServerFn(setAiBatchSetting);
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["aiBatch"], queryFn: () => getFn() });
+  if (!q.data) return null;
+  const jobs = Object.keys(q.data.names) as (keyof typeof q.data.names)[];
+  return (
+    <section
+      aria-label="Background AI at half price"
+      className="space-y-2 rounded-xl border border-border p-3"
+    >
+      <h3 className="text-sm font-semibold">Background AI at half price</h3>
+      <p className="text-xs text-muted-foreground">
+        Jobs nobody waits on are sent as batches: every token costs half, and the results come
+        within hours (usually within one). Turn one off when you need its results sooner. The
+        atlas&apos;s Hindi translation has its own switch (Atlas → Overview).
+      </p>
+      <ul className="space-y-1.5">
+        {jobs.map((j) => (
+          <li key={j} className="flex items-center gap-2 text-sm">
+            <Switch
+              aria-label={q.data!.names[j]}
+              checked={q.data!.on[j]}
+              onCheckedChange={async (v) => {
+                try {
+                  await setFn({ data: { job: j, on: v } });
+                  await qc.invalidateQueries({ queryKey: ["aiBatch"] });
+                  toast.success(v ? "Half price: sent as batches" : "Full price: run at once");
+                } catch (e) {
+                  toast.error(errorText(e, "Couldn't save it"));
+                }
+              }}
+            />
+            {q.data!.names[j]}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
