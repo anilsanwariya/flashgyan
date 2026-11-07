@@ -345,6 +345,22 @@ function requestParams(messages: ChatMessage[], opts: SaathiOptions = {}) {
   };
 }
 
+// Photos (or PDF pages) go first in the last user turn, before its text.
+function withImages(
+  turns: { role: "user" | "assistant"; content: unknown }[],
+  images?: SaathiImage[],
+) {
+  if (!images?.length) return;
+  const last = turns[turns.length - 1];
+  last.content = [
+    ...images.map((img) => ({
+      type: img.media_type === "application/pdf" ? "document" : "image",
+      source: { type: "base64", media_type: img.media_type, data: img.data },
+    })),
+    { type: "text", text: last.content as string },
+  ];
+}
+
 function anthropicRequest(
   messages: ChatMessage[],
   signal?: AbortSignal,
@@ -352,18 +368,7 @@ function anthropicRequest(
   opts: SaathiOptions = {},
 ) {
   const params = requestParams(messages, opts);
-  // Photos go first in the last user turn, before its text.
-  const turns = params.messages;
-  if (images?.length) {
-    const last = turns[turns.length - 1];
-    last.content = [
-      ...images.map((img) => ({
-        type: img.media_type === "application/pdf" ? "document" : "image",
-        source: { type: "base64", media_type: img.media_type, data: img.data },
-      })),
-      { type: "text", text: last.content as string },
-    ];
-  }
+  withImages(params.messages, images);
   return fetch(ANTHROPIC_URL, {
     method: "POST",
     headers: {
@@ -479,7 +484,7 @@ const anthropicHeaders = () => ({
   "anthropic-version": "2023-06-01",
 });
 
-export type SaathiBatchItem = { id: string; messages: ChatMessage[] };
+export type SaathiBatchItem = { id: string; messages: ChatMessage[]; images?: SaathiImage[] };
 export type SaathiBatch = {
   id: string;
   status: "in_progress" | "canceling" | "ended";
@@ -506,7 +511,11 @@ export async function saathiBatchCreate(
     method: "POST",
     headers: anthropicHeaders(),
     body: JSON.stringify({
-      requests: items.map((it) => ({ custom_id: it.id, params: requestParams(it.messages, opts) })),
+      requests: items.map((it) => {
+        const params = requestParams(it.messages, opts);
+        withImages(params.messages, it.images);
+        return { custom_id: it.id, params };
+      }),
     }),
   });
   if (!res.ok) throw gatewayError(res.status, await res.text(), "Anthropic (Claude)");

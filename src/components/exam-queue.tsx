@@ -327,6 +327,17 @@ export function PaperQueue({
                 <span className="text-xs text-muted-foreground tabular-nums">
                   {i.pages_done} of {i.pages} pages
                 </span>
+                {i.batch && (
+                  <span className="text-xs text-muted-foreground" data-queue-batch>
+                    {i.batch.pages} pages sent at half price{" "}
+                    {new Date(i.batch.at).toLocaleTimeString("en-IN", {
+                      timeZone: "Asia/Kolkata",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                    : read within hours
+                  </span>
+                )}
                 {i.error && (
                   <span className="basis-full text-xs text-destructive sm:basis-auto">
                     {i.error}
