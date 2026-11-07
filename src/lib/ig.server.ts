@@ -1063,14 +1063,24 @@ export async function igStep(origin?: string): Promise<void> {
       await from("ig_days").insert({ day: today } as never);
     }
   }
+  // Days that move on their own come first; days waiting for an editor
+  // (which can sit in review indefinitely) are fetched separately and only
+  // get early image-making with the time left, so they never crowd out a
+  // newer day's suggestions, writing or a due post.
   const { data, error } = await from("ig_days")
     .select("day,status,scheduled_for")
-    .in("status", ["suggesting", "writing", "review", "rendering", "scheduled"])
+    .in("status", ["suggesting", "writing", "rendering", "scheduled"])
     .order("day", { ascending: true })
     .limit(5);
   fail(error);
+  const { data: reviewData, error: reviewError } = await from("ig_days")
+    .select("day,status,scheduled_for")
+    .eq("status", "review")
+    .order("day", { ascending: false })
+    .limit(3);
+  fail(reviewError);
   const t0 = Date.now();
-  for (const d of (data ?? []) as Row[]) {
+  for (const d of [...((data ?? []) as Row[]), ...((reviewData ?? []) as Row[])]) {
     const day = String(d.day);
     if (d.status === "scheduled" && new Date(String(d.scheduled_for)).getTime() > Date.now())
       continue;
