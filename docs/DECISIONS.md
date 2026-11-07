@@ -214,3 +214,27 @@ watermark in Settings makes the images of days not yet posted again.
 reviewing slow and kept the editor on the page until the album was posted.
 **Consequence:** a card edited after checking is made twice (a little more Cloudflare
 use). Approving no longer remakes images; the settings change above does that instead.
+
+## ADR-020: Background AI jobs nobody waits on go through Message Batches, with a model and effort per job (7 November 2026)
+
+**Decision:** `saathiComplete` takes per-call options (model, effort, length limit) and
+reports each call's tokens; left out, a call runs as before. `saathi-core.ts` can also send
+calls as one Anthropic Message Batch (half price on every token, replies within 24 hours,
+most within an hour) and read the replies; each reply is recorded on the AI usage page as
+a call of `<model>:batch`, priced at half. The atlas Hindi translation is the first job
+moved: it sends up to 60 chunks (about 600 facts) as one batch, the minute tick collects
+the replies while the rest of the atlas work goes on, and a batch whose calls all fail
+counts towards the existing three-tries stop. The Overview tab sets the translation's model
+(Claude Sonnet 5 or Claude Haiku 5.5) and effort (kept in `bot_settings`, `ai_jobs`),
+switches batches off (a chunk a minute, full price) and runs a side-by-side test: up to 10
+facts with Hindi a person wrote or checked are translated again with each choice, shown
+beside that Hindi with what each cost and what 1,000 facts would cost as a batch.
+**Reason:** from 15 October to 6 November 2026, output tokens were 79% of the Claude bill
+and the atlas translation alone was 85% of what the AI usage page recorded, all of it
+background work nobody waited for. The same models through a batch cost half; a cheaper
+model or lower effort is a quality trade the admin decides from the test.
+**Consequence:** no migration. Students and editors wait on nothing new: SAATHI, the
+Telegram bot and the editors call the API as before. Translated Hindi now arrives in
+batches rather than a chunk a minute. Other background jobs (exam-paper reading, card
+studio checks) can move to batches the same way.
+

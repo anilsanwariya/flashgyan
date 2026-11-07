@@ -16,12 +16,21 @@ export type AiUsageRow = {
 // US dollars per million tokens: fresh input, a 5-minute cache write, a
 // cache read, and output.
 export type AiPrice = { input: number; write: number; read: number; output: number };
+// (Anthropic's price list, November 2026.)
 const SONNET: AiPrice = { input: 2, write: 2.5, read: 0.2, output: 10 };
 export const AI_PRICES: Record<string, AiPrice> = {
   "claude-sonnet-5": SONNET,
-  "claude-sonnet-5-5": SONNET,
+  "claude-sonnet-5-5": { ...SONNET, read: 0.1 },
+  "claude-haiku-5-5": { input: 0.1, write: 0.125, read: 0.01, output: 0.5 },
 };
-export const priceOf = (model: string): AiPrice => AI_PRICES[model] ?? SONNET;
+// "<model>:batch": a Message Batches call, half price on every token.
+export const priceOf = (model: string): AiPrice => {
+  const [m, kind] = model.split(":");
+  const p = AI_PRICES[m] ?? SONNET;
+  return kind === "batch"
+    ? { input: p.input / 2, write: p.write / 2, read: p.read / 2, output: p.output / 2 }
+    : p;
+};
 
 export type AiCost = {
   calls: number;

@@ -113,6 +113,10 @@ docs/                     Project documentation (this folder)
 - **AI:** every AI text call goes through `saathiComplete` in `_shared/saathi-core.ts`,
   which calls Claude, applies prompt caching and records tokens in `ai_usage`. Keep a
   prompt's first system message identical between calls so the cache works (see AGENTS.md).
+  Background jobs nobody waits on can send their calls as a Message Batch
+  (`saathiBatchCreate` / `saathiBatchGet` / `saathiBatchResults`, half price); a job's
+  model and effort are set per job (`ai-jobs.ts`, `bot_settings` key `ai_jobs`). The atlas
+  translation does both (ADR-020).
 - **SAATHI search:** hybrid search (`match_saathi_hybrid`): embedding similarity plus
   keyword rank, then the model picks the best passages. SAATHI answers only from
   `saathi_knowledge`.

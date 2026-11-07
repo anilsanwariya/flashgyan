@@ -283,8 +283,9 @@ export function usageLabel(messages: ChatMessage[]): string {
 let usageOff = false;
 
 // Adds a call's tokens to the day's usage (ai_usage_add). Never fails the
-// call: without the table or the keys it does nothing.
-async function recordUsage(label: string, u: SaathiUsage) {
+// call: without the table or the keys it does nothing. A batch call's model
+// is recorded as "<model>:batch" (billed at half price).
+async function recordUsage(label: string, u: SaathiUsage, model: string = SAATHI_CHAT_MODEL) {
   if (usageOff) return;
   const url = envGet("SUPABASE_URL");
   const key = envGet("SUPABASE_SERVICE_ROLE_KEY");
@@ -295,7 +296,7 @@ async function recordUsage(label: string, u: SaathiUsage) {
       headers: { "Content-Type": "application/json", apikey: key, Authorization: `Bearer ${key}` },
       body: JSON.stringify({
         p_label: label,
-        p_model: SAATHI_CHAT_MODEL,
+        p_model: model,
         p_input: u.input_tokens,
         p_cache_write: u.cache_creation_input_tokens,
         p_cache_read: u.cache_read_input_tokens,
@@ -320,11 +321,39 @@ export type SaathiImage = {
   data: string;
 };
 
-function anthropicRequest(messages: ChatMessage[], signal?: AbortSignal, images?: SaathiImage[]) {
+// A call's own model, effort and length limit (a background job's setting).
+// Left out, a call runs as before: the chat model, its default effort, and
+// 8,000 tokens at most. onUsage hears the call's tokens when it ends.
+export type SaathiOptions = {
+  model?: string;
+  effort?: "low" | "medium" | "high";
+  maxTokens?: number;
+  onUsage?: (u: SaathiUsage) => void;
+};
+
+// The request body (also a batch request's params).
+function requestParams(messages: ChatMessage[], opts: SaathiOptions = {}) {
   const body = toAnthropic(messages);
-  // Photos go first in the last user turn, before its text.
   const turns: { role: "user" | "assistant"; content: unknown }[] = body.messages;
   cacheHistory(turns);
+  return {
+    model: opts.model || SAATHI_CHAT_MODEL,
+    max_tokens: opts.maxTokens ?? ANTHROPIC_MAX_TOKENS,
+    ...(body.system ? { system: body.system } : {}),
+    messages: turns,
+    ...(opts.effort ? { output_config: { effort: opts.effort } } : {}),
+  };
+}
+
+function anthropicRequest(
+  messages: ChatMessage[],
+  signal?: AbortSignal,
+  images?: SaathiImage[],
+  opts: SaathiOptions = {},
+) {
+  const params = requestParams(messages, opts);
+  // Photos go first in the last user turn, before its text.
+  const turns = params.messages;
   if (images?.length) {
     const last = turns[turns.length - 1];
     last.content = [
@@ -342,13 +371,7 @@ function anthropicRequest(messages: ChatMessage[], signal?: AbortSignal, images?
       "x-api-key": anthropicKey(),
       "anthropic-version": "2023-06-01",
     },
-    body: JSON.stringify({
-      model: SAATHI_CHAT_MODEL,
-      max_tokens: ANTHROPIC_MAX_TOKENS,
-      stream: true,
-      system: body.system,
-      messages: turns,
-    }),
+    body: JSON.stringify({ ...params, stream: true }),
     signal,
   });
 }
@@ -358,11 +381,12 @@ export async function saathiComplete(
   messages: ChatMessage[],
   signal?: AbortSignal,
   images?: SaathiImage[],
+  opts: SaathiOptions = {},
 ): Promise<string> {
-  const res = await anthropicRequest(messages, signal, images);
+  const res = await anthropicRequest(messages, signal, images, opts);
   if (!res.ok || !res.body) throw gatewayError(res.status, await res.text(), "Anthropic (Claude)");
   let out = "";
-  for await (const d of readSseDeltas(res.body, usageLabel(messages))) out += d;
+  for await (const d of readSseDeltas(res.body, usageLabel(messages), opts)) out += d;
   return out.trim();
 }
 
@@ -382,6 +406,7 @@ export async function saathiCompleteStream(
 async function* readSseDeltas(
   body: ReadableStream<Uint8Array>,
   label: string,
+  opts: SaathiOptions = {},
 ): AsyncGenerator<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -433,8 +458,133 @@ async function* readSseDeltas(
     }
   } finally {
     reader.releaseLock();
-    if (usage) await recordUsage(label, usage);
+    if (usage) {
+      opts.onUsage?.(usage);
+      await recordUsage(label, usage, opts.model || SAATHI_CHAT_MODEL);
+    }
   }
+}
+
+// ---------- Message Batches (background jobs at half price) ----------
+//
+// A background job nobody waits on sends its calls as one batch: Anthropic
+// runs them within 24 hours (most within an hour) at half the price of
+// every token. The job keeps the batch id, asks after it on later ticks,
+// and reads the replies once it has ended.
+
+const BATCH_URL = `${ANTHROPIC_URL}/batches`;
+const anthropicHeaders = () => ({
+  "Content-Type": "application/json",
+  "x-api-key": anthropicKey(),
+  "anthropic-version": "2023-06-01",
+});
+
+export type SaathiBatchItem = { id: string; messages: ChatMessage[] };
+export type SaathiBatch = {
+  id: string;
+  status: "in_progress" | "canceling" | "ended";
+  counts: {
+    processing: number;
+    succeeded: number;
+    errored: number;
+    canceled: number;
+    expired: number;
+  };
+};
+
+// Ids may have letters, digits, "-" and "_" (64 at most).
+const batchId = (id: string) => /^[A-Za-z0-9_-]{1,64}$/.test(id);
+
+export async function saathiBatchCreate(
+  items: SaathiBatchItem[],
+  opts: SaathiOptions = {},
+): Promise<string> {
+  if (!items.length) throw new SaathiAiError("A batch needs at least one call", 400);
+  const bad = items.find((it) => !batchId(it.id));
+  if (bad) throw new SaathiAiError(`Not a batch id: ${bad.id}`, 400);
+  const res = await fetch(BATCH_URL, {
+    method: "POST",
+    headers: anthropicHeaders(),
+    body: JSON.stringify({
+      requests: items.map((it) => ({ custom_id: it.id, params: requestParams(it.messages, opts) })),
+    }),
+  });
+  if (!res.ok) throw gatewayError(res.status, await res.text(), "Anthropic (Claude)");
+  const b = (await res.json()) as { id?: string };
+  if (!b.id) throw new SaathiAiError("The batch wasn't created", 500);
+  return b.id;
+}
+
+export async function saathiBatchGet(id: string): Promise<SaathiBatch> {
+  const res = await fetch(`${BATCH_URL}/${encodeURIComponent(id)}`, {
+    headers: anthropicHeaders(),
+  });
+  if (!res.ok) throw gatewayError(res.status, await res.text(), "Anthropic (Claude)");
+  const b = (await res.json()) as {
+    id: string;
+    processing_status: SaathiBatch["status"];
+    request_counts: SaathiBatch["counts"];
+  };
+  return { id: b.id, status: b.processing_status, counts: b.request_counts };
+}
+
+// An ended batch's replies by id: the text, or why there is none. Each
+// reply's tokens are added to the day's usage at the batch price.
+export async function saathiBatchResults(
+  id: string,
+  label: string,
+  model: string = SAATHI_CHAT_MODEL,
+): Promise<Map<string, { text: string } | { error: string }>> {
+  const res = await fetch(`${BATCH_URL}/${encodeURIComponent(id)}/results`, {
+    headers: anthropicHeaders(),
+  });
+  if (!res.ok) throw gatewayError(res.status, await res.text(), "Anthropic (Claude)");
+  const out = new Map<string, { text: string } | { error: string }>();
+  const usages: SaathiUsage[] = [];
+  for (const line of (await res.text()).split("\n")) {
+    if (!line.trim()) continue;
+    let r: {
+      custom_id?: string;
+      result?: {
+        type?: string;
+        message?: { content?: { type?: string; text?: string }[]; usage?: Partial<SaathiUsage> };
+        error?: { error?: { message?: string }; message?: string };
+      };
+    };
+    try {
+      r = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!r.custom_id || !r.result) continue;
+    if (r.result.type === "succeeded" && r.result.message) {
+      const m = r.result.message;
+      out.set(r.custom_id, {
+        text: (m.content ?? [])
+          .filter((b) => b.type === "text")
+          .map((b) => b.text ?? "")
+          .join("")
+          .trim(),
+      });
+      usages.push({
+        input_tokens: m.usage?.input_tokens ?? 0,
+        cache_creation_input_tokens: m.usage?.cache_creation_input_tokens ?? 0,
+        cache_read_input_tokens: m.usage?.cache_read_input_tokens ?? 0,
+        output_tokens: m.usage?.output_tokens ?? 0,
+      });
+    } else {
+      out.set(r.custom_id, {
+        error:
+          r.result.type === "errored"
+            ? (r.result.error?.error?.message ?? r.result.error?.message ?? "errored")
+            : (r.result.type ?? "no result"),
+      });
+    }
+  }
+  // Each reply is a call on the usage page (ten at a time).
+  for (let i = 0; i < usages.length; i += 10)
+    await Promise.all(usages.slice(i, i + 10).map((u) => recordUsage(label, u, `${model}:batch`)));
+  return out;
 }
 
 export function cleanHistory(history: SaathiTurn[]): SaathiTurn[] {

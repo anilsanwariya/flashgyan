@@ -47,6 +47,7 @@ import { AtlasProofread } from "@/components/atlas-proofread-panel";
 import { AtlasSyllabus } from "@/components/atlas-syllabus-panel";
 import { AtlasDrills } from "@/components/atlas-drills-panel";
 import { AtlasUsage } from "@/components/atlas-usage-panel";
+import { AtlasTranslateCost } from "@/components/atlas-translate-panel";
 import { DistrictChecklist, GapsReport, HindiReview } from "@/components/atlas-review-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -361,6 +362,12 @@ function Overview() {
             <span className="text-xs text-muted-foreground">
               AI Hindi stays marked until you check it (Facts tab).
             </span>
+            <AtlasTranslateCost
+              setting={s.translateSetting}
+              batch={s.jobs.batch !== false}
+              pending={s.translateBatch}
+              onChange={refresh}
+            />
           </li>
           <li>
             Knowledge base:{" "}
