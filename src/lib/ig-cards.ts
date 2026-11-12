@@ -170,6 +170,17 @@ export function igDate(date: string, style: "short" | "long" | "hi" = "short"): 
   return `${d} ${names[mo] ?? ""} ${y}`;
 }
 
+// A card's number on the card: among its own language's cards, so the
+// Hindi cards count from 1 too ("शब्द 1 / 2" after three English cards).
+// Cards made before 13 November 2026 counted across the whole day.
+export function langNumber<T extends { lang: IgLang }>(
+  cards: T[],
+  card: T,
+): { n: number; total: number } {
+  const same = cards.filter((c) => c.lang === card.lang);
+  return { n: same.indexOf(card) + 1, total: same.length };
+}
+
 // The word, highlighted where it stands in the news line (any form of it:
 // "eradicate" in "eradicated").
 export function markWord(line: string, word: string): string {

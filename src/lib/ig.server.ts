@@ -20,6 +20,7 @@ import {
   type IgDesign,
   type IgForm,
   type IgLang,
+  langNumber,
 } from "@/lib/ig-cards";
 import { roundupHtml, type IgRoundupWord } from "@/lib/ig-roundup";
 import { parseStyleRules, type StyleSuggestion } from "@/lib/ca-style";
@@ -740,11 +741,14 @@ async function renderSome(
     for (const r of (data ?? []) as Row[]) stamps.set(String(r.id), String(r.updated_at));
   }
   const one = async (c: IgWord) => {
+    // The file keeps the day's order (01, 02… in the album); the card shows
+    // its number among its own language's cards.
     const n = cards.indexOf(c) + 1;
+    const own = langNumber(cards, c);
     const html = igCardHtml(c.card as IgCard, {
       design: (row?.design ?? "paper") as IgDesign,
-      n,
-      total: cards.length,
+      n: own.n,
+      total: own.total,
       date: day,
       // The one channel's name, or a neutral footer when it goes to several.
       channel: footerChannel(settings),

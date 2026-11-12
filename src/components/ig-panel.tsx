@@ -38,6 +38,7 @@ import {
   markWord,
   type IgDesign,
   type IgLang,
+  langNumber,
 } from "@/lib/ig-cards";
 import {
   CAPTION_FIELDS,
@@ -702,6 +703,7 @@ function Review({
         <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:gap-4">
           {view.cards.map((c, i) => {
             const notes = c.checks.filter((x) => x.state === "open").length;
+            const bothLangs = new Set(view.cards.map((x) => x.lang)).size > 1;
             const same = view.cards.filter((x) => x.lang === c.lang);
             const at = same.indexOf(c);
             return (
@@ -717,8 +719,8 @@ function Review({
                     <CardPreview
                       card={c.card}
                       design={design}
-                      n={i + 1}
-                      total={view.cards.length}
+                      n={at + 1}
+                      total={same.length}
                       date={date}
                       settings={view.settings}
                       width="fill"
@@ -731,7 +733,8 @@ function Review({
                 </button>
                 <div className="flex items-center gap-1 text-sm">
                   <span className="min-w-0 flex-1 truncate font-medium">
-                    {i + 1}. {c.card?.word || c.word}
+                    {bothLangs ? (c.lang === "hi" ? "हिंदी " : "English ") : ""}
+                    {at + 1}. {c.card?.word || c.word}
                   </span>
                   {!c.card || !c.proofed ? (
                     <Loader2
@@ -962,8 +965,7 @@ function Scheduled({
                 <CardPreview
                   card={c.card}
                   design={(d.design ?? "paper") as IgDesign}
-                  n={i + 1}
-                  total={view.cards.length}
+                  {...langNumber(view.cards, c)}
                   date={date}
                   settings={view.settings}
                   width="fill"
