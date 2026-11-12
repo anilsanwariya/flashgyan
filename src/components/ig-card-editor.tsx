@@ -50,6 +50,7 @@ import {
   type IgCard,
   type IgDesign,
   type IgForm,
+  langNumber,
 } from "@/lib/ig-cards";
 import { FIELD_NAMES, PART_OF_FIELD, type IgCheck, type IgPart } from "@/lib/ig-words";
 import { CardPreview } from "@/components/ig-card-preview";
@@ -394,8 +395,7 @@ export function IgCardEditor({
                     <CardPreview
                       card={card}
                       design={design}
-                      n={at + 1}
-                      total={cards.length}
+                      {...(w ? langNumber(cards, w) : { n: at + 1, total: cards.length })}
                       date={date}
                       settings={view.settings}
                       width="fill"
@@ -477,8 +477,7 @@ export function IgCardEditor({
               <CardPreview
                 card={card}
                 design={design}
-                n={at + 1}
-                total={cards.length}
+                {...(w ? langNumber(cards, w) : { n: at + 1, total: cards.length })}
                 date={date}
                 settings={view.settings}
                 width={340}

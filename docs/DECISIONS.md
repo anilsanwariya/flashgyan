@@ -188,7 +188,8 @@ template if wanted, and an on/off switch; one posting time serves them all. Each
 gets an album (or two, English then Hindi, when it takes more than 10 cards) of only its
 languages' cards, with its own caption, and the weekly PDF is made once per language set
 and sent to each channel. With one channel the card footer shows its link; with several,
-a neutral "FlashGyan app".
+a neutral "FlashGyan app". From 13 November 2026 each language numbers its own cards ("Word 1 of 3",
+"शब्द 1 / 2"); cards made before keep the day-wide count they were made with.
 **Reason:** a line copied from the news teaches the news, not how the word appears in an
 exam, and goes stale. Separate Hindi and English channels let each audience get only the
 words it reads.
