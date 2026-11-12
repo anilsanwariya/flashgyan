@@ -3,7 +3,7 @@
 // sources and stories changed); the same fingerprint over several ticks means
 // the collection is stuck. Pure helpers, no network here.
 
-// Several 5-minute ticks with nothing new, and at least this long: longer
+// Several ticks with nothing new, and at least this long: longer
 // than a PDF may take to parse (it is given up after 20 minutes).
 export const STALL_TICKS = 6;
 export const STALL_MINUTES = 30;

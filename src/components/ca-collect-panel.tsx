@@ -133,7 +133,7 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
   };
 
   // Runs ticks from this page until the collection is finished. The
-  // 5-minute schedule does the same when this page is closed.
+  // once-a-minute schedule does the same when this page is closed.
   async function drive(start: boolean, sites?: string[]) {
     if (work) return;
     setWork("Starting…");
@@ -638,7 +638,7 @@ export function WatchSitesSettings() {
   const cronSql = `-- Runs the evening collection even when the admin page is closed.
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
-select cron.schedule('ca-collector', '*/5 * * * *',
+select cron.schedule('ca-collector', '* * * * *',
   $$select net.http_post(url := '${origin}/api/ca/tick', headers := jsonb_build_object('x-cron-secret', '${cronSecret}'), timeout_milliseconds := 120000)$$);`;
 
   return (

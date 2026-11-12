@@ -82,9 +82,9 @@ sure the panel shows the webhook as secured.
 
 ## ADR-010: Scheduled work uses `pg_cron` calling safe "tick" endpoints (14 October 2026)
 
-**Decision:** `pg_cron` calls `/api/ca/tick` every 5 minutes (changed from every minute on
-12 November 2026 to cut runs; due-time checks use "at or after", so nothing is missed) and
-the bot's `?task=broadcast` every minute.
+**Decision:** `pg_cron` calls `/api/ca/tick` and the bot's `?task=broadcast` every minute
+(the tick ran every 5 minutes from 12 to 13 November 2026; ADR-022 has how quiet minutes
+are kept cheap instead).
 Each call does only work that is already due, so it needs no credentials.
 **Reason:** works without a separate job server, and runs even when no admin has the page
 open.
@@ -260,4 +260,25 @@ batched and direct runs can't drift apart.
 turns batching off for a job when results are needed sooner. Pending batches are kept in
 `bot_settings` (`flash_job_batch:<job>`, `exam_queue_batch:<item>`); stopping a job,
 removing a queued paper or trying it again drops its batch.
+
+## ADR-022: The tick runs every minute, but quiet minutes do only the parts with work (13 November 2026)
+
+**Decision:** The schedule calls `/api/ca/tick` every minute. Every fifth minute (by the
+clock) is a full tick: every part runs, as before. In the minutes between, the tick first asks
+a few cheap questions in parallel: a Telegram "Approve" waiting, a news collection running, a
+Words in the News or GK day writing, making images or due to post, a card studio job or exam
+paper queued (not held by another tick), a clipped newspaper in progress. It runs only those
+parts, plus the parts without a question of their own (past-date collection, custom
+magazines, official documents, scheme register, atlas) that did something on the last tick
+(kept in `bot_settings`, `tick_busy`). A question that fails counts as "busy". Timed work
+with no question (the evening collection starting, the weekly report, the atlas daily poll)
+runs on full ticks. Rules in `src/lib/tick-gate.ts`, reads in `tick-gate.server.ts`.
+**Reason:** running the tick every 5 minutes (12 November) cut its cost but made every
+background job about five times slower with the page closed (a collection does 15 seconds of
+work per tick) and let posts run up to 5 minutes late. A quiet minute now costs 8 small reads
+instead of about 30, and work in progress moves every minute.
+**Consequence:** nothing runs later than it would have on the 5-minute schedule; anything in
+progress runs every minute. Work that starts without a question (a custom magazine just
+created, the atlas jobs) can wait up to 5 minutes for its first step. The owner re-runs the
+schedule SQL shown in Admin → Current affairs → Websites to watch (it now says every minute).
 
