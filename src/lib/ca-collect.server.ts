@@ -1,5 +1,6 @@
 // Server-only automatic news collection. Work happens in short ticks (from a
-// 5-minute schedule or the admin page): each tick claims the running
+// once-a-minute schedule or the admin page; quiet minutes do only the
+// parts with work, see tick-gate.ts): each tick claims the running
 // collection and does as many small steps as fit in about 20 seconds:
 // read a site, pick headlines, fetch articles, then read and write them up
 // with the usual magazine pipeline.
@@ -22,6 +23,7 @@ import {
   type FoundLink,
 } from "@/lib/ca-collect";
 import { formatDate, istDate, type UploadSection } from "@/lib/current-affairs";
+import type { TickPart } from "@/lib/tick-gate.server";
 import {
   STALL_MINUTES,
   nextRunHealth,
@@ -165,116 +167,114 @@ export async function startRun(
   // A day collected again (or a past date) gets its whole-day duplicate
   // check again, and its stuck check starts afresh.
   await from("bot_settings").delete().eq("key", `ca_dupcheck:${issueDate}`);
-  await from("bot_settings").delete().eq("key", `${RUN_HEALTH_KEY}${(data as unknown as CaRun).id}`);
+  await from("bot_settings")
+    .delete()
+    .eq("key", `${RUN_HEALTH_KEY}${(data as unknown as CaRun).id}`);
   return data as unknown as CaRun;
 }
 
 export type TickResult = { run: string | null; steps: string[]; error?: string };
 
 export async function tick(origin?: string): Promise<TickResult> {
-  const settings = await CA.getMagazineSettings();
-  try {
-    await processApprovals();
-  } catch (e) {
-    console.error("telegram approvals:", e);
-  }
-  // Sunday's weekly report rides on the same 5-minute schedule.
-  try {
-    await (await import("@/lib/ca-report.server")).maybeSendWeeklyReport(origin);
-  } catch (e) {
-    console.error("weekly report:", e);
-  }
-  if (settings.auto_collect && collectionDue(settings.collect_time)) {
-    const today = istDate();
-    const { data: existing } = await from("ca_runs")
-      .select("id")
-      .eq("issue_date", today)
-      .maybeSingle();
-    if (!existing && (await getSites()).some((s) => s.enabled)) await startRun(today, "schedule");
+  // Every fifth minute every part runs; in the minutes between, only the
+  // parts with work in progress (src/lib/tick-gate.server.ts).
+  const gate = await import("@/lib/tick-gate.server");
+  const full = gate.isFullTick();
+  const { busy, before } = full
+    ? { busy: null, before: await gate.lastBusy() }
+    : await gate.busyParts(APPROVE_KEY);
+  const runs = (part: TickPart) => full || busy!.has(part);
+  const did = new Set<TickPart>();
+  const step = async (part: TickPart, label: string, fn: () => Promise<unknown>) => {
+    if (!runs(part)) return;
+    try {
+      if (await fn()) did.add(part);
+    } catch (e) {
+      console.error(`${label}:`, e);
+    }
+  };
+  const loop = async (fn: () => Promise<unknown>, ms: number) => {
+    let any = false;
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms && (await fn())) any = true;
+    return any;
+  };
+  // Settings only when a part needs them.
+  let settingsP: ReturnType<typeof CA.getMagazineSettings> | null = null;
+  const settingsNow = () => (settingsP ??= CA.getMagazineSettings());
+
+  await step("approvals", "telegram approvals", () => processApprovals());
+  if (full) {
+    // Sunday's weekly report, and the evening collection starting.
+    try {
+      await (await import("@/lib/ca-report.server")).maybeSendWeeklyReport(origin);
+    } catch (e) {
+      console.error("weekly report:", e);
+    }
+    const settings = await settingsNow();
+    if (settings.auto_collect && collectionDue(settings.collect_time)) {
+      const today = istDate();
+      const { data: existing } = await from("ca_runs")
+        .select("id")
+        .eq("issue_date", today)
+        .maybeSingle();
+      if (!existing && (await getSites()).some((s) => s.enabled)) await startRun(today, "schedule");
+    }
   }
 
   // Words in the News first (its posts are due at a set time):
-  // suggestions after the evening collection, cards
-  // cards written and proofread, images made, the album posted when due.
-  try {
-    await (await import("@/lib/ig.server")).igStep(origin);
-  } catch (e) {
-    console.error("infographics:", e);
-  }
-  try {
-    await advanceBackfill();
-  } catch (e) {
-    console.error("past-date collection:", e);
-  }
+  // suggestions after the evening collection, cards written and
+  // proofread, images made, the album posted when due.
+  await step("ig", "infographics", async () => (await import("@/lib/ig.server")).igStep(origin));
+  await step("backfill", "past-date collection", () => advanceBackfill());
   // Custom magazines take their next batch of stories.
-  try {
-    await (await import("@/lib/ca-mags.server")).magStep();
-  } catch (e) {
-    console.error("custom magazines:", e);
-  }
+  await step("mags", "custom magazines", async () =>
+    (await import("@/lib/ca-mags.server")).magStep(),
+  );
   // The monthly magazine's official documents, one part at a time.
-  try {
-    await (await import("@/lib/ca-docs.server")).docStep();
-  } catch (e) {
-    console.error("official documents:", e);
-  }
+  await step("docs", "official documents", async () =>
+    (await import("@/lib/ca-docs.server")).docStep(),
+  );
   // The scheme register links the next scheme stories.
-  try {
-    await (await import("@/lib/ca-schemes.server")).schemeStep();
-  } catch (e) {
-    console.error("scheme register:", e);
-  }
+  await step("schemes", "scheme register", async () =>
+    (await import("@/lib/ca-schemes.server")).schemeStep(),
+  );
   // The card studio's AI jobs left to run on the server (the check, the
   // fill), a few batches at a time.
-  try {
+  await step("studio", "card studio jobs", async () => {
     const flash = await import("@/lib/flash-studio.server");
-    const t0 = Date.now();
-    while (Date.now() - t0 < 30_000 && (await flash.jobStep())) {
-      // the next batches, within the tick's time
-    }
-  } catch (e) {
-    console.error("card studio jobs:", e);
-  }
+    return loop(() => flash.jobStep(), 30_000);
+  });
   // Clipped newspapers finish in the background after "Done".
-  try {
+  await step("clips", "newspaper clipping", async () => {
     const clips = await import("@/lib/ca-clips.server");
-    const t0 = Date.now();
-    while (Date.now() - t0 < 40_000 && (await clips.clipStep())) {
-      // one step at a time, within the tick's time
-    }
-  } catch (e) {
-    console.error("newspaper clipping:", e);
-  }
+    return loop(() => clips.clipStep(), 40_000);
+  });
   // Exam papers queued for reading in the background, a few pages a step.
-  try {
+  await step("exams", "exam paper queue", async () => {
     const queue = await import("@/lib/exam-queue.server");
-    const t0 = Date.now();
-    while (Date.now() - t0 < 45_000 && (await queue.queueStep())) {
-      // one step at a time, within the tick's time
-    }
-  } catch (e) {
-    console.error("exam paper queue:", e);
-  }
+    return loop(() => queue.queueStep(), 45_000);
+  });
   // GK infographics: the day's cards planned, written, made and posted.
-  try {
-    await (await import("@/lib/gk.server")).gkStep(origin);
-  } catch (e) {
-    console.error("gk infographics:", e);
-  }
+  await step("gk", "gk infographics", async () => (await import("@/lib/gk.server")).gkStep(origin));
   // The atlas: Hindi filled in, the knowledge base kept up to date, the
   // district overviews' jobs moved on.
-  try {
-    await (await import("@/lib/atlas.server")).atlasStep();
-  } catch (e) {
-    console.error("atlas:", e);
-  }
+  await step(
+    "atlas",
+    "atlas",
+    async () => (await (await import("@/lib/atlas.server")).atlasStep()).did,
+  );
   // The atlas's daily question, as a quiz poll on the channel (when on).
-  try {
-    await (await import("@/lib/atlas-drills.server")).dailyPollStep(origin);
-  } catch (e) {
-    console.error("atlas daily poll:", e);
-  }
+  if (full)
+    try {
+      await (await import("@/lib/atlas-drills.server")).dailyPollStep(origin);
+    } catch (e) {
+      console.error("atlas daily poll:", e);
+    }
+  await gate.rememberBusy(before, did);
 
+  if (!runs("collection")) return { run: null, steps: [] };
+  const settings = await settingsNow();
   const { data: claimed, error } = await supabaseAdmin.rpc(
     "ca_claim_run" as never,
     { p_seconds: 120 } as never,
