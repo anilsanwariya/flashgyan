@@ -82,7 +82,9 @@ sure the panel shows the webhook as secured.
 
 ## ADR-010: Scheduled work uses `pg_cron` calling safe "tick" endpoints (14 October 2026)
 
-**Decision:** `pg_cron` calls `/api/ca/tick` and the bot's `?task=broadcast` every minute.
+**Decision:** `pg_cron` calls `/api/ca/tick` every 5 minutes (changed from every minute on
+12 November 2026 to cut runs; due-time checks use "at or after", so nothing is missed) and
+the bot's `?task=broadcast` every minute.
 Each call does only work that is already due, so it needs no credentials.
 **Reason:** works without a separate job server, and runs even when no admin has the page
 open.

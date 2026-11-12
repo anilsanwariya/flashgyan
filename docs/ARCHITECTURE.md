@@ -35,7 +35,7 @@ Server function (src/lib/*.functions.ts) or API route (src/routes/api.*.ts)
 AI and outside services (Claude, Gemini embeddings, Tavily, LlamaParse, Cloudflare)
 
 Telegram ──webhook──► Edge Function telegram-demo-bot ──► same database, same AI code
-pg_cron ──every minute──► /api/ca/tick and the bot's ?task=broadcast
+pg_cron ──every 5 minutes──► /api/ca/tick; every minute──► the bot's ?task=broadcast
 ```
 
 ## Folders
@@ -125,8 +125,8 @@ docs/                     Project documentation (this folder)
 - **Long jobs:** heavy work (magazines, card studio, paper reading) runs as queued jobs
   advanced a step at a time. In the bot, slow AI replies run in `EdgeRuntime.waitUntil`
   after an immediate acknowledgment.
-- **Scheduled work:** `pg_cron` with `pg_net` calls `/api/ca/tick` (news collection) and the
-  bot's `?task=broadcast` every minute. These schedules are **not** in the migrations: an
+- **Scheduled work:** `pg_cron` with `pg_net` calls `/api/ca/tick` (news collection and its
+  background steps) every 5 minutes and the bot's `?task=broadcast` every minute. These schedules are **not** in the migrations: an
   admin runs the SQL shown in Admin → Current affairs (watch sites) and Admin → Telegram
   bot → Connection. Tick endpoints do only work that is already due, so calling them
   without credentials is safe.

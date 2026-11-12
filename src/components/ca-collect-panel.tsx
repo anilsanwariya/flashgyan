@@ -613,7 +613,7 @@ export function WatchSitesSettings() {
   const cronSql = `-- Runs the evening collection even when the admin page is closed.
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
-select cron.schedule('ca-collector', '* * * * *',
+select cron.schedule('ca-collector', '*/5 * * * *',
   $$select net.http_post(url := '${origin}/api/ca/tick', headers := jsonb_build_object('x-cron-secret', '${cronSecret}'), timeout_milliseconds := 120000)$$);`;
 
   return (
