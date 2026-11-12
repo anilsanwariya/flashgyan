@@ -24,3 +24,4 @@
 - Run Telegram Mains answers as bounded EdgeRuntime.waitUntil jobs after an immediate acknowledgment; suppress aborted-job delivery so slow AI calls cannot hold the webhook open or send late duplicate replies.
 - Telegram /check reuses the website's shared answer examiner, validates private-chat submissions before claiming a session, and counts only delivered feedback; this keeps text/photo marking consistent and duplicate taps harmless.
 - Keep each AI prompt's first system message identical across calls (no dates, ids or per-item notes); put per-call notes in a later system message or the user message, so saathi-core's prompt caching hits and ai_usage shows the saving.
+- Judge a news collection stuck only from its progress fingerprint across ticks (src/lib/ca-run-health.ts, state in bot_settings ca_runhealth:<run>), with a threshold longer than the PDF-parsing timeout, so slow PDFs and fast admin-page ticks never raise false alarms.

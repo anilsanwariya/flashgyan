@@ -126,13 +126,14 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
 
   const data = q.data;
   const run = data?.run ?? null;
+  const health = data?.health ?? { state: "ok" as const };
   const reload = () => {
     qc.invalidateQueries({ queryKey: ["caCollection"] });
     onChanged();
   };
 
   // Runs ticks from this page until the collection is finished. The
-  // once-a-minute schedule does the same when this page is closed.
+  // 5-minute schedule does the same when this page is closed.
   async function drive(start: boolean, sites?: string[]) {
     if (work) return;
     setWork("Starting…");
@@ -258,6 +259,9 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
               {run.status === "done" ? "Done" : run.status === "failed" ? "Failed" : "Running"}
             </Pill>
             {run.mode === "past" && <Pill tone="primary">Past-date collection</Pill>}
+            {(health.state === "stalled" || health.state === "no_ticks") && (
+              <Pill tone="bad">Stuck</Pill>
+            )}
           </>
         ) : (
           <Pill>Not run yet</Pill>
@@ -320,6 +324,27 @@ export function CollectionBox({ date, onChanged }: { date: string; onChanged: ()
         <p className="text-xs text-muted-foreground">
           Every evening SAATHI reads the websites in Settings, picks the exam-relevant news and
           writes it up here for your review. You can also run it now.
+        </p>
+      )}
+
+      {!work && health.state === "stalled" && (
+        <p className="text-sm text-destructive">
+          This collection hasn't moved for {health.minutes} minutes ({health.ticks} checks in a row
+          with nothing new)
+          {run?.error ? `. Last error: ${run.error}` : ""}. Press “Continue” to retry it here, or
+          “Clear &amp; start fresh”.
+        </p>
+      )}
+      {!work && health.state === "no_ticks" && (
+        <p className="text-sm text-destructive">
+          No check has worked on this collection for {health.minutes} minutes, so the schedule may
+          have stopped. Press “Continue” to run it here, and run the schedule setup in Magazine
+          settings → Websites to watch again.
+        </p>
+      )}
+      {!work && health.state === "queued" && (
+        <p className="text-xs text-muted-foreground">
+          Waiting for the collection for {health.behind} to finish first.
         </p>
       )}
 

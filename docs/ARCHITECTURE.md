@@ -130,6 +130,12 @@ docs/                     Project documentation (this folder)
   admin runs the SQL shown in Admin → Current affairs (watch sites) and Admin → Telegram
   bot → Connection. Tick endpoints do only work that is already due, so calling them
   without credentials is safe.
+- **Stuck collections:** after each tick that works on a running news collection, a progress
+  fingerprint (websites read; count and latest change of its articles, the day's sources and
+  stories) is kept in `bot_settings` under `ca_runhealth:<run id>`. Six ticks and 30 minutes
+  with the same fingerprint mark it stuck: the daily page shows "Stuck" and the admin chat
+  gets one Telegram alert. A running collection no tick has taken for 30 minutes (and none
+  ahead of it in the queue) is also shown as stuck. Rules: `src/lib/ca-run-health.ts`.
 - **Rate limits:** public AI endpoints are limited per IP and site-wide
   (`saathi_rate_limits`, `consumeSaathiRateLimit`).
 - **Bilingual:** content is stored in English and Hindi. In the atlas, AI-drafted Hindi is

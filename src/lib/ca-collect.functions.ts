@@ -12,8 +12,15 @@ import type {
   WatchSite,
 } from "@/lib/ca-collect.server";
 
-export type { BackfillDay, CaArticle, CaBackfill, CaRun, TickResult, WatchSite };
-export type Collection = { run: CaRun | null; articles: CaArticle[]; sites: WatchSite[] };
+import type { CollectionHealth } from "@/lib/ca-run-health";
+
+export type { BackfillDay, CaArticle, CaBackfill, CaRun, CollectionHealth, TickResult, WatchSite };
+export type Collection = {
+  run: CaRun | null;
+  articles: CaArticle[];
+  sites: WatchSite[];
+  health: CollectionHealth;
+};
 
 async function server() {
   return import("@/lib/ca-collect.server");

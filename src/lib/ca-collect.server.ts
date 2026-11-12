@@ -1,5 +1,5 @@
 // Server-only automatic news collection. Work happens in short ticks (from a
-// once-a-minute schedule or the admin page): each tick claims the running
+// 5-minute schedule or the admin page): each tick claims the running
 // collection and does as many small steps as fit in about 20 seconds:
 // read a site, pick headlines, fetch articles, then read and write them up
 // with the usual magazine pipeline.
@@ -22,6 +22,13 @@ import {
   type FoundLink,
 } from "@/lib/ca-collect";
 import { formatDate, istDate, type UploadSection } from "@/lib/current-affairs";
+import {
+  STALL_MINUTES,
+  nextRunHealth,
+  runHealthState,
+  type CollectionHealth,
+  type RunHealth,
+} from "@/lib/ca-run-health";
 import {
   MAX_BACKFILL_DAYS,
   addDays,
@@ -82,6 +89,8 @@ export type CaRun = {
   error: string | null;
   started_at: string;
   finished_at: string | null;
+  // Bumped by every tick that takes the run.
+  updated_at?: string;
 };
 
 export type CaArticle = {
@@ -154,8 +163,9 @@ export async function startRun(
   }
   fail(error);
   // A day collected again (or a past date) gets its whole-day duplicate
-  // check again.
+  // check again, and its stuck check starts afresh.
   await from("bot_settings").delete().eq("key", `ca_dupcheck:${issueDate}`);
+  await from("bot_settings").delete().eq("key", `${RUN_HEALTH_KEY}${(data as unknown as CaRun).id}`);
   return data as unknown as CaRun;
 }
 
@@ -168,7 +178,7 @@ export async function tick(origin?: string): Promise<TickResult> {
   } catch (e) {
     console.error("telegram approvals:", e);
   }
-  // Sunday's weekly report rides on the same once-a-minute schedule.
+  // Sunday's weekly report rides on the same 5-minute schedule.
   try {
     await (await import("@/lib/ca-report.server")).maybeSendWeeklyReport(origin);
   } catch (e) {
@@ -276,6 +286,7 @@ export async function tick(origin?: string): Promise<TickResult> {
   const started = Date.now();
   const steps: string[] = [];
   let failure: string | undefined;
+  let finished = false;
   try {
     while (Date.now() - started < TICK_BUDGET_MS) {
       const step = await nextStep(run);
@@ -285,6 +296,7 @@ export async function tick(origin?: string): Promise<TickResult> {
       }
       if (!step) {
         await finishRun(run, origin, settings);
+        finished = true;
         steps.push("finished");
         break;
       }
@@ -301,7 +313,94 @@ export async function tick(origin?: string): Promise<TickResult> {
       .update({ locked_until: null } as never)
       .eq("id", run.id);
   }
+  try {
+    if (finished) await from("bot_settings").delete().eq("key", `${RUN_HEALTH_KEY}${run.id}`);
+    else await checkRunHealth(run, settings, origin, failure);
+  } catch (e) {
+    console.error("collection health:", e);
+  }
   return { run: run.issue_date, steps, error: failure };
+}
+
+// ---------- Stuck check ----------
+
+const RUN_HEALTH_KEY = "ca_runhealth:";
+
+// What has moved in a collection: websites read, and the count and latest
+// change of its articles, the day's sources and the day's stories.
+async function runSignature(run: CaRun): Promise<string> {
+  const latest = async (table: string, col: string, val: string) => {
+    const { data, count, error } = await from(table)
+      .select("updated_at", { count: "exact" })
+      .eq(col, val)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    fail(error);
+    return `${count ?? 0}@${((data ?? []) as { updated_at: string }[])[0]?.updated_at ?? ""}`;
+  };
+  const [articles, sources, items] = await Promise.all([
+    latest("ca_articles", "run_id", run.id),
+    latest("ca_sources", "issue_date", run.issue_date),
+    latest("ca_items", "issue_date", run.issue_date),
+  ]);
+  return [run.discovered.length, articles, sources, items].join("|");
+}
+
+async function readRunHealth(runId: string): Promise<RunHealth | null> {
+  const { data } = await from("bot_settings")
+    .select("value")
+    .eq("key", `${RUN_HEALTH_KEY}${runId}`)
+    .maybeSingle();
+  return ((data as { value?: RunHealth } | null)?.value ?? null) as RunHealth | null;
+}
+
+// After a tick that worked on a collection still running: the same
+// fingerprint over several ticks flags it, and the admin chat hears once.
+async function checkRunHealth(
+  run: CaRun,
+  settings: Awaited<ReturnType<typeof CA.getMagazineSettings>>,
+  origin: string | undefined,
+  failure: string | undefined,
+) {
+  const h = nextRunHealth(await readRunHealth(run.id), await runSignature(run));
+  const state = runHealthState(h, h.at);
+  if (state.state === "stalled" && !h.alerted) {
+    const error = failure ?? run.error;
+    console.error(
+      `ca collect: the collection for ${run.issue_date} hasn't moved for ${state.minutes} minutes (${state.ticks} ticks)${error ? `: ${error}` : ""}`,
+    );
+    if (settings.test_chat_id) {
+      const link = origin ? `\n\nOpen: ${origin}/admin?section=ca.daily` : "";
+      await sendTelegram(
+        settings.test_chat_id,
+        `⚠️ The current affairs collection for ${formatDate(run.issue_date, "en")} hasn't moved for ${state.minutes} minutes (${state.ticks} checks in a row with nothing new).${error ? `\nLast error: ${error.slice(0, 300)}` : ""}\nPress “Continue” on the daily page to retry, or “Clear & start fresh”.${link}`,
+      );
+    }
+    h.alerted = true;
+  }
+  await from("bot_settings").upsert({
+    key: `${RUN_HEALTH_KEY}${run.id}`,
+    value: h,
+    updated_at: now(),
+  } as never);
+}
+
+// For the daily page: is the running collection moving?
+async function collectionHealth(run: CaRun | null): Promise<CollectionHealth> {
+  if (!run || run.status !== "running" || run.started_by === "cleared") return { state: "ok" };
+  const state = runHealthState(await readRunHealth(run.id), run.updated_at ?? run.started_at);
+  if (state.state !== "no_ticks") return state;
+  // Ticks take one collection at a time: another one worked on recently
+  // means this one is waiting its turn.
+  const { data } = await from("ca_runs")
+    .select("issue_date,updated_at")
+    .eq("status", "running")
+    .neq("id", run.id)
+    .gte("updated_at", new Date(Date.now() - STALL_MINUTES * 60_000).toISOString())
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  const other = ((data ?? []) as { issue_date: string }[])[0];
+  return other ? { state: "queued", behind: other.issue_date } : state;
 }
 
 // Does one unit of work. Returns what it did, "wait" when only PDF parsing is
@@ -1072,10 +1171,12 @@ export async function getCollection(issueDate: string) {
     getSites(),
   ]);
   fail(articles.error);
+  const current = (run.data as unknown as CaRun | null) ?? null;
   return {
-    run: (run.data as unknown as CaRun | null) ?? null,
+    run: current,
     articles: (articles.data ?? []) as unknown as CaArticle[],
     sites,
+    health: await collectionHealth(current).catch((): CollectionHealth => ({ state: "ok" })),
   };
 }
 
