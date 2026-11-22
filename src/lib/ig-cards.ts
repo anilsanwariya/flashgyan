@@ -181,6 +181,23 @@ export function langNumber<T extends { lang: IgLang }>(
   return { n: same.indexOf(card) + 1, total: same.length };
 }
 
+// A day's designs, one per language. The day keeps them in its one
+// `design` field: "paper" when both languages share it (every day made
+// before 22 November 2026), "paper|akhbar" (English|Hindi) when they differ.
+export function dayDesigns(value: string | null | undefined): Record<IgLang, IgDesign> {
+  const ok = (d: string | undefined): IgDesign | null =>
+    IG_DESIGN_KEYS.includes(d as IgDesign) ? (d as IgDesign) : null;
+  const [en, hi] = String(value ?? "").split("|");
+  const e = ok(en) ?? "paper";
+  return { en: e, hi: ok(hi) ?? e };
+}
+
+export const designFor = (value: string | null | undefined, lang: IgLang): IgDesign =>
+  dayDesigns(value)[lang];
+
+export const dayDesignValue = (d: Record<IgLang, IgDesign>): string =>
+  d.en === d.hi ? d.en : `${d.en}|${d.hi}`;
+
 // The word, highlighted where it stands in the news line (any form of it:
 // "eradicate" in "eradicated").
 export function markWord(line: string, word: string): string {

@@ -189,7 +189,12 @@ gets an album (or two, English then Hindi, when it takes more than 10 cards) of 
 languages' cards, with its own caption, and the weekly PDF is made once per language set
 and sent to each channel. With one channel the card footer shows its link; with several,
 a neutral "FlashGyan app". From 13 November 2026 each language numbers its own cards ("Word 1 of 3",
-"शब्द 1 / 2"); cards made before keep the day-wide count they were made with.
+"शब्द 1 / 2"); cards made before keep the day-wide count they were made with. From 22
+November 2026 English and Hindi cards can each have their own design: Settings hold
+`design` (English) and `design_hi` (read as the English one when missing), and a day keeps
+both in its one `design` field as `english|hindi` (a single name when they match, as every
+older day has), so no migration; changing one language's design for a day remakes only
+that language's images.
 **Reason:** a line copied from the news teaches the news, not how the word appears in an
 exam, and goes stale. Separate Hindi and English channels let each audience get only the
 words it reads.

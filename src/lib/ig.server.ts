@@ -21,6 +21,9 @@ import {
   type IgForm,
   type IgLang,
   langNumber,
+  dayDesigns,
+  dayDesignValue,
+  designFor,
 } from "@/lib/ig-cards";
 import { roundupHtml, type IgRoundupWord } from "@/lib/ig-roundup";
 import { parseStyleRules, type StyleSuggestion } from "@/lib/ca-style";
@@ -107,7 +110,8 @@ export type IgDay = {
   day: string;
   status: IgStatus;
   suggested: string[];
-  design: IgDesign | null;
+  // One design, or English|Hindi (see dayDesigns).
+  design: string | null;
   design_reason: string;
   caption: string;
   scheduled_for: string | null;
@@ -282,7 +286,9 @@ export async function getIgDay(day: string): Promise<IgDayView> {
       .map(toWord)
       .filter((w) => !posted.has(`${w.lang}:${w.key}`)),
     settings,
-    yesterdayDesign: (((prev.data ?? []) as Row[])[0]?.design as string | undefined) ?? null,
+    yesterdayDesign: ((prev.data ?? []) as Row[])[0]?.design
+      ? dayDesigns(String(((prev.data ?? []) as Row[])[0].design)).en
+      : null,
     posts: await dayPosts(day),
   };
 }
@@ -650,10 +656,11 @@ async function proofLang(day: string, lang: IgLang): Promise<boolean> {
   return true;
 }
 
-// The day's design: the channel's one design (Settings), the same every day.
+// The day's designs: the channel's (Settings), English and Hindi, the same
+// every day.
 async function chooseDesign(day: string, settings: IgSettings) {
   await patchDay(day, {
-    design: settings.design,
+    design: dayDesignValue({ en: settings.design, hi: settings.design_hi }),
     design_reason: "The channel's design (Settings).",
   });
 }
@@ -746,7 +753,7 @@ async function renderSome(
     const n = cards.indexOf(c) + 1;
     const own = langNumber(cards, c);
     const html = igCardHtml(c.card as IgCard, {
-      design: (row?.design ?? "paper") as IgDesign,
+      design: designFor(row?.design, c.lang),
       n: own.n,
       total: own.total,
       date: day,
@@ -1794,16 +1801,19 @@ export async function recheckIgCard(day: string, id: string): Promise<void> {
   await patchDay(day, { status: "writing" });
 }
 
-export async function setIgDesign(day: string, design: IgDesign): Promise<void> {
-  await patchDay(day, { design, design_reason: "Chosen by the editor." });
-  fail(
-    (
-      await from("ig_words")
-        .update({ image_path: null, updated_at: now() } as never)
-        .eq("for_day", day)
-        .eq("status", "picked")
-    ).error,
-  );
+// The day's design for one language (or both): that language's images are
+// made again.
+export async function setIgDesign(day: string, design: IgDesign, lang?: IgLang): Promise<void> {
+  const row = await readDay(day);
+  const was = dayDesigns(row?.design);
+  const next = lang ? { ...was, [lang]: design } : { en: design, hi: design };
+  await patchDay(day, { design: dayDesignValue(next), design_reason: "Chosen by the editor." });
+  let q = from("ig_words")
+    .update({ image_path: null, updated_at: now() } as never)
+    .eq("for_day", day)
+    .eq("status", "picked");
+  if (lang) q = q.eq("lang", lang);
+  fail((await q).error);
 }
 
 // Approved: the cards are made into images and posted at the set time

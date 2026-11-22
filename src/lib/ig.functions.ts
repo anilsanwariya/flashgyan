@@ -231,10 +231,12 @@ export const recheckIgCard = createServerFn({ method: "POST" })
 
 export const setIgDesign = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ date, design }).parse(d))
+  .inputValidator((d: unknown) =>
+    z.object({ date, design, lang: z.enum(["en", "hi"]).optional() }).parse(d),
+  )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    await (await server()).setIgDesign(data.date, data.design);
+    await (await server()).setIgDesign(data.date, data.design, data.lang);
     return { ok: true };
   });
 
@@ -311,6 +313,7 @@ export const saveIgSettings = createServerFn({ method: "POST" })
         pick_hi: z.number().int().min(0).max(10),
         designs: z.array(design).min(1),
         design,
+        design_hi: design.optional(),
         watermark: z.number().int().min(0).max(100),
         caption: z.string().min(1).max(3000),
         notify: z.boolean(),
