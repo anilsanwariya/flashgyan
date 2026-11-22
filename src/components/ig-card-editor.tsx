@@ -51,6 +51,7 @@ import {
   type IgDesign,
   type IgForm,
   langNumber,
+  designFor,
 } from "@/lib/ig-cards";
 import { FIELD_NAMES, PART_OF_FIELD, type IgCheck, type IgPart } from "@/lib/ig-words";
 import { CardPreview } from "@/components/ig-card-preview";
@@ -101,7 +102,8 @@ export function IgCardEditor({
 }: {
   view: IgDayView;
   date: string;
-  design: IgDesign;
+  // The day's design field (one design per language, see dayDesigns).
+  design: string | null;
   startId: string;
   onClose: () => void;
   onChange: () => Promise<unknown>;
@@ -394,7 +396,7 @@ export function IgCardEditor({
                   >
                     <CardPreview
                       card={card}
-                      design={design}
+                      design={designFor(design, w?.lang ?? "en")}
                       {...(w ? langNumber(cards, w) : { n: at + 1, total: cards.length })}
                       date={date}
                       settings={view.settings}
@@ -476,7 +478,7 @@ export function IgCardEditor({
             >
               <CardPreview
                 card={card}
-                design={design}
+                design={designFor(design, w?.lang ?? "en")}
                 {...(w ? langNumber(cards, w) : { n: at + 1, total: cards.length })}
                 date={date}
                 settings={view.settings}

@@ -39,6 +39,8 @@ import {
   type IgDesign,
   type IgLang,
   langNumber,
+  dayDesigns,
+  designFor,
 } from "@/lib/ig-cards";
 import {
   CAPTION_FIELDS,
@@ -566,10 +568,10 @@ function Review({
   const approveFn = useServerFn(approveIgDay);
   const designFn = useServerFn(setIgDesign);
   const [designBusy, setDesignBusy] = useState(false);
-  const changeDesign = async (d: IgDesign) => {
+  const changeDesign = async (d: IgDesign, lang: IgLang) => {
     setDesignBusy(true);
     try {
-      await designFn({ data: { date, design: d } });
+      await designFn({ data: { date, design: d, lang } });
       toast.success("Design changed for this day");
       await onChange();
     } catch (e) {
@@ -597,7 +599,11 @@ function Review({
   const [postAt, setPostAt] = useState(() => istInput(igPostDefault(view.settings.post_time)));
   const at = fromIstInput(postAt);
   const atBad = !at || at.getTime() < Date.now() - 60_000;
-  const design = (view.day?.design ?? "paper") as IgDesign;
+  const designs = dayDesigns(view.day?.design);
+  // A choice per language with cards today (English first).
+  const designLangs = (["en", "hi"] as IgLang[]).filter((l) =>
+    view.cards.some((c) => c.lang === l),
+  );
   const unticked = view.cards.filter((c) => !c.checked);
   const made = view.cards.filter((c) => c.image_path).length;
   const writing = view.day?.status === "writing";
@@ -630,20 +636,27 @@ function Review({
       <div className="grid gap-4 rounded-xl border border-border p-4 lg:grid-cols-2">
         <div className="space-y-2">
           <p className="text-sm font-medium">Design</p>
-          <select
-            data-day-design
-            aria-label="Design for this day"
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            value={design}
-            disabled={designBusy}
-            onChange={(e) => changeDesign(e.target.value as IgDesign)}
-          >
-            {IG_DESIGNS.map((d) => (
-              <option key={d.key} value={d.key}>
-                {d.name}
-              </option>
-            ))}
-          </select>
+          {(designLangs.length ? designLangs : (["en"] as IgLang[])).map((l) => (
+            <label key={l} className="flex items-center gap-2 text-sm">
+              {designLangs.length > 1 && (
+                <span className="w-16 shrink-0 text-muted-foreground">{LANG_NAME[l]}</span>
+              )}
+              <select
+                data-day-design={l}
+                aria-label={`Design for this day's ${LANG_NAME[l]} cards`}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={designs[l]}
+                disabled={designBusy}
+                onChange={(e) => changeDesign(e.target.value as IgDesign, l)}
+              >
+                {IG_DESIGNS.map((d) => (
+                  <option key={d.key} value={d.key}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
           <p className="text-xs text-muted-foreground">
             New days use the design from Settings; change it here for this day only.
           </p>
@@ -718,7 +731,7 @@ function Review({
                   {c.card ? (
                     <CardPreview
                       card={c.card}
-                      design={design}
+                      design={designs[c.lang]}
                       n={at + 1}
                       total={same.length}
                       date={date}
@@ -789,7 +802,7 @@ function Review({
         <IgCardEditor
           view={view}
           date={date}
-          design={design}
+          design={view.day?.design ?? null}
           startId={openId}
           onClose={() => setOpenId(null)}
           onChange={onChange}
@@ -964,7 +977,7 @@ function Scheduled({
               <div key={c.id} className="min-w-0 sm:w-[180px]">
                 <CardPreview
                   card={c.card}
-                  design={(d.design ?? "paper") as IgDesign}
+                  design={designFor(d.design, c.lang)}
                   {...langNumber(view.cards, c)}
                   date={date}
                   settings={view.settings}
@@ -1784,8 +1797,23 @@ function Settings() {
           </div>
         </div>
         <p className="text-sm text-muted-foreground">
-          One design for every day&apos;s cards, Hindi and English, so students know the
-          channel&apos;s cards at a glance.
+          One design for every day&apos;s cards, so students know the channel&apos;s cards at a
+          glance. English and Hindi can each have their own: switch the sample above to choose the
+          other language&apos;s design.
+        </p>
+        <p className="text-sm" data-design-summary>
+          English: <b>{IG_DESIGNS.find((d) => d.key === s.design)?.name}</b> · Hindi:{" "}
+          <b>{IG_DESIGNS.find((d) => d.key === s.design_hi)?.name}</b>
+          {s.design !== s.design_hi && (
+            <Button
+              size="sm"
+              variant="link"
+              className="h-auto px-2 py-0"
+              onClick={() => set(lang === "en" ? { design_hi: s.design } : { design: s.design_hi })}
+            >
+              Use the {LANG_NAME[lang]} design for both
+            </Button>
+          )}
         </p>
         <label className="block max-w-sm space-y-1 text-sm">
           <span className="font-medium">Watermark strength: {s.watermark}%</span>
@@ -1802,7 +1830,7 @@ function Settings() {
         </label>
         <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:gap-4">
           {IG_DESIGNS.map((d) => {
-            const on = s.design === d.key;
+            const on = (lang === "en" ? s.design : s.design_hi) === d.key;
             return (
               <div
                 key={d.key}
@@ -1821,10 +1849,10 @@ function Settings() {
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="radio"
-                    name="ig-design"
+                    name={`ig-design-${lang}`}
                     checked={on}
-                    aria-label={`Use ${d.name}`}
-                    onChange={() => set({ design: d.key })}
+                    aria-label={`Use ${d.name} for ${LANG_NAME[lang]} cards`}
+                    onChange={() => set(lang === "en" ? { design: d.key } : { design_hi: d.key })}
                   />
                   <span>
                     <b>{d.name}</b>
