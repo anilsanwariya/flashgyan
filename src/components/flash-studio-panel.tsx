@@ -703,7 +703,17 @@ function TemplateDialog({
               <Button
                 variant="ghost"
                 className="ml-auto text-destructive"
-                onClick={() => void onDelete()}
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await onDelete();
+                  } catch (e) {
+                    toast.error(errorText(e, "Couldn't delete"));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
               >
                 Delete
               </Button>
@@ -2018,6 +2028,11 @@ function ImportDialog({
             <label className="block space-y-1">
               <span className="font-medium">Book (short name, for cards without one)</span>
               <Input value={book} onChange={(e) => setBook(e.target.value)} placeholder="e.g. RP" />
+              {!book.trim() && (
+                <span className="block text-xs text-amber-700 dark:text-amber-400">
+                  Needed: some cards have no book.
+                </span>
+              )}
             </label>
           )}
           {sheet.numbered && (
@@ -2043,7 +2058,7 @@ function ImportDialog({
             before={replace?.kind === "sheet" ? replace.proofread : undefined}
           />
           <Button
-            disabled={busy}
+            disabled={busy || (needsBook && !book.trim())}
             onClick={async () => {
               setBusy(true);
               try {
@@ -2097,11 +2112,17 @@ function EditCell({
   value: string;
   className: string;
   prefix: string;
-  onSave: (v: string) => void;
+  // False when the save failed: the text typed stays to try again.
+  onSave: (v: string) => Promise<boolean>;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   // Closed by a key: the blur that follows isn't a save.
   const done = useRef(false);
+  const commit = async (v: string) => {
+    done.current = true;
+    if (await onSave(v)) setDraft(null);
+    else done.current = false;
+  };
   if (draft === null)
     return (
       <td
@@ -2134,16 +2155,12 @@ function EditCell({
             setDraft(null);
           } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
-            done.current = true;
-            onSave(draft);
-            setDraft(null);
+            if (!done.current) void commit(draft);
           }
         }}
         onBlur={() => {
           if (done.current) return;
-          done.current = true;
-          onSave(draft);
-          setDraft(null);
+          void commit(draft);
         }}
         className="min-w-40 text-sm"
       />
@@ -2172,7 +2189,7 @@ function CardTable({
   const saveFn = useServerFn(saveFlashCard);
   const proofread = useProofread();
   const save = async (c: FlashCard, field: string, v: string) => {
-    if (fieldText(c, field) === v) return;
+    if (fieldText(c, field) === v) return true;
     const patch =
       field === "front" || field === "back"
         ? { [field]: v }
@@ -2183,8 +2200,10 @@ function CardTable({
     try {
       onEdit?.(await saveFn({ data: { id: c.id, patch: patch as never } }));
       toast.success("Saved");
+      return true;
     } catch (e) {
       toast.error(errorText(e, "Couldn't save"));
+      return false;
     }
   };
   const cell = (c: FlashCard, field: string, className: string) =>
@@ -2195,7 +2214,7 @@ function CardTable({
         value={fieldText(c, field)}
         className={className}
         prefix={field.startsWith("ex:") && c.own.includes(field.slice(3)) ? "◇ " : ""}
-        onSave={(v) => void save(c, field, v)}
+        onSave={(v) => save(c, field, v)}
       />
     ) : (
       <td key={field} className={`whitespace-pre-wrap p-2 ${className}`} onClick={() => onOpen(c)}>
@@ -2318,10 +2337,16 @@ function CardDialog({
         : card;
     });
   }, [card]);
+  // Saved: the editor shows the card as stored, nothing left unsaved.
+  const took = (saved: FlashCard) => {
+    shown.current = saved;
+    setC(saved);
+    onSaved(saved);
+  };
   const save = async (patch: Partial<FlashCard>) => {
     setBusy(true);
     try {
-      onSaved(await saveFn({ data: { id: card.id, patch: patch as never } }));
+      took(await saveFn({ data: { id: card.id, patch: patch as never } }));
       return true;
     } catch (e) {
       toast.error(errorText(e, "Couldn't save the card"));
@@ -2344,6 +2369,8 @@ function CardDialog({
         data: { topic_id: topic.id, ids: [card.id], with_verified: true, force: true },
       });
       const fresh = r.cards.find((x) => x.id === card.id);
+      // Through the card (not took): text typed while the AI read stays,
+      // its findings come in.
       if (fresh) onSaved(fresh);
       const n = fresh?.ai?.fixes.length ?? 0;
       toast.success(
@@ -2486,7 +2513,13 @@ function CardDialog({
     }
   };
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
+    <Dialog
+      open
+      // Escape, a click outside or the X: unsaved edits aren't dropped unasked.
+      onOpenChange={(o) => {
+        if (!o && (!changed || confirm("Discard the changes not saved?"))) onClose();
+      }}
+    >
       <DialogContent
         // Opened to read: no box takes the cursor (and a phone's keyboard).
         onOpenAutoFocus={(e) => e.preventDefault()}
@@ -2600,9 +2633,9 @@ function CardDialog({
                 setBusy(true);
                 try {
                   if (JSON.stringify(c) !== JSON.stringify(card))
-                    await saveFn({ data: { id: card.id, patch: textPatch as never } });
+                    took(await saveFn({ data: { id: card.id, patch: textPatch as never } }));
                   const r = await fillFn({ data: { topic_id: topic.id, ids: [card.id] } });
-                  if (r.cards[0]) onSaved(r.cards[0]);
+                  if (r.cards[0]) took(r.cards[0]);
                   else toast("Nothing to fill");
                 } catch (e) {
                   toast.error(errorText(e, "The AI couldn't fill this card"));

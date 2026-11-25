@@ -288,3 +288,25 @@ progress runs every minute. Work that starts without a question (a custom magazi
 created, the atlas jobs) can wait up to 5 minutes for its first step. The owner re-runs the
 schedule SQL shown in Admin → Current affairs → Websites to watch (it now says every minute).
 
+
+## ADR-023: Card studio AI writes onto the card as it is now, and a job step holds its job (25 November 2026)
+
+**Decision:** The AI fill and check read the cards, wait for the AI, then read them again
+before saving. A column the editor changed meanwhile keeps the editor's text
+(`mergeFilled`); a card whose text changed is left for the next check, and a note or mark
+set meanwhile stays. "Apply AI fixes" (one card or many) applies a fix only while its field
+still reads as the AI saw it (`fixFits`). A server job step claims its job for 10 minutes
+(longer than a step takes) and saves its progress only while that claim is still its own,
+so two ticks never run one job. A batch that can't be read counts as a failed step (three
+stop the job with the reason), stopping a job cancels its batch, and a batch made after
+the job was stopped is cancelled. A forced re-check marks its cards unread before the job
+exists. One open job of each kind per topic is kept by a unique index. The fill and check
+prompts keep their first system message the same for a deck (the examples, house
+spellings, dictionary lines and hints go in a second one), so prompt caching hits.
+Replacing a sheet checks the new one before the old one is deleted.
+**Reason:** an AI call takes seconds to minutes, and the editor keeps working meanwhile;
+writing from the copy read before the call silently undid their edits.
+**Consequence:** migration `20261227090000_flash_jobs_one_open.sql` (safe to re-run; it stops
+any duplicate open jobs first). Until it runs, the code's own check still refuses a second
+job, only not under a double click. A tick that dies mid-step leaves its job for up to 10
+minutes before another takes it.

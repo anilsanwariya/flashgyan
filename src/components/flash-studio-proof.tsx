@@ -799,6 +799,7 @@ export function Versions({
   const chips = useMemo(() => combineItems(vs), [card, others]); // eslint-disable-line react-hooks/exhaustive-deps
   const [picked, setPicked] = useState<Set<string> | null>(null);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [merging, setMerging] = useState(false);
   const proofread = useProofread();
   if (!list.length) return null;
   // With a proofread sheet among them: its words start ticked, the others
@@ -854,8 +855,9 @@ export function Versions({
               size="sm"
               variant="outline"
               className="ml-auto h-7"
-              disabled={!cardsChosen.length}
+              disabled={merging || !cardsChosen.length}
               onClick={async () => {
+                setMerging(true);
                 try {
                   await mergeFn({ data: { main: card.id, others: cardsChosen } });
                   toast.success(`${cardsChosen.length} merged into this card`);
@@ -863,6 +865,8 @@ export function Versions({
                   onMerged?.(cardsChosen);
                 } catch (e) {
                   toast.error(errorText(e, "Couldn't merge"));
+                } finally {
+                  setMerging(false);
                 }
               }}
             >

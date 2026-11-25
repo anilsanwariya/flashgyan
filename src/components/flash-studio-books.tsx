@@ -1,7 +1,7 @@
 // The card studio's books: a Word file, a PDF or pasted text read by the AI
 // into the topic's cards, piece by piece (or page by page), with progress,
 // stopping and going on later, and the lines the editor must check.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { BookOpen, Pause, Play, Trash2 } from "lucide-react";
@@ -17,6 +17,31 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 // A PDF being read stays here while the page is open (its pages go to the
 // AI one at a time); after a reload it is chosen again to go on.
 const pdfFiles = new Map<string, File>();
+
+// The book being read, kept here too: reading goes on with this panel
+// closed (another tab), and coming back shows its progress and Stop, with
+// no second reading started meanwhile.
+type Reading = {
+  running: string | null;
+  stop: boolean;
+  progress: Record<string, { done: number; cards: number }>;
+  failed: Record<string, { part: number; error: string }[]>;
+};
+let reading: Reading = { running: null, stop: false, progress: {}, failed: {} };
+const readers = new Set<() => void>();
+const setReading = (next: Partial<Reading>) => {
+  reading = { ...reading, ...next };
+  readers.forEach((l) => l());
+};
+const useReading = () =>
+  useSyncExternalStore(
+    (l) => {
+      readers.add(l);
+      return () => readers.delete(l);
+    },
+    () => reading,
+    () => reading,
+  );
 
 type Pending =
   | { kind: "word" | "text"; name: string; pieces: Piece[]; todos: Todo[]; chars: number }
@@ -59,9 +84,7 @@ export function BooksPanel({
   const readFn = useServerFn(readFlashSource);
   const deleteFn = useServerFn(deleteFlashSource);
   const [pending, setPending] = useState<Pending | null>(null);
-  const [running, setRunning] = useState<string | null>(null);
-  const [progress, setProgress] = useState<Record<string, { done: number; cards: number }>>({});
-  const stop = useRef(false);
+  const { running, progress, failed } = useReading();
   const resumeRef = useRef<HTMLInputElement>(null);
   const [resumeFor, setResumeFor] = useState<string | null>(null);
   const [openTodos, setOpenTodos] = useState<string | null>(null);
@@ -82,11 +105,9 @@ export function BooksPanel({
 
   // Parts (or pages) read three at a time; one that fails doesn't stop the
   // rest, and is listed to try again.
-  const [failed, setFailed] = useState<Record<string, { part: number; error: string }[]>>({});
   const run = async (src: FlashSourceRow) => {
-    if (running) return;
-    stop.current = false;
-    setRunning(src.id);
+    if (reading.running) return;
+    setReading({ running: src.id, stop: false });
     const done = new Set(src.parts);
     let cards = src.cards;
     const errors: { part: number; error: string }[] = [];
@@ -96,7 +117,7 @@ export function BooksPanel({
         .then((r) => {
           r.parts.forEach((p) => done.add(p));
           cards = Math.max(cards, r.cards);
-          setProgress((p) => ({ ...p, [src.id]: { done: done.size, cards } }));
+          setReading({ progress: { ...reading.progress, [src.id]: { done: done.size, cards } } });
           onChanged();
         })
         .catch((e) => {
@@ -110,7 +131,7 @@ export function BooksPanel({
       while (inFlight.size >= 3) await Promise.race(inFlight);
     };
     try {
-      setFailed((f) => ({ ...f, [src.id]: [] }));
+      setReading({ failed: { ...reading.failed, [src.id]: [] } });
       if (src.kind === "pdf") {
         const file = pdfFiles.get(src.id);
         if (!file) {
@@ -123,27 +144,29 @@ export function BooksPanel({
           Array.from({ length: src.total }, (_, i) => i + 1).find((p) => !done.has(p)) ??
           src.total + 1;
         await eachPageImage(file, first, async (page, _pages, image) => {
-          if (stop.current) return false;
+          if (reading.stop) return false;
           if (done.has(page)) return;
           await room();
           send(page, image);
         });
       } else {
-        for (let part = 1; part <= src.total && !stop.current; part++) {
+        for (let part = 1; part <= src.total && !reading.stop; part++) {
           if (done.has(part)) continue;
           await room();
           send(part);
         }
       }
       await Promise.all(inFlight);
-      setFailed((f) => ({ ...f, [src.id]: errors.sort((a, b) => a.part - b.part) }));
+      setReading({
+        failed: { ...reading.failed, [src.id]: errors.sort((a, b) => a.part - b.part) },
+      });
       if (errors.length)
         toast.error(`${src.book}: ${errors.length} part(s) not read; try them again`);
       else if (done.size >= src.total) toast.success(`${src.book}: ${cards} cards read`);
     } catch (e) {
       toast.error(errorText(e, "Reading stopped"));
     } finally {
-      setRunning(null);
+      setReading({ running: null });
       onChanged();
     }
   };
@@ -183,7 +206,11 @@ export function BooksPanel({
 
                   {!finished &&
                     (running === s.id ? (
-                      <Button size="sm" variant="outline" onClick={() => (stop.current = true)}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setReading({ stop: true })}
+                      >
                         <Pause className="mr-1 h-4 w-4" /> Stop
                       </Button>
                     ) : (

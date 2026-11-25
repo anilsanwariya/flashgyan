@@ -257,7 +257,8 @@ export function WordsTab({
                             value={fixing.to}
                             onChange={(e) => setFixing({ word: w.word, to: e.target.value })}
                             onKeyDown={(e) => {
-                              if (e.key === "Enter") void replace(w, fixing.to);
+                              if (e.key === "Enter" && !busy && fixing.to.trim())
+                                void replace(w, fixing.to);
                               if (e.key === "Escape") setFixing(null);
                             }}
                           />

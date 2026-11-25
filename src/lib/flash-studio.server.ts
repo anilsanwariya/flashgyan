@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   matchLabel,
   relevantMatches,
+  saathiBatchCancel,
   saathiBatchCreate,
   saathiBatchGet,
   saathiBatchResults,
@@ -59,6 +60,8 @@ import {
   needsCheck,
   chunkChanges,
   fieldText,
+  fixFits,
+  mergeFilled,
   doneOf,
   type AiFix,
   planNumbers,
@@ -335,6 +338,19 @@ async function topicCards(id: string): Promise<FlashCard[]> {
   return out;
 }
 
+// These cards as they are now, by id.
+async function cardsById(ids: string[]): Promise<Map<string, FlashCard>> {
+  const out = new Map<string, FlashCard>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await from("flash_cards")
+      .select("*")
+      .in("id", ids.slice(i, i + 200));
+    fail(error);
+    for (const r of (data ?? []) as Row[]) out.set(String(r.id), readCard(r));
+  }
+  return out;
+}
+
 export async function getTopic(id: string) {
   const [topic, cards, sources] = await Promise.all([
     topicRow(id),
@@ -411,7 +427,27 @@ export async function importSheet(
   // chunks as in the app now (nothing changed since their download).
   fromApp?: { verified: boolean; downloaded: number[]; names?: Record<string, string> },
 ): Promise<ImportResult> {
-  if (replace) await deleteSource(replace);
+  // Checked before the sheet it replaces is deleted, so a sheet refused
+  // leaves the old one in place.
+  if (keepNumbers) {
+    const before = await getTopic(topicId);
+    if (before.cards.some((c) => c.card_order !== null) || before.topic.chunks.length)
+      throw new Error(
+        "This topic already has numbered chunks: add the cards without their numbers.",
+      );
+    if (sheet.cards.some((c) => c.sheet === null || c.order === null))
+      throw new Error("Every card needs a sheet and an order to keep the numbers.");
+  }
+  if (replace) {
+    const { data: old, error: oe } = await from("flash_sources")
+      .select("topic_id")
+      .eq("id", replace)
+      .maybeSingle();
+    fail(oe);
+    if (!old || String((old as Row).topic_id) !== topicId)
+      throw new Error("The sheet to replace isn't in this topic");
+    await deleteSource(replace);
+  }
   const { topic, cards } = await getTopic(topicId);
   const columns = [...topic.columns];
   const columnsAdded: string[] = [];
@@ -434,14 +470,6 @@ export async function importSheet(
     }
   }
   const prompt = topic.prompt || sheet.prompt;
-  if (keepNumbers) {
-    if (cards.some((c) => c.card_order !== null) || topic.chunks.length)
-      throw new Error(
-        "This topic already has numbered chunks: add the cards without their numbers.",
-      );
-    if (sheet.cards.some((c) => c.sheet === null || c.order === null))
-      throw new Error("Every card needs a sheet and an order to keep the numbers.");
-  }
   const start = cards.reduce((m, c) => Math.max(m, c.pos + 1), 0);
   // The sheet kept as one of the topic's sources (shown in its Sheets tab).
   const sheetBooks = [
@@ -1248,7 +1276,7 @@ export async function fillExplanations(
           items,
           wordings,
           SP.houseLines(
-            (await houseNow()).house,
+            (await houseRecent()).house,
             items.flatMap((it) => [it.front, it.back, ...Object.values(it.have)]),
           ),
         ),
@@ -1281,8 +1309,17 @@ export async function fillExplanations(
     own += ownAdd.length;
     patches.set(f.id, { ex: { ...base.ex, ...add }, own: [...new Set([...base.own, ...ownAdd])] });
   }
+  // Saved onto the cards as they are now: what the editor changed while
+  // the AI wrote stays.
   const out: FlashCard[] = [];
-  for (const [id, p] of patches) out.push(await saveCard(id, { ex: p.ex, own: p.own }));
+  const nowCards = await cardsById([...patches.keys()]);
+  for (const [id, p] of patches) {
+    const was = want.find((c) => c.id === id)!;
+    const cur = nowCards.get(id);
+    if (!cur || cur.removed) continue;
+    const merged = mergeFilled(was, p, cur);
+    if (merged) out.push(await saveCard(id, merged));
+  }
   return { filled: out.length, own, cards: out };
 }
 
@@ -1324,7 +1361,7 @@ export async function checkCards(
         deck,
         items,
         SP.houseLines(
-          (await houseNow()).house,
+          (await houseRecent()).house,
           items.flatMap((it) => [it.front, it.back, ...Object.values(it.ex)]),
         ),
         // A शुद्धि deck's front is wrong on purpose: its back's words instead.
@@ -1344,8 +1381,19 @@ export async function checkCards(
     topic.columns,
   ).map((f) => (deck.wrongFront && f.field === "front" ? { ...f, fix: "" } : f));
   const at = now();
-  const rows = want.map((c, i) => {
-    const mine = flags.filter((f) => f.n === i + 1);
+  // Written onto the cards as they are now: a card whose text changed while
+  // the AI read it is left to be read again; a note or mark the editor set
+  // meanwhile stays.
+  const nowCards = await cardsById(want.map((c) => c.id));
+  const read = want
+    .map((was, i) => ({ c: nowCards.get(was.id), was, n: i + 1 }))
+    .filter(
+      (x): x is { c: FlashCard; was: FlashCard; n: number } =>
+        !!x.c && !x.c.removed && cardSig(x.c) === cardSig(x.was),
+    );
+  if (!read.length) return { checked: 0, flagged: 0, cards: [] };
+  const rows = read.map(({ c, n }) => {
+    const mine = flags.filter((f) => f.n === n);
     const fixes = mine.map((f) => {
       const from = f.field ? fieldText(c, f.field) : "";
       return {
@@ -1389,7 +1437,7 @@ export async function checkCards(
   fail(error);
   await touch(topicId);
   return {
-    checked: want.length,
+    checked: read.length,
     flagged: rows.filter((r) => r.flagged).length,
     cards: ((data ?? []) as Row[]).map(readCard),
   };
@@ -1714,7 +1762,8 @@ export async function bulkCards(
   else if (action === "apply_ai")
     for (const c of chosen) {
       const fixes = c.ai?.fixes ?? [];
-      const usable = fixes.filter((f) => f.to && f.field);
+      // A fix whose text the editor has rewritten since stays unapplied.
+      const usable = fixes.filter((f) => f.to && f.field && fixFits(c, f));
       if (!usable.length) continue;
       const next = { front: c.front, back: c.back, ex: { ...c.ex } };
       let own = c.own;
@@ -1726,7 +1775,7 @@ export async function bulkCards(
           own = own.filter((o) => `ex:${o}` !== f.field);
         }
       }
-      const left = fixes.filter((f) => !(f.to && f.field));
+      const left = fixes.filter((f) => !usable.includes(f));
       const clear = !left.length && aiFlagged(c);
       edits.push({
         id: c.id,
@@ -1802,7 +1851,11 @@ export async function resolveAi(
   for (const c of cards) {
     const mine = want.get(c.id);
     if (!mine || !c.ai || c.removed) continue;
-    const hit = (f: AiFix) => mine.some((p) => p.field === f.field && p.to === f.to);
+    // A fix whose text the editor has rewritten since isn't applied (it
+    // stays listed).
+    const hit = (f: AiFix) =>
+      mine.some((p) => p.field === f.field && p.to === f.to) &&
+      (!apply || !f.to || !f.field || fixFits(c, f));
     const chosen = c.ai.fixes.filter(hit);
     if (!chosen.length) continue;
     const left = c.ai.fixes.filter((f) => !hit(f));
@@ -2156,12 +2209,8 @@ export async function startServerJob(
   jobFail(e0);
   if ((running ?? []).length)
     throw new Error("This topic already has that job on the server: stop it or wait for it");
-  const { data, error } = await from("flash_jobs")
-    .insert({ topic_id: topicId, kind, ids: todo, total: todo.length } as never)
-    .select(JOB_COLS)
-    .single();
-  jobFail(error);
-  // Asked again: the cards marked unread, so the job reads them.
+  // Asked again: the cards marked unread first, so the job (which a tick can
+  // take as soon as it exists) reads them.
   if (kind === "check" && force) {
     const again = cards.filter((c) => todo.includes(c.id) && c.ai && !needsCheck(c, true));
     for (let i = 0; i < again.length; i += 200) {
@@ -2174,6 +2223,14 @@ export async function startServerJob(
       fail(e2);
     }
   }
+  const { data, error } = await from("flash_jobs")
+    .insert({ topic_id: topicId, kind, ids: todo, total: todo.length } as never)
+    .select(JOB_COLS)
+    .single();
+  // Two asked at once (a double click): the database keeps one.
+  if (error && (error as { code?: string }).code === "23505")
+    throw new Error("This topic already has that job on the server: stop it or wait for it");
+  jobFail(error);
   return readJob(data as unknown as Row);
 }
 
@@ -2190,7 +2247,9 @@ export async function listServerJobs(topicId: string): Promise<FlashJob[]> {
 }
 
 export async function stopServerJob(id: string): Promise<FlashJob> {
-  // A batch out for it isn't collected (what it read is dropped).
+  // A batch out for it is cancelled and not collected (what it read is dropped).
+  const out = await pendingBatch<JobBatch>(jobBatchKey(id));
+  if (out) await saathiBatchCancel(out.id);
   await clearPendingBatch(jobBatchKey(id));
   const { data, error } = await from("flash_jobs")
     .update({ status: "stopped", locked_until: null, updated_at: now() } as never)
@@ -2201,6 +2260,23 @@ export async function stopServerJob(id: string): Promise<FlashJob> {
   jobFail(error);
   if (!data) throw new Error("The job had already finished");
   return readJob(data as unknown as Row);
+}
+
+// How long a step holds its job: longer than a step takes, so another tick
+// can't take the job while it runs. Each step's own claim is its mark; a
+// tick whose claim has lapsed and been taken saves nothing.
+const JOB_LOCK_MS = 10 * 60_000;
+
+// Still this step's job: running and its claim not taken by another tick.
+async function stillMine(job: Row): Promise<boolean> {
+  const { data, error } = await from("flash_jobs")
+    .select("id")
+    .eq("id", String(job.id))
+    .eq("status", "running")
+    .eq("locked_until", String(job.locked_until))
+    .maybeSingle();
+  fail(error);
+  return !!data;
 }
 
 // One step of the oldest job waiting: its next few batches, side by side
@@ -2223,7 +2299,7 @@ export async function jobStep(batches = 3): Promise<FlashJob | null> {
   const { data: claimed, error: e2 } = await from("flash_jobs")
     .update({
       status: "running",
-      locked_until: new Date(Date.now() + 120_000).toISOString(),
+      locked_until: new Date(Date.now() + JOB_LOCK_MS).toISOString(),
       updated_at: at,
     } as never)
     .eq("id", String(row.id))
@@ -2235,7 +2311,9 @@ export async function jobStep(batches = 3): Promise<FlashJob | null> {
   const job = claimed as unknown as Row;
   const ids = (Array.isArray(job.ids) ? job.ids : []).map(String);
   const size = job.kind === "fill" ? 10 : 20;
-  if (await batchOn("studio_jobs")) return batchJobStep(job, ids, size);
+  // A batch already out is collected even if batching was turned off since.
+  if ((await batchOn("studio_jobs")) || (await pendingBatch(jobBatchKey(String(job.id)))))
+    return batchJobStep(job, ids, size);
   const parts: string[][] = [];
   for (let i = 0; i < Math.min(ids.length, size * batches); i += size)
     parts.push(ids.slice(i, i + size));
@@ -2295,6 +2373,8 @@ async function settleJob(
     .eq("id", String(job.id))
     // Stopped meanwhile: stays stopped (its progress is kept).
     .eq("status", "running")
+    // Taken by another tick after this step's claim lapsed: that one saves.
+    .eq("locked_until", String(job.locked_until))
     .select(JOB_COLS)
     .maybeSingle();
   fail(e3);
@@ -2330,9 +2410,19 @@ async function batchJobStep(job: Row, ids: string[], size: number): Promise<Flas
   const key = jobBatchKey(String(job.id));
   const pending = await pendingBatch<JobBatch>(key);
   if (pending) {
-    const b = await saathiBatchGet(pending.id);
-    if (b.status !== "ended") return settleJob(job, ids, [], null, BATCH_WAIT_MS);
-    const replies = await saathiBatchResults(pending.id, pending.label);
+    // The batch can't be read (gone, or the key changed): counted as a
+    // failed step, so the job stops after three with the reason instead of
+    // waiting for ever. One the API no longer knows is dropped (its cards
+    // are sent again).
+    let replies: Awaited<ReturnType<typeof saathiBatchResults>>;
+    try {
+      const b = await saathiBatchGet(pending.id);
+      if (b.status !== "ended") return settleJob(job, ids, [], null, BATCH_WAIT_MS);
+      replies = await saathiBatchResults(pending.id, pending.label);
+    } catch (e) {
+      if ((e as { status?: number }).status === 404) await clearPendingBatch(key);
+      return settleJob(job, ids, [], e, BATCH_WAIT_MS);
+    }
     const ok: { ids: string[]; value: number }[] = [];
     let failed: unknown = null;
     for (const part of pending.parts) {
@@ -2375,6 +2465,11 @@ async function batchJobStep(job: Row, ids: string[], size: number): Promise<Flas
   if (items.length) {
     try {
       const id = await saathiBatchCreate(items);
+      // Stopped (or taken over) while the batch was made: cancelled, not kept.
+      if (!(await stillMine(job))) {
+        await saathiBatchCancel(id);
+        return null;
+      }
       await savePendingBatch(key, {
         id,
         at: now(),
@@ -2740,6 +2835,20 @@ async function topicKinds(
 
 // Every topic's spellings and the rules (read afresh: a topic just added
 // brings its own spellings).
+// The house spellings for the AI's fill and check, read at most once a
+// minute: a job step runs many parts, and each reading pages through every
+// card in the studio.
+let houseMemo: { at: number; p: ReturnType<typeof houseNow> } | null = null;
+function houseRecent(): ReturnType<typeof houseNow> {
+  if (houseMemo && Date.now() - houseMemo.at < 60_000) return houseMemo.p;
+  const p = houseNow();
+  houseMemo = { at: Date.now(), p };
+  p.catch(() => {
+    if (houseMemo?.p === p) houseMemo = null;
+  });
+  return p;
+}
+
 async function houseNow() {
   const cards: Pick<FlashCard, "front" | "back" | "ex" | "removed" | "verified">[] = [];
   // A शुद्धि deck's fronts are wrong on purpose: never house spellings.

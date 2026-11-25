@@ -4,7 +4,7 @@
 // has them, else added with a tap; the Dictionary tab loading WordNet; and
 // new cards drafted from WordNet for a list of words.
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Check, ExternalLink, Plus, X } from "lucide-react";
@@ -282,6 +282,16 @@ function Entry({
   );
 }
 
+// WordNet being loaded, kept here: the load goes on with the tab closed,
+// and coming back shows it, with no second load started meanwhile (its
+// first batch would empty the tables).
+let wnLoad: { done: number; total: number } | null = null;
+const wnListeners = new Set<() => void>();
+const setWnLoad = (next: typeof wnLoad) => {
+  wnLoad = next;
+  wnListeners.forEach((l) => l());
+};
+
 // The studio's Dictionary tab: Hindi WordNet loaded from its download
 // (the zip as it comes, or its database/data_txt file), read in the
 // browser and saved in batches; or removed.
@@ -291,8 +301,18 @@ export function WordnetSettings() {
   const clearFn = useServerFn(clearFlashWordnet);
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["flashWordnet"], queryFn: () => statusFn() });
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const progress = useSyncExternalStore(
+    (l) => {
+      wnListeners.add(l);
+      return () => wnListeners.delete(l);
+    },
+    () => wnLoad,
+    () => wnLoad,
+  );
   const load = async (file: File) => {
+    if (wnLoad) return;
+    // Taken before the file is read: no second load starts meanwhile.
+    setWnLoad({ done: 0, total: 0 });
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const data = /\.zip$/i.test(file.name) ? await unzipFile(bytes, "data_txt") : bytes;
@@ -300,10 +320,10 @@ export function WordnetSettings() {
         throw new Error("No database/data_txt in this zip: is it the Hindi WordNet download?");
       const { synsets } = parseWordnet(new TextDecoder().decode(data));
       if (synsets.length < 100) throw new Error("This doesn't look like Hindi WordNet's data_txt.");
-      setProgress({ done: 0, total: synsets.length });
+      setWnLoad({ done: 0, total: synsets.length });
       for (let i = 0; i < synsets.length; i += 1000) {
         await loadFn({ data: { first: i === 0, synsets: synsets.slice(i, i + 1000) } });
-        setProgress({ done: Math.min(synsets.length, i + 1000), total: synsets.length });
+        setWnLoad({ done: Math.min(synsets.length, i + 1000), total: synsets.length });
       }
       toast.success(`Hindi WordNet loaded: ${synsets.length.toLocaleString()} meanings`);
       await qc.invalidateQueries({ queryKey: ["flashWordnet"] });
@@ -311,7 +331,7 @@ export function WordnetSettings() {
     } catch (e) {
       toast.error(errorText(e, "Couldn't load it"));
     } finally {
-      setProgress(null);
+      setWnLoad(null);
     }
   };
   const s = q.data;
@@ -348,11 +368,15 @@ export function WordnetSettings() {
             <div className="h-2 overflow-hidden rounded-full bg-muted">
               <div
                 className="h-full bg-primary transition-all"
-                style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }}
+                style={{
+                  width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%`,
+                }}
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              Saving {progress.done.toLocaleString()} of {progress.total.toLocaleString()}…
+              {progress.total
+                ? `Saving ${progress.done.toLocaleString()} of ${progress.total.toLocaleString()}…`
+                : "Reading the file…"}
             </p>
           </div>
         ) : (

@@ -385,11 +385,16 @@ export function fillMessages(
       content: `You write the explanation columns of Hindi flashcards for FlashGyan, an app for Rajasthan's competitive exams (RPSC, RSSB). Deck type: ${deck.name}; each card asks "${deck.prompt.trim()}".
 Columns:
 ${cols}
-Finished cards in the house style, checked by the editor (copy their form, length, wording and symbols):
-${examples || "(none)"}
 
-${house.length ? `House spellings (the editor's accepted forms of words in these cards; write them this way): ${house.join("; ")}\n\n` : ""}For each card, fill ONLY the columns listed under "fill". Use the book passage given with the card first; mark such a value "from": "book". When the passage doesn't say it, write it from your own knowledge and mark it "from": "own" (the editor checks those). Never change the front or back. Write in Hindi unless the column is English (e.g. Pronunciation, Sentence-Usage). Be exact and short; no value is better than a doubtful one, so leave a column out when unsure.
+For each card, fill ONLY the columns listed under "fill". Use the book passage given with the card first; mark such a value "from": "book". When the passage doesn't say it, write it from your own knowledge and mark it "from": "own" (the editor checks those). Never change the front or back. Write in Hindi unless the column is English (e.g. Pronunciation, Sentence-Usage). Be exact and short; no value is better than a doubtful one, so leave a column out when unsure.
 Reply with JSON only: {"cards": [{"n": 1, "ex": {"<column title>": {"text": "...", "from": "book"}}}]}`,
+    },
+    // What changes from call to call (the examples closest to these cards,
+    // their words' spellings) comes after, so the first message is cached.
+    {
+      role: "system",
+      content: `Finished cards in the house style, checked by the editor (copy their form, length, wording and symbols):
+${examples || "(none)"}${house.length ? `\n\nHouse spellings (the editor's accepted forms of words in these cards; write them this way): ${house.join("; ")}` : ""}`,
     },
     {
       role: "user",
@@ -472,8 +477,20 @@ ${
 } a front that isn't the right word or form for this deck, an explanation that is wrong or doesn't fit the card, the wrong rule or type (e.g. a संधि named wrongly), or a form that breaks the deck's style. Don't report style preferences or spellings both of which are accepted. A card with no problem is left out.
 For each problem give the field ("front", "back", or the explanation's name exactly as written), the kind, a short reason, and "fix": the whole field as it should read, changing only what is wrong and keeping its layout (numbering, commas, line breaks). If you can only point the problem out (you would need the book), leave "fix" empty.
 Kinds: ${ERROR_TYPES.filter((t) => t !== "Check in book" && t !== "Other").join(", ")}, Check in book, Other.
-${house.length ? `House spellings (the editor's accepted forms; never report these as misspelt, and when a card spells one of these words another way, that is a Spelling problem): ${house.join("; ")}\n` : ""}${dict.length ? `Dictionary (Wiktionary; often incomplete, so a word missing from it is not wrong by itself, but a clear clash is worth reporting):\n${dict.join("\n")}\n` : ""}${hints.length ? `Spelling hints from ${deck.language === "en" ? "the British spelling list and Hindi WordNet" : "Hindi WordNet"} for words of the backs and explanations (a word WordNet spells another way, or a word it lacks whose near spelling it has; an inflected form, a name or a second accepted spelling can be fine, so judge each in its sentence):\n${hints.join("\n")}\n` : ""}Reply with JSON only: {"flags": [{"n": 1, "field": "back", "type": "Spelling", "note": "what is wrong, in a few words", "fix": "the field corrected"}]}`,
+The house spellings, dictionary lines and spelling hints given next (when there are any) are about these cards' words.
+Reply with JSON only: {"flags": [{"n": 1, "field": "back", "type": "Spelling", "note": "what is wrong, in a few words", "fix": "the field corrected"}]}`,
     },
+    // What changes from call to call (these cards' words) comes after, so
+    // the first message is cached.
+    ...(house.length || dict.length || hints.length
+      ? [
+          {
+            role: "system" as const,
+            content:
+              `${house.length ? `House spellings (the editor's accepted forms; never report these as misspelt, and when a card spells one of these words another way, that is a Spelling problem): ${house.join("; ")}\n` : ""}${dict.length ? `Dictionary (Wiktionary; often incomplete, so a word missing from it is not wrong by itself, but a clear clash is worth reporting):\n${dict.join("\n")}\n` : ""}${hints.length ? `Spelling hints from ${deck.language === "en" ? "the British spelling list and Hindi WordNet" : "Hindi WordNet"} for words of the backs and explanations (a word WordNet spells another way, or a word it lacks whose near spelling it has; an inflected form, a name or a second accepted spelling can be fine, so judge each in its sentence):\n${hints.join("\n")}\n` : ""}`.trim(),
+          },
+        ]
+      : []),
     {
       role: "user",
       content: items
