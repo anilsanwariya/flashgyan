@@ -158,6 +158,17 @@ so dark mode works.
   and place chips with ×, "Tag a place or district" with search and "Make a new place").
   Keys on a focused fact: V, C, H, E, X, J/K.
 
+- Card studio (admin): a topic's Cards tab opens with progress and one "Next:" step that
+  follows the daily flow (add cards → merge → fill with AI → check with AI → review AI
+  suggestions → proofread → number); the AI steps start server jobs. On a phone the counts
+  fold into one line ("Details") and the book, order and view choices behind one button.
+  Proofreading ("Next not verified") passes cards already verified; the big bottom button
+  verifies and goes on, or on a verified card just goes on (undoing a verification is the
+  small "Mark not verified" by the badge). An AI fix shows both texts with only the changed
+  words marked. On a touch screen a tap edits a field, and a one-time tip explains swiping.
+  Deleting a topic asks for its name to be typed. Opening a topic is a step the browser's
+  Back undoes, and the open tab is kept in the address.
+
 **Admin pages:** dense and practical. Tables, forms and clear status; no decoration.
 
 - Atlas data quality (admin): the Quality tab starts with "Duplicate places" (same name and

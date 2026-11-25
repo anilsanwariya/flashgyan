@@ -38,6 +38,7 @@ import {
   Sparkles,
   Trash2,
   X,
+  SlidersHorizontal,
 } from "lucide-react";
 import {
   addFlashCard,
@@ -64,6 +65,8 @@ import {
   saveFlashCard,
   saveFlashTemplate,
   updateFlashTopic,
+  listFlashServerJobs,
+  startFlashServerJob,
   type ImportResult,
   type TopicSummary,
 } from "@/lib/flash-studio.functions";
@@ -82,6 +85,7 @@ import {
   cardSig,
   doneOf,
   fieldText,
+  needsCheck,
   type AiFix,
   type FlashBook,
   type FlashCard,
@@ -98,6 +102,7 @@ import {
   aiSettled,
   shownNote,
 } from "@/lib/flash-studio";
+import { FixDiff } from "@/components/flash-studio-diff";
 import { zipFiles } from "@/lib/zip";
 import { BooksPanel } from "@/components/flash-studio-books";
 import { ServerJobsBar, StudioJobBar } from "@/components/flash-studio-jobs";
@@ -197,9 +202,15 @@ function useOpenTopic(): [string | null, (id: string | null, show?: string) => v
   const navigate = useNavigate();
   const [id, setId] = useState<string | null>(null);
   useEffect(() => {
-    const q = new URLSearchParams(window.location.search);
-    opening = q.get("show") ?? "";
-    setId(q.get("topic"));
+    const read = () => {
+      const q = new URLSearchParams(window.location.search);
+      opening = q.get("show") ?? "";
+      setId(q.get("topic"));
+    };
+    read();
+    // The browser's Back (a phone's back gesture) from a topic: the list.
+    window.addEventListener("popstate", read);
+    return () => window.removeEventListener("popstate", read);
   }, []);
   // `show`: a filter of the cards list, or "chunks", to open the topic on.
   const choose = (next: string | null, show?: string) => {
@@ -211,7 +222,8 @@ function useOpenTopic(): [string | null, (id: string | null, show?: string) => v
         const { topic: _t, show: _s, ...rest } = s;
         return next ? { ...rest, topic: next, ...(show ? { show } : {}) } : rest;
       },
-      replace: true,
+      // Opening a topic is a step Back can undo.
+      replace: false,
     } as never);
   };
   return [id, choose];
@@ -224,7 +236,7 @@ export function FlashStudio() {
     return (
       <div className="space-y-3">
         <StudioJobBar />
-        <TopicView id={open} onBack={() => setOpen(null)} />
+        <TopicView key={open} id={open} onBack={() => setOpen(null)} />
       </div>
     );
   return (
@@ -266,6 +278,74 @@ export function FlashStudio() {
 let opening = "";
 const openedOn = () => opening;
 
+// A topic deleted for good (cards, sheets, chunks): its name typed first.
+function DeleteTopicDialog({
+  topic,
+  onDelete,
+  onClose,
+}: {
+  topic: TopicSummary;
+  onDelete: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const ok = typed.trim() === topic.name.trim();
+  return (
+    <Dialog open onOpenChange={(o) => !o && !busy && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete “{topic.name}”?</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <p>
+            Its {topic.total} cards ({topic.verified} verified), its sheets and books
+            {topic.chunks.length ? `, and its ${topic.chunks.length} numbered chunks` : ""} are
+            deleted for good. This can&apos;t be undone.
+          </p>
+          {topic.chunks.length > 0 && (
+            <p className="text-amber-700 dark:text-amber-400">
+              Its cards are numbered for the app: their numbers can&apos;t be made again.
+            </p>
+          )}
+          <label className="block space-y-1">
+            <span>Type the topic&apos;s name to confirm</span>
+            <Input
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              placeholder={topic.name}
+              lang="hi"
+              autoComplete="off"
+            />
+          </label>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" disabled={busy} onClick={onClose}>
+              Keep it
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={!ok || busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await onDelete();
+                  onClose();
+                } catch (err) {
+                  toast.error(errorText(err, "Couldn't delete"));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              <Trash2 className="mr-1 h-4 w-4" /> Delete for good
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function TopicList({ onOpen }: { onOpen: (id: string, show?: string) => void }) {
   const listFn = useServerFn(listFlashTopics);
   const typesFn = useServerFn(listFlashTemplates);
@@ -284,6 +364,7 @@ function TopicList({ onOpen }: { onOpen: (id: string, show?: string) => void }) 
   const [busy, setBusy] = useState(false);
   const [fromApp, setFromApp] = useState(false);
   const [order, setOrder] = useState<"todo" | "edited">("todo");
+  const [deleting, setDeleting] = useState<TopicSummary | null>(null);
   const todo = (t: TopicSummary) => t.total - t.verified + t.errors + t.ai + t.lint + t.missing;
   const list = [...(topics.data ?? [])].sort((a, b) =>
     order === "todo" ? todo(b) - todo(a) : b.updated_at.localeCompare(a.updated_at),
@@ -291,6 +372,17 @@ function TopicList({ onOpen }: { onOpen: (id: string, show?: string) => void }) 
   const typeName = (id: string | null) => types.data?.find((t) => t.id === id)?.name ?? "";
   return (
     <div className="space-y-4">
+      {deleting && (
+        <DeleteTopicDialog
+          topic={deleting}
+          onClose={() => setDeleting(null)}
+          onDelete={async () => {
+            await deleteFn({ data: { id: deleting.id } });
+            await qc.invalidateQueries({ queryKey: ["flashTopics"] });
+            toast.success(`“${deleting.name}” deleted`);
+          }}
+        />
+      )}
       <form
         className="flex flex-wrap items-end gap-2 rounded-xl border border-border p-3"
         onSubmit={async (e) => {
@@ -458,15 +550,7 @@ function TopicList({ onOpen }: { onOpen: (id: string, show?: string) => void }) 
                   size="sm"
                   variant="ghost"
                   aria-label={`Delete ${t.name}`}
-                  onClick={async () => {
-                    if (!confirm(`Delete “${t.name}” and its ${t.total} cards?`)) return;
-                    try {
-                      await deleteFn({ data: { id: t.id } });
-                      await qc.invalidateQueries({ queryKey: ["flashTopics"] });
-                    } catch (err) {
-                      toast.error(errorText(err, "Couldn't delete"));
-                    }
-                  }}
+                  onClick={() => setDeleting(t)}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -842,6 +926,7 @@ function ColumnsEditor({
 // ---------- One topic ----------
 
 type TopicTab = "cards" | "sheets" | "chunks" | "words" | "settings";
+const TOPIC_TABS: TopicTab[] = ["cards", "sheets", "chunks", "words", "settings"];
 
 // The topic's proofread sheets, the same Set while they don't change (so
 // lists that depend on it aren't redone on every render).
@@ -861,7 +946,21 @@ function TopicView({ id, onBack }: { id: string; onBack: () => void }) {
     refetchOnMount: true,
   });
   const qc = useQueryClient();
-  const [tab, setTab] = useState<TopicTab>(() => (openedOn() === "chunks" ? "chunks" : "cards"));
+  const [tab, setTabState] = useState<TopicTab>(() =>
+    TOPIC_TABS.includes(openedOn() as TopicTab) ? (openedOn() as TopicTab) : "cards",
+  );
+  // The tab kept in the address, so a reload (often, in Telegram) comes back to it.
+  const setTab = (t: TopicTab) => {
+    setTabState(t);
+    try {
+      const u = new URL(window.location.href);
+      if (t === "cards") u.searchParams.delete("show");
+      else u.searchParams.set("show", t);
+      window.history.replaceState(window.history.state, "", u);
+    } catch {
+      // The tab still changes.
+    }
+  };
   // Cards asked for from another tab (a word's, a chunk's open ones),
   // opened one after another in the Cards tab.
   const [proofIds, setProofIds] = useState<string[] | null>(null);
@@ -1141,7 +1240,9 @@ function CardsTab({
   const [shown, setShown] = useState(60);
   const [editing, setEditing] = useState<FlashCard | null>(null);
   // Proofreading: the cards shown, one after another.
-  const [proof, setProof] = useState<{ ids: string[]; i: number } | null>(null);
+  // The cards gone through one at a time; `todo`: started from "Next not
+  // verified", so → skips cards verified already.
+  const [proof, setProof] = useState<{ ids: string[]; i: number; todo?: boolean } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [bookFile, setBookFile] = useState<File | null>(null);
   const [pasting, setPasting] = useState(false);
@@ -1150,6 +1251,9 @@ function CardsTab({
   const [sort, setSort] = useState<SortKey>("order");
   const [desc, setDesc] = useState(false);
   const [view, setView] = useState<"list" | "table">("list");
+  // On a phone the book, order and view choices fold away behind one button.
+  const [viewOpts, setViewOpts] = useState(false);
+  const viewChanged = !!book || sort !== "order" || desc || view !== "list";
   const [merging, setMerging] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [finding, setFinding] = useState(false);
@@ -1280,10 +1384,10 @@ function CardsTab({
       );
     return sortCards(picked, sort, desc);
   }, [inBook, filter, query, topic.columns, sort, desc, lints, inOther, wnGaps, proofread]);
-  const startProof = (from: FlashCard[]) => {
+  const startProof = (from: FlashCard[], todo = false) => {
     if (!from.length) return;
     const first = from.findIndex((c) => !c.verified);
-    setProof({ ids: from.map((c) => c.id), i: Math.max(0, first) });
+    setProof({ ids: from.map((c) => c.id), i: Math.max(0, first), todo });
   };
   useEffect(() => {
     if (!proofIds) return;
@@ -1373,7 +1477,7 @@ function CardsTab({
           variant="outline"
           disabled={!notVerified}
           title="Open the first card shown that isn't verified; swipe or Alt+→ for the next"
-          onClick={() => startProof(list)}
+          onClick={() => startProof(list, true)}
         >
           <BadgeCheck className="mr-1 h-4 w-4" /> Next not verified ({notVerified})
         </Button>
@@ -1437,6 +1541,19 @@ function CardsTab({
           onChanged={onChanged}
           onCards={onCard}
         />
+        <Button
+          size="sm"
+          variant={viewOpts ? "secondary" : "outline"}
+          className="relative md:hidden"
+          aria-expanded={viewOpts}
+          aria-label="Book, order and view"
+          onClick={() => setViewOpts(!viewOpts)}
+        >
+          <SlidersHorizontal className="h-4 w-4" />
+          {viewChanged && (
+            <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-primary" />
+          )}
+        </Button>
         <div className="relative ml-auto min-w-0 flex-1 basis-48 sm:max-w-xs">
           <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
@@ -1448,7 +1565,9 @@ function CardsTab({
           />
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2 text-sm">
+      <div
+        className={`${viewOpts ? "flex" : "hidden"} flex-wrap items-center gap-2 text-sm md:flex`}
+      >
         <select
           aria-label="Book"
           value={book}
@@ -1589,7 +1708,7 @@ function CardsTab({
             <input
               type="checkbox"
               aria-label={`Tick ${c.front.split("\n")[0]}`}
-              className="mt-4 h-4 w-4 shrink-0"
+              className="mt-4 h-5 w-5 shrink-0 sm:h-4 sm:w-4"
               checked={picked.has(c.id)}
               onChange={(e) => pickOne(c.id, e.target.checked)}
             />
@@ -1787,11 +1906,15 @@ function CardsTab({
             next: () =>
               setProof((p) => {
                 if (!p) return p;
-                if (p.i + 1 >= p.ids.length) {
-                  toast.success("End of the list");
+                // Going through what's left to verify: verified cards are passed.
+                let i = p.i + 1;
+                if (p.todo)
+                  while (i < p.ids.length && cards.find((c) => c.id === p.ids[i])?.verified) i++;
+                if (i >= p.ids.length) {
+                  toast.success(p.todo ? "Every card shown is verified" : "End of the list");
                   return null;
                 }
-                return { ...p, i: p.i + 1 };
+                return { ...p, i };
               }),
           }}
           onClose={() => setProof(null)}
@@ -1835,34 +1958,76 @@ function TopicProgress({
     : 0;
   const dups = useMemo(() => groupDuplicates(cards).length, [cards]);
   const fixes = live.reduce((n, c) => n + (c.ai?.fixes.length ?? 0), 0);
+  const withFixes = live.filter((c) => c.ai?.fixes.length).length;
+  const [details, setDetails] = useState(false);
   const pct = live.length ? Math.round((verified / live.length) * 100) : 0;
+  // The AI's steps run on the server (the page can be closed); a step is
+  // suggested only while no job of its kind is open.
+  const listJobs = useServerFn(listFlashServerJobs);
+  const startJob = useServerFn(startFlashServerJob);
+  const qc = useQueryClient();
+  const jobs = useQuery({
+    queryKey: ["flashJobs", topic.id],
+    queryFn: () => listJobs({ data: { topic_id: topic.id } }),
+  });
+  const open = (k: "check" | "fill") =>
+    (jobs.data ?? []).some(
+      (j) => j.kind === k && (j.status === "queued" || j.status === "running"),
+    );
+  const toFill = live.filter((c) => emptyColumns(c, topic.columns).length).map((c) => c.id);
+  const toCheck = live.filter((c) => needsCheck(c)).map((c) => c.id);
+  const runJob = async (kind: "check" | "fill", ids: string[]) => {
+    try {
+      const j = await startJob({ data: { topic_id: topic.id, kind, ids } });
+      await qc.invalidateQueries({ queryKey: ["flashJobs", topic.id] });
+      toast.success(`${j.total} cards queued on the server: it goes on with this page closed`);
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't queue it"));
+    }
+  };
   const next: { text: string; action: string; go: () => void } | null = !live.length
-    ? { text: "Add each book's Excel sheet.", action: "Add a sheet", go: onAdd }
+    ? {
+        text: "Add the cards: an Excel sheet, or a Word file, PDF or text for the AI to read.",
+        action: "Add cards",
+        go: onAdd,
+      }
     : dups
       ? {
           text: `${dups} words are in several books as separate cards.`,
           action: "Merge them",
           go: onMerge,
         }
-      : missing
+      : missing && !open("fill")
         ? {
             text: `${missing} cards have empty explanations.`,
-            action: "Show them",
-            go: () => onFilter("missing"),
+            action: "Fill them with AI",
+            go: () => void runJob("fill", toFill),
           }
-        : verified < live.length
+        : toCheck.length && !open("check") && !open("fill")
           ? {
-              text: `${live.length - verified} cards to proofread.`,
-              action: verified ? "Continue proofreading" : "Start proofreading",
-              go: onProof,
+              text: `${toCheck.length} cards not checked by the AI yet.`,
+              action: "Check them with AI",
+              go: () => void runJob("check", toCheck),
             }
-          : !topic.chunks.length
+          : withFixes
             ? {
-                text: "Every card is verified.",
-                action: "Shuffle and number",
-                go: () => onTab("chunks"),
+                text: `${withFixes} cards have AI suggestions to decide.`,
+                action: "Review them",
+                go: onReview,
               }
-            : null;
+            : verified < live.length
+              ? {
+                  text: `${live.length - verified} cards to proofread.`,
+                  action: verified ? "Continue proofreading" : "Start proofreading",
+                  go: onProof,
+                }
+              : !topic.chunks.length
+                ? {
+                    text: "Every card is verified.",
+                    action: "Shuffle and number",
+                    go: () => onTab("chunks"),
+                  }
+                : null;
   const stat = (label: string, n: number, go: () => void, tone = "") => (
     <button
       type="button"
@@ -1894,7 +2059,26 @@ function TopicProgress({
         </div>
         <span className="text-xs tabular-nums text-muted-foreground">{pct}%</span>
       </div>
-      <div className="-mx-1 flex flex-wrap gap-1">
+      {/* On a phone: one line, the counts behind "Details". */}
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 text-left text-xs text-muted-foreground sm:hidden"
+        aria-expanded={details}
+        onClick={() => setDetails(!details)}
+      >
+        <span className="min-w-0 flex-1 truncate">
+          {[
+            errors ? `${errors} to recheck` : "",
+            fixes ? `${fixes} AI suggestions` : "",
+            missing ? `${missing} empty explanations` : "",
+            dups ? `${dups} to merge` : "",
+          ]
+            .filter(Boolean)
+            .join(" · ") || `${sheets} sheets · ${topic.chunks.length} chunks`}
+        </span>
+        <span className="shrink-0 underline">{details ? "Less" : "Details"}</span>
+      </button>
+      <div className={`-mx-1 flex-wrap gap-1 ${details ? "flex" : "hidden"} sm:flex`}>
         {stat("sheets", sheets, () => onTab("sheets"))}
         {dups > 0 && stat("words to merge", dups, onMerge, "text-amber-700 dark:text-amber-400")}
         {fixes > 0 && stat("AI suggestions", fixes, onReview, "text-amber-700 dark:text-amber-400")}
@@ -2325,6 +2509,22 @@ function CardDialog({
   const [student, setStudent] = useState(false);
   const [dict, setDict] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
+  // On a phone, how to move between cards is shown once.
+  const [swipeTip, setSwipeTip] = useState(() => {
+    try {
+      return !localStorage.getItem(SWIPE_TIP_KEY);
+    } catch {
+      return false;
+    }
+  });
+  const swipeTipSeen = () => {
+    setSwipeTip(false);
+    try {
+      localStorage.setItem(SWIPE_TIP_KEY, "1");
+    } catch {
+      // Shown again next time.
+    }
+  };
   // The card changed outside (saved, or the AI check ran in the
   // background): edits not saved yet stay, the check's findings come in.
   const shown = useRef(card);
@@ -2460,6 +2660,7 @@ function CardDialog({
       const dx = e.changedTouches[0].clientX - t.x;
       const dy = e.changedTouches[0].clientY - t.y;
       if (Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) / 2) return;
+      if (swipeTip) swipeTipSeen();
       if (dx < 0) void go(nav.next);
       else if (nav.index > 0) void go(nav.prev);
     },
@@ -2545,9 +2746,20 @@ function CardDialog({
           )}
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
             {card.verified ? (
-              <Badge tone="good">
-                <BadgeCheck className="h-3 w-3" /> Verified
-              </Badge>
+              <>
+                <Badge tone="good">
+                  <BadgeCheck className="h-3 w-3" /> Verified
+                </Badge>
+                {/* Undone only here, away from the big button a thumb taps. */}
+                <button
+                  type="button"
+                  className="rounded px-1.5 py-1 underline underline-offset-2 hover:text-foreground disabled:opacity-50"
+                  disabled={busy}
+                  onClick={() => void save({ ...textPatch, verified: false })}
+                >
+                  Mark not verified
+                </button>
+              </>
             ) : (
               <Badge>Not verified</Badge>
             )}
@@ -2783,6 +2995,17 @@ function CardDialog({
             </Button>
           )}
         </div>
+        {nav && swipeTip && (
+          <div className="flex items-center gap-2 border-t border-border bg-primary/5 px-3 py-2 text-xs md:hidden">
+            <span className="flex-1">
+              Swipe the card left for the next one, right for the one before. Tap a field to edit
+              it.
+            </span>
+            <Button size="sm" variant="outline" className="h-8" onClick={swipeTipSeen}>
+              Got it
+            </Button>
+          </div>
+        )}
         <div className="flex items-center gap-2 border-t border-border bg-background px-3 py-2.5 sm:px-5">
           {nav && (
             <Button
@@ -2804,27 +3027,36 @@ function CardDialog({
           >
             Save
           </Button>
-          <Button
-            disabled={busy}
-            variant={c.verified ? "outline" : "default"}
-            title={c.verified ? undefined : "Ctrl+Enter"}
-            className={`min-w-0 ${c.verified ? "" : "flex-1 bg-emerald-600 hover:bg-emerald-700 sm:flex-none"}`}
-            onClick={() =>
-              c.verified ? void save({ ...textPatch, verified: false }) : void saveAndVerify()
-            }
-          >
-            <BadgeCheck className="mr-1 h-4 w-4 shrink-0" />
-            {c.verified ? (
-              "Not verified"
-            ) : nav ? (
-              <>
-                <span className="sm:hidden">Verify, next</span>
-                <span className="hidden sm:inline">Save, verify and next</span>
-              </>
-            ) : (
-              "Save and verify"
-            )}
-          </Button>
+          {c.verified ? (
+            // Verified already: the big button goes on (saving any edit).
+            nav && (
+              <Button
+                disabled={busy}
+                className="min-w-0 flex-1 sm:flex-none"
+                onClick={() => void go(nav.next)}
+              >
+                {changed ? "Save, next" : "Next"}
+                <ArrowRight className="ml-1 h-4 w-4 shrink-0" />
+              </Button>
+            )
+          ) : (
+            <Button
+              disabled={busy}
+              title="Ctrl+Enter"
+              className="min-w-0 flex-1 bg-emerald-600 hover:bg-emerald-700 sm:flex-none"
+              onClick={() => void saveAndVerify()}
+            >
+              <BadgeCheck className="mr-1 h-4 w-4 shrink-0" />
+              {nav ? (
+                <>
+                  <span className="sm:hidden">Verify, next</span>
+                  <span className="hidden sm:inline">Save, verify and next</span>
+                </>
+              ) : (
+                "Save and verify"
+              )}
+            </Button>
+          )}
           <span className="ml-auto hidden text-xs text-muted-foreground md:inline">
             {changed ? (
               <span className="text-amber-700 dark:text-amber-400">● Unsaved</span>
@@ -2976,7 +3208,7 @@ function AiSuggestions({
             <Button
               size="sm"
               variant="outline"
-              className="h-7"
+              className="h-9 sm:h-7"
               data-key="apply-ai"
               title="Apply all (Alt+A)"
               onClick={() => {
@@ -2998,7 +3230,7 @@ function AiSuggestions({
           <Button
             size="sm"
             variant="ghost"
-            className="h-7"
+            className="h-9 sm:h-7"
             onClick={() => onChange(settle(c, [], [], fixes))}
           >
             Dismiss all
@@ -3006,7 +3238,7 @@ function AiSuggestions({
           <Button
             size="sm"
             variant="ghost"
-            className="h-7"
+            className="h-9 sm:h-7"
             disabled={checking}
             title="Read the card again (Alt+C); new suggestions replace these"
             onClick={onAgain}
@@ -3027,16 +3259,7 @@ function AiSuggestions({
                   {f.note}
                 </span>
               </div>
-              {canApply(f) && (
-                <div className="grid gap-1 text-sm sm:grid-cols-2" lang="hi">
-                  <div className="whitespace-pre-wrap rounded bg-red-500/10 px-2 py-1 text-red-800 line-through decoration-red-400/60 dark:text-red-300">
-                    {f.from || "—"}
-                  </div>
-                  <div className="whitespace-pre-wrap rounded bg-emerald-500/10 px-2 py-1 text-emerald-800 dark:text-emerald-300">
-                    {f.to}
-                  </div>
-                </div>
-              )}
+              {canApply(f) && <FixDiff from={f.from} to={f.to} />}
               {stale && (
                 <p className="text-xs text-amber-700 dark:text-amber-400">
                   The field has changed since the check; applying replaces it.
@@ -3044,11 +3267,11 @@ function AiSuggestions({
               )}
               <div className="flex gap-1">
                 {canApply(f) && (
-                  <Button size="sm" className="h-7" onClick={() => apply(i)}>
+                  <Button size="sm" className="h-9 sm:h-7" onClick={() => apply(i)}>
                     Apply
                   </Button>
                 )}
-                <Button size="sm" variant="ghost" className="h-7" onClick={() => dismiss(i)}>
+                <Button size="sm" variant="ghost" className="h-9 sm:h-7" onClick={() => dismiss(i)}>
                   {canApply(f) ? "Dismiss" : "Done"}
                 </Button>
               </div>
@@ -3062,6 +3285,8 @@ function AiSuggestions({
 
 // A card's text to read, with copy and edit (pencil, or a double click):
 // editing makes it a text box with the cursor at the end.
+const SWIPE_TIP_KEY = "flash_studio_swipe_tip";
+
 function EditField({
   label,
   value,
@@ -3084,7 +3309,7 @@ function EditField({
           <Button
             size="icon"
             variant="ghost"
-            className="h-7 w-7"
+            className="h-9 w-9 sm:h-7 sm:w-7"
             aria-label={`Copy ${label}`}
             title="Copy"
             disabled={!value}
@@ -3102,7 +3327,7 @@ function EditField({
           <Button
             size="icon"
             variant={editing ? "secondary" : "ghost"}
-            className="h-7 w-7"
+            className="h-9 w-9 sm:h-7 sm:w-7"
             aria-label={editing ? `Done editing ${label}` : `Edit ${label}`}
             title={editing ? "Done" : "Edit"}
             // Keeps the box from losing focus (and closing) before the click.
@@ -3131,6 +3356,10 @@ function EditField({
           data-value
           title="Double-click to edit"
           onDoubleClick={() => setEditing(true)}
+          // On a touch screen one tap edits (there's no double-click).
+          onClick={() => {
+            if (window.matchMedia?.("(pointer: coarse)").matches) setEditing(true);
+          }}
           className={`min-h-[2.5rem] whitespace-pre-wrap rounded-md bg-muted/40 px-3 py-2 ${big ? "text-base font-medium" : ""}`}
         >
           {value || <span className="text-muted-foreground">{placeholder ?? "—"}</span>}

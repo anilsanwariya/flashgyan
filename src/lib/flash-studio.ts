@@ -283,6 +283,41 @@ export function mergeFilled(
   return any ? { ex, own: [...own] } : null;
 }
 
+// The words an AI fix changes: both texts as runs of words and separators,
+// each marked same or changed (the longest common run kept), so a one-matra
+// fix in a long explanation stands out. Very long texts: all marked changed.
+export type DiffPart = { text: string; changed: boolean };
+export function diffWords(from: string, to: string): { from: DiffPart[]; to: DiffPart[] } {
+  const split = (s: string) => s.split(/(\s+|[,;:()।॥/|.?!"'“”‘’\-–—]+)/).filter(Boolean);
+  const a = split(from);
+  const b = split(to);
+  if (a.length * b.length > 250_000)
+    return { from: [{ text: from, changed: true }], to: [{ text: to, changed: true }] };
+  // Longest common subsequence of the runs, from the end.
+  const L = Array.from({ length: a.length + 1 }, () => new Uint16Array(b.length + 1));
+  for (let i = a.length - 1; i >= 0; i--)
+    for (let j = b.length - 1; j >= 0; j--)
+      L[i][j] = a[i] === b[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const outA: DiffPart[] = [];
+  const outB: DiffPart[] = [];
+  const push = (out: DiffPart[], text: string, changed: boolean) => {
+    const last = out[out.length - 1];
+    if (last && last.changed === changed) last.text += text;
+    else out.push({ text, changed });
+  };
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) {
+      push(outA, a[i++], false);
+      push(outB, b[j++], false);
+    } else if (j < b.length && (i >= a.length || L[i][j + 1] >= L[i + 1][j]))
+      push(outB, b[j++], true);
+    else push(outA, a[i++], true);
+  }
+  return { from: outA, to: outB };
+}
+
 export const BOOK_COLORS = [
   "#D9D2E9",
   "#D9EAD3",
