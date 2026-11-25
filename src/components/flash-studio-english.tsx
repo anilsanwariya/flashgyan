@@ -3,7 +3,7 @@
 // (SCOWL's en_GB Hunspell dictionary, fetched or its two files picked,
 // every form of every word worked out here and saved).
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useSyncExternalStore } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -24,6 +24,16 @@ const POS = ["noun", "verb", "adj", "adv"];
 
 type Progress = { what: string; done: number; total: number };
 
+// A list being loaded, kept here: the load goes on with the tab closed,
+// and coming back shows it, with no second load started meanwhile (its
+// first batch would empty the tables).
+let loading: Progress | null = null;
+const listeners = new Set<() => void>();
+const setProgress = (next: Progress | null) => {
+  loading = next;
+  listeners.forEach((l) => l());
+};
+
 export function EnglishSettings() {
   const statusFn = useServerFn(flashEnglishStatus);
   const wnFn = useServerFn(loadFlashEnWordnet);
@@ -31,12 +41,22 @@ export function EnglishSettings() {
   const clearFn = useServerFn(clearFlashEnglish);
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["flashEnglish"], queryFn: () => statusFn() });
-  const [progress, setProgress] = useState<Progress | null>(null);
+  const progress = useSyncExternalStore(
+    (l) => {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+    () => loading,
+    () => loading,
+  );
   const done = async () => {
     await qc.invalidateQueries({ queryKey: ["flashEnglish"] });
     await qc.invalidateQueries({ queryKey: ["flashTopicWords"] });
   };
   const loadWordnet = async (file: File) => {
+    if (loading) return;
+    // Taken before the file is read: no second load starts meanwhile.
+    setProgress({ what: "English WordNet", done: 0, total: 0 });
     try {
       const zip = new Uint8Array(await file.arrayBuffer());
       const read = async (name: string) => {
@@ -81,6 +101,8 @@ export function EnglishSettings() {
     }
   };
   const loadSpellings = async (files?: FileList | null) => {
+    if (loading) return;
+    setProgress({ what: "British spelling list", done: 0, total: 0 });
     try {
       let aff = "";
       let dic = "";
@@ -146,12 +168,15 @@ export function EnglishSettings() {
           <div className="h-2 overflow-hidden rounded-full bg-muted">
             <div
               className="h-full bg-primary transition-all"
-              style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }}
+              style={{
+                width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%`,
+              }}
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            {progress.what}: saving {progress.done.toLocaleString()} of{" "}
-            {progress.total.toLocaleString()}…
+            {progress.total
+              ? `${progress.what}: saving ${progress.done.toLocaleString()} of ${progress.total.toLocaleString()}…`
+              : `${progress.what}: reading…`}
           </p>
         </div>
       ) : (

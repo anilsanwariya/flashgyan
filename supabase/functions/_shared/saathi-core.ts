@@ -537,6 +537,19 @@ export async function saathiBatchGet(id: string): Promise<SaathiBatch> {
   return { id: b.id, status: b.processing_status, counts: b.request_counts };
 }
 
+// A batch no longer wanted: cancelled (requests not yet run aren't billed).
+// Failing quietly: it is only a saving.
+export async function saathiBatchCancel(id: string): Promise<void> {
+  try {
+    await fetch(`${BATCH_URL}/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+      headers: anthropicHeaders(),
+    });
+  } catch {
+    // The batch runs on; its replies are never read.
+  }
+}
+
 // An ended batch's replies by id: the text, or why there is none. Each
 // reply's tokens are added to the day's usage at the batch price.
 export async function saathiBatchResults(

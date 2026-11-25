@@ -254,6 +254,35 @@ export const doneOf = (fixes: AiFix[], applied: boolean): AiDone[] => {
 export const fieldText = (c: Pick<FlashCard, "front" | "back" | "ex">, field: string) =>
   field === "front" ? c.front : field === "back" ? c.back : (c.ex[field.slice(3)] ?? "");
 
+// An AI fix still fits the card: its field holds the text the AI read
+// (the editor hasn't rewritten it since).
+export const fixFits = (
+  c: Pick<FlashCard, "front" | "back" | "ex">,
+  f: { field: string; from: string },
+) => fieldText(c, f.field).trim() === (f.from ?? "").trim();
+
+// The AI's filled columns put on the card as it is now: a column the editor
+// changed while the AI wrote keeps the editor's text. `was` is the card the
+// AI read, `filled` what it gave, `now` the card read again just before
+// saving. Null: nothing left to write.
+export function mergeFilled(
+  was: { ex: Record<string, string>; own: string[] },
+  filled: { ex: Record<string, string>; own: string[] },
+  now: { ex: Record<string, string>; own: string[] },
+): { ex: Record<string, string>; own: string[] } | null {
+  const ex = { ...now.ex };
+  const own = new Set(now.own);
+  let any = false;
+  for (const [id, text] of Object.entries(filled.ex)) {
+    if ((text ?? "") === (was.ex[id] ?? "")) continue;
+    if ((now.ex[id] ?? "") !== (was.ex[id] ?? "")) continue;
+    ex[id] = text;
+    if (filled.own.includes(id)) own.add(id);
+    any = true;
+  }
+  return any ? { ex, own: [...own] } : null;
+}
+
 export const BOOK_COLORS = [
   "#D9D2E9",
   "#D9EAD3",

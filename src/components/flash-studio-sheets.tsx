@@ -3,7 +3,7 @@
 // explanation, merged, deleted, numbered), to replace with a new version
 // of the sheet (card by card, previewed first) or remove with its cards;
 // and the working sheet: the whole topic to edit in Excel and upload back.
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Download, FileUp, RefreshCw, Trash2 } from "lucide-react";
@@ -237,6 +237,8 @@ function ProofToggle({
   onSave: (on: boolean) => Promise<boolean>;
 }) {
   const [on, setOn] = useState(source.proofread);
+  // Changed elsewhere (the sheet replaced, the list reloaded).
+  useEffect(() => setOn(source.proofread), [source.proofread]);
   return (
     <label
       className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${on ? "border-emerald-400 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "border-border text-muted-foreground"}`}

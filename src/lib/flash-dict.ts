@@ -36,13 +36,15 @@ const DEVA = /[ऀ-ॿ]/;
 
 // The words of a card's front worth looking up: each line's first word
 // group ("असार - " → असार; "राम + अवतार" → राम, अवतार), at most `max`.
+// Longer than 80 characters (a sentence front) isn't a word: the lookup
+// would refuse it.
 export function lookupWords(front: string, max = 4): string[] {
   const out: string[] = [];
   for (const line of front.normalize("NFC").split("\n")) {
     const head = line.split(/\s[-–—:=]\s|\s[-–—]$|[-–—]\s*$|\(/)[0];
     for (const part of head.split(/[+,/;।]/)) {
       const w = part.replace(/[^ऀ-ॿ\s]/g, "").trim();
-      if (w && DEVA.test(w) && !out.includes(w)) out.push(w);
+      if (w && w.length <= 80 && DEVA.test(w) && !out.includes(w)) out.push(w);
     }
   }
   return out.slice(0, max);
