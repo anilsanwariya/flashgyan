@@ -3,6 +3,7 @@
 // recently deleted cards, a card's quick checks
 // (problems found without the AI, with their safe fixes) and its history
 // (earlier texts to restore).
+import { FixDiff } from "@/components/flash-studio-diff";
 import { useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
@@ -551,14 +552,7 @@ export function AiReview({
                       </span>
                     </div>
                     {f.to ? (
-                      <div className="grid gap-1 sm:grid-cols-2" lang="hi">
-                        <div className="whitespace-pre-wrap rounded bg-red-500/10 px-2 py-0.5 text-red-800 line-through decoration-red-400/60 dark:text-red-300">
-                          {f.from || "—"}
-                        </div>
-                        <div className="whitespace-pre-wrap rounded bg-emerald-500/10 px-2 py-0.5 text-emerald-800 dark:text-emerald-300">
-                          {f.to}
-                        </div>
-                      </div>
+                      <FixDiff from={f.from} to={f.to} />
                     ) : (
                       <div className="text-xs text-muted-foreground">
                         Only pointed out: no text to apply.

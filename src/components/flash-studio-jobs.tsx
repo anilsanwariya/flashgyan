@@ -125,7 +125,7 @@ export function ServerJobsBar({
           >
             <Pause className="mr-1 h-4 w-4" /> Stop
           </Button>
-          <span className="basis-full text-xs text-muted-foreground">
+          <span className="hidden basis-full text-xs text-muted-foreground sm:block">
             Goes on with this page closed. At half price (Admin → AI usage) it&apos;s sent as
             batches, so the results can take a few hours.
           </span>
