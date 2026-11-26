@@ -160,7 +160,8 @@ so dark mode works.
 
 - Daily magazine, phone edition (the channel's post): story cards on phone-shaped
   pages, one story per page (taller when the story is long), the section and "n / total"
-  small at the top of each card, 12pt type; the A4 issue is linked in the caption.
+  small at the top of each card, 12pt type; a contents page of links after the cover;
+  visuals in one column (flow charts top to bottom); the A4 issue is linked in the caption.
 
 - Card studio (admin): a topic's Cards tab opens with progress and one "Next:" step that
   follows the daily flow (add cards → merge → fill with AI → check with AI → review AI
