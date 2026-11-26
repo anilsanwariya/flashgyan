@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { CA_PRACTICE_SUBJECT } from "@/lib/ca-reader";
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
@@ -48,6 +49,8 @@ export const listMcqPracticeTests = createServerFn({ method: "GET" }).handler(as
   const { data: tests, error } = await supabase
     .from("mcq_practice_tests")
     .select("id, name, description, subject, topic, order_index")
+    // The daily current affairs tests are reached from the web reader.
+    .neq("subject", CA_PRACTICE_SUBJECT)
     .order("order_index", { ascending: true })
     .order("created_at", { ascending: true });
   if (error) throw new Error(error.message);

@@ -77,6 +77,7 @@ import { CollectionBox, WatchSitesSettings } from "@/components/ca-collect-panel
 import { StoryList } from "@/components/ca-story-review";
 import { SkippedNews } from "@/components/ca-skipped-news";
 import { DayChecklist } from "@/components/ca-day-checklist";
+import { getCaReaderDayStatus, setCaReaderDayHidden } from "@/lib/ca-reader.functions";
 import { OfficialDayDialog } from "@/components/ca-official-panel";
 import { FactCheckDialog } from "@/components/ca-fact-check";
 import { StyleCheckDialog } from "@/components/ca-style-check";
@@ -173,6 +174,58 @@ const STATUS_TEXT: Record<
   failed: { label: "Posting failed", tone: "bad" },
   cancelled: { label: "Cancelled", tone: "warn" },
 };
+
+// A posted day on the website's current affairs reader (with its MCQ
+// practice), or taken off it.
+function WebsiteSwitch({ date }: { date: string }) {
+  const statusFn = useServerFn(getCaReaderDayStatus);
+  const setFn = useServerFn(setCaReaderDayHidden);
+  const q = useQuery({
+    queryKey: ["caReaderStatus", date],
+    queryFn: () => statusFn({ data: { date } }),
+  });
+  const [busy, setBusy] = useState(false);
+  const on = q.data?.onWebsite ?? true;
+  return (
+    <label className="inline-flex items-center gap-2 text-sm" data-website-switch>
+      <Switch
+        checked={on}
+        disabled={busy || q.isLoading}
+        aria-label="Show this day on the website"
+        onCheckedChange={async (v) => {
+          if (
+            !v &&
+            !confirm(
+              "Take this day off the website's current affairs reader? Its practice tests are removed too.",
+            )
+          )
+            return;
+          setBusy(true);
+          try {
+            await setFn({ data: { date, hidden: !v } });
+            await q.refetch();
+            toast.success(v ? "Shown on the website" : "Taken off the website");
+          } catch (e) {
+            toast.error(errorText(e, "Couldn't change it"));
+          } finally {
+            setBusy(false);
+          }
+        }}
+      />
+      <span>
+        On the website{" "}
+        <a
+          href={`/current-affairs/${date}`}
+          target="_blank"
+          rel="noreferrer"
+          className="text-primary hover:underline"
+        >
+          (open)
+        </a>
+      </span>
+    </label>
+  );
+}
 
 function IssueBar({
   kind,
@@ -275,6 +328,7 @@ function IssueBar({
             No channel set
           </a>
         )}
+        {kind === "daily" && issue?.status === "posted" && <WebsiteSwitch date={period} />}
         {issue?.pdf_url && (
           <span className="ml-auto flex flex-wrap gap-3">
             {/* The English issue, and the Hindi issue (none on older bilingual issues). */}
@@ -303,7 +357,7 @@ function IssueBar({
                 ["Hindi A4", issue.caption_hi],
               ] as const
             ).map(([label, cap]) => {
-              const href = /href="([^"]+)"/.exec(cap ?? "")?.[1]?.replace(/&amp;/g, "&");
+              const href = /🖨️ <a href="([^"]+)"/.exec(cap ?? "")?.[1]?.replace(/&amp;/g, "&");
               return href ? (
                 <a
                   key={label}
@@ -1637,6 +1691,7 @@ const SETTINGS_FIELDS: Record<SettingsTab, string[]> = {
     "join_text",
     "post_time",
     "daily_edition",
+    "reader_app_link",
     "test_chat_id",
     "channel_quiz",
     "channel_quiz_count",
@@ -1758,6 +1813,7 @@ function SettingsPanel() {
           accent: text("accent"),
           daily_cover: (text("daily_cover") || "classic") as DailyLayout,
           daily_edition: text("daily_edition") === "a4" ? "a4" : "cards",
+          reader_app_link: text("reader_app_link").trim(),
           daily_back_cover: text("daily_back_cover"),
           print_binding: (text("print_binding") || "booklet") as Binding,
           test_chat_id: text("test_chat_id"),
@@ -1903,6 +1959,12 @@ function SettingsPanel() {
                   The A4 issue is linked in the caption for those who print.
                 </span>
               </label>
+              {field(
+                "reader_app_link",
+                "Telegram mini app link",
+                "https://t.me/YourBot/app",
+                "The caption's “Read in the app” link opens the day in the website's current affairs reader inside this mini app (its direct link from BotFather). Empty: the link opens the website.",
+              )}
               <label className="flex items-start gap-3">
                 <Switch
                   checked={Boolean(form.channel_quiz)}

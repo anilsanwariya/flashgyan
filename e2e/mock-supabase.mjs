@@ -57,6 +57,7 @@ const tables = {
       hide_mcq: false,
       hide_saathi: false,
       hide_atlas: false,
+      hide_current_affairs: false,
     },
   ],
   home_banners: [],

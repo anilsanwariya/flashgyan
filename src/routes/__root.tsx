@@ -16,6 +16,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/hooks/use-auth";
 import { isTelegramMiniApp, getTelegramWebApp } from "@/lib/telegram-env";
+import { readerStart } from "@/lib/ca-reader";
 import { analyticsHeadScripts } from "@/lib/analytics";
 import { detectInstalledApp } from "@/lib/app-promo";
 import { captureInstallPrompt, registerServiceWorker } from "@/lib/pwa";
@@ -23,6 +24,29 @@ import { PwaLayer } from "@/components/pwa-layer";
 
 // Chrome's install prompt can fire before React mounts.
 captureInstallPrompt();
+
+// A channel link opened the mini app on a day of the current affairs reader
+// ("startapp=ca_2026-11-25", or "_3" for its third story): go there once.
+function TelegramStartLink() {
+  const router = useRouter();
+  useEffect(() => {
+    if (!isTelegramMiniApp()) return;
+    const start = readerStart(getTelegramWebApp()?.initDataUnsafe?.start_param);
+    if (!start) return;
+    try {
+      if (sessionStorage.getItem("tg_start_done") === "1") return;
+      sessionStorage.setItem("tg_start_done", "1");
+    } catch {
+      // Followed every time the app opens, which is the same link anyway.
+    }
+    void router.navigate({
+      to: "/current-affairs/$date",
+      params: { date: start.date },
+      hash: start.story ? `story-${start.story}` : undefined,
+    });
+  }, [router]);
+  return null;
+}
 
 // Telegram Expander: Forces the mini-app to take up the full screen height
 function TelegramExpander() {
@@ -264,6 +288,7 @@ function RootComponent() {
       <Toaster richColors position="top-center" />
       <AuthProvider>
         <TelegramExpander />
+        <TelegramStartLink />
         <Outlet />
         <PwaLayer />
       </AuthProvider>

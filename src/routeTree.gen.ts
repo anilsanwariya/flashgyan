@@ -30,6 +30,8 @@ import { Route as AtlasDrillsRouteImport } from './routes/atlas.drills'
 import { Route as AtlasQuizRouteImport } from './routes/atlas.quiz'
 import { Route as AtlasSavedRouteImport } from './routes/atlas.saved'
 import { Route as AtlasThenNowRouteImport } from './routes/atlas.then-now'
+import { Route as CurrentAffairsIndexRouteImport } from './routes/current-affairs.index'
+import { Route as CurrentAffairsDateRouteImport } from './routes/current-affairs.$date'
 import { Route as DecksDeckIdRouteImport } from './routes/decks.$deckId'
 import { Route as McqResultTestIdRouteImport } from './routes/mcq-result.$testId'
 import { Route as McqTestIdRouteImport } from './routes/mcq.$testId'
@@ -147,6 +149,16 @@ const AtlasThenNowRoute = AtlasThenNowRouteImport.update({
   path: '/atlas/then-now',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CurrentAffairsIndexRoute = CurrentAffairsIndexRouteImport.update({
+  id: '/current-affairs/',
+  path: '/current-affairs/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CurrentAffairsDateRoute = CurrentAffairsDateRouteImport.update({
+  id: '/current-affairs/$date',
+  path: '/current-affairs/$date',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DecksDeckIdRoute = DecksDeckIdRouteImport.update({
   id: '/decks/$deckId',
   path: '/decks/$deckId',
@@ -228,12 +240,14 @@ export interface FileRoutesByFullPath {
   '/atlas/quiz': typeof AtlasQuizRoute
   '/atlas/saved': typeof AtlasSavedRoute
   '/atlas/then-now': typeof AtlasThenNowRoute
+  '/current-affairs/$date': typeof CurrentAffairsDateRoute
   '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
   '/atlas/': typeof AtlasIndexRoute
+  '/current-affairs/': typeof CurrentAffairsIndexRoute
   '/api/atlas/preview': typeof ApiAtlasPreviewRoute
   '/api/ca/tick': typeof ApiCaTickRoute
   '/api/saathi/ask': typeof ApiSaathiAskRoute
@@ -262,12 +276,14 @@ export interface FileRoutesByTo {
   '/atlas/quiz': typeof AtlasQuizRoute
   '/atlas/saved': typeof AtlasSavedRoute
   '/atlas/then-now': typeof AtlasThenNowRoute
+  '/current-affairs/$date': typeof CurrentAffairsDateRoute
   '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
   '/atlas': typeof AtlasIndexRoute
+  '/current-affairs': typeof CurrentAffairsIndexRoute
   '/api/atlas/preview': typeof ApiAtlasPreviewRoute
   '/api/ca/tick': typeof ApiCaTickRoute
   '/api/saathi/ask': typeof ApiSaathiAskRoute
@@ -298,12 +314,14 @@ export interface FileRoutesById {
   '/atlas/quiz': typeof AtlasQuizRoute
   '/atlas/saved': typeof AtlasSavedRoute
   '/atlas/then-now': typeof AtlasThenNowRoute
+  '/current-affairs/$date': typeof CurrentAffairsDateRoute
   '/decks/$deckId': typeof DecksDeckIdRoute
   '/mcq-result/$testId': typeof McqResultTestIdRoute
   '/mcq/$testId': typeof McqTestIdRoute
   '/practice-mcq/$testId': typeof PracticeMcqTestIdRoute
   '/practice/$deckId': typeof PracticeDeckIdRoute
   '/atlas/': typeof AtlasIndexRoute
+  '/current-affairs/': typeof CurrentAffairsIndexRoute
   '/api/atlas/preview': typeof ApiAtlasPreviewRoute
   '/api/ca/tick': typeof ApiCaTickRoute
   '/api/saathi/ask': typeof ApiSaathiAskRoute
@@ -334,12 +352,14 @@ export interface FileRouteTypes {
     | '/atlas/quiz'
     | '/atlas/saved'
     | '/atlas/then-now'
+    | '/current-affairs/$date'
     | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
     | '/practice/$deckId'
     | '/atlas/'
+    | '/current-affairs/'
     | '/api/atlas/preview'
     | '/api/ca/tick'
     | '/api/saathi/ask'
@@ -368,12 +388,14 @@ export interface FileRouteTypes {
     | '/atlas/quiz'
     | '/atlas/saved'
     | '/atlas/then-now'
+    | '/current-affairs/$date'
     | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
     | '/practice/$deckId'
     | '/atlas'
+    | '/current-affairs'
     | '/api/atlas/preview'
     | '/api/ca/tick'
     | '/api/saathi/ask'
@@ -403,12 +425,14 @@ export interface FileRouteTypes {
     | '/atlas/quiz'
     | '/atlas/saved'
     | '/atlas/then-now'
+    | '/current-affairs/$date'
     | '/decks/$deckId'
     | '/mcq-result/$testId'
     | '/mcq/$testId'
     | '/practice-mcq/$testId'
     | '/practice/$deckId'
     | '/atlas/'
+    | '/current-affairs/'
     | '/api/atlas/preview'
     | '/api/ca/tick'
     | '/api/saathi/ask'
@@ -438,12 +462,14 @@ export interface RootRouteChildren {
   AtlasQuizRoute: typeof AtlasQuizRoute
   AtlasSavedRoute: typeof AtlasSavedRoute
   AtlasThenNowRoute: typeof AtlasThenNowRoute
+  CurrentAffairsDateRoute: typeof CurrentAffairsDateRoute
   DecksDeckIdRoute: typeof DecksDeckIdRoute
   McqResultTestIdRoute: typeof McqResultTestIdRoute
   McqTestIdRoute: typeof McqTestIdRoute
   PracticeMcqTestIdRoute: typeof PracticeMcqTestIdRoute
   PracticeDeckIdRoute: typeof PracticeDeckIdRoute
   AtlasIndexRoute: typeof AtlasIndexRoute
+  CurrentAffairsIndexRoute: typeof CurrentAffairsIndexRoute
   ApiAtlasPreviewRoute: typeof ApiAtlasPreviewRoute
   ApiCaTickRoute: typeof ApiCaTickRoute
   ApiSaathiAskRoute: typeof ApiSaathiAskRoute
@@ -602,6 +628,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtlasThenNowRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/current-affairs/': {
+      id: '/current-affairs/'
+      path: '/current-affairs'
+      fullPath: '/current-affairs/'
+      preLoaderRoute: typeof CurrentAffairsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/current-affairs/$date': {
+      id: '/current-affairs/$date'
+      path: '/current-affairs/$date'
+      fullPath: '/current-affairs/$date'
+      preLoaderRoute: typeof CurrentAffairsDateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/decks/$deckId': {
       id: '/decks/$deckId'
       path: '/decks/$deckId'
@@ -720,12 +760,14 @@ const rootRouteChildren: RootRouteChildren = {
   AtlasQuizRoute: AtlasQuizRoute,
   AtlasSavedRoute: AtlasSavedRoute,
   AtlasThenNowRoute: AtlasThenNowRoute,
+  CurrentAffairsDateRoute: CurrentAffairsDateRoute,
   DecksDeckIdRoute: DecksDeckIdRoute,
   McqResultTestIdRoute: McqResultTestIdRoute,
   McqTestIdRoute: McqTestIdRoute,
   PracticeMcqTestIdRoute: PracticeMcqTestIdRoute,
   PracticeDeckIdRoute: PracticeDeckIdRoute,
   AtlasIndexRoute: AtlasIndexRoute,
+  CurrentAffairsIndexRoute: CurrentAffairsIndexRoute,
   ApiAtlasPreviewRoute: ApiAtlasPreviewRoute,
   ApiCaTickRoute: ApiCaTickRoute,
   ApiSaathiAskRoute: ApiSaathiAskRoute,

@@ -47,6 +47,11 @@ turned off in Supabase Auth (see **Open questions**).
   public.
 - Public catalog reads require the parent's `is_public` flag, and study image buckets are
   private with signed URLs (`drizzle/migrations/0001`–`0003`; see AGENTS.md).
+- The current affairs reader reads `ca_issues` and `ca_items` on the server (they stay
+  closed to the anon key) and returns only days whose daily issue is **posted** and not
+  taken off the website: a posted issue is the day's public flag. Its text is escaped by
+  the magazine renderer and shown in a shadow root. Its practice tests are made by the
+  tick only for those days, and removed when a day is taken off.
 
 ### Secrets
 

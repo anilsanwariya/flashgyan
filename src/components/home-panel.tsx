@@ -242,6 +242,7 @@ export function HomePanel() {
             ["MCQ Tests", "hide_mcq"],
             ["SAATHI", "hide_saathi"],
             ["Rajasthan Atlas", "hide_atlas"],
+            ["Current Affairs", "hide_current_affairs"],
           ] as const).map(([label, key]) => (
             <div key={key} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-background p-3">
               <Label htmlFor={key} className="text-sm font-medium">{label}</Label>

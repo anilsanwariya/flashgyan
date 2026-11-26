@@ -32,6 +32,8 @@ export type HomeSettings = {
   hide_saathi: boolean;
   // The Rajasthan atlas card (false where the column isn't there yet).
   hide_atlas: boolean;
+  // The current affairs reader's card (false where the column isn't there yet).
+  hide_current_affairs: boolean;
 };
 
 export type HomeData = {
@@ -89,6 +91,7 @@ const DEFAULT_SETTINGS: HomeSettings = {
   hide_mcq: false,
   hide_saathi: false,
   hide_atlas: false,
+  hide_current_affairs: false,
 };
 
 export const getHomeData = createServerFn({ method: "GET" }).handler(
@@ -97,6 +100,13 @@ export const getHomeData = createServerFn({ method: "GET" }).handler(
     const COLS =
       "cta_label, cta_subtitle, cta_url, cta_caption, lock_flashcards, lock_mcq, lock_mcq_practice, lock_saathi, lock_cta, hide_app_store, hide_google_play, hide_flashcards, hide_mcq_practice, hide_mcq, hide_saathi";
     const readSettings = async () => {
+      const all = await supabase
+        .from("home_settings")
+        .select(`${COLS}, hide_atlas, hide_current_affairs`)
+        .eq("id", 1)
+        .maybeSingle();
+      // Before the current affairs migration: without its column.
+      if (!all.error || !/hide_current_affairs/.test(all.error.message)) return all;
       const r = await supabase.from("home_settings").select(`${COLS}, hide_atlas`).eq("id", 1).maybeSingle();
       // Before the atlas migration: the settings without its column.
       if (r.error && /hide_atlas/.test(r.error.message))
@@ -219,6 +229,7 @@ export const updateHomeSettings = createServerFn({ method: "POST" })
         hide_mcq: z.boolean().optional(),
         hide_saathi: z.boolean().optional(),
         hide_atlas: z.boolean().optional(),
+        hide_current_affairs: z.boolean().optional(),
       })
       .parse(d),
   )
@@ -241,13 +252,26 @@ export const updateHomeSettings = createServerFn({ method: "POST" })
         hide_mcq: data.hide_mcq,
         hide_saathi: data.hide_saathi,
         ...(data.hide_atlas !== undefined ? { hide_atlas: data.hide_atlas } : {}),
+        ...(data.hide_current_affairs !== undefined
+          ? { hide_current_affairs: data.hide_current_affairs }
+          : {}),
         updated_at: new Date().toISOString(),
     };
-    let { error } = await admin.from("home_settings").update(patch).eq("id", 1);
+    let { error } = await admin.from("home_settings").update(patch as never).eq("id", 1);
+    // Before the current affairs migration: saved without its column.
+    if (error && /hide_current_affairs/.test(error.message)) {
+      const { hide_current_affairs: _c, ...rest } = patch as typeof patch & {
+        hide_current_affairs?: boolean;
+      };
+      ({ error } = await admin.from("home_settings").update(rest as never).eq("id", 1));
+    }
     // Before the atlas migration: saved without its column.
     if (error && /hide_atlas/.test(error.message)) {
-      const { hide_atlas: _, ...rest } = patch as typeof patch & { hide_atlas?: boolean };
-      ({ error } = await admin.from("home_settings").update(rest).eq("id", 1));
+      const { hide_atlas: _, hide_current_affairs: _c, ...rest } = patch as typeof patch & {
+        hide_atlas?: boolean;
+        hide_current_affairs?: boolean;
+      };
+      ({ error } = await admin.from("home_settings").update(rest as never).eq("id", 1));
     }
     if (error) throw new Error(error.message);
     return { ok: true };

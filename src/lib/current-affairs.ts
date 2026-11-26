@@ -1322,6 +1322,10 @@ export type MagazineSettings = {
   // What the channel gets each day: story cards for phones (the A4 issue
   // linked in the caption, for printing), or the A4 issue alone.
   daily_edition?: "cards" | "a4";
+  // The Telegram mini app's direct link (https://t.me/<bot>/<app>): the
+  // caption's "read online" link opens the web reader in it ("" = the
+  // website's page).
+  reader_app_link?: string;
   // An ad from the library printed as the daily issue's last page ("": none).
   daily_back_cover: string;
   // How the printed monthly issue is bound: ruled notes pages are added so
@@ -1388,6 +1392,7 @@ export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   style_rules: [],
   daily_cover: "classic",
   daily_edition: "cards",
+  reader_app_link: "",
   daily_back_cover: "",
   print_binding: "booklet",
   ads: [],
@@ -1449,12 +1454,20 @@ export function captionFor(
   lang?: "en" | "hi",
   // The A4 issue, for printing, when the post is the story cards.
   printUrl?: string,
+  // The day in the web reader (and its MCQs), for a daily issue.
+  readerUrl?: string,
 ): string {
   const caption = captionText(kind, period, settings, count, lang);
-  if (!printUrl) return caption;
-  const href = printUrl.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-  const label = lang === "hi" ? "प्रिंट के लिए A4 PDF" : "Printable A4 PDF";
-  return `${caption}\n\n🖨️ <a href="${href}">${label}</a>`;
+  const link = (url: string) => url.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  const lines = [
+    readerUrl
+      ? `📱 <a href="${link(readerUrl)}">${lang === "hi" ? "ऐप में पढ़ें और MCQ हल करें" : "Read in the app and practise the MCQs"}</a>`
+      : "",
+    printUrl
+      ? `🖨️ <a href="${link(printUrl)}">${lang === "hi" ? "प्रिंट के लिए A4 PDF" : "Printable A4 PDF"}</a>`
+      : "",
+  ].filter(Boolean);
+  return lines.length ? `${caption}\n\n${lines.join("\n")}` : caption;
 }
 
 function captionText(
