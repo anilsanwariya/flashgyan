@@ -158,6 +158,10 @@ so dark mode works.
   and place chips with ×, "Tag a place or district" with search and "Make a new place").
   Keys on a focused fact: V, C, H, E, X, J/K.
 
+- Daily magazine, phone edition (the channel's post): story cards on phone-shaped
+  pages, one story per page (taller when the story is long), the section and "n / total"
+  small at the top of each card, 12pt type; the A4 issue is linked in the caption.
+
 - Card studio (admin): a topic's Cards tab opens with progress and one "Next:" step that
   follows the daily flow (add cards → merge → fill with AI → check with AI → review AI
   suggestions → proofread → number); the AI steps start server jobs. On a phone the counts

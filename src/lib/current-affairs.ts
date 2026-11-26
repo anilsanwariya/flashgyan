@@ -1319,6 +1319,9 @@ export type MagazineSettings = {
   exam_weights?: Record<string, number>;
   // The daily issue's cover layout.
   daily_cover: DailyLayout;
+  // What the channel gets each day: story cards for phones (the A4 issue
+  // linked in the caption, for printing), or the A4 issue alone.
+  daily_edition?: "cards" | "a4";
   // An ad from the library printed as the daily issue's last page ("": none).
   daily_back_cover: string;
   // How the printed monthly issue is bound: ruled notes pages are added so
@@ -1384,6 +1387,7 @@ export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   post_corrections: true,
   style_rules: [],
   daily_cover: "classic",
+  daily_edition: "cards",
   daily_back_cover: "",
   print_binding: "booklet",
   ads: [],
@@ -1438,6 +1442,22 @@ export function categoryLabel(id: string): { en: string; hi: string } {
 // The post's caption, in the issue's language (both for an older bilingual
 // issue).
 export function captionFor(
+  kind: "daily" | "monthly",
+  period: string,
+  settings: MagazineSettings,
+  count: number,
+  lang?: "en" | "hi",
+  // The A4 issue, for printing, when the post is the story cards.
+  printUrl?: string,
+): string {
+  const caption = captionText(kind, period, settings, count, lang);
+  if (!printUrl) return caption;
+  const href = printUrl.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  const label = lang === "hi" ? "प्रिंट के लिए A4 PDF" : "Printable A4 PDF";
+  return `${caption}\n\n🖨️ <a href="${href}">${label}</a>`;
+}
+
+function captionText(
   kind: "daily" | "monthly",
   period: string,
   settings: MagazineSettings,

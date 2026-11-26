@@ -258,6 +258,7 @@ export const saveMagazineSettings = createServerFn({ method: "POST" })
         min_rajasthan: z.number().int().min(0).max(20),
         post_corrections: z.boolean(),
         daily_cover: z.enum(DAILY_LAYOUTS.map((l) => l.id) as [DailyLayout, ...DailyLayout[]]),
+        daily_edition: z.enum(["cards", "a4"]).default("cards"),
         daily_back_cover: z.string().max(60),
         print_binding: z.enum(["booklet", "even", "digital"]),
       })

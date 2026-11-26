@@ -338,3 +338,31 @@ out, or silently undo facts and edits.
 **Consequence:** migration `20261228090000_ca_issue_stale_posting.sql` (safe to re-run).
 Until it runs, a stuck issue is recovered by hand with "Post again" or "Cancel" on the
 page.
+
+## ADR-025: The daily issue goes to the channel as story cards for phones, A4 linked for printing (26 November 2026)
+
+**Decision:** Students read the daily issue on their phones. The A4 page shrinks to about
+5pt text on a phone screen, so they had to zoom on every line or print it.
+
+The channel now gets a phone edition made from the same stories and the same HTML:
+- **Page:** a 105 × 187 mm page (a phone screen's shape), one column, 12pt body text and
+  darker greys.
+- **Cards:** each story is a card on a page of its own, as tall as the story needs and never
+  shorter than a screen, so text is never shrunk to fit. Its section (Rajasthan, National…)
+  and its number ("1 / 5") are in small letters at the top of the card.
+- **Links:** the cover's headlines and contents link to the cards, and "↑" on each card
+  links back to the cover.
+- **Caption:** it links the A4 issue ("Printable A4 PDF"), stored beside the cards PDF as
+  `…-A4.pdf`.
+- **Setting:** Magazine settings → Channel has "Daily issue posted as" (story cards, or A4
+  only). Monthly and custom magazines stay A4.
+
+**How:** `renderMagazine({ edition: "phone" })` adds the phone styles and a short script.
+The script sizes each card's page (a CSS named page per story, measured once the fonts
+have loaded); Chrome prints pages of different sizes in one PDF.
+
+**Reason:** a card per story reads like a feed, with no zooming, and printing stays one
+tap away.
+
+**Consequence:** no migration. Approving makes four PDFs instead of two (cards and A4,
+in each language), so it takes about twice as long.

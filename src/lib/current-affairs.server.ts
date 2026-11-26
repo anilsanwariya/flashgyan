@@ -4884,6 +4884,8 @@ export async function issueHtml(
     coverOnly?: boolean;
     // A daily layout being tried in Settings, before it is saved.
     dailyCover?: DailyLayout;
+    // The daily issue as story cards for phones.
+    edition?: "print" | "phone";
   } = {},
 ) {
   const saved = await getMagazineSettings();
@@ -4961,6 +4963,7 @@ export async function issueHtml(
       period: kind === "daily" ? period : range.from,
       lang,
       settings,
+      edition: opts.edition,
       items,
       corrections,
       feature: feature?.included ? feature : null,
@@ -4996,8 +4999,9 @@ export async function renderPdf(
   html: string,
   settings: MagazineSettings,
   lang: Lang = "en",
-  // A part of a long PDF: no page numbers yet (stamped once joined).
-  opts: { numbered?: boolean } = {},
+  // A part of a long PDF: no page numbers yet (stamped once joined). The
+  // phone edition: narrower footer margins.
+  opts: { numbered?: boolean; phone?: boolean } = {},
 ): Promise<{ pdf: Uint8Array; pages: number; ads: number[] }> {
   const account = process.env.CLOUDFLARE_ACCOUNT_ID;
   const token = process.env.CLOUDFLARE_API_TOKEN;
@@ -5021,7 +5025,7 @@ export async function renderPdf(
           preferCSSPageSize: true,
           displayHeaderFooter: true,
           headerTemplate: "<span></span>",
-          footerTemplate: footerTemplate(settings, opts.numbered !== false),
+          footerTemplate: footerTemplate(settings, opts.numbered !== false, opts.phone),
         },
       }),
     });
@@ -5081,9 +5085,14 @@ export async function renderPdf(
 // pages before its back cover so the back cover lands on the outside: the
 // first PDF tells how many pages there are, and when notes pages are needed
 // the issue is made again with them (so the page numbers count them).
-async function issuePdf(kind: "daily" | "monthly", period: string, lang: Lang) {
-  const first = await issueHtml(kind, period, lang);
-  const made = await renderPdf(first.html, first.settings, lang);
+async function issuePdf(
+  kind: "daily" | "monthly",
+  period: string,
+  lang: Lang,
+  edition: "print" | "phone" = "print",
+) {
+  const first = await issueHtml(kind, period, lang, { edition });
+  const made = await renderPdf(first.html, first.settings, lang, { phone: edition === "phone" });
   const binding = first.settings.print_binding ?? "booklet";
   const need = kind === "monthly" && made.pages ? fillerPages(made.pages, binding) : 0;
   if (!need) return { ...first, pdf: made.pdf };
@@ -5100,6 +5109,9 @@ function fileName(kind: "daily" | "monthly", period: string, lang: Lang, version
     ? `daily/${version}/FlashGyan-Current-Affairs-${period}-${name}.pdf`
     : `monthly/${version}/FlashGyan-Current-Affairs-${period.slice(0, 7)}-${name}.pdf`;
 }
+
+// The A4 issue kept beside the story-cards one (linked in its caption).
+const printPathOf = (path: string) => path.replace(/\.pdf$/, "-A4.pdf");
 
 // Old PDFs removed; a failure only leaves a file behind.
 async function removeFiles(paths: string[]) {
@@ -5217,24 +5229,43 @@ export async function buildIssue(
   // approval's files go in a folder of their own, so a post already sending
   // the last ones never gets half of the new pair.
   const version = `v${Date.now()}`;
+  // A daily issue goes out as story cards for phones, its A4 issue linked
+  // in the caption for printing (unless Settings says A4 only).
+  const cards = kind === "daily" && (await getMagazineSettings()).daily_edition !== "a4";
+  const upload = async (path: string, pdf: Uint8Array) => {
+    const { error } = await supabaseAdmin.storage
+      .from(BUCKET)
+      .upload(path, pdf, { contentType: "application/pdf", upsert: true });
+    fail(error);
+    return `${supabaseAdmin.storage.from(BUCKET).getPublicUrl(path).data.publicUrl}?v=${Date.now()}`;
+  };
   const made = [];
   for (const lang of ["en", "hi"] as const) {
     made.push(
       await (async () => {
         const { pdf, settings, count } = await issuePdf(kind, period, lang);
         if (count === 0) throw new Error("There are no items to put in this issue.");
-        const path = fileName(kind, period, lang, version);
-        const { error } = await supabaseAdmin.storage
-          .from(BUCKET)
-          .upload(path, pdf, { contentType: "application/pdf", upsert: true });
-        fail(error);
-        const url = `${supabaseAdmin.storage.from(BUCKET).getPublicUrl(path).data.publicUrl}?v=${Date.now()}`;
+        const a4Path = fileName(kind, period, lang, version);
+        if (!cards) {
+          const url = await upload(a4Path, pdf);
+          return {
+            path: a4Path,
+            url,
+            settings,
+            count,
+            caption: captionFor(kind, period, settings, count, lang),
+          };
+        }
+        const printPath = printPathOf(a4Path);
+        const printUrl = await upload(printPath, pdf);
+        const phone = await issuePdf(kind, period, lang, "phone");
+        const url = await upload(a4Path, phone.pdf);
         return {
-          path,
+          path: a4Path,
           url,
           settings,
           count,
-          caption: captionFor(kind, period, settings, count, lang),
+          caption: captionFor(kind, period, settings, count, lang, printUrl),
         };
       })(),
     );
@@ -5277,11 +5308,11 @@ export async function buildIssue(
       throw new Error("This issue was posted while it was being made.");
     }
     issue = data as unknown as CaIssue;
-    // The last approval's files, no longer used.
+    // The last approval's files (and their A4 copies), no longer used.
     await removeFiles(
-      [current.pdf_path, current.pdf_path_hi].filter(
-        (p): p is string => !!p && p !== en.path && p !== hi.path,
-      ),
+      [current.pdf_path, current.pdf_path_hi]
+        .filter((p): p is string => !!p && p !== en.path && p !== hi.path)
+        .flatMap((p) => [p, printPathOf(p)]),
     );
   } else issue = await upsertIssue(kind, period, patch);
   if (opts.schedule && kind === "daily" && settings.add_to_knowledge_base) {

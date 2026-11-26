@@ -626,6 +626,154 @@ export const MEDIA_IMAGE_CSS = `
 .img-row figcaption { margin-top: 1mm; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; font-size: 8pt; line-height: 1.35; color: #64748b; }
 `;
 
+// ---------- The phone edition ----------
+//
+// The daily issue as story cards for reading on a phone: a 105 × 187 mm
+// page (a phone screen's shape), one column, larger type and darker greys,
+// laid over the print styles. Each story is a card on a page of its own,
+// as tall as the story needs (never less than a screen), with its section
+// and number in small letters at the top. The cover's headlines and
+// contents link to the cards, and each card links back to the cover.
+const PHONE_CSS = (accent: string) => `
+@page { size: 105mm 187mm; margin: 7mm 6mm 9mm; }
+@media screen { body { width: 93mm; } }
+@page { size: 105mm 187mm; margin: 7mm 6mm 9mm; }
+body { font-size: 12pt; line-height: 1.6; }
+[lang="hi"], .hi { line-height: 1.7; }
+.section { margin-bottom: 4mm; }
+.section-title { padding: 2.5mm 3.5mm; border-radius: 2.5mm; margin-bottom: 4mm; flex-wrap: wrap; gap: 1mm 3mm; }
+.section-title h2 { font-size: 15pt; }
+.section-title span { font-size: 11pt; }
+.item { padding: 3mm 3.5mm; border-left-width: 3px; margin-bottom: 4mm; }
+.num { width: 8mm; height: 8mm; font-size: 11pt; }
+.heads h3 { font-size: 15.5pt; line-height: 1.35; }
+.heads h4 { font-size: 12pt; }
+.tags { margin-left: 0; }
+.tag { font-size: 10pt; }
+.tag.src-tag { color: #64748b; }
+.box-title { font-size: 11pt; }
+.bi ul { padding-left: 5mm; }
+.bi li { margin-bottom: 1.2mm; }
+.bi .en, .dyk .en, .answers .en, .rev .en, .corrections .en { color: #334155; }
+/* One column: visuals under the points, lists and maps one per row. */
+.pts-beside { display: block; }
+.pts-visuals { margin-top: 2.5mm; }
+.v-pair { display: block !important; }
+.v-pair > * + * { margin-top: 2.5mm; }
+.ol-list { columns: 1; }
+.ix-cols { column-count: 1; font-size: 11pt; }
+.pmaps { grid-template-columns: 1fr; }
+.img-side.right, .img-side.left { float: none; width: 100% !important; margin: 2mm 0; }
+.img-row { flex-direction: column; }
+/* Small greys readable on a phone in daylight. */
+.dyk .site, .img-credit, .pmap-credit, .rep-meta, .feat-src { color: #64748b; font-size: 9.5pt; }
+figcaption, .img-side figcaption, .img-row figcaption { font-size: 10pt; color: #475569; }
+.rd-line, .rd-n, .rd-tag, .asked, .earlier, .ps-style, .ol-list li, .answers td, .rev td, .card, .nums { font-size: 11pt; }
+/* Long blocks may continue on the next page (a small page would leave big
+   gaps); headings stay with what follows. */
+.item, .box, .report, .medal-box, .pmaps, .feat-sec { break-inside: auto; }
+.bi li, .mcq li, .rev tr, .radar-list li { break-inside: avoid; }
+.mcq { break-inside: auto; }
+.watermark span { font-size: 54pt; }
+/* The cover, fitted to the phone page. */
+@page full { size: 105mm 187mm; margin: 0; }
+.cover { width: 105mm; height: 187mm; }
+.cover-logos { padding: 5mm 6mm 3mm; }
+.cover-hero { padding: 6mm 6mm 5mm !important; margin: 0 !important; border-radius: 0 0 4mm 4mm !important; }
+.cover .eyebrow { font-size: 8.5pt; }
+.cover h1 { font-size: 26pt; max-width: none; }
+.cover .date-pill { font-size: 10pt; }
+.cover .stats { display: grid !important; grid-template-columns: repeat(4, 1fr); gap: 2mm; }
+.cover .stats > div { padding: 2mm !important; min-width: 0; }
+.cover .stats b { font-size: 15pt; }
+.cover .stats span { font-size: 8pt; }
+.cover-body { padding: 4mm 6mm 2mm !important; margin: 0 !important; }
+.cover-h { font-size: 9.5pt; margin-bottom: 2mm; }
+.hl-grid { display: block !important; }
+.hl { margin-bottom: 2mm; padding: 2mm 3mm !important; }
+.hl-cat { font-size: 8.5pt; }
+.hl-hi, .hl-en { font-size: 11pt; line-height: 1.4; }
+.toc { display: block !important; columns: 1 !important; }
+.toc-row { font-size: 10.5pt; padding: 1mm 0 !important; }
+.cover-foot { margin: 0 6mm 6mm !important; padding: 2.5mm 4mm !important; font-size: 9pt; }
+.cover .join, .cover [class*="join"] { padding: 2.5mm 4mm !important; }
+.visual, .v-pair > * { break-inside: avoid; }
+
+/* One story, one card, one page. */
+.section:has(.item) .section-title { display: none; }
+.section:has(.item) { margin: 0; }
+.item { break-before: page; break-inside: avoid; margin: 0; min-height: 168mm; border: 1px solid #e5e7eb; border-top: 4px solid ${accent}; border-left-width: 1px; border-radius: 3mm; padding: 3.5mm 4mm 4mm; }
+.card-label { display: flex; justify-content: space-between; align-items: center; gap: 2mm; margin: 0 0 3mm; font-size: 9pt; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: ${accent}; }
+.card-label .icon { width: 1.1em; height: 1.1em; vertical-align: -0.2em; margin-right: 1.5mm; }
+.card-label .of { color: #64748b; font-weight: 500; letter-spacing: 0; text-transform: none; white-space: nowrap; }
+.card-label a, .cover a.to-story { color: inherit; text-decoration: none; }
+`;
+
+// Turns each story into its own card page (the page as tall as the card,
+// measured once the fonts are in) and links the cover to the cards.
+const PHONE_SCRIPT = `(() => {
+  const mm = (px) => (px * 25.4) / 96;
+  const items = [...document.querySelectorAll(".item")];
+  const cover = document.querySelector(".cover");
+  if (cover) cover.id = "contents";
+  const heads = new Map();
+  items.forEach((it, i) => {
+    it.id = "story-" + (i + 1);
+    const h = it.querySelector(".heads h3");
+    if (h) heads.set(h.textContent.trim(), it.id);
+    const title = it.closest(".section")?.querySelector(".section-title h2");
+    const label = document.createElement("div");
+    label.className = "card-label";
+    label.innerHTML = '<span>' + (title ? title.innerHTML : "") + '</span><span class="of"><a href="#contents">↑</a> ' + (i + 1) + " / " + items.length + "</span>";
+    it.prepend(label);
+  });
+  // The cover's headlines and its contents (a section: its first story).
+  if (cover) {
+    cover.querySelectorAll(".hl, .lead, li").forEach((el) => {
+      const t = el.querySelector(".hl-hi, h2, b");
+      const id = t && heads.get(t.textContent.trim());
+      if (!id) return;
+      const a = document.createElement("a");
+      a.href = "#" + id;
+      a.className = "to-story";
+      el.parentNode.insertBefore(a, el);
+      a.appendChild(el);
+    });
+    const firstOf = new Map();
+    items.forEach((it) => {
+      const t = it.closest(".section")?.querySelector(".section-title h2")?.textContent.trim();
+      if (t && !firstOf.has(t)) firstOf.set(t, it.id);
+    });
+    cover.querySelectorAll(".toc-row").forEach((row) => {
+      const id = firstOf.get(row.querySelector("span")?.textContent.trim() ?? "");
+      if (!id) return;
+      const a = document.createElement("a");
+      a.href = "#" + id;
+      a.className = "to-story";
+      row.parentNode.insertBefore(a, row);
+      a.appendChild(row);
+    });
+  }
+  const size = () => {
+    const css = items.map((it, i) => {
+      it.style.page = "story" + i;
+      // 7 mm top and 9 mm bottom margins, and a little room.
+      const h = Math.max(187, Math.ceil(mm(it.getBoundingClientRect().height) + 19));
+      return "@page story" + i + " { size: 105mm " + h + "mm; margin: 7mm 6mm 9mm; }";
+    });
+    let st = document.getElementById("card-pages");
+    if (!st) {
+      st = document.createElement("style");
+      st.id = "card-pages";
+      document.head.appendChild(st);
+    }
+    st.textContent = css.join("\\n");
+  };
+  size();
+  // Measured again once the fonts are in (they change the heights).
+  if (document.fonts) document.fonts.ready.then(size);
+})();`;
+
 const CSS = (accent: string) => `
 @page { size: A4; margin: 14mm 12mm 16mm; }
 * { box-sizing: border-box; }
@@ -1097,8 +1245,11 @@ function renderMagazineInner(opts: {
   // A part of a long PDF: the stories it prints (the cover, contents and
   // pages after the stories only where asked), numbered on from `start`.
   part?: { only: string[]; cover: boolean; tail: boolean; start: number } | null;
+  // The daily issue for reading on a phone: story cards (see PHONE_CSS).
+  edition?: "print" | "phone";
 }): string {
   const s = opts.settings;
+  const phone = opts.edition === "phone" && opts.kind === "daily" && !opts.coverOnly;
   const lang = opts.lang;
   const t = T[lang];
   const monthly = opts.kind === "monthly";
@@ -1489,7 +1640,7 @@ function renderMagazineInner(opts: {
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600;700&family=Noto+Sans:wght@400;600;700&${COVER_FONTS}&display=swap" rel="stylesheet" />
-<style>${CSS(accent)}</style>
+<style>${CSS(accent)}${phone ? PHONE_CSS(accent) : ""}</style>
 </head>
 <body>
 ${
@@ -1514,6 +1665,7 @@ ${back ? adPageHtml(back, lang, "back") : ""}`
     : ""
 }`
 }
+${phone ? `<script>${PHONE_SCRIPT}</script>` : ""}
 </body>
 </html>`;
 }
@@ -1521,8 +1673,13 @@ ${back ? adPageHtml(back, lang, "back") : ""}`
 // Page numbers and brand line printed at the bottom of every page.
 // A part of a long PDF leaves the numbers out (they are stamped on once the
 // parts are joined).
-export function footerTemplate(settings: MagazineSettings, numbered = true): string {
-  return `<div style="width:100%;font-size:8px;color:#94a3b8;padding:0 12mm;display:flex;justify-content:space-between;font-family:sans-serif"><span>${esc(settings.brand_line)}</span>${numbered ? `<span><span class="pageNumber"></span> / <span class="totalPages"></span></span>` : ""}</div>`;
+export function footerTemplate(
+  settings: MagazineSettings,
+  numbered = true,
+  // The phone edition's narrower page margins.
+  phone = false,
+): string {
+  return `<div style="width:100%;font-size:8px;color:#94a3b8;padding:0 ${phone ? 6 : 12}mm;display:flex;justify-content:space-between;font-family:sans-serif"><span>${esc(settings.brand_line)}</span>${numbered ? `<span><span class="pageNumber"></span> / <span class="totalPages"></span></span>` : ""}</div>`;
 }
 
 // One story as the issue prints it, in one language, for the editor's
