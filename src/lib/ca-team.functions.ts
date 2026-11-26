@@ -1,0 +1,39 @@
+// The magazine's editorial team (admin): scorecards and notebook history.
+import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+
+async function server() {
+  return import("@/lib/ca-team.server");
+}
+
+async function assertAdmin(userId: string) {
+  const { requireAdminMfa } = await import("@/lib/admin-mfa.server");
+  await requireAdminMfa(userId);
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data, error } = await supabaseAdmin
+    .from("user_roles")
+    .select("user_id")
+    .eq("user_id", userId)
+    .eq("role", "admin")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Admin access required");
+}
+
+const member = z.enum(["chief", "writer"]);
+
+export const getCaTeam = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).teamOverview();
+  });
+
+export const restoreCaTeamNotebook = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ member, at: z.string().min(10).max(40) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return { rules: await (await server()).restoreNotebook(data.member, data.at) };
+  });

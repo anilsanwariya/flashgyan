@@ -4176,7 +4176,11 @@ export async function saveStyleRules(rules: string[]): Promise<string[]> {
       return true;
     })
     .slice(0, STYLE_RULES_MAX);
-  return (await saveMagazineSettings({ style_rules: clean })).style_rules;
+  const before = (await getMagazineSettings()).style_rules ?? [];
+  const after = (await saveMagazineSettings({ style_rules: clean })).style_rules;
+  // The Writer's notebook as it was, to undo this change.
+  await (await import("@/lib/ca-team.server")).rememberNotebook("writer", before, after);
+  return after;
 }
 
 // ---------- House style check before scheduling ----------

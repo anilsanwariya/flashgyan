@@ -237,11 +237,11 @@ export function weeklyReportText(s: WeeklyStats, adminUrl?: string): string {
   if (s.style) lines.push(...styleScoreLines(s.style));
   if (s.styleSuggestions)
     lines.push(
-      `✍️ SAATHI suggests ${s.styleSuggestions} house style rule${s.styleSuggestions === 1 ? "" : "s"} from your edits: add the ones you agree with in Magazine settings → House style.`,
+      `✍️ SAATHI suggests ${s.styleSuggestions} house style rule${s.styleSuggestions === 1 ? "" : "s"} for the Writer's notebook, from your edits: keep the ones you agree with in Current affairs → Editorial team.`,
     );
   if (s.pickSuggestions)
     lines.push(
-      `🎯 SAATHI suggests ${s.pickSuggestions} picking rule${s.pickSuggestions === 1 ? "" : "s"} from the stories you dropped, kept or moved: add the ones you agree with in Magazine settings → Collection → Learnt from your picks.`,
+      `🎯 SAATHI suggests ${s.pickSuggestions} picking rule${s.pickSuggestions === 1 ? "" : "s"} for the Editor-in-chief's notebook, from the stories you dropped, kept or moved: keep the ones you agree with in Current affairs → Editorial team.`,
     );
   lines.push(
     "",

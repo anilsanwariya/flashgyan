@@ -77,6 +77,7 @@ import { CollectionBox, WatchSitesSettings } from "@/components/ca-collect-panel
 import { StoryList } from "@/components/ca-story-review";
 import { SkippedNews } from "@/components/ca-skipped-news";
 import { DayChecklist } from "@/components/ca-day-checklist";
+import { EditorialTeam } from "@/components/ca-team-panel";
 import { getCaReaderDayStatus, setCaReaderDayHidden } from "@/lib/ca-reader.functions";
 import { OfficialDayDialog } from "@/components/ca-official-panel";
 import { FactCheckDialog } from "@/components/ca-fact-check";
@@ -134,6 +135,7 @@ export type CaSection =
   | "schemes"
   | "syllabus"
   | "papers"
+  | "team"
   | "settings";
 
 const shiftDate = (date: string, days: number) => {
@@ -157,6 +159,7 @@ export function CurrentAffairsPanel({ section }: { section: CaSection }) {
   if (section === "schemes") return <SchemeRegister />;
   if (section === "syllabus") return <SyllabusPanel />;
   if (section === "papers") return <ExamPapers />;
+  if (section === "team") return <EditorialTeam />;
   if (section === "settings") return <SettingsPanel />;
   return <DailyPanel />;
 }

@@ -108,7 +108,12 @@ export async function suggestPickRules(): Promise<PickSuggestions> {
 }
 
 export async function savePickRules(rules: string[]): Promise<string[]> {
-  return (await saveMagazineSettings({ pick_rules: cleanPickRules(rules) })).pick_rules ?? [];
+  const before = (await getMagazineSettings()).pick_rules ?? [];
+  const after =
+    (await saveMagazineSettings({ pick_rules: cleanPickRules(rules) })).pick_rules ?? [];
+  // The Editor-in-chief's notebook as it was, to undo this change.
+  await (await import("@/lib/ca-team.server")).rememberNotebook("chief", before, after);
+  return after;
 }
 
 // Everything the settings card shows.
