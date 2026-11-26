@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   AlertTriangle,
+  Loader2,
   ArrowDown,
   ArrowUp,
   BarChart3,
@@ -51,7 +52,9 @@ import {
   type EventBrief,
   createCaEvent,
   linkCaStoryEvent,
+  removeCaRepeats,
 } from "@/lib/current-affairs.functions";
+import { findRepeats, partLabel } from "@/lib/ca-repeats";
 import {
   CATEGORIES,
   DEFAULT_MAGAZINE_SETTINGS,
@@ -564,6 +567,7 @@ export function StoryEditor({
           ) : (
             <main ref={main} className="min-h-0 flex-1 overflow-y-auto">
               <div className="mx-auto max-w-3xl space-y-4 p-3 pb-16 text-[15px] leading-relaxed sm:p-5 sm:text-sm">
+                {ctx && <RepeatNotes item={item} busy={busy} onChanged={onChanged} />}
                 {!ctx ? (
                   <NotWritten item={item} job={job} onWrite={() => void review.write(item)} />
                 ) : tab === "summary" ? (
@@ -763,6 +767,80 @@ function Section({
       </div>
       {children}
     </section>
+  );
+}
+
+// A fact printed twice in the story (the summary and a point, Static
+// Context and a point…), with the prose rewritten without it on request.
+function RepeatNotes({
+  item,
+  busy,
+  onChanged,
+}: {
+  item: CaItem;
+  busy: boolean;
+  onChanged: () => void;
+}) {
+  const fixFn = useServerFn(removeCaRepeats);
+  const [fixing, setFixing] = useState(false);
+  const seen = new Set<string>();
+  const repeats = [...findRepeats(item.content, "hi"), ...findRepeats(item.content, "en")].filter(
+    (r) => {
+      const k = `${r.what}:${r.parts.map(partLabel).join("|")}:${r.value}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    },
+  );
+  if (!repeats.length) return null;
+  const fixable = repeats.some((r) =>
+    r.parts.some((p) => p.kind !== "point" && p.kind !== "visual"),
+  );
+  return (
+    <div
+      className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm"
+      data-repeats
+    >
+      <p className="font-medium text-amber-800 dark:text-amber-300">
+        {repeats.length === 1
+          ? "A fact is printed twice"
+          : `${repeats.length} facts are printed twice`}
+      </p>
+      <ul className="space-y-1">
+        {repeats.slice(0, 8).map((r, i) => (
+          <li key={i} lang="hi">
+            {r.what === "figure" ? <b>{r.value}</b> : <span>“{r.value}…”</span>} —{" "}
+            <span className="text-muted-foreground">{r.parts.map(partLabel).join(", ")}</span>
+          </li>
+        ))}
+      </ul>
+      {fixable ? (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy || fixing}
+          onClick={async () => {
+            setFixing(true);
+            try {
+              await fixFn({ data: { id: item.id } });
+              toast.success("Rewritten without the repeats (the earlier version is in History)");
+              onChanged();
+            } catch (e) {
+              toast.error(errorText(e, "Couldn't rewrite it"));
+            } finally {
+              setFixing(false);
+            }
+          }}
+        >
+          {fixing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null} Remove the repeat
+        </Button>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          A point and a visual show the same figure: cover the point with the visual (Visuals tab)
+          so it prints once.
+        </p>
+      )}
+    </div>
   );
 }
 

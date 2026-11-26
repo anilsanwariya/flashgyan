@@ -464,6 +464,15 @@ export const extractCaSourcePart = createServerFn({ method: "POST" })
     return (await server()).extractSourceChunk(data.id, data.part);
   });
 
+// A fact printed twice in a story: the repeating prose rewritten without it.
+export const removeCaRepeats = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).removeRepeats(data.id);
+  });
+
 export const deleteCaSource = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
