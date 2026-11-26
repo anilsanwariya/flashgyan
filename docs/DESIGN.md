@@ -162,7 +162,9 @@ so dark mode works.
   pages, one story per page (taller when the story is long), the section and "n / total"
   small at the top of each card, 12pt type; a contents page of links after the cover;
   visuals in one column (flow charts top to bottom); small page margins and no Exam Angle
-  box on the cards; the A4 issue is linked in the caption.
+  box on the cards; exam facts bold, a colour per section, "याद रखें" one-liner under the
+  headline, the story's MCQ at the foot with a link to its answer, the source last; the A4
+  issue is linked in the caption.
 
 - Card studio (admin): a topic's Cards tab opens with progress and one "Next:" step that
   follows the daily flow (add cards → merge → fill with AI → check with AI → review AI
