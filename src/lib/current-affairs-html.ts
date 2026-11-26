@@ -151,6 +151,9 @@ const T = {
     questions: "practice questions",
     inThisIssue: "In this issue",
     contents: "Contents",
+    takeaway: "Remember",
+    quickQ: "Quick question",
+    answerLink: "Answer →",
     corrections: "Corrections",
     background: "Background",
     revision: "60-Second Revision",
@@ -214,6 +217,9 @@ const T = {
     questions: "अभ्यास प्रश्न",
     inThisIssue: "इस अंक में",
     contents: "विषय-सूची",
+    takeaway: "याद रखें",
+    quickQ: "झटपट प्रश्न",
+    answerLink: "उत्तर →",
     corrections: "सुधार",
     background: "पृष्ठभूमि",
     revision: "60 सेकंड रिवीजन",
@@ -561,6 +567,7 @@ function itemHtml(
     : "";
   return `<article class="item">
   <div class="item-head"><span class="num">${number}</span><div class="heads"><h3>${esc(pick(c.headline, lang))}</h3></div></div>
+  ${pick(c.oneliner, lang) ? `<p class="takeaway"><b>${t.takeaway}:</b> ${esc(pick(c.oneliner, lang))}</p>` : ""}
   ${tags ? `<div class="tags">${tags}</div>` : ""}
   ${
     item.earlier?.length
@@ -598,6 +605,15 @@ function itemHtml(
   ${why}
   ${background}
   ${dykBox}
+  ${
+    c.mcq
+      ? `<div class="card-q"><div class="box-title">${t.quickQ}</div>${mcqSide(
+          pick(c.mcq.question, lang),
+          c.mcq.options.map((o) => pick(o, lang)),
+          t.letters,
+        )}<a class="to-ans" href="#ans-${esc(item.id)}">${t.answerLink}</a></div>`
+      : ""
+  }
 </article>`;
 }
 
@@ -627,6 +643,22 @@ export const MEDIA_IMAGE_CSS = `
 `;
 
 // ---------- The phone edition ----------
+//
+// Each section's colour on its cards (top edge, label, number).
+const SECTION_COLORS: Record<string, string> = {
+  rajasthan: "#c2410c",
+  national: "#1d4ed8",
+  schemes: "#0f766e",
+  international: "#7c3aed",
+  science: "#0369a1",
+  economy: "#15803d",
+  sports: "#b91c1c",
+  persons: "#a21caf",
+  places: "#a16207",
+  misc: "#475569",
+  editorial: "#334155",
+};
+
 //
 // The daily issue as story cards for reading on a phone: a 105 × 187 mm
 // page (a phone screen's shape), one column, larger type and darker greys,
@@ -734,6 +766,35 @@ figcaption, .img-side figcaption, .img-row figcaption { font-size: 10pt; color: 
 .v-tree-kid::before, .v-tree-kid::after, .v-tree-kids::before { display: none; }
 .v-tree-kid ul { font-size: 10.5pt; }
 
+/* Each section's own colour on its cards' top edge and label. */
+${Object.entries(SECTION_COLORS)
+  .map(
+    ([cat, c]) =>
+      `.section[data-cat="${cat}"] .item { border-top-color: ${c}; } .section[data-cat="${cat}"] .card-label, .section[data-cat="${cat}"] .card-q .box-title { color: ${c}; } .section[data-cat="${cat}"] .num { background: ${c}; }`,
+  )
+  .join("\n")}
+/* The story in one line, under the headline. */
+.takeaway { display: block; margin: 2mm 0 0; padding: 1.8mm 2.5mm; border-radius: 2mm; background: #fef9c3; color: #713f12; font-size: 11pt; line-height: 1.5; }
+.takeaway b { color: #854d0e; }
+/* The source and tags at the foot of the card, small. */
+.item { display: flex; flex-direction: column; }
+.item > * { flex: none; }
+.item > .card-label { order: -1; }
+.item > .tags { order: 90; margin: 3mm 0 0; padding-top: 2mm; border-top: 1px dashed #e5e7eb; }
+.item > .tags .tag { font-size: 9pt; }
+.item > .card-q { order: 80; }
+/* A question on each card; its answer in the key at the end. */
+.card-q { display: block; margin-top: 3mm; padding: 2.5mm 3mm; border-radius: 2mm; background: #f5f3ff; border: 1px solid #ddd6fe; break-inside: avoid; }
+.card-q .box-title { color: ${accent}; margin-bottom: 1mm; }
+.card-q .stmt { white-space: pre-line; font-weight: 600; font-size: 11pt; }
+.card-q ol { list-style: none; margin: 1.5mm 0 0; padding: 0; }
+.card-q li { margin-bottom: .8mm; font-size: 11pt; }
+.card-q .opt { font-weight: 700; color: ${accent}; }
+.card-q .to-ans { display: inline-block; margin-top: 1.5mm; font-size: 10pt; font-weight: 600; color: ${accent}; text-decoration: none; }
+/* The questions are on the cards: the practice page keeps the key and Mains. */
+.prelims { display: none; }
+b.fact { font-weight: 700; color: #111827; }
+
 /* One story, one card, one page. */
 .section:has(.item) .section-title { display: none; }
 .section:has(.item) { margin: 0; }
@@ -789,6 +850,37 @@ const PHONE_SCRIPT = `(() => {
   toc.innerHTML = html;
   if (cover) cover.after(toc);
   else document.body.prepend(toc);
+  // The exam facts in bold: amounts, numbers with their units, dates.
+  const n = "[0-9०-९]+([,.][0-9०-९]+)*";
+  const units = "करोड़|लाख|हज़ार|हजार|crore|lakh|billion|million|trillion|प्रतिशत|per cent|percent";
+  const months = "जनवरी|फरवरी|मार्च|अप्रैल|मई|जून|जुलाई|अगस्त|सितंबर|सितम्बर|अक्टूबर|अक्तूबर|नवंबर|नवम्बर|दिसंबर|दिसम्बर|January|February|March|April|May|June|July|August|September|October|November|December";
+  const fact = new RegExp(
+    "(?<![A-Za-z0-9०-९])(₹ ?" + n + "( ?(" + units + "))?|" + n + " (" + months + ")( [0-9०-९]{4})?|" + n + "( ?%| (" + units + ")|st|nd|rd|th)?)",
+    "g",
+  );
+  document.querySelectorAll(".item .summary, .item .points, .item .context .bi").forEach((el) => {
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walk.nextNode()) nodes.push(walk.currentNode);
+    nodes.forEach((t) => {
+      const text = t.nodeValue;
+      fact.lastIndex = 0;
+      if (!fact.test(text)) return;
+      fact.lastIndex = 0;
+      const frag = document.createDocumentFragment();
+      let at = 0;
+      for (const m of text.matchAll(fact)) {
+        frag.append(text.slice(at, m.index));
+        const b = document.createElement("b");
+        b.className = "fact";
+        b.textContent = m[0];
+        frag.append(b);
+        at = m.index + m[0].length;
+      }
+      frag.append(text.slice(at));
+      t.replaceWith(frag);
+    });
+  });
   const size = () => {
     const css = items.map((it, i) => {
       it.style.page = "story" + i;
@@ -960,6 +1052,8 @@ table.medals.board td:not(:nth-child(2)), table.medals.board th:not(:nth-child(2
 .rep-ans { margin: 0 0 2mm 6mm; font-size: 8.5pt; color: #475569; }
 .rev .ans { font-weight: 700; color: ${accent}; }
 .item { display: flow-root; }
+/* Shown only in the phone edition (story cards). */
+.takeaway, .card-q { display: none; }
 .item .box { display: flow-root; }
 .img-side.left ~ .bi ul { list-style-position: inside; padding-left: 0; }
 .images, .item .visual { clear: both; }
@@ -1197,7 +1291,7 @@ function practicePage(items: MagazineItem[], lang: Lang): string {
   const key = withMcq
     .map((i, n) => {
       const m = i.content.mcq!;
-      return `<tr><td class="kn">${n + 1}</td><td class="ka">(${t.letters[m.answer] ?? m.answer + 1})</td><td>${esc(pick(m.explanation, lang))}</td></tr>`;
+      return `<tr id="ans-${esc(i.id)}"><td class="kn">${n + 1}</td><td class="ka">(${t.letters[m.answer] ?? m.answer + 1})</td><td>${esc(pick(m.explanation, lang))}</td></tr>`;
     })
     .join("");
   const mains = withMains
@@ -1207,7 +1301,7 @@ function practicePage(items: MagazineItem[], lang: Lang): string {
     )
     .join("");
   return `<section class="section new-page"><div class="section-title"><h2>${icon("practice")} ${t.practice}</h2><span>${t.rpsc}</span></div>
-${qs ? `<h3 class="part">${t.partA}</h3>${qs}` : ""}
+${qs ? `<div class="prelims"><h3 class="part">${t.partA}</h3>${qs}</div>` : ""}
 ${mains ? `<h3 class="part">${t.partB}</h3>${mains}` : ""}
 ${key ? `<h3 class="part">${t.key}</h3><table class="answers">${key}</table>` : ""}</section>`;
 }
@@ -1551,7 +1645,7 @@ function renderMagazineInner(opts: {
           ? opts.placeMaps(dots, lang, accent)
           : "");
       const count = list.length + (parted ? reports.length : 0);
-      return `<section class="section${monthly ? " new-page" : ""}"><div class="section-title"><h2>${icon(cat)} ${esc(label(cat)[lang])}</h2><span>${count} ${t.stories(count)}</span></div>${body}</section>${feature}${ad ? adPageHtml(ad, lang, cat) : ""}`;
+      return `<section class="section${monthly ? " new-page" : ""}" data-cat="${esc(cat)}"><div class="section-title"><h2>${icon(cat)} ${esc(label(cat)[lang])}</h2><span>${count} ${t.stories(count)}</span></div>${body}</section>${feature}${ad ? adPageHtml(ad, lang, cat) : ""}`;
     })
     .join("");
 

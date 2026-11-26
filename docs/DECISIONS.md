@@ -357,6 +357,14 @@ The channel now gets a phone edition made from the same stories and the same HTM
   page; the A4 issue keeps its design.
 - **Visuals:** they print in one column with their words at reading size (flow charts run
   top to bottom, tables at 10.5pt).
+- **Revising from a card:**
+  - exam facts (amounts, numbers with their units, dates) are bold, marked by the phone
+    script with no AI;
+  - each section has its own colour on its cards' top edge, label and number;
+  - the story's one-liner shows under the headline as "याद रखें / Remember";
+  - the story's MCQ sits at the foot of its card with "उत्तर → / Answer →" linking to its
+    row in the answer key (the practice page then keeps the key and the Mains questions);
+  - the source line moves to the bottom of the card, small.
 - **Space:** the cards use small page margins (4 mm top, 3 mm sides, 8 mm bottom for the
   footer and the Telegram link). The Exam Angle box is left out on cards (it took a box on
   every story); the A4 issue keeps it.
