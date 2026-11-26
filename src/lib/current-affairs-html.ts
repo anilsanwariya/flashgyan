@@ -635,9 +635,8 @@ export const MEDIA_IMAGE_CSS = `
 // and number in small letters at the top. A contents page after the cover
 // links every story, and each card links back to it.
 const PHONE_CSS = (accent: string) => `
-@page { size: 105mm 187mm; margin: 7mm 6mm 9mm; }
-@media screen { body { width: 93mm; } }
-@page { size: 105mm 187mm; margin: 7mm 6mm 9mm; }
+@page { size: 105mm 187mm; margin: 4mm 3mm 8mm; }
+@media screen { body { width: 99mm; } }
 body { font-size: 12pt; line-height: 1.6; }
 [lang="hi"], .hi { line-height: 1.7; }
 .section { margin-bottom: 4mm; }
@@ -738,7 +737,10 @@ figcaption, .img-side figcaption, .img-row figcaption { font-size: 10pt; color: 
 /* One story, one card, one page. */
 .section:has(.item) .section-title { display: none; }
 .section:has(.item) { margin: 0; }
-.item { break-before: page; break-inside: avoid; margin: 0; min-height: 168mm; border: 1px solid #e5e7eb; border-top: 4px solid ${accent}; border-left-width: 1px; border-radius: 3mm; padding: 3.5mm 4mm 4mm; }
+.item { break-before: page; break-inside: avoid; margin: 0; min-height: 174mm; border: 1px solid #e5e7eb; border-top: 4px solid ${accent}; border-left-width: 1px; border-radius: 3mm; padding: 3mm 3mm 3mm; }
+/* The exam angle (the syllabus label) is left out on a phone: it takes a
+   box on every card. The A4 issue keeps it. */
+.item .box.why { display: none; }
 .card-label { display: flex; justify-content: space-between; align-items: center; gap: 2mm; margin: 0 0 3mm; font-size: 9pt; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: ${accent}; }
 .card-label .icon { width: 1.1em; height: 1.1em; vertical-align: -0.2em; margin-right: 1.5mm; }
 .card-label .of { color: #64748b; font-weight: 500; letter-spacing: 0; text-transform: none; white-space: nowrap; }
@@ -790,9 +792,9 @@ const PHONE_SCRIPT = `(() => {
   const size = () => {
     const css = items.map((it, i) => {
       it.style.page = "story" + i;
-      // 7 mm top and 9 mm bottom margins, and a little room.
-      const h = Math.max(187, Math.ceil(mm(it.getBoundingClientRect().height) + 19));
-      return "@page story" + i + " { size: 105mm " + h + "mm; margin: 7mm 6mm 9mm; }";
+      // 4 mm top and 8 mm bottom margins, and a little room.
+      const h = Math.max(187, Math.ceil(mm(it.getBoundingClientRect().height) + 15));
+      return "@page story" + i + " { size: 105mm " + h + "mm; margin: 4mm 3mm 8mm; }";
     });
     let st = document.getElementById("card-pages");
     if (!st) {
@@ -1717,7 +1719,7 @@ export function footerTemplate(
   // The phone edition's narrower page margins.
   phone = false,
 ): string {
-  return `<div style="width:100%;font-size:8px;color:#94a3b8;padding:0 ${phone ? 6 : 12}mm;display:flex;justify-content:space-between;font-family:sans-serif"><span>${esc(settings.brand_line)}</span>${numbered ? `<span><span class="pageNumber"></span> / <span class="totalPages"></span></span>` : ""}</div>`;
+  return `<div style="width:100%;font-size:8px;color:#94a3b8;padding:0 ${phone ? 4 : 12}mm;display:flex;justify-content:space-between;font-family:sans-serif"><span>${esc(settings.brand_line)}</span>${numbered ? `<span><span class="pageNumber"></span> / <span class="totalPages"></span></span>` : ""}</div>`;
 }
 
 // One story as the issue prints it, in one language, for the editor's
