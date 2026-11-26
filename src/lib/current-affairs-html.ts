@@ -632,8 +632,8 @@ export const MEDIA_IMAGE_CSS = `
 // page (a phone screen's shape), one column, larger type and darker greys,
 // laid over the print styles. Each story is a card on a page of its own,
 // as tall as the story needs (never less than a screen), with its section
-// and number in small letters at the top. The cover's headlines and
-// contents link to the cards, and each card links back to the cover.
+// and number in small letters at the top. A contents page after the cover
+// links every story, and each card links back to it.
 const PHONE_CSS = (accent: string) => `
 @page { size: 105mm 187mm; margin: 7mm 6mm 9mm; }
 @media screen { body { width: 93mm; } }
@@ -695,9 +695,45 @@ figcaption, .img-side figcaption, .img-row figcaption { font-size: 10pt; color: 
 .hl-hi, .hl-en { font-size: 11pt; line-height: 1.4; }
 .toc { display: block !important; columns: 1 !important; }
 .toc-row { font-size: 10.5pt; padding: 1mm 0 !important; }
-.cover-foot { margin: 0 6mm 6mm !important; padding: 2.5mm 4mm !important; font-size: 9pt; }
+.cover-foot { margin: 0 6mm 11mm !important; padding: 2.5mm 4mm !important; font-size: 9pt; }
 .cover .join, .cover [class*="join"] { padding: 2.5mm 4mm !important; }
 .visual, .v-pair > * { break-inside: avoid; }
+/* The cover: title, date and counts (the stories are listed on the next
+   page, as links). */
+.cover .cover-body .cover-h, .cover .hl-grid, .cover .toc, .cover .lead { display: none !important; }
+.cover-hero { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; }
+/* The contents page. */
+.phone-toc { break-before: page; break-after: page; }
+.phone-toc h2 { margin: 0 0 3mm; font-size: 15pt; color: ${accent}; }
+.phone-toc ol, .phone-toc ul { list-style: none; margin: 0; padding: 0; }
+.phone-toc ol li { border-bottom: 1px solid #e5e7eb; }
+.phone-toc a { display: flex; gap: 3mm; align-items: flex-start; padding: 2.2mm 0; color: inherit; text-decoration: none; }
+.phone-toc .n { flex: none; width: 7mm; height: 7mm; border-radius: 50%; background: ${accent}; color: #fff; font-weight: 700; font-size: 10pt; display: flex; align-items: center; justify-content: center; }
+.phone-toc .t { font-weight: 600; font-size: 11.5pt; line-height: 1.4; }
+.phone-toc small { display: block; font-size: 8.5pt; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: ${accent}; }
+.phone-toc ul { margin-top: 4mm; display: flex; flex-wrap: wrap; gap: 2mm; }
+.phone-toc ul a { padding: 1.5mm 3mm; border-radius: 2mm; background: #f5f3ff; color: ${accent}; font-size: 10pt; font-weight: 600; align-items: center; }
+.phone-toc ul .icon { width: 1.1em; height: 1.1em; }
+/* Visuals in one narrow column, their words at reading size. */
+.v-flow { flex-direction: column; }
+.v-arrow { transform: rotate(90deg); }
+.v-step { font-size: 11pt; padding: 3.5mm 3mm 2.5mm; }
+.v-step-n { width: 6mm; height: 6mm; top: -3mm; font-size: 9pt; }
+.v-pie { flex-direction: column; align-items: flex-start; gap: 3mm; }
+.v-proscons, .v-chg { grid-template-columns: 1fr; }
+.v-chg { gap: 1mm; }
+.v-bar-row { grid-template-columns: 34% 1fr; gap: 2mm; }
+.v-stats { grid-template-columns: repeat(auto-fit, minmax(24mm, 1fr)); }
+.v-stat b { font-size: 16pt; }
+.v-table, .v-compare { font-size: 10.5pt; }
+.v-table th, .v-table td { padding: 1.5mm 1.5mm; }
+.v-glance dt { font-size: 9.5pt; }
+.v-glance dd { font-size: 12pt; }
+.v-compare th.vs, .v-compare td.asp { font-size: 9.5pt; }
+.v-bar-val, .v-rank-n, .v-pc-h, .v-tree-node { font-size: 10.5pt; }
+.v-tree-kids { flex-direction: column; }
+.v-tree-kid::before, .v-tree-kid::after, .v-tree-kids::before { display: none; }
+.v-tree-kid ul { font-size: 10.5pt; }
 
 /* One story, one card, one page. */
 .section:has(.item) .section-title { display: none; }
@@ -710,50 +746,47 @@ figcaption, .img-side figcaption, .img-row figcaption { font-size: 10pt; color: 
 `;
 
 // Turns each story into its own card page (the page as tall as the card,
-// measured once the fonts are in) and links the cover to the cards.
+// measured once the fonts are in) and adds a contents page of links.
 const PHONE_SCRIPT = `(() => {
   const mm = (px) => (px * 25.4) / 96;
+  const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const items = [...document.querySelectorAll(".item")];
   const cover = document.querySelector(".cover");
-  if (cover) cover.id = "contents";
-  const heads = new Map();
   items.forEach((it, i) => {
     it.id = "story-" + (i + 1);
-    const h = it.querySelector(".heads h3");
-    if (h) heads.set(h.textContent.trim(), it.id);
     const title = it.closest(".section")?.querySelector(".section-title h2");
     const label = document.createElement("div");
     label.className = "card-label";
     label.innerHTML = '<span>' + (title ? title.innerHTML : "") + '</span><span class="of"><a href="#contents">↑</a> ' + (i + 1) + " / " + items.length + "</span>";
     it.prepend(label);
   });
-  // The cover's headlines and its contents (a section: its first story).
-  if (cover) {
-    cover.querySelectorAll(".hl, .lead, li").forEach((el) => {
-      const t = el.querySelector(".hl-hi, h2, b");
-      const id = t && heads.get(t.textContent.trim());
-      if (!id) return;
-      const a = document.createElement("a");
-      a.href = "#" + id;
-      a.className = "to-story";
-      el.parentNode.insertBefore(a, el);
-      a.appendChild(el);
+  // A contents page after the cover: every story (its section, number and
+  // headline) and the pages after them, each a link. The cover keeps its
+  // title, date and counts.
+  const hi = document.documentElement.lang === "hi";
+  const toc = document.createElement("section");
+  toc.className = "phone-toc";
+  toc.id = "contents";
+  if (cover) cover.removeAttribute("id");
+  let html = '<h2>' + (hi ? "इस अंक में" : "In this issue") + "</h2><ol>";
+  items.forEach((it, i) => {
+    const sec = it.closest(".section")?.querySelector(".section-title h2")?.textContent.trim() ?? "";
+    const h = it.querySelector(".heads h3")?.textContent.trim() ?? "";
+    html += '<li><a href="#' + it.id + '"><span class="n">' + (i + 1) + '</span><span class="t"><small>' + esc(sec) + "</small>" + esc(h) + "</span></a></li>";
+  });
+  html += "</ol>";
+  const rest = [...document.querySelectorAll(".section")].filter((s) => !s.querySelector(".item") && s.querySelector(".section-title h2"));
+  if (rest.length) {
+    html += "<ul>";
+    rest.forEach((s, i) => {
+      s.id = s.id || "part-" + (i + 1);
+      html += '<li><a href="#' + s.id + '">' + s.querySelector(".section-title h2").innerHTML + "</a></li>";
     });
-    const firstOf = new Map();
-    items.forEach((it) => {
-      const t = it.closest(".section")?.querySelector(".section-title h2")?.textContent.trim();
-      if (t && !firstOf.has(t)) firstOf.set(t, it.id);
-    });
-    cover.querySelectorAll(".toc-row").forEach((row) => {
-      const id = firstOf.get(row.querySelector("span")?.textContent.trim() ?? "");
-      if (!id) return;
-      const a = document.createElement("a");
-      a.href = "#" + id;
-      a.className = "to-story";
-      row.parentNode.insertBefore(a, row);
-      a.appendChild(row);
-    });
+    html += "</ul>";
   }
+  toc.innerHTML = html;
+  if (cover) cover.after(toc);
+  else document.body.prepend(toc);
   const size = () => {
     const css = items.map((it, i) => {
       it.style.page = "story" + i;
@@ -1617,7 +1650,12 @@ function renderMagazineInner(opts: {
       ? `<a class="cta" href="${esc(joinUrl)}"><div><b>${joinText}</b><span>${t.ctaText}</span></div><div class="cta-handle">${handle ? `@${esc(handle)}` : joinText}</div></a>`
       : "",
   };
-  const dailyLayout = DAILY_LAYOUTS.find((l) => l.id === s.daily_cover)?.id ?? "classic";
+  const chosenLayout = DAILY_LAYOUTS.find((l) => l.id === s.daily_cover)?.id ?? "classic";
+  // A side band or a lead story doesn't fit a phone's narrow page: the
+  // phone edition uses the classic cover then (its contents page lists the
+  // stories).
+  const dailyLayout =
+    phone && (chosenLayout === "band" || chosenLayout === "lead") ? "classic" : chosenLayout;
   const look: CoverLook = cover
     ? { kind: "monthly", cover }
     : { kind: "daily", layout: dailyLayout };

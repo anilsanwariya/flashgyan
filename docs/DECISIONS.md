@@ -350,8 +350,13 @@ The channel now gets a phone edition made from the same stories and the same HTM
 - **Cards:** each story is a card on a page of its own, as tall as the story needs and never
   shorter than a screen, so text is never shrunk to fit. Its section (Rajasthan, National…)
   and its number ("1 / 5") are in small letters at the top of the card.
-- **Links:** the cover's headlines and contents link to the cards, and "↑" on each card
-  links back to the cover.
+- **Cover and contents:** the cover keeps the title, date and counts. A contents page
+  after it lists every story (section, number and headline) and the pages after the
+  stories, each a link, and "↑" on each card links back to it. A Side Band or Top Story
+  First cover is printed as Classic in the phone edition, because it doesn't fit a narrow
+  page; the A4 issue keeps its design.
+- **Visuals:** they print in one column with their words at reading size (flow charts run
+  top to bottom, tables at 10.5pt).
 - **Caption:** it links the A4 issue ("Printable A4 PDF"), stored beside the cards PDF as
   `…-A4.pdf`.
 - **Setting:** Magazine settings → Channel has "Daily issue posted as" (story cards, or A4
