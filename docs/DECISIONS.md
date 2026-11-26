@@ -410,7 +410,8 @@ switch language on, and practise from does what a PDF can't.
 
 **Consequence:** migration `20261229090000_home_current_affairs.sql` adds the homepage
 column (safe to re-run; the card shows until it runs). A day's page is cached on the
-server for 5 minutes. Days are not in the sitemap yet.
+server for 5 minutes. The sitemap lists `/current-affairs` and every public day while the
+card is shown (scheduled days never).
 
 ## ADR-027: The magazine's AI steps as an editorial team with notebooks, reviewed weekly (26 November 2026)
 
@@ -435,9 +436,21 @@ How it works:
 measure of agreement shows whether the lessons help. Members stay steps of the existing
 pipeline, not free-running agents: cheaper and predictable.
 
-**Consequence:** no migration. The Proofreader (learning from accepted and dismissed
-notes) and the Updater (corrections and follow-ups) come next. No member acts on its own;
-autonomy can be considered once a scorecard stays high.
+**Consequence:** no migration. No member acts on its own; autonomy can be considered
+once a scorecard stays high.
+
+Added on 26 November 2026, two more members, each with a notebook of lessons (up to 15)
+in `bot_settings` `ca_team_notebook:<member>`. A notebook goes into its member's prompt as
+a message after the fixed instructions, so the prompt cache still works:
+- **Proofreader:** the house style and Hindi–English checks. It learns from the notes the
+  editor waves through as fine (false alarms) and the ones fixed. Its scorecard is the
+  notes acted on.
+- **Updater:** the corrections check. It learns from the corrections the editor approves
+  and rejects. Its scorecard is the corrections approved.
+
+Their lessons are suggested with the Sunday report (or on request) from the last 4 weeks'
+decisions, at least 4 needed, and wait for the editor. The editor can also write or
+remove lessons by hand.
 
 ## ADR-028: Each fact once in a story: the writer told so, repeats found and fixed on request (26 November 2026)
 

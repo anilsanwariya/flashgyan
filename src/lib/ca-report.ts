@@ -87,6 +87,8 @@ export type WeeklyStats = {
   styleSuggestions?: number;
   // Picking rules SAATHI suggested from the editor's picks, waiting.
   pickSuggestions?: number;
+  // New lessons the Proofreader and the Updater suggest.
+  teamSuggestions?: number;
   // Each house style rule's week in the style check.
   style?: StyleScore[];
   // The atlas: dated facts due for a recheck, students' open reports.
@@ -242,6 +244,10 @@ export function weeklyReportText(s: WeeklyStats, adminUrl?: string): string {
   if (s.pickSuggestions)
     lines.push(
       `🎯 SAATHI suggests ${s.pickSuggestions} picking rule${s.pickSuggestions === 1 ? "" : "s"} for the Editor-in-chief's notebook, from the stories you dropped, kept or moved: keep the ones you agree with in Current affairs → Editorial team.`,
+    );
+  if (s.teamSuggestions)
+    lines.push(
+      `🧑‍💼 The Proofreader and the Updater suggest ${s.teamSuggestions} new lesson${s.teamSuggestions === 1 ? "" : "s"} from your decisions: keep the ones you agree with in Current affairs → Editorial team.`,
     );
   lines.push(
     "",

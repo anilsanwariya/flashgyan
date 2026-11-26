@@ -15,6 +15,7 @@ import {
 export * from "../../supabase/functions/_shared/ca-style-check.ts";
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+import { lessonsMessage } from "@/lib/ca-team";
 
 // One change: which part, SAATHI's draft and the editor's version.
 export type EditPair = { part: string; before: string; after: string };
@@ -107,6 +108,8 @@ const ref = (n: number, p: StylePart) => `S${n}.${p.part.replace(" ", "")}.${p.l
 export function styleCheckMessages(
   rules: string[],
   stories: { content: CaContent }[],
+  // The Proofreader's notebook (lessons from the editor's decisions).
+  lessons: string[] = [],
 ): ChatMessage[] {
   return [
     {
@@ -115,6 +118,7 @@ export function styleCheckMessages(
 RULES: Report only clear breaks of a numbered rule, not taste, facts or anything the rules don't ask for. A rule about one language applies only to that language. For each break give the part's label, the rule's number and the whole part rewritten to follow the rule: same language, same facts, numbers and names, changing only what the rule needs. Leave out a part that already follows the rules. At most ${STYLE_BREAKS_MAX} breaks, the clearest first; an empty list is fine.
 Reply with JSON only: {"breaks": [{"ref": "S1.headline.en", "rule": 1, "fix": "..."}]}`,
     },
+    ...lessonsMessage(lessons),
     {
       role: "user",
       content: `House style rules:\n${rules.map((r, i) => `${i + 1}. ${r}`).join("\n")}\n\nStories:\n${stories

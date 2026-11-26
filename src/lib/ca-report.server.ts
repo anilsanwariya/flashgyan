@@ -280,6 +280,17 @@ export async function sendWeeklyReport(
       // Too few changed picks, no migration yet, or the AI failed.
       console.error("picking rules:", e instanceof Error ? e.message : e);
     }
+    // The Proofreader's and the Updater's lessons from the week's decisions.
+    const team = await import("@/lib/ca-team.server");
+    for (const m of ["proofreader", "updater"] as const) {
+      try {
+        const n = (await team.suggestLessons(m)).suggestions?.rules.length ?? 0;
+        if (n) stats.teamSuggestions = (stats.teamSuggestions ?? 0) + n;
+      } catch (e) {
+        // Too few decisions yet, or the AI failed.
+        console.error(`team ${m}:`, e instanceof Error ? e.message : e);
+      }
+    }
   }
   try {
     stats.atlas = await (await import("@/lib/atlas-recheck.server")).atlasWeekly();

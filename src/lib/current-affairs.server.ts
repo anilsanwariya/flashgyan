@@ -279,6 +279,15 @@ function withShortForms<T extends object>(q: T): T {
 }
 const rpc: SaathiRpc = (fn, args) => supabaseAdmin.rpc(fn as never, args as never);
 
+// A team member's notebook, for its prompt (none when it can't be read).
+async function teamLessons(m: "proofreader" | "updater"): Promise<string[]> {
+  try {
+    return (await (await import("@/lib/ca-team.server")).notebook(m)).rules;
+  } catch {
+    return [];
+  }
+}
+
 function apiKey(): string {
   const key = process.env.LOVABLE_API_KEY;
   if (!key) throw new Error("LOVABLE_API_KEY is not configured");
@@ -2671,6 +2680,7 @@ async function checkForCorrections(earlierId: string, laterId: string) {
         points: earlier.content?.points ?? [],
       },
       later: { date: later.issue_date, facts: later.facts },
+      lessons: await teamLessons("updater"),
     }),
   );
   const changes = parseChanges(raw, earlier.facts.length);
@@ -4237,7 +4247,10 @@ export async function checkStyle(
   const batch = todo.slice(0, STYLE_CHECK_STORIES);
   const found = batch.length
     ? parseStyleBreaks(
-        await saathiComplete(apiKey(), styleCheckMessages(rules, batch)),
+        await saathiComplete(
+          apiKey(),
+          styleCheckMessages(rules, batch, await teamLessons("proofreader")),
+        ),
         rules,
         batch,
       )
@@ -4416,7 +4429,10 @@ export async function checkLanguages(
   const todo = items.filter((i) => saved?.stories[i.id] !== langFingerprint(i.content));
   const batch = todo.slice(0, LANG_CHECK_STORIES);
   const found = batch.length
-    ? parseLangNotes(await saathiComplete(apiKey(), langCheckMessages(batch)), batch)
+    ? parseLangNotes(
+        await saathiComplete(apiKey(), langCheckMessages(batch, await teamLessons("proofreader"))),
+        batch,
+      )
     : [];
   if (!found) throw new Error("The AI's reply could not be read. Try again.");
   const live = new Set(items.map((i) => i.id));

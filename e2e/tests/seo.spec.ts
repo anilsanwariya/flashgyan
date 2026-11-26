@@ -29,4 +29,9 @@ test("sitemap lists the main pages and every deck", async ({ request }) => {
   expect(xml).toContain("<loc>https://www.flashgyan.com/</loc>");
   expect(xml).toContain("<loc>https://www.flashgyan.com/flashcards</loc>");
   expect(xml).toContain(`<loc>https://www.flashgyan.com/decks/${DECK_ID}</loc>`);
+  // The current affairs reader: its list and each posted day, never one
+  // that is only scheduled.
+  expect(xml).toContain("<loc>https://www.flashgyan.com/current-affairs</loc>");
+  expect(xml).toContain("<loc>https://www.flashgyan.com/current-affairs/2026-11-20</loc>");
+  expect(xml).not.toContain("current-affairs/2026-11-21");
 });

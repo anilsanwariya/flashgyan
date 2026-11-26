@@ -56,6 +56,13 @@ async function postedDates(limit = 2000): Promise<string[]> {
   return ((data ?? []) as Row[]).map((r) => String(r.period));
 }
 
+// The reader's public days (posted and not taken off), newest first, for the
+// sitemap.
+export async function publicDates(limit = 1000): Promise<string[]> {
+  const hidden = await hiddenDays();
+  return (await postedDates(limit)).filter((d) => !hidden.has(d));
+}
+
 export async function isPublicDay(date: string): Promise<boolean> {
   const { data, error } = await from("ca_issues")
     .select("status")
