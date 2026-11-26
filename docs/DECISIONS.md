@@ -357,6 +357,9 @@ The channel now gets a phone edition made from the same stories and the same HTM
   page; the A4 issue keeps its design.
 - **Visuals:** they print in one column with their words at reading size (flow charts run
   top to bottom, tables at 10.5pt).
+- **Space:** the cards use small page margins (4 mm top, 3 mm sides, 8 mm bottom for the
+  footer and the Telegram link). The Exam Angle box is left out on cards (it took a box on
+  every story); the A4 issue keeps it.
 - **Caption:** it links the A4 issue ("Printable A4 PDF"), stored beside the cards PDF as
   `…-A4.pdf`.
 - **Setting:** Magazine settings → Channel has "Daily issue posted as" (story cards, or A4
