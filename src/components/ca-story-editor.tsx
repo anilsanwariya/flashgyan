@@ -195,6 +195,15 @@ export function StoryEditor({
     window.addEventListener("keydown", on);
     return () => window.removeEventListener("keydown", on);
   }, []);
+  // Saves run one at a time, each on the content the last one left, so two
+  // quick saves (or one after a rewrite) don't undo each other.
+  const saves = useRef<Promise<unknown>>(Promise.resolve());
+  const latest = useRef(new Map<string, CaContent | null>());
+  const itemId = item?.id;
+  const itemContent = item?.content;
+  useEffect(() => {
+    if (itemId) latest.current.set(itemId, itemContent ?? null);
+  }, [itemId, itemContent]);
 
   if (!item) return null;
   const c = item.content;
@@ -230,12 +239,19 @@ export function StoryEditor({
     }
   }
   // Saves one changed part of the story.
-  const save = async (patch: Partial<CaContent>) => {
-    if (!item.content) return;
-    await tracked(() =>
-      updateFn({ data: { id: item.id, content: { ...item.content!, ...patch } } }),
-    );
-    onChanged();
+  const save = (patch: Partial<CaContent>) => {
+    const sid = item.id;
+    const run = saves.current.then(async () => {
+      const base = latest.current.has(sid) ? latest.current.get(sid) : item.content;
+      if (!base) return;
+      const saved = await tracked(() =>
+        updateFn({ data: { id: sid, content: { ...base, ...patch } } }),
+      );
+      latest.current.set(sid, saved.content);
+      onChanged();
+    });
+    saves.current = run.catch(() => undefined);
+    return run;
   };
   // Leaving the story with a line still open asks first.
   const leave = (go: () => void) => {
@@ -551,7 +567,7 @@ export function StoryEditor({
                 {!ctx ? (
                   <NotWritten item={item} job={job} onWrite={() => void review.write(item)} />
                 ) : tab === "summary" ? (
-                  <SummaryTab {...ctx} />
+                  <SummaryTab key={item.id} {...ctx} />
                 ) : tab === "points" ? (
                   <PointsTab key={item.id} {...ctx} />
                 ) : tab === "images" ? (
@@ -560,6 +576,7 @@ export function StoryEditor({
                     hint="Photos, maps or diagrams for this story. Crop, turn, caption and place each one."
                   >
                     <StoryImages
+                      key={item.id}
                       itemId={item.id}
                       sourceIds={item.source_ids}
                       content={c!}
@@ -573,7 +590,13 @@ export function StoryEditor({
                     title="Visuals"
                     hint="Up to four per story, each above, beside or below the key points. Rebuild one as the type you pick, or edit its text and numbers."
                   >
-                    <StoryVisuals item={item} content={c!} busy={busy} onSave={save} />
+                    <StoryVisuals
+                      key={item.id}
+                      item={item}
+                      content={c!}
+                      busy={busy}
+                      onSave={save}
+                    />
                   </Section>
                 ) : tab === "map" ? (
                   <Section
@@ -588,6 +611,7 @@ export function StoryEditor({
                     hint="Textbook background on the concepts behind the news, from your books or SAATHI's own knowledge."
                   >
                     <StaticConnect
+                      key={item.id}
                       item={item}
                       content={c!}
                       lang={lang}
@@ -600,7 +624,7 @@ export function StoryEditor({
                 ) : tab === "factbite" ? (
                   <FactBiteTab key={item.id} {...ctx} />
                 ) : tab === "questions" ? (
-                  <QuestionsTab {...ctx} />
+                  <QuestionsTab key={item.id} {...ctx} />
                 ) : tab === "material" ? (
                   <Section
                     title="Add material"
@@ -1006,14 +1030,15 @@ function PointsTab({ item, c, lang, busy, save, act, onChanged, goTo }: Ctx) {
   const redoFn = useServerFn(redoCaVisual);
   const checkFn = useServerFn(setCaFactChecked);
   const inVisual = new Set(storyVisuals(c).flatMap((v) => v.covers));
-  // Points ticked to make a visual from.
-  const [picked, setPicked] = useState<Set<number>>(new Set());
+  // Points ticked to make a visual from, by their fact's text so a delete
+  // doesn't move the ticks.
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [making, setMaking] = useState(false);
-  const pick = (i: number, on: boolean) =>
+  const pick = (text: string, on: boolean) =>
     setPicked((cur) => {
       const next = new Set(cur);
-      if (on) next.add(i);
-      else next.delete(i);
+      if (on) next.add(text);
+      else next.delete(text);
       return next;
     });
   // A deleted key point is hidden at once and removed (with its fact) after a
@@ -1084,6 +1109,9 @@ function PointsTab({ item, c, lang, busy, save, act, onChanged, goTo }: Ctx) {
   const extraFacts = item.facts.slice(c.points.length);
   const markChecked = (text: string) =>
     act(() => checkFn({ data: { id: item.id, text, checked: true } }), "Marked checked");
+  const pickedAt = item.facts.flatMap((f, i) =>
+    i < c.points.length && picked.has(f.text) && !hidden.has(f.text) ? [i] : [],
+  );
 
   return (
     <Section
@@ -1101,13 +1129,13 @@ function PointsTab({ item, c, lang, busy, save, act, onChanged, goTo }: Ctx) {
     >
       {c.points.length >= 2 && (
         <div className="flex flex-wrap items-center gap-2 rounded-xl bg-muted/40 px-2.5 py-2 text-xs text-muted-foreground">
-          {picked.size ? (
+          {pickedAt.length ? (
             <>
-              <span className="font-medium text-foreground">{picked.size} picked</span>
+              <span className="font-medium text-foreground">{pickedAt.length} picked</span>
               <Button
                 size="sm"
                 className="h-7"
-                disabled={busy || picked.size < 2}
+                disabled={busy || pickedAt.length < 2}
                 onClick={() => setMaking(true)}
               >
                 <BarChart3 className="mr-1 h-3.5 w-3.5" /> Make a visual from these
@@ -1120,7 +1148,7 @@ function PointsTab({ item, c, lang, busy, save, act, onChanged, goTo }: Ctx) {
               >
                 Clear
               </Button>
-              {picked.size < 2 && <span>Pick at least two.</span>}
+              {pickedAt.length < 2 && <span>Pick at least two.</span>}
             </>
           ) : (
             <span>
@@ -1133,7 +1161,7 @@ function PointsTab({ item, c, lang, busy, save, act, onChanged, goTo }: Ctx) {
         <PickedPointsVisual
           item={item}
           content={c}
-          facts={[...picked].sort((a, b) => a - b)}
+          facts={pickedAt}
           onClose={() => setMaking(false)}
           onSave={async (patch) => {
             await save(patch);
@@ -1147,14 +1175,14 @@ function PointsTab({ item, c, lang, busy, save, act, onChanged, goTo }: Ctx) {
           if (f && hidden.has(f.text)) return null;
           return (
             <li
-              key={`${i}-${f?.text ?? ""}`}
+              key={f ? `fact-${f.text}` : `point-${i}`}
               className={`rounded-xl border p-2 ${f && !f.verified ? "border-amber-500/50 bg-amber-500/5" : "border-border"}`}
             >
               {f && (
                 <label className="mb-1 flex w-fit items-center gap-1.5 text-[11px] text-muted-foreground">
                   <Checkbox
-                    checked={picked.has(i)}
-                    onCheckedChange={(on) => pick(i, on === true)}
+                    checked={picked.has(f.text)}
+                    onCheckedChange={(on) => pick(f.text, on === true)}
                     aria-label={`Pick point ${i + 1} for a visual`}
                   />
                   {inVisual.has(i) ? "In a visual" : "Pick for a visual"}

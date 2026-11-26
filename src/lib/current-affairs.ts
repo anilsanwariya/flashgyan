@@ -620,6 +620,14 @@ Keep the editorial's own reasoning but drop rhetoric, quotes of politicians and 
   ];
 }
 
+// The same, for a reply that must be a list: one that can't be read is an
+// error (a part of the source silently lost otherwise), not "nothing found".
+export function parseExtractedStrict(raw: string, source: string, sourceId: string): RawItem[] {
+  if (!Array.isArray(parseJson<unknown[]>(raw)))
+    throw new Error("The AI's reply couldn't be read (it may have been cut off)");
+  return parseExtracted(raw, source, sourceId);
+}
+
 export function parseExtracted(raw: string, source: string, sourceId: string): RawItem[] {
   const list = parseJson<unknown[]>(raw);
   if (!Array.isArray(list)) return [];
@@ -801,7 +809,16 @@ export function enrichMessages(opts: {
   const visualNote = opts.visual
     ? `\nA ${opts.visual.type} printed with this story already shows ${covered.length ? `facts ${covered.join(", ")}` : "some of the facts"}. Do not restate ${covered.length ? "those facts" : "what it shows"} in the summary or "why"; still write their points (they are only printed if the visual is removed).`
     : "";
-  const storyNotes = `${visualNote}${opts.event ? roundupNote(opts.event, opts.eventKind) : opts.combined ? COMBINED_NOTE : ""}`;
+  // An editorial's own rules go here too, so the first message is the same
+  // for editorials and news (one cached copy, not two).
+  const editorialNote = editorial
+    ? `
+THIS IS AN EDITORIAL:
+- "summary": 3-4 connected sentences, about ${words} words: the issue, the main argument and the suggested way forward.
+- "mcq" may be null if the editorial gives no checkable fact.
+- Set "mains" unless it is about party politics. Ask an analytical question on the issue, anchored to its static topic and naming the exact subject, as RPSC does: "What are the challenges in implementing X? Suggest measures.", "How will X affect Y?", "Examine the issues in X." 10 marks, 150 words when the points give at least five answer points, otherwise 5 marks, 50 words.`
+    : "";
+  const storyNotes = `${visualNote}${editorialNote}${opts.event ? roundupNote(opts.event, opts.eventKind) : opts.combined ? COMBINED_NOTE : ""}`;
   return [
     {
       role: "system",
@@ -811,12 +828,12 @@ BE BRIEF: students revise from this, so less theory, more memorable facts. ${sum
 STATIC CONNECT links the news to the static syllabus. "keywords" lists up to ${MAX_KEYWORDS} static concepts the news links to that RPSC could ask about (constitutional articles, acts, institutions, technologies, schemes, places, conventions, terms), most important first (the "Static concept" in the message, when given), whether or not the passages explain them; each is a short name of at most 5 words. "statics" explains the first 1 or 2 keywords the way a textbook does: what it is, what it says, how it works, in 1-2 sentences of at most 40 words each, without retelling the news. Base each on the knowledge-base passages [K…] that explain it, even if they never mention the news, and list them in "from"; when no passage explains it, write it from well-established textbook knowledge you are sure of (no doubtful figures or dates) and leave "from" empty. Use [] for both when the news has no static concept worth explaining.${hindiGuide(opts.glossary)}
 Reply with JSON only:
 {"headline": {"en": "...", "hi": "..."},
- "summary": {"en": ${editorial ? `"3-4 connected sentences, about ${words} words: the issue, the main argument and the suggested way forward"` : `"3-4 connected sentences, about ${words} words (never more than ${words + 15}): the complete context of the news"`}, "hi": "..."},
+ "summary": {"en": "3-4 connected sentences, about ${words} words (never more than ${words + 15}): the complete context of the news", "hi": "..."},
  "points": [{"en": "...", "hi": "..."}] (exactly one per numbered fact, same order),
  "why": {"en": "a label, not a sentence: 'GS Paper <number> · <subject> · <topic in at most 6 words>' from the RAS syllabus topic given (e.g. 'GS Paper II · Earth Science · Climate of Rajasthan')", "hi": "the same label in Hindi (e.g. 'सामान्य अध्ययन प्रश्नपत्र II · भू-विज्ञान · राजस्थान की जलवायु')"},
  "keywords": [{"en": "...", "hi": "..."}],
  "statics": [{"keyword": its number in "keywords" (1 = first), "en": "...", "hi": "...", "from": ["K1", ...]}],
- "mcq": {"question": {"en": "...", "hi": "..."}, "options": [{"en": "...", "hi": "..."} x4], "answer": index 0-3, "explanation": {"en": "...", "hi": "..."}}${editorial ? " or null" : ""},
+ "mcq": {"question": {"en": "...", "hi": "..."}, "options": [{"en": "...", "hi": "..."} x4], "answer": index 0-3, "explanation": {"en": "...", "hi": "..."}},
  "mains": {"en": "...", "hi": "..."} or null}
 PRACTICE QUESTIONS follow the RPSC (RAS) pattern and difficulty:
 - "mcq" is a RAS Prelims question written the way RPSC sets current affairs (RAS Pre 2024 and Sub-Inspector 2025 papers, 2026 Prelims syllabus). Test the exact detail an examiner picks (a name, number, district, rank, ordinal, date, host, winner, author or provision), not the story's general idea. Choose the format from the facts:
@@ -831,12 +848,7 @@ PRACTICE QUESTIONS follow the RPSC (RAS) pattern and difficulty:
   - 5 marks, 50 words by default. 10 marks, 150 words only when the facts give at least five answer points: join two tasks in one question (what it is and its features, or the measures and how they help Rajasthan), anchored to a static syllabus topic (the constitutional article, institution or concept behind the news). Never print marks for parts and never offer "OR".
   - Use What is/are, Who, Write, Mention, Explain, Describe, Differentiate, Enumerate; "Examine" or "Analyse" only at 10 marks. Never a vague "Discuss the role/significance/importance of X", never opinion or political judgment, never bare recall of a date, rank or figure.
   - Name Rajasthan in the question when the facts are about Rajasthan (the state scheme, act, district or project); do not tack "with special reference to Rajasthan" onto national news.
-  - Questions already set for this issue are listed in the message; never set one on the same scheme, event or theme again (use null).${
-    editorial
-      ? `
-  - THIS IS AN EDITORIAL: set "mains" unless it is about party politics. Ask an analytical question on the issue, anchored to its static topic and naming the exact subject, as RPSC does: "What are the challenges in implementing X? Suggest measures.", "How will X affect Y?", "Examine the issues in X." 10 marks, 150 words when the points give at least five answer points, otherwise 5 marks, 50 words. Set "mcq" to null if the editorial gives no checkable fact.`
-      : ""
-  }
+  - Questions already set for this issue are listed in the message; never set one on the same scheme, event or theme again (use null).
   - End with the marks and word limit: "(5 marks, 50 words)" or "(10 marks, 150 words)"; in Hindi "(5 अंक, 50 शब्द)" or "(10 अंक, 150 शब्द)", using RPSC's Hindi phrasing (e.g. "के प्रमुख उद्देश्य लिखिए", "की मुख्य विशेषताओं का उल्लेख कीजिए").`,
     },
     ...(storyNotes
@@ -1154,6 +1166,22 @@ export function shiftChanges(changes: CaChange[], index: number): CaChange[] | n
   const next = changes
     .filter((c) => c.fact !== index)
     .map((c) => (c.fact > index ? { ...c, fact: c.fact - 1 } : c));
+  return next.length ? next : null;
+}
+
+// A correction's changes moved onto another list of facts (stories merged):
+// each change follows its fact by text; a change whose fact isn't there is
+// dropped. Null when none is left.
+export function reindexChanges(
+  changes: CaChange[],
+  from: { text: string }[],
+  to: { text: string }[],
+): CaChange[] | null {
+  const next = changes.flatMap((c) => {
+    const text = from[c.fact]?.text;
+    const at = text === undefined ? -1 : to.findIndex((f) => f.text === text);
+    return at < 0 ? [] : [{ ...c, fact: at }];
+  });
   return next.length ? next : null;
 }
 

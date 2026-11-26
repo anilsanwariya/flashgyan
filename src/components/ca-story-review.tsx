@@ -156,6 +156,10 @@ export function StoryList({
     if (reviewQ.data && typeof reviewQ.data === "object") setReviewState(reviewQ.data);
   }, [reviewQ.data]);
   useEffect(() => setReviewState({}), [date]);
+  // Sent one at a time (the server rewrites the whole list), and only the
+  // latest reply is shown, so quick taps don't lose one another.
+  const reviewQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const reviewSeq = useRef(0);
   async function setReview(ids: string[], state: ReviewState | null) {
     setReviewState((cur) => {
       const next = { ...cur };
@@ -165,13 +169,18 @@ export function StoryList({
       }
       return next;
     });
-    try {
-      const saved = await setReviewFn({ data: { date, ids, state } });
-      if (saved && typeof saved === "object") setReviewState(saved);
-    } catch (e) {
-      toast.error(errorText(e, "Couldn't save"));
-      void reviewQ.refetch();
-    }
+    const seq = ++reviewSeq.current;
+    const run = reviewQueue.current.then(async () => {
+      try {
+        const saved = await setReviewFn({ data: { date, ids, state } });
+        if (seq === reviewSeq.current && saved && typeof saved === "object") setReviewState(saved);
+      } catch (e) {
+        toast.error(errorText(e, "Couldn't save"));
+        void reviewQ.refetch();
+      }
+    });
+    reviewQueue.current = run;
+    await run;
   }
 
   const jobs = useStoryJobs(onChanged);

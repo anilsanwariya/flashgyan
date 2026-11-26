@@ -310,3 +310,31 @@ writing from the copy read before the call silently undid their edits.
 any duplicate open jobs first). Until it runs, the code's own check still refuses a second
 job, only not under a double click. A tick that dies mid-step leaves its job for up to 10
 minutes before another takes it.
+
+## ADR-024: Daily magazine work is claimed, guarded and recoverable (26 November 2026)
+
+**Decision:**
+- **Posting:** an issue left "posting" for 10 minutes (the bot stopped mid-post) is taken
+  again by `ca_claim_due_issue`, sending only the editions whose message id isn't saved yet;
+  the page offers "Post again" or "Cancel" for it.
+- **Approving:** each approval's PDFs go in a folder of their own (`daily/v<time>/…`, file
+  names unchanged for the channel), and the issue is saved only if it wasn't posted
+  meanwhile; the last approval's files are then removed.
+- **Corrections:** a correction is claimed while pending before it is applied, so its
+  channel note goes once.
+- **Writing:** the story writer saves only if the story is unchanged since it read it; new
+  facts merged meanwhile leave it to be written again on the next tick. Steps after the
+  save (versions, corrections, "Asked before", history) only log their failures.
+- **Reading sources:** an AI reply that can't be read marks the source as failed instead
+  of dropping that part.
+- **Collecting news:** a run is claimed for 10 minutes and released only by its own tick.
+  LlamaParse calls time out, and a PDF still unparsed after 20 minutes gives up even when
+  asking keeps failing. A failed read stops the step instead of ending the run.
+- **Merging stories:** pending corrections follow their facts by text when stories merge.
+- **Editor:** the story editor saves one change at a time on the latest content.
+
+**Reason:** these paths could post twice, post a stale PDF, leave an issue stuck with no way
+out, or silently undo facts and edits.
+**Consequence:** migration `20261228090000_ca_issue_stale_posting.sql` (safe to re-run).
+Until it runs, a stuck issue is recovered by hand with "Post again" or "Cancel" on the
+page.

@@ -416,7 +416,42 @@ function IssueBar({
             </Button>
           </>
         )}
-        {(issue?.status === "failed" || issue?.status === "cancelled") && (
+        {/* Cut off mid-post (the bot stopped): sent again, only what's missing. */}
+        {issue?.status === "posting" &&
+          !!issue.updated_at &&
+          Date.now() - Date.parse(issue.updated_at) > 10 * 60_000 && (
+            <>
+              <span className="text-xs text-amber-700 dark:text-amber-400">
+                Posting stopped partway.
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!!busy}
+                onClick={() =>
+                  run(
+                    "retry",
+                    () => postFn({ data: { kind, period } }),
+                    "Posting what's missing within a minute",
+                  )
+                }
+              >
+                <RefreshCw className="mr-1 h-4 w-4" /> Post again
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!!busy}
+                onClick={() =>
+                  run("cancel", () => cancelFn({ data: { kind, period } }), "Schedule cancelled")
+                }
+              >
+                Cancel
+              </Button>
+            </>
+          )}
+        {/* A cancelled issue is approved again instead, which remakes its PDFs. */}
+        {issue?.status === "failed" && (
           <Button
             size="sm"
             variant="outline"
@@ -560,6 +595,8 @@ function DailyPanel() {
   const [pending, setPending] = useState<PendingSource[]>([]);
   const [work, setWork] = useState<string | null>(null);
   const working = useRef(false);
+  // Bumped when other work ends, so sources added meanwhile are then read.
+  const [freed, setFreed] = useState(0);
 
   // Each uploaded or pasted source is saved, read into items and written up,
   // one at a time, in the order added.
@@ -586,7 +623,15 @@ function DailyPanel() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pending]);
+  }, [pending, freed]);
+  // Leaving the page while sources wait or work runs asks first.
+  const busyWork = pending.length > 0 || !!work;
+  useEffect(() => {
+    if (!busyWork) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [busyWork]);
 
   async function readSource(src: Pick<CaSource, "id" | "title" | "chunks" | "chunks_done">) {
     let created = 0;
@@ -687,6 +732,7 @@ function DailyPanel() {
     } finally {
       working.current = false;
       setWork(null);
+      setFreed((n) => n + 1);
       refresh();
     }
   }
@@ -717,6 +763,7 @@ function DailyPanel() {
     } finally {
       working.current = false;
       setWork(null);
+      setFreed((n) => n + 1);
       refresh();
     }
   }
@@ -1119,10 +1166,18 @@ function CorrectionsBox({
 }) {
   const decideFn = useServerFn(decideCaCorrection);
   const [busy, setBusy] = useState<string | null>(null);
+  // Decided ones hide at once, before the list reloads, so a second tap
+  // can't apply or post one again.
+  const sent = useRef(new Set<string>());
+  const [decided, setDecided] = useState<Set<string>>(new Set());
+  const left = corrections.filter((c) => !decided.has(c.id));
   async function decide(id: string, approve: boolean) {
+    if (sent.current.has(id)) return;
+    sent.current.add(id);
     setBusy(id);
     try {
       const r = await decideFn({ data: { id, approve } });
+      setDecided((cur) => new Set(cur).add(id));
       toast.success(
         !approve
           ? "Correction dismissed"
@@ -1132,11 +1187,13 @@ function CorrectionsBox({
       );
       onChanged();
     } catch (e) {
+      sent.current.delete(id);
       toast.error(errorText(e, "Failed"));
     } finally {
       setBusy(null);
     }
   }
+  if (!left.length) return null;
   return (
     <section className="space-y-2 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4">
       <h3 className="flex items-center gap-2 font-semibold">
@@ -1147,7 +1204,7 @@ function CorrectionsBox({
         monthly magazine uses the corrected version and lists the change.
       </p>
       <ul className="space-y-2">
-        {corrections.map((c) => (
+        {left.map((c) => (
           <li key={c.id} className="rounded-xl border border-border bg-card p-3 text-sm">
             <div className="font-medium">
               {formatDate(c.item_date, "en")} · {c.headline}

@@ -110,6 +110,7 @@ import {
   parseChanges,
   parseContent,
   parseExtracted,
+  parseExtractedStrict,
   MAX_STATICS,
   mergeKeywords,
   mergeStatics,
@@ -126,6 +127,7 @@ import {
   quoteInSource,
   removePoint,
   shiftChanges,
+  reindexChanges,
   splitSource,
   storyText,
   type Bi,
@@ -402,7 +404,19 @@ export type CaIssue = {
   approved_at: string | null;
   posted_at: string | null;
   error: string | null;
+  // Each edition's message once sent (a retry sends only what is missing).
+  telegram_message_id?: number | null;
+  telegram_message_id_hi?: number | null;
+  updated_at?: string;
 };
+
+// An issue left "posting" this long was cut off mid-post (the bot stopped):
+// it can be posted again (only what's missing is sent) or cancelled.
+const POSTING_STALE_MS = 10 * 60_000;
+export const stalePosting = (issue: CaIssue, now = Date.now()) =>
+  issue.status === "posting" &&
+  !!issue.updated_at &&
+  now - Date.parse(issue.updated_at) > POSTING_STALE_MS;
 
 export type CaCorrection = {
   id: string;
@@ -653,7 +667,7 @@ export async function extractSourceChunk(sourceId: string, index: number) {
         focus: await examFocus(),
       }),
     );
-    const found = parseExtracted(raw, text, src.id);
+    const found = parseExtractedStrict(raw, text, src.id);
     const { daily_stories } = settingsNow;
     // The day's stories, kept up to date as this part adds to them.
     const day = found.length ? await dayStoryRows({ date: src.issue_date }) : [];
@@ -926,6 +940,32 @@ async function mergeGroup(members: DayStoryRow[], distinct = false): Promise<str
       .eq("id", keeper.id));
   }
   fail(error);
+  // Pending corrections follow their facts into the merged list (their fact
+  // numbers were the old stories'); decided ones just move.
+  const { data: pend, error: pe } = await from("ca_corrections")
+    .select("id,item_id,changes")
+    .in("item_id", [keeper.id, ...otherIds])
+    .eq("status", "pending");
+  fail(pe);
+  for (const c of (pend ?? []) as { id: string; item_id: string; changes: CaChange[] }[]) {
+    const was = members.find((m) => m.id === c.item_id)?.facts ?? [];
+    const changes = reindexChanges(c.changes ?? [], was, facts);
+    fail(
+      (
+        await from("ca_corrections")
+          .update(
+            (changes
+              ? { item_id: keeper.id, changes }
+              : {
+                  item_id: keeper.id,
+                  status: "rejected",
+                  decided_at: new Date().toISOString(),
+                }) as never,
+          )
+          .eq("id", c.id)
+      ).error,
+    );
+  }
   fail(
     (
       await from("ca_corrections")
@@ -1231,6 +1271,13 @@ export async function enrichItem(
     reason?: CaVersion["reason"];
   } = {},
 ): Promise<CaItem> {
+  // When it was read: the text is saved only if nothing changed the story
+  // while the AI wrote (new facts merged, the editor's edits).
+  const { data: seenRow } = await from("ca_items")
+    .select("updated_at")
+    .eq("id", itemId)
+    .maybeSingle();
+  const seen = String((seenRow as { updated_at?: string } | null)?.updated_at ?? "");
   const item = await loadItem(itemId);
   item.category = normalizeCategory(item.category);
   const before = opts.before !== undefined ? opts.before : snapshotOf(item);
@@ -1337,15 +1384,39 @@ export async function enrichItem(
     const { data: saved, error: uErr } = await from("ca_items")
       .update(update as never)
       .eq("id", itemId)
+      .eq("updated_at", seen)
       .select(ITEM_COLS)
-      .single();
+      .maybeSingle();
     fail(uErr);
-    if (before) await saveVersion(itemId, before, opts.reason ?? "write");
-    if (item.related_item_id) await checkForCorrections(item.related_item_id, itemId);
+    if (!saved) {
+      const now = await loadItem(itemId);
+      // New facts came in: written again on the next tick, with them.
+      if (now.needs_enrich) {
+        await clearWriteProgress(itemId);
+        return now;
+      }
+      throw new Error("The story was changed while it was being written: write it again.");
+    }
+    // The story is saved; what follows only adds to it, and its failures
+    // are logged, not shown as the writing failing.
+    const after = async (what: string, fn: () => Promise<unknown>) => {
+      try {
+        await fn();
+      } catch (e) {
+        console.error(`after writing (${what}):`, e);
+      }
+    };
+    if (before) await after("version", () => saveVersion(itemId, before, opts.reason ?? "write"));
+    if (item.related_item_id)
+      await after("corrections", () => checkForCorrections(item.related_item_id!, itemId));
     // Past exam questions on its topic ("Asked before").
-    await (await import("@/lib/ca-asked.server")).linkAskedFor(itemId);
+    await after("asked before", async () =>
+      (await import("@/lib/ca-asked.server")).linkAskedFor(itemId),
+    );
     // A report's earlier editions, an appointment's predecessors.
-    await (await import("@/lib/ca-history.server")).makeHistorySafe(itemId);
+    await after("history", async () =>
+      (await import("@/lib/ca-history.server")).makeHistorySafe(itemId),
+    );
     await clearWriteProgress(itemId);
     return saved as unknown as CaItem;
   } catch (e) {
@@ -4575,11 +4646,38 @@ async function postCorrectionNote(
 
 // `noted`: the correction was also announced on the channel.
 export async function decideCorrection(id: string, approve: boolean) {
-  const { data, error } = await from("ca_corrections").select("*").eq("id", id).single();
+  // Taken first, only while pending: a second click (or a second admin)
+  // finds it decided, so the changes and the channel's note go once.
+  const { data, error } = await from("ca_corrections")
+    .update({
+      status: approve ? "approved" : "rejected",
+      decided_at: new Date().toISOString(),
+    } as never)
+    .eq("id", id)
+    .eq("status", "pending")
+    .select("*")
+    .maybeSingle();
   fail(error);
+  if (!data) throw new Error("This correction was already decided.");
   const corr = data as unknown as CaCorrection;
   let noted = false;
   if (approve) {
+    try {
+      noted = await applyCorrection(corr);
+    } catch (e) {
+      // Not applied: back to pending, to try again.
+      await from("ca_corrections")
+        .update({ status: "pending", decided_at: null } as never)
+        .eq("id", id);
+      throw e;
+    }
+  }
+  return { ...corr, noted };
+}
+
+async function applyCorrection(corr: CaCorrection): Promise<boolean> {
+  let noted = false;
+  {
     const { data: it } = await from("ca_items").select(ITEM_COLS).eq("id", corr.item_id).single();
     const item = it as unknown as CaItem;
     const next = applyChanges(item.facts, item.content, corr.changes);
@@ -4599,7 +4697,12 @@ export async function decideCorrection(id: string, approve: boolean) {
     // Keep SAATHI's copy of that day up to date.
     const day = await getIssue("daily", item.issue_date);
     const settings = await getMagazineSettings();
-    noted = await postCorrectionNote(item, corr, settings);
+    // The story is corrected now: a note that fails isn't a reason to undo it.
+    try {
+      noted = await postCorrectionNote(item, corr, settings);
+    } catch (e) {
+      console.error("correction note:", e);
+    }
     if (
       day &&
       day.status !== "draft" &&
@@ -4613,17 +4716,7 @@ export async function decideCorrection(id: string, approve: boolean) {
       }
     }
   }
-  fail(
-    (
-      await from("ca_corrections")
-        .update({
-          status: approve ? "approved" : "rejected",
-          decided_at: new Date().toISOString(),
-        } as never)
-        .eq("id", id)
-    ).error,
-  );
-  return { ...corr, noted };
+  return noted;
 }
 
 // ---------- Building issues ----------
@@ -4999,11 +5092,23 @@ async function issuePdf(kind: "daily" | "monthly", period: string, lang: Lang) {
   return { ...again, pdf: padded.pdf };
 }
 
-function fileName(kind: "daily" | "monthly", period: string, lang: Lang) {
+// The file's own name is what the channel shows; the folder keeps each
+// approval's files apart.
+function fileName(kind: "daily" | "monthly", period: string, lang: Lang, version: string) {
   const name = lang === "hi" ? "Hindi" : "English";
   return kind === "daily"
-    ? `daily/FlashGyan-Current-Affairs-${period}-${name}.pdf`
-    : `monthly/FlashGyan-Current-Affairs-${period.slice(0, 7)}-${name}.pdf`;
+    ? `daily/${version}/FlashGyan-Current-Affairs-${period}-${name}.pdf`
+    : `monthly/${version}/FlashGyan-Current-Affairs-${period.slice(0, 7)}-${name}.pdf`;
+}
+
+// Old PDFs removed; a failure only leaves a file behind.
+async function removeFiles(paths: string[]) {
+  if (!paths.length) return;
+  try {
+    await supabaseAdmin.storage.from(BUCKET).remove(paths);
+  } catch (e) {
+    console.error("magazine files:", e);
+  }
 }
 
 async function upsertIssue(
@@ -5108,14 +5213,17 @@ export async function buildIssue(
       throw new Error(`${count} item(s) still need writing. Run "Write magazine text" first.`);
   }
   // The English issue and the Hindi issue, from the same stories, one after
-  // the other: Cloudflare refuses PDFs asked for at the same time.
+  // the other: Cloudflare refuses PDFs asked for at the same time. Each
+  // approval's files go in a folder of their own, so a post already sending
+  // the last ones never gets half of the new pair.
+  const version = `v${Date.now()}`;
   const made = [];
   for (const lang of ["en", "hi"] as const) {
     made.push(
       await (async () => {
         const { pdf, settings, count } = await issuePdf(kind, period, lang);
         if (count === 0) throw new Error("There are no items to put in this issue.");
-        const path = fileName(kind, period, lang);
+        const path = fileName(kind, period, lang, version);
         const { error } = await supabaseAdmin.storage
           .from(BUCKET)
           .upload(path, pdf, { contentType: "application/pdf", upsert: true });
@@ -5140,7 +5248,7 @@ export async function buildIssue(
         ? dailyPostTime(period, settings.post_time)
         : new Date()
     : null;
-  const issue = await upsertIssue(kind, period, {
+  const patch = {
     pdf_path: en.path,
     pdf_url: en.url,
     caption: en.caption,
@@ -5152,7 +5260,30 @@ export async function buildIssue(
     scheduled_for: scheduledFor?.toISOString() ?? null,
     approved_at: opts.schedule ? new Date().toISOString() : null,
     error: null,
-  });
+  };
+  // Saved only if it wasn't posted while the PDFs were made (the post that
+  // went out stays recorded as posted).
+  let issue: CaIssue;
+  if (current) {
+    const { data, error } = await from("ca_issues")
+      .update({ ...patch, updated_at: new Date().toISOString() } as never)
+      .eq("id", current.id)
+      .not("status", "in", "(posting,posted)")
+      .select("*")
+      .maybeSingle();
+    fail(error);
+    if (!data) {
+      await removeFiles([en.path, hi.path]);
+      throw new Error("This issue was posted while it was being made.");
+    }
+    issue = data as unknown as CaIssue;
+    // The last approval's files, no longer used.
+    await removeFiles(
+      [current.pdf_path, current.pdf_path_hi].filter(
+        (p): p is string => !!p && p !== en.path && p !== hi.path,
+      ),
+    );
+  } else issue = await upsertIssue(kind, period, patch);
   if (opts.schedule && kind === "daily" && settings.add_to_knowledge_base) {
     try {
       await addDayToKnowledgeBase(period);
@@ -5172,7 +5303,7 @@ export async function buildIssue(
 
 export async function cancelIssue(kind: "daily" | "monthly", period: string) {
   const issue = await getIssue(kind, period);
-  if (!issue || issue.status !== "scheduled")
+  if (!issue || (issue.status !== "scheduled" && !stalePosting(issue)))
     throw new Error("Only a scheduled issue can be cancelled.");
   return upsertIssue(kind, period, { status: "cancelled", scheduled_for: null });
 }
@@ -5180,7 +5311,12 @@ export async function cancelIssue(kind: "daily" | "monthly", period: string) {
 export async function postIssueNow(kind: "daily" | "monthly", period: string) {
   const issue = await getIssue(kind, period);
   if (!issue?.pdf_path) throw new Error("Approve the issue first.");
-  if (issue.status === "posted" || issue.status === "posting") throw new Error("Already posted.");
+  const stale = stalePosting(issue);
+  if (issue.status === "posted" || (issue.status === "posting" && !stale))
+    throw new Error("Already posted.");
+  // Cut off after every edition went out: it was posted.
+  if (stale && issue.telegram_message_id && (!issue.pdf_path_hi || issue.telegram_message_id_hi))
+    return upsertIssue(kind, period, { status: "posted", error: null });
   return upsertIssue(kind, period, {
     status: "scheduled",
     scheduled_for: new Date().toISOString(),

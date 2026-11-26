@@ -275,9 +275,12 @@ export async function tick(origin?: string): Promise<TickResult> {
 
   if (!runs("collection")) return { run: null, steps: [] };
   const settings = await settingsNow();
+  // Held for 10 minutes: longer than a step can take (one starts within
+  // the 15-second budget but can run for minutes), so the next minute's
+  // tick doesn't take the same run while this one still works on it.
   const { data: claimed, error } = await supabaseAdmin.rpc(
     "ca_claim_run" as never,
-    { p_seconds: 120 } as never,
+    { p_seconds: 600 } as never,
   );
   fail(error);
   const run = ((claimed ?? []) as unknown as CaRun[])[0];
@@ -309,9 +312,13 @@ export async function tick(origin?: string): Promise<TickResult> {
       .update({ error: failure, updated_at: now() } as never)
       .eq("id", run.id);
   } finally {
-    await from("ca_runs")
+    // Released only if still this tick's claim (not one taken since).
+    const mine = (run as unknown as { locked_until?: string | null }).locked_until;
+    let release = from("ca_runs")
       .update({ locked_until: null } as never)
       .eq("id", run.id);
+    if (mine) release = release.eq("locked_until", mine);
+    await release;
   }
   try {
     if (finished) await from("bot_settings").delete().eq("key", `${RUN_HEALTH_KEY}${run.id}`);
@@ -427,38 +434,44 @@ async function nextStep(run: CaRun): Promise<string | "wait" | null> {
   }
 
   // 2) Pick the exam-relevant headlines.
-  const { count: found } = await from("ca_articles")
+  // A read that fails stops this step (the tick records it and the next
+  // one tries again) instead of looking like "nothing left".
+  const { count: found, error: fe } = await from("ca_articles")
     .select("id", { count: "exact", head: true })
     .eq("run_id", run.id)
     .eq("status", "found");
+  fail(fe);
   if (found) return `picked ${await triage(run, sites)} headlines`;
 
   // 3) Check PDFs being parsed.
-  const { data: parsing } = await from("ca_articles")
+  const { data: parsing, error: pe } = await from("ca_articles")
     .select("*")
     .eq("run_id", run.id)
     .eq("status", "parsing")
     .limit(5);
+  fail(pe);
   const parsed = await pollParsing((parsing ?? []) as unknown as CaArticle[], sites);
 
   // 4) Fetch selected articles.
-  const { data: selected } = await from("ca_articles")
+  const { data: selected, error: se } = await from("ca_articles")
     .select("*")
     .eq("issue_date", run.issue_date)
     .eq("status", "selected")
     .limit(5);
+  fail(se);
   const toFetch = (selected ?? []) as unknown as CaArticle[];
   if (toFetch.length) return `fetched ${await fetchArticles(toFetch, sites)} articles`;
   if (parsed) return `parsed ${parsed} PDFs`;
 
   // 5) Read the collected sources into news items.
-  const { data: srcs } = await from("ca_sources")
+  const { data: srcs, error: re } = await from("ca_sources")
     .select("id,title,chunks,chunks_done,status")
     .eq("issue_date", run.issue_date)
     .not("url", "is", null)
     .in("status", ["new", "extracting"])
     .order("created_at")
     .limit(1);
+  fail(re);
   const src = (
     (srcs ?? []) as { id: string; title: string; chunks: number; chunks_done: number }[]
   )[0];
@@ -494,13 +507,14 @@ async function nextStep(run: CaRun): Promise<string | "wait" | null> {
   }
 
   // 6) Write the magazine text.
-  const { data: items } = await from("ca_items")
+  const { data: items, error: ie } = await from("ca_items")
     .select("id,headline")
     .eq("issue_date", run.issue_date)
     .eq("status", "included")
     .eq("needs_enrich", true)
     .is("enrich_error", null)
     .limit(1);
+  fail(ie);
   const item = ((items ?? []) as { id: string; headline: string }[])[0];
   if (item) {
     await CA.enrichItem(item.id).catch(() => undefined);
@@ -1034,15 +1048,24 @@ async function tavilyExtract(urls: string[]): Promise<Map<string, string>> {
 
 async function saveArticle(article: CaArticle, site: WatchSite | undefined, text: string) {
   const content = `# ${article.title}\n\n${text.trim().slice(0, 60_000)}\n\nSource: ${article.url}`;
-  const source = await CA.addSource({
-    issue_date: article.issue_date,
-    section: site?.section ?? "news",
-    source_name: site?.name ?? new URL(article.url).hostname,
-    title: article.title.slice(0, 300),
-    content,
-    url: article.url,
-    ...(site?.official ? { official: true } : {}),
-  });
+  // Saved before (the article's own update failed after): not added twice.
+  const { data: had } = await from("ca_sources")
+    .select("id")
+    .eq("issue_date", article.issue_date)
+    .eq("url", article.url)
+    .limit(1);
+  const existing = ((had ?? []) as { id: string }[])[0];
+  const source =
+    existing ??
+    (await CA.addSource({
+      issue_date: article.issue_date,
+      section: site?.section ?? "news",
+      source_name: site?.name ?? new URL(article.url).hostname,
+      title: article.title.slice(0, 300),
+      content,
+      url: article.url,
+      ...(site?.official ? { official: true } : {}),
+    }));
   fail(
     (
       await from("ca_articles")
@@ -1121,6 +1144,7 @@ async function startPdfParse(article: CaArticle, site: WatchSite | undefined) {
     method: "POST",
     headers: { Authorization: `Bearer ${key}` },
     body: form,
+    signal: AbortSignal.timeout(60_000),
   });
   const job = ((await up.json().catch(() => ({}))) as { id?: string }).id;
   if (!up.ok || !job) return markFailed(article.id, `LlamaParse upload failed (${up.status})`);
@@ -1137,17 +1161,24 @@ async function pollParsing(articles: CaArticle[], sites: WatchSite[]): Promise<n
   let done = 0;
   for (const a of articles) {
     try {
-      const st = await fetch(`${LLAMA_BASE}/job/${a.parse_job}`, { headers });
+      const st = await fetch(`${LLAMA_BASE}/job/${a.parse_job}`, {
+        headers,
+        signal: AbortSignal.timeout(20_000),
+      });
       const status = (
         ((await st.json().catch(() => ({}))) as { status?: string }).status ?? ""
       ).toUpperCase();
       if (status === "SUCCESS") {
-        const md = await fetch(`${LLAMA_BASE}/job/${a.parse_job}/result/markdown`, { headers });
+        const md = await fetch(`${LLAMA_BASE}/job/${a.parse_job}/result/markdown`, {
+          headers,
+          signal: AbortSignal.timeout(30_000),
+        });
         const text = (
           ((await md.json().catch(() => ({}))) as { markdown?: string }).markdown ?? ""
         ).trim();
         if (text.length >= 200) {
-          await saveArticle(a, byId.get(a.site_id ?? ""), text);
+          // NUL bytes (some PDFs' text) are refused by the database.
+          await saveArticle(a, byId.get(a.site_id ?? ""), text.split("\u0000").join(""));
           done++;
         } else await markFailed(a.id, "The PDF had no readable text");
       } else if (["ERROR", "FAILED", "CANCELED"].includes(status)) {
@@ -1157,6 +1188,11 @@ async function pollParsing(articles: CaArticle[], sites: WatchSite[]): Promise<n
       }
     } catch (e) {
       console.error("pdf poll:", e);
+      // The same give-up when asking keeps failing, so the run can finish.
+      if (Date.now() - Date.parse(a.updated_at) > 20 * 60_000)
+        await markFailed(a.id, `PDF parsing failed: ${e instanceof Error ? e.message : e}`).catch(
+          () => {},
+        );
     }
   }
   return done;

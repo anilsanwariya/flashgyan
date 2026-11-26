@@ -910,7 +910,19 @@ export function VisualEditor({
       : undefined;
   const stray = unverifiedNumbers(draft, item.facts, item.headline);
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
+    // Escape or a tap outside asks before dropping changes, and waits while saving.
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (o || saving) return;
+        if (
+          JSON.stringify(draft) !== JSON.stringify(visual) &&
+          !confirm("Discard the changes not saved?")
+        )
+          return;
+        onClose();
+      }}
+    >
       <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit the {VISUAL_LABELS[draft.type].toLowerCase()}</DialogTitle>

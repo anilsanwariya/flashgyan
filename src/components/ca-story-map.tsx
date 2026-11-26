@@ -30,16 +30,33 @@ export function StoryMap({
   const [m, setM] = useState<MapSpec | null>(content.map ?? null);
   const [busy, setBusy] = useState(false);
   const sent = useRef(JSON.stringify(content.map ?? null));
+  // The latest onSave and map, so a new onSave each render doesn't restart
+  // the wait and leaving the tab still saves.
+  const saveRef = useRef(onSave);
+  const mapRef = useRef(m);
+  useEffect(() => {
+    saveRef.current = onSave;
+  }, [onSave]);
+  const flush = useRef(() => {
+    const json = JSON.stringify(mapRef.current);
+    if (json === sent.current) return;
+    sent.current = json;
+    saveRef
+      .current({ map: mapRef.current })
+      .catch((e) => toast.error(errorText(e, "Couldn't save the map")));
+  });
   // Saved once typing pauses.
   useEffect(() => {
-    const json = JSON.stringify(m);
-    if (json === sent.current) return;
-    const t = setTimeout(() => {
-      sent.current = json;
-      onSave({ map: m }).catch((e) => toast.error(errorText(e, "Couldn't save the map")));
-    }, 800);
+    mapRef.current = m;
+    if (JSON.stringify(m) === sent.current) return;
+    const t = setTimeout(() => flush.current(), 800);
     return () => clearTimeout(t);
-  }, [m, onSave]);
+  }, [m]);
+  // A change not saved yet is saved when the map closes.
+  useEffect(() => {
+    const f = flush.current;
+    return () => f();
+  }, []);
   const [shown, setShown] = useState(m);
   useEffect(() => {
     const t = setTimeout(() => setShown(m), 500);
