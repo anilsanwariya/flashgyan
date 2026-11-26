@@ -8,6 +8,7 @@ import type { LangStatus } from "@/lib/ca-bilingual";
 import { TRIAGE } from "../../supabase/functions/_shared/ca-triage.ts";
 import { officialCounts, type OfficialCheck } from "@/lib/ca-official";
 import { STYLE_TG } from "../../supabase/functions/_shared/ca-style-check.ts";
+import { findRepeats, type RepeatContent } from "@/lib/ca-repeats";
 
 export type CheckAction =
   | { kind: "story"; id: string }
@@ -119,6 +120,25 @@ export function dayChecklist(o: {
         }
       : { key: "facts", state: "done", text: "No facts left to check" },
   );
+
+  // A fact printed twice in a story: worth a look (each fact once).
+  const repeating = included.filter(
+    (i) =>
+      i.content &&
+      (findRepeats(i.content as RepeatContent, "hi").length ||
+        findRepeats(i.content as RepeatContent, "en").length),
+  );
+  if (included.some((i) => i.content))
+    out.push(
+      repeating.length
+        ? {
+            key: "repeats",
+            state: "note",
+            text: `${plural(repeating.length, "story", "stories")} print${repeating.length === 1 ? "s" : ""} a fact twice`,
+            action: { kind: "story", id: repeating[0].id, label: "Show" },
+          }
+        : { key: "repeats", state: "done", text: "No fact printed twice" },
+    );
 
   // The official source check (only stories with names, amounts, dates or
   // posts to check).

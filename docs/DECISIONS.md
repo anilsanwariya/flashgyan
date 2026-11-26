@@ -438,3 +438,26 @@ pipeline, not free-running agents: cheaper and predictable.
 **Consequence:** no migration. The Proofreader (learning from accepted and dismissed
 notes) and the Updater (corrections and follow-ups) come next. No member acts on its own;
 autonomy can be considered once a scorecard stays high.
+
+## ADR-028: Each fact once in a story: the writer told so, repeats found and fixed on request (26 November 2026)
+
+**Decision:**
+- **The writer's rule:** every fact, figure, name and date appears in one place only in
+  the story. The summary explains and leaves the figures to the points and visuals; only
+  the main figure the headline names may also appear in it. Static Context adds nothing
+  the points say. The writer checks its draft for repeats before replying. This lives in
+  the first system message, so the prompt cache is unchanged.
+- **The check:** `findRepeats` (`ca-repeats.ts`, pure, no AI) finds the same figure or
+  date, or the same sentence, printed in two parts of a story. Figures match however
+  they're written (Devanagari digits, commas, "per cent" or "%"). Small counts and bare
+  years don't count, points a visual covers aren't printed, and the headline isn't checked.
+- **In the story editor:** the repeats show as a note with **"Remove the repeat"**, which
+  rewrites only the repeating prose (summary, Static Context or Fact Bite lines) in both
+  languages, as an edit whose earlier version stays in History. A point repeating a visual
+  is fixed by covering the point with the visual.
+- **The day's checklist:** shows "N stories print a fact twice" as a note, which doesn't
+  block approving.
+
+**Reason:** students revise from a story; the same figure two or three times wastes space
+and reads as padding. Cutting words automatically at print time could leave broken
+sentences, so the editor decides.

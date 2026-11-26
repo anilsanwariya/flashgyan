@@ -4291,6 +4291,71 @@ export async function applyStyleFix(date: string, breakId: string): Promise<CaIt
   return updated;
 }
 
+// ---------- A fact printed twice in one story ----------
+
+// The prose parts that repeat a fact (the summary, a Static Context line, a
+// Fact Bite line) rewritten without it, in both languages, as an edit (its
+// version kept). A figure a point and a visual both show isn't changed
+// here: the point is hidden by covering it with the visual.
+const REPEATS_SYSTEM = `You edit one news story of a bilingual (Hindi and English) current affairs magazine for Rajasthan exam aspirants. A fact is printed twice in the story. Rewrite ONLY the parts you are given so that they no longer state the repeated facts, which the key points already give: keep their meaning, length and tone, keep everything else they say, and add nothing new. Hindi in standard Devanagari, as the magazine writes it.
+Reply with JSON only: {"summary": {"en": "...", "hi": "..."}, "statics": [{"index": 0, "en": "...", "hi": "..."}], "dyk": [{"index": 0, "en": "...", "hi": "..."}]} (only the parts you were given).`;
+
+export async function removeRepeats(itemId: string): Promise<CaItem> {
+  const item = await loadItem(itemId);
+  await assertDayEditable([item.issue_date]);
+  const c = item.content;
+  if (!c) throw new Error("The story isn't written yet.");
+  const { findRepeats } = await import("@/lib/ca-repeats");
+  const repeats = [...findRepeats(c, "en"), ...findRepeats(c, "hi")];
+  const parts = repeats.flatMap((r) => r.parts);
+  const summary = parts.some((p) => p.kind === "summary");
+  const statics = [...new Set(parts.flatMap((p) => (p.kind === "static" ? [p.index] : [])))];
+  const dyk = [...new Set(parts.flatMap((p) => (p.kind === "dyk" ? [p.index] : [])))];
+  if (!summary && !statics.length && !dyk.length)
+    throw new Error(
+      "Nothing to rewrite: a repeat between a point and a visual is fixed by covering the point with the visual.",
+    );
+  const ask = [
+    `Repeated: ${[...new Set(repeats.map((r) => r.value))].join("; ")}`,
+    `Key points (they keep these facts):\n${c.points.map((p, i) => `${i + 1}. ${p.en} | ${p.hi}`).join("\n")}`,
+    summary ? `summary:\nEN: ${c.summary.en}\nHI: ${c.summary.hi}` : "",
+    ...statics.map(
+      (i) =>
+        `statics index ${i}:\nEN: ${c.statics?.[i]?.text.en ?? ""}\nHI: ${c.statics?.[i]?.text.hi ?? ""}`,
+    ),
+    ...dyk.map((i) => `dyk index ${i}:\nEN: ${c.dyk?.[i]?.en ?? ""}\nHI: ${c.dyk?.[i]?.hi ?? ""}`),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const raw = await saathiComplete(apiKey(), [
+    { role: "system", content: REPEATS_SYSTEM },
+    { role: "user", content: ask },
+  ]);
+  const { parseJsonLoose } = await import("../../supabase/functions/_shared/saathi-core.ts");
+  const o = parseJsonLoose<{
+    summary?: { en?: string; hi?: string };
+    statics?: { index?: number; en?: string; hi?: string }[];
+    dyk?: { index?: number; en?: string; hi?: string }[];
+  }>(raw);
+  if (!o) throw new Error("The AI's reply couldn't be read. Try again.");
+  const text = (v: unknown, keep: string) =>
+    typeof v === "string" && v.trim() ? v.trim().slice(0, 4000) : keep;
+  const next: CaContent = { ...c };
+  if (summary && o.summary)
+    next.summary = { en: text(o.summary.en, c.summary.en), hi: text(o.summary.hi, c.summary.hi) };
+  if (next.statics)
+    next.statics = next.statics.map((st, i) => {
+      const f = statics.includes(i) ? o.statics?.find((x) => x.index === i) : undefined;
+      return f ? { ...st, text: { en: text(f.en, st.text.en), hi: text(f.hi, st.text.hi) } } : st;
+    });
+  if (next.dyk)
+    next.dyk = next.dyk.map((d, i) => {
+      const f = dyk.includes(i) ? o.dyk?.find((x) => x.index === i) : undefined;
+      return f ? { ...d, en: text(f.en, d.en), hi: text(f.hi, d.hi) } : d;
+    });
+  return asEdit(item.id, () => updateItem(item.id, { content: next }));
+}
+
 // "It's fine": the note stays out of the list (and out of later checks that
 // find the same thing in the same text).
 export async function dismissStyleBreak(date: string, breakId: string): Promise<StyleCheck> {
