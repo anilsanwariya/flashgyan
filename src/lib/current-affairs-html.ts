@@ -118,6 +118,20 @@ export type Lang = "en" | "hi";
 
 // A part in the issue's language (the other one when it's missing: the
 // Hindi–English check flags those before scheduling).
+// Text cut to `max` letters as a reader sees them (a Hindi conjunct or a
+// vowel sign is never split), at a word's end when one is near.
+export function clipText(v: string, max: number, lang: Lang): string {
+  const seg =
+    typeof Intl !== "undefined" && "Segmenter" in Intl
+      ? [...new Intl.Segmenter(lang, { granularity: "grapheme" }).segment(v)].map((g) => g.segment)
+      : Array.from(v);
+  if (seg.length <= max) return v;
+  let cut = seg.slice(0, max - 1).join("");
+  const space = cut.lastIndexOf(" ");
+  if (space > cut.length * 0.7) cut = cut.slice(0, space);
+  return `${cut.trimEnd()}…`;
+}
+
 const pick = (b: Bi | null | undefined, lang: Lang) =>
   ((lang === "hi" ? b?.hi || b?.en : b?.en || b?.hi) ?? "").trim();
 
@@ -1391,12 +1405,12 @@ function renderMagazineInner(opts: {
           opts.radar.shares,
         )
       : [];
-  const clip = (v: string, max: number) => (v.length > max ? `${v.slice(0, max - 1)}…` : v);
+  const clip = (v: string, max: number) => clipText(v, max, lang);
   const radarHtml = radar.length
     ? `<section class="section new-page radar"><div class="section-title"><h2>${icon("practice")} ${t.radar}</h2><span>${t.radarSub}</span></div><p class="radar-intro">${t.radarIntro}</p><ol class="radar-list">${radar
         .map(
           ({ story: it, reasons }) =>
-            `<li><span class="rd-n">${t.radarStory} ${numberOf.get(it.id)}</span><div class="rd-body"><b>${esc(pick(it.content.headline, lang))}</b><div class="rd-line">${esc(clip(pick(it.content.oneliner ?? it.content.summary, lang), 170))}</div>${
+            `<li><span class="rd-n">${t.radarStory} ${numberOf.get(it.id)}</span><div class="rd-body"><b>${esc(pick(it.content.headline, lang))}</b><div class="rd-line">${esc(clip(pick(it.content.oneliner, lang) || pick(it.content.summary, lang), 170))}</div>${
               reasons.length
                 ? `<div class="rd-tags">${reasons.map((r) => `<span class="rd-tag rd-${r.kind}">${esc(reasonText(r, lang))}</span>`).join("")}</div>`
                 : ""

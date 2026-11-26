@@ -460,7 +460,9 @@ export const deleteCaSource = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
-    await (await server()).deleteSource(data.id);
+    // Through the day's lock, like deleting several: a scheduled day's
+    // stories don't change after its PDF is made.
+    await (await server()).deleteSources([data.id]);
     return { ok: true };
   });
 
