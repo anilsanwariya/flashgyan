@@ -3212,6 +3212,7 @@ export type Database = {
           cta_url: string
           hide_app_store: boolean
           hide_atlas: boolean
+          hide_current_affairs: boolean
           hide_flashcards: boolean
           hide_google_play: boolean
           hide_mcq: boolean
@@ -3233,6 +3234,7 @@ export type Database = {
           cta_url?: string
           hide_app_store?: boolean
           hide_atlas?: boolean
+          hide_current_affairs?: boolean
           hide_flashcards?: boolean
           hide_google_play?: boolean
           hide_mcq?: boolean
@@ -3254,6 +3256,7 @@ export type Database = {
           cta_url?: string
           hide_app_store?: boolean
           hide_atlas?: boolean
+          hide_current_affairs?: boolean
           hide_flashcards?: boolean
           hide_google_play?: boolean
           hide_mcq?: boolean
