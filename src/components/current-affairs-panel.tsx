@@ -296,6 +296,26 @@ function IssueBar({
                 <FileText className="h-4 w-4" /> Hindi PDF
               </a>
             )}
+            {/* The A4 issues linked in the story-cards captions, for printing. */}
+            {(
+              [
+                ["English A4", issue.caption],
+                ["Hindi A4", issue.caption_hi],
+              ] as const
+            ).map(([label, cap]) => {
+              const href = /href="([^"]+)"/.exec(cap ?? "")?.[1]?.replace(/&amp;/g, "&");
+              return href ? (
+                <a
+                  key={label}
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline"
+                >
+                  <FileText className="h-4 w-4" /> {label}
+                </a>
+              ) : null;
+            })}
           </span>
         )}
       </div>
@@ -1616,6 +1636,7 @@ const SETTINGS_FIELDS: Record<SettingsTab, string[]> = {
     "join_url",
     "join_text",
     "post_time",
+    "daily_edition",
     "test_chat_id",
     "channel_quiz",
     "channel_quiz_count",
@@ -1736,6 +1757,7 @@ function SettingsPanel() {
           join_url: text("join_url"),
           accent: text("accent"),
           daily_cover: (text("daily_cover") || "classic") as DailyLayout,
+          daily_edition: text("daily_edition") === "a4" ? "a4" : "cards",
           daily_back_cover: text("daily_back_cover"),
           print_binding: (text("print_binding") || "booklet") as Binding,
           test_chat_id: text("test_chat_id"),
@@ -1865,6 +1887,22 @@ function SettingsPanel() {
                   "Send /start to the bot, then find your id in Bot users.",
                 )}
               </div>
+              <label className="block max-w-md space-y-1 text-sm">
+                <span className="font-medium">Daily issue posted as</span>
+                <select
+                  aria-label="Daily issue posted as"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2"
+                  value={text("daily_edition") || "cards"}
+                  onChange={(e) => set("daily_edition", e.target.value)}
+                >
+                  <option value="cards">Story cards for phones (A4 linked for printing)</option>
+                  <option value="a4">A4 issue only</option>
+                </select>
+                <span className="block text-xs text-muted-foreground">
+                  Story cards: each story on its own phone-sized page, easy to read without zooming.
+                  The A4 issue is linked in the caption for those who print.
+                </span>
+              </label>
               <label className="flex items-start gap-3">
                 <Switch
                   checked={Boolean(form.channel_quiz)}
