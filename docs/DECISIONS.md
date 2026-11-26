@@ -411,3 +411,30 @@ switch language on, and practise from does what a PDF can't.
 **Consequence:** migration `20261229090000_home_current_affairs.sql` adds the homepage
 column (safe to re-run; the card shows until it runs). A day's page is cached on the
 server for 5 minutes. Days are not in the sitemap yet.
+
+## ADR-027: The magazine's AI steps as an editorial team with notebooks, reviewed weekly (26 November 2026)
+
+**Decision:** Each AI step of the daily magazine is a team member with a notebook of
+lessons learnt from the editor. The first two members are:
+- **Editor-in-chief:** picks stories. Its notebook is the picking rules.
+- **Writer:** writes the bilingual stories. Its notebook is the house style.
+
+How it works:
+- **Weekly review:** every Sunday, with the weekly report, each member suggests new lessons
+  from the week's changes (the stories you dropped, kept or moved, and your edits).
+- **Your OK first:** nothing enters a notebook until the editor keeps it. Every change to a
+  notebook keeps the version before it (`bot_settings` `ca_team_history:<member>`, the last
+  20), so it can be undone.
+- **Scorecard:** week by week, it shows how often the editor left the member's work as it
+  was. For the Editor-in-chief, that's stories whose pick, importance and section stayed as
+  the AI chose (`ai_pick`). For the Writer, that's written stories without an editor's
+  edit (`ca_item_versions` reason `edit`).
+- **Where:** all of this is on Current affairs → Editorial team.
+
+**Reason:** the steps already learnt separately. One place with evidence, undo and a
+measure of agreement shows whether the lessons help. Members stay steps of the existing
+pipeline, not free-running agents: cheaper and predictable.
+
+**Consequence:** no migration. The Proofreader (learning from accepted and dismissed
+notes) and the Updater (corrections and follow-ups) come next. No member acts on its own;
+autonomy can be considered once a scorecard stays high.

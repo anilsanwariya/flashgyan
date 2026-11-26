@@ -57,6 +57,7 @@ export type AdminSectionId =
   | "ca.schemes"
   | "ca.syllabus"
   | "ca.papers"
+  | "ca.team"
   | "ca.settings"
   | "bot.broadcast"
   | "bot.commands"
@@ -197,6 +198,13 @@ export const ADMIN_GROUPS: { label: string; sections: SectionDef[] }[] = [
         icon: ScrollText,
         description:
           "RPSC and RSSB papers with their answer keys, read from PDF or Excel, exported to Excel, and checked against the magazine.",
+      },
+      {
+        id: "ca.team",
+        label: "Editorial team",
+        icon: Users,
+        description:
+          "The magazine's AI team members, each with a notebook of lessons learnt from your decisions: review new lessons each week and see how often you agreed.",
       },
       {
         id: "ca.settings",
