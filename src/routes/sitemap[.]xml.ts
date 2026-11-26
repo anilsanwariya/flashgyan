@@ -63,6 +63,17 @@ export const Route = createFileRoute("/sitemap.xml")({
                 placeKeys: places.filter((p) => p[7] > 0).map((p) => placePath(p[0])),
               };
             })().catch(() => ({ themes: [], placeKeys: [] as string[] }));
+        // The current affairs reader while its card is shown: the list and
+        // every public day (posted to the channel, not taken off the site).
+        const caOff = Boolean(
+          (settings as { hide_current_affairs?: boolean } | null)?.hide_current_affairs,
+        );
+        const caDays = caOff
+          ? []
+          : await (await import("@/lib/ca-reader.server")).publicDates().catch((e) => {
+              console.error("sitemap: could not list current affairs days", e);
+              return [] as string[];
+            });
         const entries = [
           ...STATIC_PATHS.filter(
             (p) =>
@@ -74,6 +85,8 @@ export const Route = createFileRoute("/sitemap.xml")({
           ),
           ...themes.map((t) => urlEntry(`${SITE_URL}/atlas/theme/${t.key}`, "0.6", "monthly")),
           ...placeKeys.map((k) => urlEntry(`${SITE_URL}${k}`, "0.5", "monthly")),
+          ...(caOff ? [] : [urlEntry(`${SITE_URL}/current-affairs`, "0.8", "daily")]),
+          ...caDays.map((d) => urlEntry(`${SITE_URL}/current-affairs/${d}`, "0.6", "monthly")),
         ];
         const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries.join("\n")}\n</urlset>\n`;
         return new Response(xml, {

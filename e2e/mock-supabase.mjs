@@ -85,6 +85,12 @@ const tables = {
     },
   ],
   mcq_questions: questions,
+  // The current affairs reader's days: one posted (public), one only
+  // scheduled (not public yet).
+  ca_issues: [
+    { id: "55555555-5555-4555-8555-000000000001", kind: "daily", period: "2026-11-20", status: "posted" },
+    { id: "55555555-5555-4555-8555-000000000002", kind: "daily", period: "2026-11-21", status: "scheduled" },
+  ],
 };
 
 function filterRows(rows, params) {

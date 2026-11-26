@@ -2,6 +2,7 @@
 // check facts against their sources, merge duplicate stories, apply
 // corrections and schedule posts. No database or network access here.
 
+import { lessonsMessage } from "@/lib/ca-team";
 import type { MapSpec } from "@/lib/map-spec";
 import { EVENT_FIELD, parseRawEvent, roundupNote, type RawEvent } from "@/lib/ca-events";
 import type { Binding, CoverPreset, DailyLayout, MagazineAd } from "@/lib/ca-covers";
@@ -1035,6 +1036,8 @@ export function changeCheckMessages(opts: {
   glossary?: GlossaryEntry[];
   earlier: { date: string; facts: CaFact[]; points: Bi[] };
   later: { date: string; facts: CaFact[] };
+  // The Updater's notebook (lessons from the editor's decisions).
+  lessons?: string[];
 }): ChatMessage[] {
   const earlier = opts.earlier.facts
     .map(
@@ -1049,6 +1052,7 @@ export function changeCheckMessages(opts: {
       content: `You check current affairs for corrections. An earlier news item and a later report are about the same story. Find facts of the earlier item that the later report changes or corrects (a figure, date, name, place or status). New information that does not contradict an earlier fact is NOT a change.${hindiGuide(opts.glossary)}
 Reply with JSON only: {"changes": [{"fact": index of the earlier fact, "new_en": the corrected fact in English, "new_hi": the corrected fact in Hindi, "old_value": the exact changed words in the earlier English fact, "new_value": what replaces them, "old_value_hi": the exact changed words in the earlier Hindi text (or ""), "new_value_hi": the Hindi replacement (or ""), "note": short reason in English}]}. Reply {"changes": []} if nothing changed.`,
     },
+    ...lessonsMessage(opts.lessons),
     {
       role: "user",
       content: `Earlier item (${opts.earlier.date}):\n${earlier}\n\nLater report (${opts.later.date}):\n${later}`,

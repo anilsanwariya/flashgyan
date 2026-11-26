@@ -6,6 +6,7 @@
 // dates are found here, as the editor works; names (and facts one language
 // leaves out) need SAATHI, one AI request a day.
 // Pure helpers, shared by the server, the admin panel and tests.
+import { lessonsMessage } from "@/lib/ca-team";
 import { VISUAL_SLOTS, normalizeForMatch, type Bi, type CaContent } from "@/lib/current-affairs";
 import { partName } from "@/lib/ca-style";
 import { hindiIssues, type GlossaryEntry } from "../../supabase/functions/_shared/ca-hindi.ts";
@@ -423,7 +424,11 @@ const pairs = (c: CaContent) =>
     .filter((p) => p.en && p.hi)
     .map(({ part, en, hi }) => [part, { en, hi }] as [string, { en: string; hi: string }]);
 
-export function langCheckMessages(stories: { content: CaContent }[]): ChatMessage[] {
+export function langCheckMessages(
+  stories: { content: CaContent }[],
+  // The Proofreader's notebook (lessons from the editor's decisions).
+  lessons: string[] = [],
+): ChatMessage[] {
   return [
     {
       role: "system",
@@ -431,6 +436,7 @@ export function langCheckMessages(stories: { content: CaContent }[]): ChatMessag
 RULES: Report only clear differences in names (people, places, schemes, missions, organisations, acts, awards) and in what the facts say (a different subject, or a fact one language leaves out). Ignore numbers and dates (they are checked separately), word order, style, translation choices, and different spellings of the same name in Devanagari. Short forms written in Latin letters in the Hindi (SCO, RBI), a full Hindi name with the short form in brackets, and English terms in brackets are the magazine's style: never report them. For each difference say which language is wrong and give that language's whole line corrected, changing only what differs. At most ${LANG_NOTES_MAX} notes, the clearest first; an empty list is fine.
 Reply with JSON only: {"notes": [{"ref": "S1.point2", "wrong": "hi", "issue": "Hindi names Jodhpur, English names Jaipur", "fix": "..."}]}`,
     },
+    ...lessonsMessage(lessons),
     {
       role: "user",
       content: stories
