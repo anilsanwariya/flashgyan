@@ -55,6 +55,7 @@ the result page. Each session counts once; no student is identified.
 | Homepage | Pitch, app download, 5-card demo, feature picker | `/` |
 | Flashcards | Decks by subject and topic; flip and rate recall; summary | `/flashcards`, `/practice/$deckId`, `/decks/$deckId` |
 | MCQ practice | Questions with instant feedback and explanations | `/mcq-practice`, `/practice-mcq/$testId` |
+| Current affairs reader | Each posted day's stories (Hindi/English, text size, dark pages, section tabs) and a practice test of its MCQs; opened from the channel's caption, in the Telegram mini app when its link is set | `/current-affairs`, `/current-affairs/$date` |
 | MCQ tests | Timed tests, marked +1 / −⅓, with review | `/mcq-tests`, `/mcq/$testId` |
 | SAATHI | AI study assistant that answers **only** from FlashGyan's study material, with sources; also marks Mains answers (typed or photos) | `/saathi` |
 | Rajasthan Atlas | Interactive map: districts, places, themes (also from the notes: folk deities, sakas, fair calendar, painting schools), quizzes, drills, daily challenge, compare, then and now, one-page sheets, revision cards | `/atlas/...` |

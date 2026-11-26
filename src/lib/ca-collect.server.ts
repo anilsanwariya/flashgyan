@@ -271,6 +271,14 @@ export async function tick(origin?: string): Promise<TickResult> {
     } catch (e) {
       console.error("atlas daily poll:", e);
     }
+  // The web reader's practice tests for posted days (a few days a tick, so
+  // old days fill in over time).
+  if (full)
+    try {
+      await (await import("@/lib/ca-reader.server")).makePracticeTests();
+    } catch (e) {
+      console.error("reader practice tests:", e);
+    }
   await gate.rememberBusy(before, did);
 
   if (!runs("collection")) return { run: null, steps: [] };

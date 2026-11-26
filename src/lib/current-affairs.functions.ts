@@ -259,6 +259,14 @@ export const saveMagazineSettings = createServerFn({ method: "POST" })
         post_corrections: z.boolean(),
         daily_cover: z.enum(DAILY_LAYOUTS.map((l) => l.id) as [DailyLayout, ...DailyLayout[]]),
         daily_edition: z.enum(["cards", "a4"]).default("cards"),
+        reader_app_link: z
+          .string()
+          .trim()
+          .max(200)
+          .refine((v) => !v || /^https:\/\/t\.me\/[A-Za-z0-9_]+\/[A-Za-z0-9_]+\/?$/.test(v), {
+            message: "Use the mini app's link, like https://t.me/YourBot/app",
+          })
+          .default(""),
         daily_back_cover: z.string().max(60),
         print_binding: z.enum(["booklet", "even", "digital"]),
       })

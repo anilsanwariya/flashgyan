@@ -88,6 +88,7 @@ docs/                     Project documentation (this folder)
 | SAATHI | `saathi.tsx`, `api.saathi.ask`, `api.saathi.check` | `saathi*.ts`, `_shared/saathi-core.ts` | `saathi_` |
 | Atlas | `atlas.*` | `atlas*.ts`, `geo*.ts` | `atlas_` |
 | Current affairs | admin only | `ca-*.ts`, `current-affairs*.ts`, `api.ca.tick` | `ca_` |
+| Current affairs reader | public (posted days) | `current-affairs.index`, `current-affairs.$date`; `ca-reader*.ts` | `ca_issues`, `ca_items` (server reads), `mcq_practice_*` |
 | Card studio | admin only | `flash-*.ts` | `flash_` |
 | Exam papers, syllabus | admin only | `exam-*.ts`, `syllabus*.ts` | `exam_`, `syllabus_`, `ras_` |
 | GK and Words in the News | admin only | `gk*.ts`, `ig*.ts` | `gk_`, `ig_` |

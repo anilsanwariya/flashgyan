@@ -9,6 +9,8 @@ test("homepage shows the pitch and a tagged Play Store link", async ({ page }) =
   const play = page.getByRole("link", { name: "Get it on Google Play" });
   await expect(play).toHaveAttribute("href", /id=com\.flashgyan/);
   await expect(play).toHaveAttribute("href", /utm_medium%3Dhome_badge/);
+  // The current affairs reader's card (shown unless hidden in Home settings).
+  await expect(page.getByRole("button", { name: /Current Affairs/ })).toBeVisible();
 });
 
 test("homepage shows the right install prompt for the device", async ({ page }, testInfo) => {

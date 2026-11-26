@@ -381,3 +381,33 @@ tap away.
 
 **Consequence:** no migration. Approving makes four PDFs instead of two (cards and A4,
 in each language), so it takes about twice as long.
+
+## ADR-026: A current affairs web reader for posted days, opened in the Telegram mini app, with MCQ practice (26 November 2026)
+
+**Decision:**
+- **Pages:** `/current-affairs` lists the days and `/current-affairs/<date>` shows one.
+- **Which days:** a day is shown once its daily issue is posted to the channel, old days
+  included. The editor can take a day off the website from the daily page ("On the
+  website"), stored in `bot_settings` `ca_reader_hidden`.
+- **Stories:** they are the magazine's own HTML (`renderMagazine({ edition: "web" })`),
+  shown in a shadow root so its styles stay apart from the site's. The page adds a
+  हिंदी/English switch, text size, dark pages and section tabs, remembered per device.
+  Exam facts are bold, and each section has its colour. The Exam Angle box is left out,
+  as on the phone PDF.
+- **Practice:** each shown day gets one MCQ practice test per language, made from its
+  stories' MCQs by the full tick, a few days at a time, so old days fill in. The ids are
+  in `bot_settings` `ca_reader_practice`. The tests have the subject "Current Affairs",
+  are left out of `/mcq-practice`'s list, and open from the day's "Practise today's MCQs"
+  button in the existing practice screen.
+- **Telegram:** the daily caption links the day: "📱 ऐप में पढ़ें और MCQ हल करें". With
+  Magazine settings' "Telegram mini app link" set, the link is
+  `https://t.me/<bot>/<app>?startapp=ca_<date>`. The app reads the start parameter once
+  and opens the day; `_<n>` opens story n. Without that link, it is the website's page.
+- **Homepage:** a Current Affairs card, hidden with `home_settings.hide_current_affairs`.
+
+**Reason:** students read on their phones inside Telegram. A page they can open there,
+switch language on, and practise from does what a PDF can't.
+
+**Consequence:** migration `20261229090000_home_current_affairs.sql` adds the homepage
+column (safe to re-run; the card shows until it runs). A day's page is cached on the
+server for 5 minutes. Days are not in the sitemap yet.

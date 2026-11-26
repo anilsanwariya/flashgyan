@@ -778,6 +778,59 @@ b.fact { font-weight: 700; color: #111827; }
 .card-label a, .cover a.to-story { color: inherit; text-decoration: none; }
 `;
 
+// The web reader: the print styles at screen sizes, each story a card under
+// its section's heading, in the section's colour (the page adds the rest).
+const WEB_CSS = (accent: string) => `
+:host { display: block; font-family: "Noto Sans", "Noto Sans Devanagari", sans-serif; font-size: var(--reader-size, 17px); line-height: 1.65; color: #1f2937; }
+:host([lang="hi"]) { font-family: "Noto Sans Devanagari", "Noto Sans", sans-serif; line-height: 1.75; }
+.watermark { display: none; }
+.section { margin: 0 0 20px; scroll-margin-top: 110px; }
+.section-title { position: static; border-radius: 12px; padding: 10px 14px; margin: 0 0 12px; }
+.section-title h2 { font-size: 1.1em; }
+.section-title span { font-size: .85em; }
+.item { display: flow-root; margin: 0 0 14px; padding: 14px; border: 1px solid #e5e7eb; border-top: 4px solid ${accent}; border-left-width: 1px; border-radius: 14px; background: #fff; scroll-margin-top: 110px; }
+.num { width: 28px; height: 28px; font-size: .8em; }
+.heads h3 { font-size: 1.2em; line-height: 1.35; }
+.heads h4 { font-size: .9em; }
+.tags { margin: 8px 0 0; }
+.tag { font-size: .75em; }
+.bi, .box .bi { font-size: 1em; }
+.box-title { font-size: .8em; }
+.box { padding: 10px 12px; border-radius: 10px; }
+.bi ul { padding-left: 1.2em; }
+.bi li { margin-bottom: 4px; }
+.pts-beside { display: block; }
+.pts-visuals { margin-top: 10px; }
+.v-pair { display: block !important; }
+.v-pair > * + * { margin-top: 10px; }
+.img-side.right, .img-side.left { float: none; width: 100% !important; margin: 8px 0; }
+.img-row { flex-direction: column; }
+.v-flow { flex-direction: column; }
+.v-arrow { transform: rotate(90deg); }
+.v-step { font-size: .9em; }
+.v-table, .v-compare { font-size: .85em; }
+.v-table-wrap, .visual { overflow-x: auto; }
+.v-glance dt { font-size: .75em; }
+.v-glance dd { font-size: .95em; }
+.dyk .site, .img-credit, figcaption { color: #64748b; font-size: .8em; }
+.item .box.why { display: none; }
+${Object.entries(SECTION_COLORS)
+  .map(
+    ([cat, c]) =>
+      `.section[data-cat="${cat}"] .section-title { background: ${c}; } .section[data-cat="${cat}"] .item { border-top-color: ${c}; } .section[data-cat="${cat}"] .num { background: ${c}; }`,
+  )
+  .join("\n")}
+b.fact { font-weight: 700; color: #111827; }
+:host([data-dark]) { color: #e5e7eb; }
+:host([data-dark]) .item { background: #0f172a; border-color: #1e293b; }
+:host([data-dark]) .bi .en, :host([data-dark]) .heads h4 { color: #cbd5e1; }
+:host([data-dark]) b.fact, :host([data-dark]) .heads h3 { color: #f8fafc; }
+:host([data-dark]) .box, :host([data-dark]) .why, :host([data-dark]) .v-stat, :host([data-dark]) .v-step, :host([data-dark]) .v-glance, :host([data-dark]) .v-table td { background: #1e293b; color: #e5e7eb; border-color: #334155; }
+:host([data-dark]) .context { background: #052e2b; border-color: #065f46; }
+:host([data-dark]) .dyk { background: #0c2537; border-color: #0c4a6e; }
+:host([data-dark]) .tag { background: #1e293b; color: #cbd5e1; }
+`;
+
 // Turns each story into its own card page (the page as tall as the card,
 // measured once the fonts are in) and adds a contents page of links.
 const PHONE_SCRIPT = `(() => {
@@ -1342,8 +1395,10 @@ function renderMagazineInner(opts: {
   // A part of a long PDF: the stories it prints (the cover, contents and
   // pages after the stories only where asked), numbered on from `start`.
   part?: { only: string[]; cover: boolean; tail: boolean; start: number } | null;
-  // The daily issue for reading on a phone: story cards (see PHONE_CSS).
-  edition?: "print" | "phone";
+  // The daily issue for reading on a phone: story cards (see PHONE_CSS);
+  // "web": only the day's story sections and their styles, for the web
+  // reader (shown inside a shadow root).
+  edition?: "print" | "phone" | "web";
 }): string {
   const s = opts.settings;
   const phone = opts.edition === "phone" && opts.kind === "daily" && !opts.coverOnly;
@@ -1730,6 +1785,8 @@ function renderMagazineInner(opts: {
   // The back cover (an ad), after any ruled notes pages that bring it to the
   // outside of a printed issue.
   const back = adById(monthly ? design?.back_cover : s.daily_back_cover);
+  if (opts.edition === "web")
+    return `<style>${CSS(accent)}${WEB_CSS(accent)}</style>${eventsHtml}${sections}`;
   const notes = Array.from({ length: Math.max(0, Math.min(3, opts.fillers ?? 0)) }, () =>
     notesPageHtml(lang, s.brand_line, accent),
   ).join("");

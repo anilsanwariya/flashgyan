@@ -4884,8 +4884,8 @@ export async function issueHtml(
     coverOnly?: boolean;
     // A daily layout being tried in Settings, before it is saved.
     dailyCover?: DailyLayout;
-    // The daily issue as story cards for phones.
-    edition?: "print" | "phone";
+    // The daily issue as story cards for phones, or the web reader's stories.
+    edition?: "print" | "phone" | "web";
   } = {},
 ) {
   const saved = await getMagazineSettings();
@@ -5239,6 +5239,16 @@ export async function buildIssue(
     fail(error);
     return `${supabaseAdmin.storage.from(BUCKET).getPublicUrl(path).data.publicUrl}?v=${Date.now()}`;
   };
+  // A daily issue's caption links the day in the web reader (opened in the
+  // Telegram mini app when its link is set).
+  const readerUrl =
+    kind === "daily"
+      ? (await import("@/lib/ca-reader.server")).readerLink(
+          await getMagazineSettings(),
+          period,
+          process.env.SITE_URL || "https://www.flashgyan.com",
+        )
+      : undefined;
   const made = [];
   for (const lang of ["en", "hi"] as const) {
     made.push(
@@ -5253,7 +5263,7 @@ export async function buildIssue(
             url,
             settings,
             count,
-            caption: captionFor(kind, period, settings, count, lang),
+            caption: captionFor(kind, period, settings, count, lang, undefined, readerUrl),
           };
         }
         const printPath = printPathOf(a4Path);
@@ -5265,7 +5275,7 @@ export async function buildIssue(
           url,
           settings,
           count,
-          caption: captionFor(kind, period, settings, count, lang, printUrl),
+          caption: captionFor(kind, period, settings, count, lang, printUrl, readerUrl),
         };
       })(),
     );
