@@ -12,6 +12,7 @@ import {
   rankCaSkipped,
   setCaSkippedHidden,
   type SkippedArticle,
+  addCaBriefFromArticle,
 } from "@/lib/current-affairs.functions";
 import { SourceReader } from "@/components/ca-source-reader";
 import { Badge, errorText } from "@/components/ca-ui";
@@ -57,6 +58,22 @@ export function SkippedNews({
   const skippedFn = useServerFn(getCaSkipped);
   const rankFn = useServerFn(rankCaSkipped);
   const hideFn = useServerFn(setCaSkippedHidden);
+  const briefFn = useServerFn(addCaBriefFromArticle);
+  const [briefing, setBriefing] = useState<string | null>(null);
+  // Worth one line: added to the day as a brief ("News in brief").
+  const addBrief = async (a: { source_id: string; at: number; end: number; title: string }) => {
+    const key = `${a.source_id}:${a.at}`;
+    setBriefing(key);
+    try {
+      await briefFn({ data: { date, ...a } });
+      toast.success("Added as a brief in “News in brief”");
+      onChanged();
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't add it"));
+    } finally {
+      setBriefing(null);
+    }
+  };
   const [open, setOpen] = useState(false);
   const [ranking, setRanking] = useState(false);
   // Most exam-worthy first, or in the order of the papers.
@@ -316,6 +333,15 @@ export function SkippedNews({
                             }}
                           >
                             <BookOpen className="mr-1 h-4 w-4" /> Read and highlight
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={briefing !== null}
+                            onClick={() => void addBrief(a)}
+                          >
+                            <Newspaper className="mr-1 h-4 w-4" />
+                            {briefing === `${a.source_id}:${a.at}` ? "Adding…" : "Add as brief"}
                           </Button>
                           <Button size="sm" variant="ghost" onClick={() => toggleHidden(a)}>
                             <EyeOff className="mr-1 h-4 w-4" />

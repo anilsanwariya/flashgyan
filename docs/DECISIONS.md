@@ -474,3 +474,36 @@ remove lessons by hand.
 **Reason:** students revise from a story; the same figure two or three times wastes space
 and reads as padding. Cutting words automatically at print time could leave broken
 sentences, so the editor decides.
+
+## ADR-029: News in brief: one line for news that isn't worth a story (28 November 2026)
+
+**Decision:** A day's story is a full story or a **brief** (`ca_items.format`, "story" or
+"brief"). A brief is one line in each language with its key fact, plus a quick MCQ,
+written in one short AI call (`ca-briefs.ts`).
+
+How a story becomes a brief:
+- **At picking time:** the picking AI says whether an item is worth only one line. Its
+  picking rules (the Editor-in-chief's notebook) are already in that prompt. When it
+  doesn't say, the story type decides: appointment, day, award, agreement, index, sports,
+  book, conference or person. Rajasthan news and must-know news (importance 3) are never
+  briefs.
+- **Daily limit:** up to "News in brief per day" (Magazine settings, default 10) go in,
+  apart from the day's full stories, which no longer count them.
+- **Your override:** each story card has "Make brief" / "Make full story", which writes
+  it again in its new form. These changes are learnt by the Editor-in-chief as a new kind
+  of pick change. The skipped news list has "Add as brief", which writes a brief from the
+  article's text.
+
+How briefs print:
+- **Daily issue:** in "News in Brief / संक्षेप में" after the stories, grouped by
+  section: two columns on A4, one card in the phone edition, a section in the web reader.
+- **Revision and practice:** they are part of the 60-second revision page and the
+  practice questions, so they count in the day's practice test.
+- **Monthly and custom magazines** leave them out.
+
+**Reason:** routine news needs one line, not a page. Briefs keep coverage high while the
+issue, the AI cost and the editor's review time go down.
+
+**Consequence:** migration `20261230090000_ca_item_format.sql` (safe to re-run). Until it
+runs, every story is a full story, and "Make brief" / "Add as brief" ask for the
+migration.

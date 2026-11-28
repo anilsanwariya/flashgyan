@@ -15,9 +15,11 @@ export type AiPick = {
   importance: number;
   category: string;
   capped?: boolean;
+  // A full story or a one-line brief (none on picks made before briefs).
+  format?: "story" | "brief";
 };
 
-export type PickChangeKind = "dropped" | "kept" | "importance" | "section";
+export type PickChangeKind = "dropped" | "kept" | "importance" | "section" | "format";
 export type PickChange = {
   kind: PickChangeKind;
   date: string;
@@ -26,7 +28,7 @@ export type PickChange = {
   rajasthan: boolean;
   facts: string[];
   ai: AiPick;
-  editor: { status: string; importance: number; category: string };
+  editor: { status: string; importance: number; category: string; format?: string };
 };
 export type PickCounts = Record<PickChangeKind, number> & { stories: number };
 
@@ -45,6 +47,7 @@ type Row = {
   rajasthan: boolean;
   facts: { text: string }[];
   ai_pick: AiPick | null;
+  format?: string | null;
 };
 
 // Where the editor's final decision differs from the AI's first one. A story
@@ -63,7 +66,12 @@ export function pickChanges(rows: Row[]): { changes: PickChange[]; counts: PickC
       rajasthan: r.rajasthan,
       facts: r.facts.slice(0, 4).map((f) => f.text),
       ai,
-      editor: { status: r.status, importance: r.importance, category: r.category },
+      editor: {
+        status: r.status,
+        importance: r.importance,
+        category: r.category,
+        format: r.format ?? undefined,
+      },
     };
     const inNow = r.status === "included";
     if (ai.status === "included" && r.status === "dropped")
@@ -71,8 +79,17 @@ export function pickChanges(rows: Row[]): { changes: PickChange[]; counts: PickC
     else if (ai.status === "dropped" && inNow) changes.push({ kind: "kept", ...base });
     if (inNow && ai.importance !== r.importance) changes.push({ kind: "importance", ...base });
     if (ai.category !== r.category) changes.push({ kind: "section", ...base });
+    if (inNow && ai.format && r.format && ai.format !== r.format)
+      changes.push({ kind: "format", ...base });
   }
-  const counts: PickCounts = { stories, dropped: 0, kept: 0, importance: 0, section: 0 };
+  const counts: PickCounts = {
+    stories,
+    dropped: 0,
+    kept: 0,
+    importance: 0,
+    section: 0,
+    format: 0,
+  };
   for (const c of changes) counts[c.kind]++;
   return { changes, counts };
 }
@@ -88,6 +105,8 @@ const line = (c: PickChange) => {
       return `${what}\n   AI gave importance ${c.ai.importance}; the editor set ${c.editor.importance}.`;
     case "section":
       return `${what}\n   AI put it in "${c.ai.category}"; the editor moved it to "${c.editor.category}".`;
+    case "format":
+      return `${what}\n   AI made it ${c.ai.format === "brief" ? "a one-line brief" : "a full story"}; the editor made it ${c.editor.format === "brief" ? "a one-line brief" : "a full story"}.`;
   }
 };
 
@@ -96,6 +115,7 @@ const HEADS: Record<PickChangeKind, string> = {
   kept: "Left out by the AI, kept by the editor",
   importance: "Importance changed",
   section: "Section changed",
+  format: "Full story or one-line brief changed",
 };
 
 export function pickMessages(changes: PickChange[], rules: string[]): ChatMessage[] {
@@ -105,8 +125,8 @@ export function pickMessages(changes: PickChange[], rules: string[]): ChatMessag
   return [
     {
       role: "system",
-      content: `You help the AI editor of a current affairs magazine for Rajasthan competitive exams (RPSC and RSSB, with depth for RAS Mains) pick stories the way the human editor does. Below are stories where the editor changed the AI's decision: dropped a story the AI kept, kept one it left out, changed its importance (1 = rarely asked, 2 = may be asked, 3 = likely asked) or moved it to another section. Find the editor's consistent preferences and write them as picking rules the AI should follow when it reads a source.
-RULES: At most 5 rules, the clearest first. Each is one specific instruction of at most 30 words, in English, naming the kind of news (story type, subject, level such as district or national) and what to do (leave out, keep, importance n, which section). Leave out one-off decisions and anything the existing rules already say. Add one short example from the changes for each rule. Fewer rules are better than vague ones; reply with an empty list when there is no clear pattern.
+      content: `You help the AI editor of a current affairs magazine for Rajasthan competitive exams (RPSC and RSSB, with depth for RAS Mains) pick stories the way the human editor does. Below are stories where the editor changed the AI's decision: dropped a story the AI kept, kept one it left out, changed its importance (1 = rarely asked, 2 = may be asked, 3 = likely asked), moved it to another section, or made a full story a one-line brief ("News in brief") or the other way. Find the editor's consistent preferences and write them as picking rules the AI should follow when it reads a source.
+RULES: At most 5 rules, the clearest first. Each is one specific instruction of at most 30 words, in English, naming the kind of news (story type, subject, level such as district or national) and what to do (leave out, keep, importance n, which section, brief or full story). Leave out one-off decisions and anything the existing rules already say. Add one short example from the changes for each rule. Fewer rules are better than vague ones; reply with an empty list when there is no clear pattern.
 Reply with JSON only: {"rules": [{"rule": "...", "example": "..."}]}`,
     },
     {

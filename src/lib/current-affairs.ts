@@ -363,6 +363,9 @@ export type RawItem = {
   key: string | null;
   // The several-day event the story is part of (the Olympics, a summit).
   event: RawEvent | null;
+  // The AI's view: worth one line ("News in brief") rather than a story
+  // (undefined: it didn't say; the story type decides).
+  brief?: boolean;
 };
 
 // What the extraction prompt asks for as the story's event key.
@@ -581,7 +584,7 @@ export function extractMessages(opts: {
 ${blueprintText()}
 ${CATEGORY_TEXT}
 Skip: advertisements, crime and accidents, purely local incidents, opinion without facts, market tips, entertainment.
-Reply with JSON only: [{"type": one story type id, "headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 as described above, "rajasthan": true if it concerns Rajasthan, ${KEY_FIELD}, ${EVENT_FIELD}, ${CONCEPT_FIELD}, "facts": [{"slot": the slot id this fact fills, "text": one short fact in English, "quote": the exact words from the source that state this fact, copied character for character (5 to 30 words, in the source's language)}]}].
+Reply with JSON only: [{"type": one story type id, "headline": a short factual headline in English, "category": one of ${JSON.stringify(CATEGORY_IDS)}, "importance": 1 to 3 as described above, "rajasthan": true if it concerns Rajasthan, "brief": true when the news is worth only one line in "News in brief" rather than a full story (typically an appointment, a day, a minor award, an MoU, a ranking, a sports result, an obituary or a routine announcement; never Rajasthan news or news very likely in exams), ${KEY_FIELD}, ${EVENT_FIELD}, ${CONCEPT_FIELD}, "facts": [{"slot": the slot id this fact fills, "text": one short fact in English, "quote": the exact words from the source that state this fact, copied character for character (5 to 30 words, in the source's language)}]}].
 Every fact must fill one slot of its story's type; leave a slot out if the source doesn't state it, and drop any fact that fits no slot. Use only facts stated in the source and keep every number, name and date exactly. Reply [] if nothing is exam-relevant.${
         lessons.length
           ? `\nLessons from recent RPSC and RSSB papers (news like this was asked, so keep it):\n${lessons.map((l) => `- ${l}`).join("\n")}`
@@ -669,6 +672,7 @@ export function parseExtracted(raw: string, source: string, sourceId: string): R
         concept: str(o.concept, 160) || null,
         key: str(o.key, 160) || null,
         event: parseRawEvent(o.event),
+        ...(typeof o.brief === "boolean" ? { brief: o.brief } : {}),
       };
     })
     .filter((i) => i.headline && i.facts.length > 0);
@@ -1291,6 +1295,8 @@ export type MagazineSettings = {
   // Stories a day go into the issue; less important ones beyond this arrive
   // already dropped (must-know stories always go in).
   daily_stories: number;
+  // News in brief a day (one line each, apart from the stories).
+  daily_briefs?: number;
   // Editorials a day picked from the websites marked "Editorials".
   daily_editorials: number;
   // About how many words SAATHI writes for each story's summary.
@@ -1384,6 +1390,7 @@ export const DEFAULT_MAGAZINE_SETTINGS: MagazineSettings = {
   notify_when_ready: true,
   visuals: true,
   daily_stories: DEFAULT_DAILY_STORIES,
+  daily_briefs: 10,
   daily_editorials: 2,
   summary_words: DEFAULT_SUMMARY_WORDS,
   glossary: [],

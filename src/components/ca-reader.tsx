@@ -123,7 +123,7 @@ export type ReaderSectionRef = { cat: string; label: string; el: HTMLElement };
 
 // Marks amounts, numbers with their units and dates bold.
 function boldFacts(root: ParentNode) {
-  root.querySelectorAll(".summary, .points, .context .bi").forEach((el) => {
+  root.querySelectorAll(".summary, .points, .context .bi, .brief-list").forEach((el) => {
     const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     const nodes: Text[] = [];
     while (walk.nextNode()) nodes.push(walk.currentNode as Text);

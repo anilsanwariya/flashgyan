@@ -1714,6 +1714,7 @@ const SETTINGS_FIELDS: Record<SettingsTab, string[]> = {
   covers: ["daily_cover", "daily_back_cover", "print_binding"],
   writing: [
     "daily_stories",
+    "daily_briefs",
     "min_rajasthan",
     "summary_words",
     "visuals",
@@ -1771,6 +1772,7 @@ function SettingsPanel() {
         ...rest,
         trusted_domains: q.data.trusted_domains.join("\n"),
         daily_stories: String(q.data.daily_stories),
+        daily_briefs: String(q.data.daily_briefs ?? 10),
         daily_editorials: String(q.data.daily_editorials),
         summary_words: String(q.data.summary_words),
         channel_quiz_count: String(q.data.channel_quiz_count),
@@ -1842,6 +1844,7 @@ function SettingsPanel() {
           notify_when_ready: Boolean(form!.notify_when_ready),
           visuals: Boolean(form!.visuals),
           daily_stories: Number(text("daily_stories")) || 15,
+          daily_briefs: Math.min(30, Math.max(0, Math.round(Number(text("daily_briefs")) || 0))),
           summary_words: clampSummaryWords(text("summary_words")),
           daily_editorials: Math.min(
             6,
@@ -2133,6 +2136,12 @@ function SettingsPanel() {
                   "Stories per day",
                   "15",
                   "Must-know stories always go in, and Rajasthan stories up to twice this number. Others beyond it, and unlikely ones, arrive already dropped; you can bring any back.",
+                )}
+                {field(
+                  "daily_briefs",
+                  "News in brief per day",
+                  "10",
+                  "News worth one line (appointments, days, minor awards, MoUs, rankings, sports results) goes in “संक्षेप में” instead of a full story, up to this many a day. 0 turns briefs off.",
                 )}
                 {field(
                   "min_rajasthan",

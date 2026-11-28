@@ -35,6 +35,7 @@ import {
   keepCaStoriesApart,
   mergeCaStories,
   setCaReview,
+  setCaItemFormat,
   updateCaItem,
   type CaItem,
   type EventBrief,
@@ -660,20 +661,38 @@ function StoryCard({
   onDrop,
   selected,
   onSelect,
+  onChanged,
   ref,
   eventName,
 }: CardProps) {
   const c = item.content;
+  const brief = item.format === "brief";
+  const formatFn = useServerFn(setCaItemFormat);
+  const [switching, setSwitching] = useState(false);
+  const switchFormat = async () => {
+    setSwitching(true);
+    try {
+      await formatFn({ data: { id: item.id, format: brief ? "story" : "brief" } });
+      toast.success(
+        brief
+          ? "Made a full story: it is written again within a minute"
+          : "Made a brief: its one line is written within a minute",
+      );
+      onChanged();
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't change it"));
+    } finally {
+      setSwitching(false);
+    }
+  };
   const dropped = state === "dropped";
   const approved = state === "approved";
   const unverified = item.facts.filter((f) => !f.verified).length;
   const headHi = c?.headline.hi || item.headline;
   const headEn = c?.headline.en || "";
-  const summary = c
-    ? lang === "en"
-      ? c.summary.en || c.summary.hi
-      : c.summary.hi || c.summary.en
-    : "";
+  // A brief shows its one line.
+  const shown = c ? (brief && c.oneliner ? c.oneliner : c.summary) : null;
+  const summary = shown ? (lang === "en" ? shown.en || shown.hi : shown.hi || shown.en) : "";
 
   return (
     <article
@@ -790,6 +809,11 @@ function StoryCard({
                 </Badge>
               )
             )}
+            {brief && (
+              <Badge tone="primary" title="Printed as one line in “News in brief”">
+                Brief · संक्षेप
+              </Badge>
+            )}
             {dropped && <Badge tone="bad">Dropped</Badge>}
             {approved && <Badge tone="good">Approved</Badge>}
             {state === "later" && <Badge tone="warn">Read later</Badge>}
@@ -811,6 +835,22 @@ function StoryCard({
           <Button size="sm" variant="outline" className="h-8" onClick={onOpen}>
             <Pencil className="mr-1 h-3.5 w-3.5" /> Open
           </Button>
+          {item.category !== "editorial" && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              disabled={!!job || switching}
+              title={
+                brief
+                  ? "Write it as a full story instead"
+                  : "Print it as one line in “News in brief”"
+              }
+              onClick={() => void switchFormat()}
+            >
+              {brief ? "Make full story" : "Make brief"}
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"
