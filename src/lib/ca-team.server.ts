@@ -109,8 +109,13 @@ const byWeek = (rows: Row[]) => {
 async function chiefScores(weeks: number): Promise<WeekScore[]> {
   const rows = (
     await recentRows(
-      "issue_date,headline,story_type,category,importance,status,rajasthan,facts,ai_pick",
+      "issue_date,headline,story_type,category,importance,status,rajasthan,facts,ai_pick,format",
       weeks,
+    ).catch(() =>
+      recentRows(
+        "issue_date,headline,story_type,category,importance,status,rajasthan,facts,ai_pick",
+        weeks,
+      ),
     )
   ).filter((r) => r.ai_pick);
   return [...byWeek(rows)].map(([week, list]) => {

@@ -1,5 +1,13 @@
 // Server-only current affairs magazine: sources → news items → bilingual
 // issues → PDF (Cloudflare browser rendering) → scheduled Telegram post.
+import {
+  DEFAULT_DAILY_BRIEFS,
+  briefIncluded,
+  briefMessages,
+  parseBrief,
+  startsBrief,
+  type StoryFormat,
+} from "@/lib/ca-briefs";
 import type { AskedQ } from "@/lib/ca-asked";
 import type { StoryHistory } from "@/lib/ca-history";
 import type { AiPick } from "@/lib/ca-picks";
@@ -366,6 +374,8 @@ export type CaSource = {
 };
 
 export type CaItem = {
+  // A full story, or a one-line brief (none before the migration: a story).
+  format?: StoryFormat;
   id: string;
   issue_date: string;
   category: Category;
@@ -563,8 +573,173 @@ async function dayStoryRows(filter: { date?: string; ids?: string[] }): Promise<
 }
 
 // Saves a new story; on a database without the event-key columns, without them.
+// ---------- News in brief: a story's format ----------
+
+const missingFormat = (e: { message: string } | null | undefined) =>
+  !!e && /\bformat\b/.test(e.message) && /column|schema cache/.test(e.message);
+const FORMAT_MIGRATION =
+  "News in brief needs a database update: run the latest migration (ca_item_format) in Lovable's SQL editor.";
+
+// Each story's format (all full stories before the migration).
+export async function formatsOf(ids: string[]): Promise<Map<string, StoryFormat>> {
+  const out = new Map<string, StoryFormat>();
+  for (let i = 0; i < ids.length; i += 150) {
+    const { data, error } = await from("ca_items")
+      .select("id,format")
+      .in("id", ids.slice(i, i + 150));
+    if (missingFormat(error)) return out;
+    fail(error);
+    for (const r of (data ?? []) as { id: string; format?: string }[])
+      out.set(r.id, r.format === "brief" ? "brief" : "story");
+  }
+  return out;
+}
+
+// A day's included stories of one format so far (not editorials).
+async function includedCount(date: string, format: StoryFormat): Promise<number> {
+  const q = () =>
+    from("ca_items")
+      .select("id", { count: "exact", head: true })
+      .eq("issue_date", date)
+      .eq("status", "included")
+      .neq("category", "editorial");
+  const { count, error } = await q().eq("format", format);
+  // Before the migration: everything is a story.
+  if (missingFormat(error)) return format === "brief" ? 0 : ((await q()).count ?? 0);
+  fail(error);
+  return count ?? 0;
+}
+
+// A brief written from its facts (or an article's text): a headline, one
+// line in each language and a quick MCQ, in one short AI call.
+async function briefContent(opts: {
+  headline: string;
+  facts?: string[];
+  article?: string;
+}): Promise<CaContent> {
+  const raw = await saathiComplete(
+    apiKey(),
+    briefMessages({ ...opts, glossary: await glossaryNow() }),
+  );
+  const b = parseBrief(raw);
+  if (!b) throw new Error("The AI's brief couldn't be read. Try again.");
+  const empty = { en: "", hi: "" };
+  return {
+    headline: b.headline,
+    summary: empty,
+    points: [],
+    why: empty,
+    background: null,
+    statics: [],
+    keywords: [],
+    mcq: b.mcq,
+    mains: null,
+    dyk: [],
+    visual: null,
+    oneliner: b.line,
+  } as unknown as CaContent;
+}
+
+export async function writeBrief(itemId: string): Promise<CaItem> {
+  const item = await loadItem(itemId);
+  const before = snapshotOf(item);
+  try {
+    const content = await briefContent({
+      headline: item.headline,
+      facts: item.facts.map((f) => f.text),
+    });
+    const { data, error } = await from("ca_items")
+      .update({
+        content,
+        needs_enrich: false,
+        enrich_error: null,
+        updated_at: new Date().toISOString(),
+      } as never)
+      .eq("id", itemId)
+      .select(ITEM_COLS)
+      .single();
+    fail(error);
+    if (before) await saveVersion(itemId, before, "write").catch(() => {});
+    return data as unknown as CaItem;
+  } catch (e) {
+    await from("ca_items")
+      .update({ enrich_error: saathiErrorDetail(e) } as never)
+      .eq("id", itemId);
+    throw new Error(saathiErrorDetail(e));
+  }
+}
+
+// The editor's choice: a full story or a brief. It is written again in its
+// new form (the AI's first choice stays in ai_pick to learn from).
+export async function setItemFormat(itemId: string, format: StoryFormat): Promise<CaItem> {
+  const item = await loadItem(itemId);
+  await assertDayEditable([item.issue_date]);
+  const { error } = await from("ca_items")
+    .update({ format, needs_enrich: true, updated_at: new Date().toISOString() } as never)
+    .eq("id", itemId);
+  if (missingFormat(error)) throw new Error(FORMAT_MIGRATION);
+  fail(error);
+  return { ...(await loadItem(itemId)), format };
+}
+
+// An article from the skipped news list added to the day as a brief.
+export async function briefFromArticle(a: {
+  date: string;
+  source_id: string;
+  at: number;
+  end: number;
+  title: string;
+}): Promise<CaItem> {
+  await assertDayEditable([a.date]);
+  const { data: src, error: se } = await from("ca_sources")
+    .select("id,content,issue_date")
+    .eq("id", a.source_id)
+    .single();
+  fail(se);
+  const text = String((src as unknown as { content?: string }).content ?? "").slice(a.at, a.end);
+  if (text.trim().length < 40) throw new Error("That article's text couldn't be found.");
+  const content = await briefContent({ headline: a.title, article: text });
+  const line = content.oneliner ?? { en: a.title, hi: a.title };
+  const id = crypto.randomUUID();
+  await insertItem({
+    id,
+    issue_date: a.date,
+    category: "misc",
+    status: "included",
+    format: "brief",
+    headline: content.headline.en || a.title,
+    facts: [
+      {
+        text: line.en || line.hi,
+        quote: text.slice(0, 200),
+        source_id: a.source_id,
+        verified: false,
+      },
+    ],
+    source_ids: [a.source_id],
+    importance: 2,
+    rajasthan: false,
+    content,
+    needs_enrich: false,
+    position: 5000,
+  });
+  const { data: fresh } = await from("ca_items").select("format").eq("id", id).maybeSingle();
+  // Before the migration it can only be a story: written as one later.
+  if (!fresh || (fresh as { format?: string }).format !== "brief") {
+    await from("ca_items").delete().eq("id", id);
+    throw new Error(FORMAT_MIGRATION);
+  }
+  return { ...(await loadItem(id)), format: "brief" };
+}
+
 async function insertItem(row: Record<string, unknown>) {
   let { error } = await from("ca_items").insert(row as never);
+  // Before the briefs migration: every story is a full story.
+  if (missingFormat(error)) {
+    const { format: _f, ...rest } = row;
+    row = rest;
+    ({ error } = await from("ca_items").insert(row as never));
+  }
   // Before the new sections migration: no story type.
   if (error && /story_type/.test(error.message)) {
     const { story_type: _t, ...rest } = row;
@@ -773,14 +948,26 @@ export async function extractSourceChunk(sourceId: string, index: number) {
       // Unlikely stories, and less important non-Rajasthan ones once the day is
       // full, arrive already dropped; an editorial always goes in and does not
       // count towards the day's stories.
-      const { count: includedSoFar } = await from("ca_items")
-        .select("id", { count: "exact", head: true })
-        .eq("issue_date", src.issue_date)
-        .eq("status", "included")
-        .neq("category", "editorial");
-      const included =
-        editorial ||
-        startsIncluded(item.importance, includedSoFar ?? 0, daily_stories, item.rajasthan);
+      // News worth one line goes in as a brief while the day has room for
+      // briefs; the rest count towards the day's full stories.
+      const brief =
+        !editorial &&
+        (settingsNow.daily_briefs ?? DEFAULT_DAILY_BRIEFS) > 0 &&
+        startsBrief(item.type, item.importance, item.rajasthan, item.brief);
+      const included = editorial
+        ? true
+        : brief
+          ? briefIncluded(
+              item.importance,
+              await includedCount(src.issue_date, "brief"),
+              settingsNow.daily_briefs ?? DEFAULT_DAILY_BRIEFS,
+            )
+          : startsIncluded(
+              item.importance,
+              await includedCount(src.issue_date, "story"),
+              daily_stories,
+              item.rajasthan,
+            );
       const id = crypto.randomUUID();
       await insertItem({
         id,
@@ -798,11 +985,13 @@ export async function extractSourceChunk(sourceId: string, index: number) {
         key_embedding: keyEmbedding as unknown as string,
         ...(eventId ? { event_id: eventId } : {}),
         story_type: item.type,
+        format: brief ? "brief" : "story",
         // The AI's first decision, to learn from the editor's changes.
         ai_pick: {
           status: included ? "included" : "dropped",
           importance: item.importance,
           category,
+          format: brief ? "brief" : "story",
           ...(!included && item.importance === 2 ? { capped: true } : {}),
         },
         related_item_id: earlier?.id ?? null,
@@ -1280,6 +1469,8 @@ export async function enrichItem(
     reason?: CaVersion["reason"];
   } = {},
 ): Promise<CaItem> {
+  // A brief is written as one line.
+  if ((await formatsOf([itemId])).get(itemId) === "brief") return writeBrief(itemId);
   // When it was read: the text is saved only if nothing changed the story
   // while the AI wrote (new facts merged, the editor's edits).
   const { data: seenRow } = await from("ca_items")
@@ -2720,8 +2911,11 @@ export async function getDay(date: string): Promise<DayData> {
   // editor then hides the event picker).
   const links = await eventLinksOrNull({ date });
   const { later, docs } = await collectedLater(date);
-  const list = ((items.data ?? []) as unknown as CaItem[]).map((i) => ({
+  const rows = (items.data ?? []) as unknown as CaItem[];
+  const formats = await formatsOf(rows.map((i) => i.id));
+  const list = rows.map((i) => ({
     ...i,
+    format: formats.get(i.id) ?? "story",
     category: normalizeCategory(i.category),
     ...(links ? { event_id: links.get(i.id) ?? null } : {}),
     ...(later.has(i.id) ? { collected_later: true } : {}),
@@ -4872,10 +5066,12 @@ export async function toMagazineItems(rows: CaItem[]): Promise<MagazineItem[]> {
   const history = await (await import("@/lib/ca-history.server"))
     .historyForItems(items as (CaItem & { origin_id?: string | null })[])
     .catch(() => new Map<string, StoryHistory>());
+  const formats = await formatsOf(items.map((i) => i.id));
   return items.map((i) => ({
     id: i.id,
     issue_date: i.issue_date,
     category: normalizeCategory(i.category),
+    format: formats.get(i.id) ?? "story",
     earlier: earlier.get(i.id),
     asked: asked.get(i.id),
     history: history.get(i.id),

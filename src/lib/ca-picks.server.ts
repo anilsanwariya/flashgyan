@@ -48,19 +48,25 @@ export async function recentChanges(
   const since = istDate(new Date(Date.now() - days * 86_400_000));
   const rows = [];
   for (let at = 0; ; at += 1000) {
-    const { data, error } = await from("ca_items")
-      .select("issue_date,headline,story_type,category,importance,status,rajasthan,facts,ai_pick")
-      .gte("issue_date", since)
-      .lt("issue_date", today)
-      .not("ai_pick", "is", null)
-      .order("issue_date")
-      .order("id")
-      .range(at, at + 999);
+    const page = (cols: string) =>
+      from("ca_items")
+        .select(cols)
+        .gte("issue_date", since)
+        .lt("issue_date", today)
+        .not("ai_pick", "is", null)
+        .order("issue_date")
+        .order("id")
+        .range(at, at + 999);
+    const COLS =
+      "issue_date,headline,story_type,category,importance,status,rajasthan,facts,ai_pick";
+    let { data, error } = await page(`${COLS},format`);
+    // Before the briefs migration: no format to compare.
+    if (error && /\bformat\b/.test(error.message)) ({ data, error } = await page(COLS));
     if (error && /ai_pick|story_type/.test(error.message)) {
       return {
         ready: false,
         changes: [],
-        counts: { stories: 0, dropped: 0, kept: 0, importance: 0, section: 0 },
+        counts: { stories: 0, dropped: 0, kept: 0, importance: 0, section: 0, format: 0 },
       };
     }
     fail(error);

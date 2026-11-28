@@ -249,6 +249,7 @@ export const saveMagazineSettings = createServerFn({ method: "POST" })
         notify_when_ready: z.boolean(),
         visuals: z.boolean(),
         daily_stories: z.number().int().min(3).max(40),
+        daily_briefs: z.number().int().min(0).max(30).default(10),
         daily_editorials: z.number().int().min(0).max(6),
         summary_words: z.number().int().min(25).max(150),
         channel_quiz: z.boolean(),
@@ -462,6 +463,38 @@ export const extractCaSourcePart = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.userId);
     return (await server()).extractSourceChunk(data.id, data.part);
+  });
+
+// News in brief: a story switched between a full story and a one-line
+// brief (written again in its new form).
+export const setCaItemFormat = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), format: z.enum(["story", "brief"]) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).setItemFormat(data.id, data.format);
+  });
+
+// An article from the skipped news list added as a brief.
+export const addCaBriefFromArticle = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        source_id: z.string().uuid(),
+        at: z.number().int().min(0),
+        end: z.number().int().min(1),
+        title: z.string().trim().min(1).max(400),
+      })
+      .refine((v) => v.end > v.at, "The article's place is wrong")
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.userId);
+    return (await server()).briefFromArticle(data);
   });
 
 // A fact printed twice in a story: the repeating prose rewritten without it.

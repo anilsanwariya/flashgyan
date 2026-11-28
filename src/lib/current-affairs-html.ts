@@ -57,6 +57,8 @@ import {
 } from "@/lib/ca-covers";
 
 export type MagazineItem = {
+  // A one-line brief prints in "News in Brief", not as a story.
+  format?: "story" | "brief";
   id: string;
   issue_date: string;
   category: string;
@@ -162,6 +164,8 @@ const T = {
     practiceSet: "Practice Set: RPSC &amp; RSSB Pattern",
     practiceSetSub: (n: number) => `${n} questions, answers at the end`,
     oneliners: "Month in One-liners",
+    briefs: "News in Brief",
+    briefsSub: (n: number) => `${n} more ${n === 1 ? "news item" : "news items"} in one line`,
     onelinersSub: "Facts to revise before the exam",
     ctaText: "Free current affairs every morning.",
     edition: "English edition",
@@ -225,6 +229,8 @@ const T = {
     practiceSet: "अभ्यास सेट: RPSC एवं RSSB पैटर्न",
     practiceSetSub: (n: number) => `${n} प्रश्न, उत्तर अंत में`,
     oneliners: "माह की एक-पंक्ति बातें",
+    briefs: "संक्षेप में",
+    briefsSub: (n: number) => `${n} अन्य ${n === 1 ? "खबर" : "खबरें"} एक पंक्ति में`,
     onelinersSub: "परीक्षा से पहले दोहराने योग्य तथ्य",
     ctaText: "हर सुबह निःशुल्क करेंट अफेयर्स।",
     edition: "हिंदी संस्करण",
@@ -764,6 +770,9 @@ ${Object.entries(SECTION_COLORS)
 .item > .tags { order: 90; margin: 3mm 0 0; padding-top: 2mm; border-top: 1px dashed #e5e7eb; }
 .item > .tags .tag { font-size: 9pt; }
 b.fact { font-weight: 700; color: #111827; }
+.brief-list { columns: 1; }
+.brief-list li { font-size: 11.5pt; margin-bottom: 2mm; }
+.brief-cat { font-size: 9.5pt; margin-top: 2mm; }
 
 /* One story, one card, one page. */
 .section:has(.item) .section-title { display: none; }
@@ -821,6 +830,9 @@ ${Object.entries(SECTION_COLORS)
   )
   .join("\n")}
 b.fact { font-weight: 700; color: #111827; }
+.brief-list { columns: 1; }
+.brief-list li { margin-bottom: 6px; }
+.brief-cat { font-size: .8em; margin-top: 8px; }
 :host([data-dark]) { color: #e5e7eb; }
 :host([data-dark]) .item { background: #0f172a; border-color: #1e293b; }
 :host([data-dark]) .bi .en, :host([data-dark]) .heads h4 { color: #cbd5e1; }
@@ -881,7 +893,7 @@ const PHONE_SCRIPT = `(() => {
     "(?<![A-Za-z0-9०-९])(₹ ?" + n + "( ?(" + units + "))?|" + n + " (" + months + ")( [0-9०-९]{4})?|" + n + "( ?%| (" + units + ")|st|nd|rd|th)?)",
     "g",
   );
-  document.querySelectorAll(".item .summary, .item .points, .item .context .bi").forEach((el) => {
+  document.querySelectorAll(".item .summary, .item .points, .item .context .bi, .item .brief-list").forEach((el) => {
     const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     const nodes = [];
     while (walk.nextNode()) nodes.push(walk.currentNode);
@@ -1075,6 +1087,13 @@ table.medals.board td:not(:nth-child(2)), table.medals.board th:not(:nth-child(2
 .rep-ans { margin: 0 0 2mm 6mm; font-size: 8.5pt; color: #475569; }
 .rev .ans { font-weight: 700; color: ${accent}; }
 .item { display: flow-root; }
+/* News in brief: compact lines in two columns, grouped by section (the
+   card's own heading is for the phone edition's contents page only). */
+.briefs-card .brief-head { display: none; }
+.brief-group { break-inside: avoid; margin-bottom: 2mm; }
+.brief-cat { display: flex; align-items: center; gap: 1.5mm; margin: 0 0 1mm; font-size: 9pt; text-transform: uppercase; letter-spacing: .04em; color: ${accent}; }
+.brief-list { columns: 2; column-gap: 6mm; margin: 0 0 1mm; padding-left: 4.5mm; }
+.brief-list li { break-inside: avoid; margin-bottom: 1mm; }
 .item .box { display: flow-root; }
 .img-side.left ~ .bi ul { list-style-position: inside; padding-left: 0; }
 .images, .item .visual { clear: both; }
@@ -1428,13 +1447,17 @@ function renderMagazineInner(opts: {
       : categoryLabel(cat);
   const subLabel = (id: string): Bi =>
     custom?.sections.flatMap((c) => c.subs).find((x) => x.id === id)?.title ?? { en: id, hi: id };
-  const items = [...opts.items].sort(
+  const sortedAll = [...opts.items].sort(
     (a, b) =>
       (order.get(a.category) ?? 99) - (order.get(b.category) ?? 99) ||
       subRank(a) - subRank(b) ||
       a.issue_date.localeCompare(b.issue_date) ||
       b.importance - a.importance,
   );
+  // News in brief prints in its own section of the daily issue (monthly and
+  // custom magazines leave briefs out).
+  const items = sortedAll.filter((i) => i.format !== "brief");
+  const briefs = !monthly && !custom ? sortedAll.filter((i) => i.format === "brief") : [];
   const groups = new Map<string, MagazineItem[]>();
   // The month's report pages print in "Schemes, Policies & Reports", even
   // without a story there.
@@ -1473,7 +1496,8 @@ function renderMagazineInner(opts: {
   // Everything the issue prints, for the cover, revision and practice pages.
   const everything = [...eventItems, ...items];
   const allGroups = new Map<string, MagazineItem[]>();
-  for (const it of [...everything].sort(
+  // Briefs are revised and practised with the stories.
+  for (const it of [...everything, ...briefs].sort(
     (a, b) =>
       (order.get(a.category) ?? 99) - (order.get(b.category) ?? 99) ||
       a.issue_date.localeCompare(b.issue_date),
@@ -1785,8 +1809,27 @@ function renderMagazineInner(opts: {
   // The back cover (an ad), after any ruled notes pages that bring it to the
   // outside of a printed issue.
   const back = adById(monthly ? design?.back_cover : s.daily_back_cover);
+  // "News in Brief": each brief's line, under its section's name, as one
+  // card in the phone edition.
+  const briefGroups = new Map<string, MagazineItem[]>();
+  for (const b of briefs) briefGroups.set(b.category, [...(briefGroups.get(b.category) ?? []), b]);
+  const briefsHtml = briefs.length
+    ? `<section class="section briefs" data-cat="briefs"><div class="section-title"><h2>${icon("revision")} ${t.briefs}</h2><span>${t.briefsSub(briefs.length)}</span></div><article class="item briefs-card"><div class="item-head brief-head"><div class="heads"><h3>${t.briefsSub(briefs.length)}</h3></div></div>${[
+        ...briefGroups,
+      ]
+        .map(
+          ([cat, list]) =>
+            `<div class="brief-group"><h4 class="brief-cat">${icon(cat)} ${esc(label(cat)[lang])}</h4><ul class="brief-list bi">${list
+              .map(
+                (b) =>
+                  `<li>${esc(pick(b.content.oneliner, lang) || pick(b.content.headline, lang))}</li>`,
+              )
+              .join("")}</ul></div>`,
+        )
+        .join("")}</article></section>`
+    : "";
   if (opts.edition === "web")
-    return `<style>${CSS(accent)}${WEB_CSS(accent)}</style>${eventsHtml}${sections}`;
+    return `<style>${CSS(accent)}${WEB_CSS(accent)}</style>${eventsHtml}${sections}${briefsHtml}`;
   const notes = Array.from({ length: Math.max(0, Math.min(3, opts.fillers ?? 0)) }, () =>
     notesPageHtml(lang, s.brand_line, accent),
   ).join("");
@@ -1808,6 +1851,7 @@ ${
     : `${watermark}
 ${!part || part.cover ? `${coverSection}\n${radarHtml}\n${eventsHtml}` : ""}
 ${sections}
+${briefsHtml}
 ${
   !part || part.tail
     ? `${corrections}
@@ -1817,7 +1861,7 @@ ${revisionPage(allGroups, lang, label)}
 ${onelinersHtml}
 ${wordsHtml}
 ${practiceSetHtml}
-${practicePage(everything, lang)}
+${practicePage([...everything, ...briefs], lang)}
 ${indexHtml}
 ${notes}
 ${back ? adPageHtml(back, lang, "back") : ""}`
